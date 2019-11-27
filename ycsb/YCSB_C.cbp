@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6"/>
+	<Project>
+		<Option title="YCSB_C"/>
+		<Option makefile_is_custom="1"/>
+		<Option compiler="gcc"/>
+		<Option virtualFolders="CMake Files\;"/>
+		<Build>
+			<Target title="all">
+				<Option working_dir="/home/haoyu/Documents/cache/YCSB-C"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 all"/>
+					<CompileFile command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="rebuild_cache">
+				<Option working_dir="/home/haoyu/Documents/cache/YCSB-C"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 rebuild_cache"/>
+					<CompileFile command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="edit_cache">
+				<Option working_dir="/home/haoyu/Documents/cache/YCSB-C"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 edit_cache"/>
+					<CompileFile command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="ycsb">
+				<Option output="/home/haoyu/Documents/cache/YCSB-C/ycsb" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="/home/haoyu/Documents/cache/YCSB-C"/>
+				<Option object_output="./"/>
+				<Option type="1"/>
+				<Option compiler="gcc"/>
+				<Compiler>
+					<Add directory="/home/haoyu/Documents/cache/YCSB-C"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 ycsb"/>
+					<CompileFile command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="ycsb/fast">
+				<Option output="/home/haoyu/Documents/cache/YCSB-C/ycsb" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="/home/haoyu/Documents/cache/YCSB-C"/>
+				<Option object_output="./"/>
+				<Option type="1"/>
+				<Option compiler="gcc"/>
+				<Compiler>
+					<Add directory="/home/haoyu/Documents/cache/YCSB-C"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 ycsb/fast"/>
+					<CompileFile command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="libycsb">
+				<Option output="/home/haoyu/Documents/cache/YCSB-C/liblibycsb.a" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="/home/haoyu/Documents/cache/YCSB-C"/>
+				<Option object_output="./"/>
+				<Option type="2"/>
+				<Option compiler="gcc"/>
+				<Compiler>
+					<Add directory="/home/haoyu/Documents/cache/YCSB-C"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 libycsb"/>
+					<CompileFile command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="libycsb/fast">
+				<Option output="/home/haoyu/Documents/cache/YCSB-C/liblibycsb.a" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="/home/haoyu/Documents/cache/YCSB-C"/>
+				<Option object_output="./"/>
+				<Option type="2"/>
+				<Option compiler="gcc"/>
+				<Compiler>
+					<Add directory="/home/haoyu/Documents/cache/YCSB-C"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 libycsb/fast"/>
+					<CompileFile command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="/usr/bin/make -f &quot;/home/haoyu/Documents/cache/YCSB-C/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+		</Build>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/basic_db.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/client.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/const_generator.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/core_workload.cc">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/core_workload.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/counter_generator.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/db.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/db_factory.cc">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/db_factory.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/discrete_generator.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/generator.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/logging.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/nova_mem_client_db.cc">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/nova_mem_client_db.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/properties.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/scrambled_zipfian_generator.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/skewed_latest_generator.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/timer.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/uniform_generator.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/utils.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/ycsbc.cc">
+			<Option target="ycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/zipfian_generator.h">
+			<Option target="libycsb"/>
+		</Unit>
+		<Unit filename="/home/haoyu/Documents/cache/YCSB-C/CMakeLists.txt">
+			<Option virtualFolder="CMake Files\"/>
+		</Unit>
+	</Project>
+</CodeBlocks_project_file>
