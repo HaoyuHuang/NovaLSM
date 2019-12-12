@@ -78,6 +78,7 @@ namespace leveldb {
     FilterBlockReader::FilterBlockReader(const FilterPolicy *policy,
                                          const Slice &contents)
             : policy_(policy), data_(nullptr), offset_(nullptr), num_(0),
+              size_(contents.size()),
               base_lg_(0) {
         size_t n = contents.size();
         if (n < 5)

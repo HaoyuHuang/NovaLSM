@@ -31,6 +31,7 @@ using namespace rdmaio;
 enum RequestType : char {
     GET = 'g',
     PUT = 'p',
+    REQ_RANGE = 'r',
     REDIRECT = 'r',
     GET_INDEX = 'i',
     EXISTS = 'h',
@@ -180,7 +181,7 @@ uint32_t nint_to_str(uint64_t x);
 
 uint32_t int_to_str(char *str, uint64_t x);
 
-uint32_t str_to_int(char *str, uint64_t *out, uint32_t nkey = 0);
+uint32_t str_to_int(const char *str, uint64_t *out, uint32_t nkey = 0);
 
 int
 GenerateRDMARequest(RequestType req_type, char *buf, uint64_t from_server_id,

@@ -219,23 +219,33 @@ namespace leveldb {
         mutable char value_buf_[16];
     };
 
-    static Iterator *GetFileIterator(void *arg, const ReadOptions &options,
-                                     const Slice &file_value) {
+    static Iterator *
+    GetFileIterator(void *arg, BlockReadContext context,
+                    const ReadOptions &options,
+                    const Slice &file_value) {
         TableCache *cache = reinterpret_cast<TableCache *>(arg);
         if (file_value.size() != 16) {
             return NewErrorIterator(
                     Status::Corruption(
                             "FileReader invoked with unexpected value"));
         } else {
-            return cache->NewIterator(options, DecodeFixed64(file_value.data()),
+            return cache->NewIterator(context.caller, options,
+                                      DecodeFixed64(file_value.data()),
+                                      context.level,
                                       DecodeFixed64(file_value.data() + 8));
         }
     }
 
     Iterator *Version::NewConcatenatingIterator(const ReadOptions &options,
                                                 int level) const {
+        BlockReadContext context = {
+                .caller = AccessCaller::kUserIterator,
+                .file_number = 0,
+                .level = level,
+        };
         return NewTwoLevelIterator(
                 new LevelFileNumIterator(vset_->icmp_, &files_[level]),
+                context,
                 &GetFileIterator,
                 vset_->table_cache_, options);
     }
@@ -245,7 +255,8 @@ namespace leveldb {
         // Merge all level zero files together since they may overlap
         for (size_t i = 0; i < files_[0].size(); i++) {
             iters->push_back(vset_->table_cache_->NewIterator(
-                    options, files_[0][i]->number, files_[0][i]->file_size));
+                    AccessCaller::kUserIterator,
+                    options, files_[0][i]->number, 0, files_[0][i]->file_size));
         }
 
         // For levels > 0, we can use a concatenating iterator that sequentially
@@ -366,10 +377,10 @@ namespace leveldb {
 
                 state->last_file_read = f;
                 state->last_file_read_level = level;
-
                 state->s = state->vset->table_cache_->Get(*state->options,
                                                           f->number,
                                                           f->file_size,
+                                                          level,
                                                           state->ikey,
                                                           &state->saver,
                                                           SaveValue);
@@ -566,25 +577,38 @@ namespace leveldb {
     std::string Version::DebugString() const {
         std::string r;
         for (int level = 0; level < config::kNumLevels; level++) {
+            r.append("sstables,");
+            AppendNumberTo(&r, level);
+            r.append(",");
+            AppendNumberTo(&r, files_[level].size());
+            r.append(",");
+            uint64_t size = 0;
+            const std::vector<FileMetaData *> &files = files_[level];
+            for (size_t i = 0; i < files.size(); i++) {
+                size += files[i]->file_size;
+            }
+            AppendNumberTo(&r, size);
+            r.append("\n");
+
             // E.g.,
             //   --- level 1 ---
             //   17:123['a' .. 'd']
             //   20:43['e' .. 'g']
-            r.append("--- level ");
-            AppendNumberTo(&r, level);
-            r.append(" ---\n");
-            const std::vector<FileMetaData *> &files = files_[level];
-            for (size_t i = 0; i < files.size(); i++) {
-                r.push_back(' ');
-                AppendNumberTo(&r, files[i]->number);
-                r.push_back(':');
-                AppendNumberTo(&r, files[i]->file_size);
-                r.append("[");
-                r.append(files[i]->smallest.DebugString());
-                r.append(" .. ");
-                r.append(files[i]->largest.DebugString());
-                r.append("]\n");
-            }
+//            r.append("--- level ");
+//            AppendNumberTo(&r, level);
+//            r.append(" ---\n");
+//            const std::vector<FileMetaData *> &files = files_[level];
+//            for (size_t i = 0; i < files.size(); i++) {
+//                r.push_back(' ');
+//                AppendNumberTo(&r, files[i]->number);
+//                r.push_back(':');
+//                AppendNumberTo(&r, files[i]->file_size);
+//                r.append("[");
+//                r.append(files[i]->smallest.DebugString());
+//                r.append(" .. ");
+//                r.append(files[i]->largest.DebugString());
+//                r.append("]\n");
+//            }
         }
         return r;
     }
@@ -1177,7 +1201,8 @@ namespace leveldb {
                     // approximate offset of "ikey" within the table.
                     Table *tableptr;
                     Iterator *iter = table_cache_->NewIterator(
-                            ReadOptions(), files[i]->number,
+                            AccessCaller::kApproximateSize,
+                            ReadOptions(), files[i]->number, level,
                             files[i]->file_size, &tableptr);
                     if (tableptr != nullptr) {
                         result += tableptr->ApproximateOffsetOf(ikey.Encode());
@@ -1276,15 +1301,24 @@ namespace leveldb {
                 if (c->level() + which == 0) {
                     const std::vector<FileMetaData *> &files = c->inputs_[which];
                     for (size_t i = 0; i < files.size(); i++) {
-                        list[num++] = table_cache_->NewIterator(options,
-                                                                files[i]->number,
-                                                                files[i]->file_size);
+                        list[num++] = table_cache_->NewIterator(
+                                AccessCaller::kCompaction, options,
+                                files[i]->number,
+                                c->level() +
+                                which,
+                                files[i]->file_size);
                     }
                 } else {
                     // Create concatenating iterator for the files from this level
+                    BlockReadContext context = {
+                            .caller = AccessCaller::kCompaction,
+                            .file_number = 0,
+                            .level = c->level() + which,
+                    };
                     list[num++] = NewTwoLevelIterator(
                             new Version::LevelFileNumIterator(icmp_,
                                                               &c->inputs_[which]),
+                            context,
                             &GetFileIterator, table_cache_, options);
                 }
             }

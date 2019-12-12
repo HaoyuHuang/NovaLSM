@@ -22,8 +22,11 @@ namespace leveldb {
         return DecodeFixed32(data_ + size_ - sizeof(uint32_t));
     }
 
-    Block::Block(const BlockContents &contents)
-            : data_(contents.data.data()),
+    Block::Block(const BlockContents &contents, uint64_t file_number,
+                 uint64_t block_id)
+            : file_number_(file_number),
+              block_id_(block_id),
+              data_(contents.data.data()),
               size_(contents.data.size()),
               owned_(contents.heap_allocated) {
         if (size_ < sizeof(uint32_t)) {

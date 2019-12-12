@@ -18,6 +18,7 @@
 #include "linked_list.h"
 #include "nova_mem_config.h"
 #include "nova_mem_manager.h"
+#include "leveldb/db.h"
 
 #include <event.h>
 
@@ -73,6 +74,8 @@ struct Stats {
     uint64_t nputs = 0;
     uint64_t nput_lc = 0;
 
+    uint64_t nranges = 0;
+
     uint64_t nreqs_to_poll_rdma = 0;
 
     Stats diff(const Stats &other) {
@@ -96,6 +99,7 @@ struct Stats {
                 ngetindex_rdma_indirect - other.ngetindex_rdma_indirect;
         diff.nputs = nputs - other.nputs;
         diff.nput_lc = nput_lc - other.nput_lc;
+        diff.nranges = nranges - other.nranges;
         return diff;
     }
 };
@@ -106,7 +110,6 @@ public:
             : store_id_(store_id),
               thread_id_(thread_id), mem_server_(server) {
         nservers = NovaConfig::config->servers.size();
-        shed_load = NovaConfig::config->shed_load;
         RDMA_LOG(INFO) << "memstore[" << thread_id << "]: " << "create "
                        << store_id << ":" << thread_id << ":";
     }
@@ -134,7 +137,9 @@ public:
         mem_manager_ = mem_manager;
     };
 
-    int RedirectClientRequest();
+    void set_db(leveldb::DB *db) {
+        db_ = db;
+    }
 
     timeval start{};
     timeval read_start{};
@@ -147,7 +152,11 @@ public:
     std::mutex mutex_;
 
     NovaMemServer *mem_server_ = nullptr;
+
     NovaMemManager *mem_manager_ = nullptr;
+
+    leveldb::DB* db_ = nullptr;
+
     NovaRDMAStore *rdma_store_ = nullptr;
     struct event_base *base = nullptr;
 
@@ -155,7 +164,6 @@ public:
     int on_new_conn_recv_fd = 0;
     int nconns = 0;
 
-    double *shed_load = nullptr;
     int nservers = 0;
     mutex conn_mu;
     vector<int> conn_queue;
@@ -179,9 +187,9 @@ public:
     struct event event;
     int event_flags;
 
-    bool try_free_entry_after_transmit_response = false;
-    IndexEntry index_entry;
-    DataEntry data_entry;
+//    bool try_free_entry_after_transmit_response = false;
+//    IndexEntry index_entry;
+//    DataEntry data_entry;
 
     uint32_t number_get_retries = 0;
 

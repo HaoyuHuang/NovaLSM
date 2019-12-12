@@ -12,12 +12,13 @@
 #include "nova_mem_config.h"
 #include "nova_rdma_store.h"
 #include "nova_rdma_rc_store.h"
+#include "leveldb/db.h"
 
 class NovaMemWorker;
 
 class NovaMemServer {
 public:
-    NovaMemServer(char *rdmabuf, int nport);
+    NovaMemServer(leveldb::DB *db, char *rdmabuf, int nport);
 
     void Start();
 
@@ -32,6 +33,7 @@ public:
     int nport_;
     int listen_fd_ = -1;            /* listener descriptor      */
 
+    leveldb::DB *db_;
     NovaMemManager *manager;
     NovaMemWorker **workers;
     struct event_base *base;

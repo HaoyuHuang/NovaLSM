@@ -137,8 +137,11 @@ namespace leveldb {
               owns_info_log_(options_.info_log != raw_options.info_log),
               owns_cache_(options_.block_cache != raw_options.block_cache),
               dbname_(dbname),
+              db_profiler_(new DBProfiler(raw_options.enable_tracing,
+                                          raw_options.trace_file_path)),
               table_cache_(new TableCache(dbname_, options_,
-                                          TableCacheSize(options_))),
+                                          TableCacheSize(options_),
+                                          db_profiler_)),
               db_lock_(nullptr),
               shutting_down_(false),
               background_work_finished_signal_(&mutex_),
@@ -153,7 +156,8 @@ namespace leveldb {
               background_compaction_scheduled_(false),
               manual_compaction_(nullptr),
               versions_(new VersionSet(dbname_, &options_, table_cache_,
-                                       &internal_comparator_)) {}
+                                       &internal_comparator_)) {
+    }
 
     DBImpl::~DBImpl() {
         // Wait for background work to finish.
@@ -445,7 +449,7 @@ namespace leveldb {
             WriteBatchInternal::SetContents(&batch, record);
 
             if (mem == nullptr) {
-                mem = new MemTable(internal_comparator_);
+                mem = new MemTable(internal_comparator_, db_profiler_);
                 mem->Ref();
             }
             status = WriteBatchInternal::InsertInto(&batch, mem);
@@ -493,7 +497,7 @@ namespace leveldb {
                     mem = nullptr;
                 } else {
                     // mem can be nullptr if lognum exists but was empty.
-                    mem_ = new MemTable(internal_comparator_);
+                    mem_ = new MemTable(internal_comparator_, db_profiler_);
                     mem_->Ref();
                 }
             }
@@ -518,7 +522,8 @@ namespace leveldb {
         FileMetaData meta;
         meta.number = versions_->NewFileNumber();
         pending_outputs_.insert(meta.number);
-        Iterator *iter = mem->NewIterator();
+        Iterator *iter = mem->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
+                                          AccessCaller::kCompaction);
         Log(options_.info_log, "Level-0 table #%llu: started",
             (unsigned long long) meta.number);
 
@@ -554,6 +559,19 @@ namespace leveldb {
         stats.micros = env_->NowMicros() - start_micros;
         stats.bytes_written = meta.file_size;
         stats_[level].Add(stats);
+
+        if (db_profiler_) {
+            CompactionProfiler compaction;
+            compaction.level = -1;
+            compaction.output_level = level;
+            compaction.level_stats.num_files = 1;
+            compaction.level_stats.num_bytes_read = 0;
+            compaction.next_level_stats.num_files = 1;
+            compaction.next_level_stats.num_bytes_read = 0;
+            compaction.next_level_output_stats.num_files = 1;
+            compaction.next_level_output_stats.num_bytes_written = meta.file_size;
+            db_profiler_->Trace(compaction);
+        }
         return s;
     }
 
@@ -876,7 +894,9 @@ namespace leveldb {
         if (s.ok() && current_entries > 0) {
             // Verify that the table is usable
             Iterator *iter =
-                    table_cache_->NewIterator(ReadOptions(), output_number,
+                    table_cache_->NewIterator(AccessCaller::kCompaction,
+                                              ReadOptions(), output_number,
+                                              compact->compaction->level() + 1,
                                               current_bytes);
             s = iter->status();
             delete iter;
@@ -1070,6 +1090,32 @@ namespace leveldb {
         mutex_.Lock();
         stats_[compact->compaction->level() + 1].Add(stats);
 
+        if (db_profiler_) {
+            CompactionProfiler compaction;
+            compaction.level = compact->compaction->level();
+            compaction.output_level = compact->compaction->level() + 1;
+            compaction.level_stats.num_files = compact->compaction->num_input_files(
+                    0);
+            for (int i = 0;
+                 i < compact->compaction->num_input_files(0); i++) {
+                compaction.level_stats.num_bytes_read += compact->compaction->input(
+                        0, i)->file_size;
+            }
+
+            compaction.next_level_stats.num_files = compact->compaction->num_input_files(
+                    1);
+            for (int i = 0;
+                 i < compact->compaction->num_input_files(1); i++) {
+                compaction.next_level_stats.num_bytes_read += compact->compaction->input(
+                        1, i)->file_size;
+            }
+
+            compaction.next_level_output_stats.num_files = compact->outputs.size();
+            compaction.next_level_output_stats.num_bytes_written = stats.bytes_written;
+            db_profiler_->Trace(compaction);
+        }
+
+
         if (status.ok()) {
             status = InstallCompactionResults(compact);
         }
@@ -1115,10 +1161,12 @@ namespace leveldb {
 
         // Collect together all needed child iterators
         std::vector<Iterator *> list;
-        list.push_back(mem_->NewIterator());
+        list.push_back(mem_->NewIterator(TraceType::MEMTABLE,
+                                         AccessCaller::kUserIterator));
         mem_->Ref();
         if (imm_ != nullptr) {
-            list.push_back(imm_->NewIterator());
+            list.push_back(imm_->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
+                                             AccessCaller::kUserIterator));
             imm_->Ref();
         }
         versions_->current()->AddIterators(options, &list);
@@ -1176,8 +1224,26 @@ namespace leveldb {
             LookupKey lkey(key, snapshot);
             if (mem->Get(lkey, value, &s)) {
                 // Done
+                Access access = {
+                        .trace_type = TraceType::MEMTABLE,
+                        .access_caller = AccessCaller::kUserGet,
+                        .block_id = 0,
+                        .sstable_id = 0,
+                        .level = 0,
+                        .size = value->size()
+                };
+                db_profiler_->Trace(access);
             } else if (imm != nullptr && imm->Get(lkey, value, &s)) {
                 // Done
+                Access access = {
+                        .trace_type = TraceType::IMMUTABLE_MEMTABLE,
+                        .access_caller = AccessCaller::kUserGet,
+                        .block_id = 1,
+                        .sstable_id = 1,
+                        .level = 0,
+                        .size = value->size()
+                };
+                db_profiler_->Trace(access);
             } else {
                 s = current->Get(options, lkey, value, &stats);
                 have_stat_update = true;
@@ -1192,6 +1258,12 @@ namespace leveldb {
         if (imm != nullptr) imm->Unref();
         current->Unref();
         return s;
+    }
+
+    void DBImpl::StartTracing() {
+        if (db_profiler_) {
+            db_profiler_->StartTracing();
+        }
     }
 
     Iterator *DBImpl::NewIterator(const ReadOptions &options) {
@@ -1416,7 +1488,7 @@ namespace leveldb {
                 log_ = new log::Writer(lfile);
                 imm_ = mem_;
                 has_imm_.store(true, std::memory_order_release);
-                mem_ = new MemTable(internal_comparator_);
+                mem_ = new MemTable(internal_comparator_, db_profiler_);
                 mem_->Ref();
                 force = false;  // Do not force another compaction if have room
                 MaybeScheduleCompaction();
@@ -1548,7 +1620,8 @@ namespace leveldb {
                 impl->logfile_ = lfile;
                 impl->logfile_number_ = new_log_number;
                 impl->log_ = new log::Writer(lfile);
-                impl->mem_ = new MemTable(impl->internal_comparator_);
+                impl->mem_ = new MemTable(impl->internal_comparator_,
+                                          impl->db_profiler_);
                 impl->mem_->Ref();
             }
         }

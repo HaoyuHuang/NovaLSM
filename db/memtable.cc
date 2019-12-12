@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include <leveldb/db_profiler.h>
 #include "db/memtable.h"
 #include "db/dbformat.h"
 #include "leveldb/comparator.h"
@@ -19,8 +20,10 @@ namespace leveldb {
         return Slice(p, len);
     }
 
-    MemTable::MemTable(const InternalKeyComparator &comparator)
-            : comparator_(comparator), refs_(0), table_(comparator_, &arena_) {}
+    MemTable::MemTable(const InternalKeyComparator &comparator,
+                       DBProfiler *db_profiler)
+            : comparator_(comparator), refs_(0), table_(comparator_, &arena_),
+              db_profiler_(db_profiler) {}
 
     MemTable::~MemTable() { assert(refs_ == 0); }
 
@@ -46,7 +49,21 @@ namespace leveldb {
 
     class MemTableIterator : public Iterator {
     public:
-        explicit MemTableIterator(MemTable::Table *table) : iter_(table) {}
+        explicit MemTableIterator(MemTable *table, TraceType trace_type,
+                                  AccessCaller caller) : iter_(
+                &(table->table_)), trace_type_(trace_type), caller_(caller) {
+            if (db_profiler_ != nullptr) {
+                Access access = {
+                        .trace_type = trace_type_,
+                        .access_caller = caller_,
+                        .block_id = 0,
+                        .sstable_id = 0,
+                        .level = 0,
+                        .size = 0
+                };
+                db_profiler_->Trace(access);
+            }
+        }
 
         MemTableIterator(const MemTableIterator &) = delete;
 
@@ -56,13 +73,17 @@ namespace leveldb {
 
         bool Valid() const override { return iter_.Valid(); }
 
-        void Seek(const Slice &k) override { iter_.Seek(EncodeKey(&tmp_, k)); }
+        void Seek(const Slice &k) override {
+            iter_.Seek(EncodeKey(&tmp_, k));
+        }
 
         void SeekToFirst() override { iter_.SeekToFirst(); }
 
         void SeekToLast() override { iter_.SeekToLast(); }
 
-        void Next() override { iter_.Next(); }
+        void Next() override {
+            iter_.Next();
+        }
 
         void Prev() override { iter_.Prev(); }
 
@@ -78,11 +99,17 @@ namespace leveldb {
         Status status() const override { return Status::OK(); }
 
     private:
+        DBProfiler *db_profiler_ = nullptr;
+        TraceType trace_type_;
+        AccessCaller caller_;
         MemTable::Table::Iterator iter_;
         std::string tmp_;  // For passing to EncodeKey
     };
 
-    Iterator *MemTable::NewIterator() { return new MemTableIterator(&table_); }
+    Iterator *MemTable::NewIterator(TraceType trace_type,
+                                    AccessCaller caller) {
+        return new MemTableIterator(this, trace_type, caller);
+    }
 
     void MemTable::Add(SequenceNumber s, ValueType type, const Slice &key,
                        const Slice &value) {

@@ -30,13 +30,17 @@ namespace leveldb {
         uint64_t cache_id;
         FilterBlockReader *filter;
         const char *filter_data;
+        int level;
+        uint64_t file_number;
 
         BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
         Block *index_block;
     };
 
     Status Table::Open(const Options &options, RandomAccessFile *file,
-                       uint64_t size, Table **table) {
+                       uint64_t size, int level,
+                       uint64_t file_number, Table **table,
+                       DBProfiler *db_profiler) {
         *table = nullptr;
         if (size < Footer::kEncodedLength) {
             return Status::Corruption("file is too short to be an sstable");
@@ -67,7 +71,9 @@ namespace leveldb {
         if (s.ok()) {
             // We've successfully read the footer and the index block: we're
             // ready to serve requests.
-            Block *index_block = new Block(index_block_contents);
+            Block *index_block = new Block(index_block_contents,
+                                           file_number,
+                                           footer.index_handle().offset());
             Rep *rep = new Table::Rep;
             rep->options = options;
             rep->file = file;
@@ -76,9 +82,12 @@ namespace leveldb {
             rep->cache_id = (options.block_cache ? options.block_cache->NewId()
                                                  : 0);
             rep->filter_data = nullptr;
+            rep->file_number = file_number;
+            rep->level = level;
             rep->filter = nullptr;
             *table = new Table(rep);
             (*table)->ReadMeta(footer);
+            (*table)->db_profiler_ = db_profiler;
         }
 
         return s;
@@ -101,7 +110,9 @@ namespace leveldb {
             // Do not propagate errors since meta info is not needed for operation
             return;
         }
-        Block *meta = new Block(contents);
+        Block *meta = new Block(contents,
+                                rep_->file_number,
+                                footer.metaindex_handle().offset());
 
         Iterator *iter = meta->NewIterator(BytewiseComparator());
         std::string key = "filter.";
@@ -157,7 +168,8 @@ namespace leveldb {
 
 // Convert an index iterator value (i.e., an encoded BlockHandle)
 // into an iterator over the contents of the corresponding block.
-    Iterator *Table::BlockReader(void *arg, const ReadOptions &options,
+    Iterator *Table::BlockReader(void *arg, BlockReadContext context,
+                                 const ReadOptions &options,
                                  const Slice &index_value) {
         Table *table = reinterpret_cast<Table *>(arg);
         Cache *block_cache = table->rep_->options.block_cache;
@@ -185,7 +197,8 @@ namespace leveldb {
                     s = ReadBlock(table->rep_->file, options, handle,
                                   &contents);
                     if (s.ok()) {
-                        block = new Block(contents);
+                        block = new Block(contents, table->rep_->file_number,
+                                          handle.offset());
                         if (contents.cachable && options.fill_cache) {
                             cache_handle = block_cache->Insert(key, block,
                                                                block->size(),
@@ -196,8 +209,20 @@ namespace leveldb {
             } else {
                 s = ReadBlock(table->rep_->file, options, handle, &contents);
                 if (s.ok()) {
-                    block = new Block(contents);
+                    block = new Block(contents, table->rep_->file_number,
+                                      handle.offset());
                 }
+            }
+            if (block != nullptr && table->db_profiler_ != nullptr) {
+                Access access = {
+                        .trace_type = TraceType::DATA_BLOCK,
+                        .access_caller = context.caller,
+                        .block_id = block->block_id(),
+                        .sstable_id = block->file_number(),
+                        .level = table->rep_->level,
+                        .size = block->size()
+                };
+                table->db_profiler_->Trace(access);
             }
         }
 
@@ -215,9 +240,30 @@ namespace leveldb {
         return iter;
     }
 
-    Iterator *Table::NewIterator(const ReadOptions &options) const {
+    Iterator *
+    Table::NewIterator(AccessCaller caller, const ReadOptions &options) const {
+        BlockReadContext context = {
+                .caller = caller,
+                .file_number = rep_->file_number,
+                .level = rep_->level,
+        };
+
+        // Access index block.
+        if (db_profiler_ != nullptr) {
+            Access access = {
+                    .trace_type = TraceType::INDEX_BLOCK,
+                    .access_caller = caller,
+                    .block_id = rep_->index_block->block_id(),
+                    .sstable_id = rep_->file_number,
+                    .level = rep_->level,
+                    .size = rep_->index_block->size(),
+            };
+            db_profiler_->Trace(access);
+        }
+
         return NewTwoLevelIterator(
                 rep_->index_block->NewIterator(rep_->options.comparator),
+                context,
                 &Table::BlockReader, const_cast<Table *>(this), options);
     }
 
@@ -225,6 +271,20 @@ namespace leveldb {
     Table::InternalGet(const ReadOptions &options, const Slice &k, void *arg,
                        void (*handle_result)(void *, const Slice &,
                                              const Slice &)) {
+
+        // Access index block.
+        if (db_profiler_ != nullptr) {
+            Access access = {
+                    .trace_type = TraceType::INDEX_BLOCK,
+                    .access_caller = AccessCaller::kUserGet,
+                    .block_id = rep_->index_block->block_id(),
+                    .sstable_id = rep_->file_number,
+                    .level = rep_->level,
+                    .size = rep_->index_block->size(),
+            };
+            db_profiler_->Trace(access);
+        }
+
         Status s;
         Iterator *iiter = rep_->index_block->NewIterator(
                 rep_->options.comparator);
@@ -233,11 +293,34 @@ namespace leveldb {
             Slice handle_value = iiter->value();
             FilterBlockReader *filter = rep_->filter;
             BlockHandle handle;
-            if (filter != nullptr && handle.DecodeFrom(&handle_value).ok() &&
-                !filter->KeyMayMatch(handle.offset(), k)) {
+            bool found = true;
+
+            if (filter != nullptr && handle.DecodeFrom(&handle_value).ok()) {
                 // Not found
-            } else {
-                Iterator *block_iter = BlockReader(this, options,
+                if (db_profiler_ != nullptr) {
+                    Access access = {
+                            .trace_type = TraceType::FILTER_BLOCK,
+                            .access_caller = AccessCaller::kUserGet,
+                            .block_id = 0,
+                            .sstable_id = rep_->file_number,
+                            .level = rep_->level,
+                            .size = rep_->filter->size()
+                    };
+                    db_profiler_->Trace(access);
+                }
+
+                if (!filter->KeyMayMatch(handle.offset(), k)) {
+                    found = false;
+                }
+            }
+            if (found) {
+                BlockReadContext context{
+                        .caller = AccessCaller::kUserGet,
+                        .file_number = rep_->file_number,
+                        .level = rep_->level
+                };
+                Iterator *block_iter = BlockReader(this, context,
+                                                   options,
                                                    iiter->value());
                 block_iter->Seek(k);
                 if (block_iter->Valid()) {

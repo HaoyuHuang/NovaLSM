@@ -14,79 +14,6 @@ set(CMAKE_CXX_COMPILER /usr/bin/g++)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(YCSB_SOURCES
-        ycsb/logging.h
-        ycsb/client.h
-        ycsb/const_generator.h
-        ycsb/core_workload.cc
-        ycsb/core_workload.h
-        ycsb/counter_generator.h
-        ycsb/db.h
-        ycsb/discrete_generator.h
-        ycsb/generator.h
-        ycsb/properties.h
-        ycsb/scrambled_zipfian_generator.h
-        ycsb/skewed_latest_generator.h
-        ycsb/timer.h
-        ycsb/uniform_generator.h
-        ycsb/utils.h
-        ycsb/zipfian_generator.h
-        ycsb/basic_db.h
-        ycsb/db_factory.cc
-        ycsb/db_factory.h
-        ycsb/nova_mem_client_db.cc
-        ycsb/nova_mem_client_db.h)
-
-add_library(libycsb STATIC ${YCSB_SOURCES})
-set_target_properties(libycsb PROPERTIES LINKER_LANGUAGE CXX)
-target_link_libraries(libycsb -lpthread -fexceptions)
-
-add_executable(ycsbbench "ycsb/ycsbc.cc")
-target_link_libraries(ycsbbench libycsb)
-
-set(NOVA_SOURCES
-        network/city_hash.h
-        network/city_hash.cpp
-        network/common.hpp
-        network/logging.hpp
-        network/mr.hpp
-        network/msg_interface.hpp
-        network/pre_connector.hpp
-        network/qp.hpp
-        network/qp_impl.hpp
-        network/rdma_ctrl.hpp
-        network/rdma_ctrl_impl.hpp
-        network/rnic.hpp
-        network/nova_mem_config.h
-        network/nova_msg_parser.h
-        network/nova_mem_server.cpp
-        network/nova_mem_server.h
-        network/nova_mem_worker.cpp
-        network/nova_mem_worker.h
-        network/nova_common.cpp
-        network/nova_common.h
-        network/nova_msg_callback.h
-        network/nova_rdma_rc_store.cpp
-        network/nova_rdma_rc_store.h
-        network/nova_rdma_store.h
-        network/nova_mem_manager.h
-        network/nova_mem_manager.cpp
-        network/linked_list.h
-        network/nova_chained_hashtable.cpp
-        network/nova_chained_hashtable.h)
-
-
-add_library(libnova STATIC ${NOVA_SOURCES})
-set_target_properties(libnova PROPERTIES LINKER_LANGUAGE CXX)
-target_link_libraries(libnova -lpthread ibverbs event)
-
-add_executable(nova_mem_server "network/nova_main.cpp")
-add_executable(nova_test "network/nova_test.cpp")
-
-target_link_libraries(nova_mem_server libnova -lgflags)
-target_link_libraries(nova_test libnova -lgflags)
-
-
 # C standard can be overridden when this is used as a sub-project.
 #if (NOT CMAKE_C_STANDARD)
 #    # This project can use C11, but will gracefully decay down to C89.
@@ -269,6 +196,7 @@ target_sources(leveldb
         "util/options.cc"
         "util/random.h"
         "util/status.cc"
+        "util/db_profiler.cpp"
 
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
@@ -555,3 +483,76 @@ if (LEVELDB_INSTALL)
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
     )
 endif (LEVELDB_INSTALL)
+
+
+set(YCSB_SOURCES
+        ycsb/logging.h
+        ycsb/client.h
+        ycsb/const_generator.h
+        ycsb/core_workload.cc
+        ycsb/core_workload.h
+        ycsb/counter_generator.h
+        ycsb/db.h
+        ycsb/discrete_generator.h
+        ycsb/generator.h
+        ycsb/properties.h
+        ycsb/scrambled_zipfian_generator.h
+        ycsb/skewed_latest_generator.h
+        ycsb/timer.h
+        ycsb/uniform_generator.h
+        ycsb/utils.h
+        ycsb/zipfian_generator.h
+        ycsb/basic_db.h
+        ycsb/db_factory.cc
+        ycsb/db_factory.h
+        ycsb/nova_mem_client_db.cc
+        ycsb/nova_mem_client_db.h)
+
+add_library(libycsb STATIC ${YCSB_SOURCES})
+set_target_properties(libycsb PROPERTIES LINKER_LANGUAGE CXX)
+target_link_libraries(libycsb -lpthread -fexceptions)
+
+add_executable(ycsbbench "ycsb/ycsbc.cc")
+target_link_libraries(ycsbbench libycsb)
+
+set(NOVA_SOURCES
+        network/city_hash.h
+        network/city_hash.cpp
+        network/common.hpp
+        network/logging.hpp
+        network/mr.hpp
+        network/msg_interface.hpp
+        network/pre_connector.hpp
+        network/qp.hpp
+        network/qp_impl.hpp
+        network/rdma_ctrl.hpp
+        network/rdma_ctrl_impl.hpp
+        network/rnic.hpp
+        network/nova_mem_config.h
+        network/nova_msg_parser.h
+        network/nova_mem_server.cpp
+        network/nova_mem_server.h
+        network/nova_mem_worker.cpp
+        network/nova_mem_worker.h
+        network/nova_common.cpp
+        network/nova_common.h
+        network/nova_msg_callback.h
+        network/nova_rdma_rc_store.cpp
+        network/nova_rdma_rc_store.h
+        network/nova_rdma_store.h
+        network/nova_mem_manager.h
+        network/nova_mem_manager.cpp
+        network/linked_list.h
+        network/nova_chained_hashtable.cpp
+        network/nova_chained_hashtable.h)
+
+
+add_library(libnova STATIC ${NOVA_SOURCES})
+set_target_properties(libnova PROPERTIES LINKER_LANGUAGE CXX)
+target_link_libraries(libnova -lpthread ibverbs event leveldb)
+
+add_executable(nova_mem_server "network/nova_main.cpp")
+add_executable(nova_test "network/nova_test.cpp")
+
+target_link_libraries(nova_mem_server libnova -lgflags leveldb)
+target_link_libraries(nova_test libnova -lgflags leveldb)

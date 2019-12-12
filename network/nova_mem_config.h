@@ -152,7 +152,6 @@ public:
     int my_server_id;
     int recordcount;
     uint64_t load_default_value_size;
-    double *shed_load;
     char *nova_buf;
     uint64_t nnovabuf;
     uint32_t nfragments;
@@ -177,6 +176,11 @@ public:
 
     // Data.
     uint64_t data_buf_offset;
+
+    // LevelDB.
+    std::string db_path;
+    std::string profiler_file_path;
+    bool fsync;
 
     NovaRDMAMode mode;
     NovaRDMAPartitionMode partition_mode;

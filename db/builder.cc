@@ -57,9 +57,11 @@ namespace leveldb {
 
             if (s.ok()) {
                 // Verify that the table is usable
-                Iterator *it = table_cache->NewIterator(ReadOptions(),
-                                                        meta->number,
-                                                        meta->file_size);
+                Iterator *it = table_cache->NewIterator(
+                        AccessCaller::kCompaction, ReadOptions(),
+                        meta->number,
+                        0,
+                        meta->file_size);
                 s = it->status();
                 delete it;
             }

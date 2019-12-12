@@ -10,6 +10,10 @@
 #include "nova_mem_config.h"
 #include "nova_rdma_rc_store.h"
 #include "nova_mem_server.h"
+#include "leveldb/db.h"
+#include "leveldb/cache.h"
+#include "leveldb/filter_policy.h"
+#include "leveldb/comparator.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -24,6 +28,11 @@ using namespace rdmaio;
 NovaConfig *NovaConfig::config;
 RdmaCtrl *NovaConfig::rdma_ctrl;
 
+DEFINE_string(db_path, "/tmp/nova", "level db path");
+DEFINE_uint64(block_cache_mb, 0, "leveldb block cache size in mb");
+DEFINE_bool(write_sync, false, "fsync write");
+
+DEFINE_string(profiler_file_path, "", "profiler file path.");
 DEFINE_string(servers, "localhost:11211", "A list of peer servers");
 DEFINE_int64(server_id, -1, "Server id.");
 DEFINE_uint64(recordcount, 0, "Number of records.");
@@ -53,13 +62,42 @@ DEFINE_uint64(rdma_doorbell_batch_size, 0, "The doorbell batch size.");
 DEFINE_uint64(rdma_pq_batch_size, 0,
               "The number of pending requests a worker thread waits before polling RNIC.");
 DEFINE_string(rdma_mode, "none", "Server mode: none, server_redirect, proxy.");
-DEFINE_uint64(shed_load, 0,
-              "The percentage of read requests shed to other servers.");
 DEFINE_bool(enable_rdma, false, "Enable RDMA messaging.");
 DEFINE_bool(enable_load_data, false, "Enable loading data.");
 DEFINE_uint64(rdma_number_of_get_retries, 3, "Number of RDMA retries for get.");
 DEFINE_string(config_path, "/tmp/uniform-3-32-10000000-frags.txt",
               "The path that stores fragment configuration.");
+
+namespace {
+    class YCSBKeyComparator : public leveldb::Comparator {
+    public:
+        //   if a < b: negative result
+        //   if a > b: positive result
+        //   else: zero result
+        int Compare(const leveldb::Slice &a, const leveldb::Slice &b) const {
+            uint64_t ai = 0;
+            str_to_int(a.data(), &ai, a.size());
+            uint64_t bi = 0;
+            str_to_int(b.data(), &bi, b.size());
+
+            if (ai < bi) {
+                return -1;
+            } else if (ai > bi) {
+                return 1;
+            }
+            return 0;
+            return 0;
+        }
+
+        // Ignore the following methods for now:
+        const char *Name() const { return "YCSBKeyComparator"; }
+
+        void
+        FindShortestSeparator(std::string *, const leveldb::Slice &) const {}
+
+        void FindShortSuccessor(std::string *) const {}
+    };
+}
 
 void start(NovaMemServer *server) {
     server->Start();
@@ -108,28 +146,19 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->rdma_doorbell_batch_size = FLAGS_rdma_doorbell_batch_size;
     NovaConfig::config->rdma_pq_batch_size = FLAGS_rdma_pq_batch_size;
     NovaConfig::config->rdma_number_of_get_retries = FLAGS_rdma_number_of_get_retries;
+
+    // LevelDB
+    NovaConfig::config->db_path = FLAGS_db_path;
+    NovaConfig::config->profiler_file_path = FLAGS_profiler_file_path;
+    NovaConfig::config->fsync = FLAGS_write_sync;
+
     string rdma_mode = FLAGS_rdma_mode;
 
     // sheding load.
-    int shed_loads = FLAGS_shed_load;
     NovaConfig::config->enable_rdma = FLAGS_enable_rdma;
     NovaConfig::config->enable_load_data = FLAGS_enable_load_data;
     std::string path = FLAGS_config_path;
     printf("config path=%s\n", path.c_str());
-
-    NovaConfig::config->shed_load = (double *) malloc(
-            NovaConfig::config->servers.size() * sizeof(double));
-    NovaConfig::config->shed_load[0] = 100 - shed_loads;
-    uint64_t load_per_server = 100;
-    if (NovaConfig::config->servers.size() > 1) {
-        load_per_server = shed_loads / (NovaConfig::config->servers.size() - 1);
-    }
-    for (size_t i = 1; i < NovaConfig::config->servers.size(); i++) {
-        NovaConfig::config->shed_load[i] = load_per_server;
-        NovaConfig::config->shed_load[i] += NovaConfig::config->shed_load[i -
-                                                                          1];
-    }
-    NovaConfig::config->shed_load[NovaConfig::config->servers.size() - 1] = 100;
 
     if (rdma_mode.find("none") != string::npos) {
         NovaConfig::config->mode = NovaRDMAMode::NORMAL;
@@ -145,6 +174,8 @@ int main(int argc, char *argv[]) {
     } else {
         NovaConfig::config->partition_mode = NovaRDMAPartitionMode::DEBUG_RDMA;
     }
+
+
     RDMA_LOG(INFO) << NovaConfig::config->to_string();
     NovaConfig::config->ReadFragments(path);
     NovaConfig::rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
@@ -169,7 +200,29 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->nova_buf = buf;
     NovaConfig::config->nnovabuf = ntotal;
     RDMA_ASSERT(buf != NULL) << "Not enough memory";
-    auto *mem_server = new NovaMemServer(buf, port);
+
+    leveldb::DB *db;
+    leveldb::Options options;
+    if (FLAGS_block_cache_mb > 0) {
+        options.block_cache = leveldb::NewLRUCache(
+                FLAGS_block_cache_mb * 1024 * 1024);
+    }
+    options.create_if_missing = true;
+    options.compression = leveldb::kNoCompression;
+    options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+    if (NovaConfig::config->profiler_file_path.empty()) {
+        options.enable_tracing = false;
+    } else {
+        options.enable_tracing = true;
+        options.trace_file_path = NovaConfig::config->profiler_file_path;
+    }
+    options.comparator = new YCSBKeyComparator();
+    leveldb::Status status = leveldb::DB::Open(options,
+                                               NovaConfig::config->db_path,
+                                               &db);
+    RDMA_ASSERT(status.ok()) << "Open leveldb failed " << status.ToString();
+
+    auto *mem_server = new NovaMemServer(db, buf, port);
     mem_server->Start();
 
 //    int cores[] = {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31};

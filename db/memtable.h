@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "leveldb/db_profiler.h"
 #include "db/dbformat.h"
 #include "db/skiplist.h"
 #include "leveldb/db.h"
@@ -22,7 +23,8 @@ namespace leveldb {
     public:
         // MemTables are reference counted.  The initial reference count
         // is zero and the caller must call Ref() at least once.
-        explicit MemTable(const InternalKeyComparator &comparator);
+        explicit MemTable(const InternalKeyComparator &comparator,
+                          DBProfiler *db_profiler);
 
         MemTable(const MemTable &) = delete;
 
@@ -50,7 +52,7 @@ namespace leveldb {
         // while the returned iterator is live.  The keys returned by this
         // iterator are internal keys encoded by AppendInternalKey in the
         // db/format.{h,cc} module.
-        Iterator *NewIterator();
+        Iterator *NewIterator(TraceType trace_type, AccessCaller caller);
 
         // Add an entry into memtable that maps key to value at the
         // specified sequence number and with the specified type.
@@ -82,6 +84,7 @@ namespace leveldb {
 
         ~MemTable();  // Private since only Unref() should be used to delete it
 
+        DBProfiler *db_profiler_ = nullptr;
         KeyComparator comparator_;
         int refs_;
         Arena arena_;

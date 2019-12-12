@@ -19,7 +19,8 @@ namespace leveldb {
     class Block {
     public:
         // Initialize the block with the specified contents.
-        explicit Block(const BlockContents &contents);
+        explicit Block(const BlockContents &contents, uint64_t file_number,
+                       uint64_t block_id);
 
         Block(const Block &) = delete;
 
@@ -29,12 +30,19 @@ namespace leveldb {
 
         size_t size() const { return size_; }
 
+        uint64_t file_number() const {return file_number_;}
+
+        uint64_t block_id() const {return block_id_;}
+
         Iterator *NewIterator(const Comparator *comparator);
 
     private:
         class Iter;
 
         uint32_t NumRestarts() const;
+
+        const uint64_t file_number_;
+        const uint64_t block_id_;
 
         const char *data_;
         size_t size_;

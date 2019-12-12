@@ -5,11 +5,13 @@
 #ifndef STORAGE_LEVELDB_TABLE_TWO_LEVEL_ITERATOR_H_
 #define STORAGE_LEVELDB_TABLE_TWO_LEVEL_ITERATOR_H_
 
+#include <leveldb/db_profiler.h>
 #include "leveldb/iterator.h"
+#include "block.h"
 
 namespace leveldb {
 
-struct ReadOptions;
+    struct ReadOptions;
 
 // Return a new two level iterator.  A two-level iterator contains an
 // index iterator whose values point to a sequence of blocks where
@@ -20,11 +22,14 @@ struct ReadOptions;
 //
 // Uses a supplied function to convert an index_iter value into
 // an iterator over the contents of the corresponding block.
-Iterator* NewTwoLevelIterator(
-    Iterator* index_iter,
-    Iterator* (*block_function)(void* arg, const ReadOptions& options,
-                                const Slice& index_value),
-    void* arg, const ReadOptions& options);
+    Iterator *NewTwoLevelIterator(
+            Iterator *index_iter,
+            BlockReadContext context,
+            Iterator *(*block_function)(void *arg,
+                                        BlockReadContext context,
+                                        const ReadOptions &options,
+                                        const Slice &index_value),
+            void *arg, const ReadOptions &options);
 
 }  // namespace leveldb
 

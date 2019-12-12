@@ -9,6 +9,7 @@
 #include <deque>
 #include <set>
 #include <string>
+#include <leveldb/db_profiler.h>
 
 #include "db/dbformat.h"
 #include "db/log_writer.h"
@@ -55,6 +56,8 @@ namespace leveldb {
 
         const Snapshot *GetSnapshot() override;
 
+        void StartTracing() override;
+
         void ReleaseSnapshot(const Snapshot *snapshot) override;
 
         bool GetProperty(const Slice &property, std::string *value) override;
@@ -91,6 +94,8 @@ namespace leveldb {
 
         struct CompactionState;
         struct Writer;
+
+        DBProfiler *db_profiler_ = nullptr;
 
         // Information for a manual compaction
         struct ManualCompaction {

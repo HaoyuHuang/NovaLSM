@@ -77,14 +77,6 @@ SocketState socket_write_handler(int fd, Connection *conn) {
         total = conn->response_ind;
         conn->worker->stats.nwrites++;
     } while (total < conn->response_size);
-
-    if (conn->try_free_entry_after_transmit_response) {
-        if (conn->data_entry.nkey != 0) {
-            conn->worker->mem_manager_->FreeDataEntry(conn->index_entry,
-                                                      conn->data_entry);
-        }
-        conn->try_free_entry_after_transmit_response = false;
-    }
     return COMPLETE;
 }
 
@@ -181,117 +173,100 @@ process_socket_get(int fd, Connection *conn, bool no_redirect) {
     uint64_t int_key = 0;
     uint32_t nkey = str_to_int(buf, &int_key) - 1;
     uint64_t hv = NovaConfig::keyhash(buf, nkey);
-    uint64_t remote_offset = 0;
-    uint64_t remote_size = 0;
     char *tmp = buf;
     tmp += nkey + 1;
-    tmp += str_to_int(tmp, &remote_offset);
-    str_to_int(tmp, &remote_size);
     Fragment *frag = NovaConfig::home_fragment(hv);
     NovaMemWorker *store = conn->worker;
     RDMA_LOG(DEBUG) << "memstore[" << store->thread_id_ << "]: "
                     << " Get fd:"
                     << fd << " key:" << int_key << " nkey:" << nkey
                     << " hv:"
-                    << hv << " home:" << frag->server_id << " roffset:"
-                    << remote_offset << " rsize:" << remote_size
+                    << hv << " home:" << frag->server_id
                     << " buf:" << conn->request_buf;
     int home_server = frag->server_id;
-    // I'm the home.
-    if (home_server == NovaConfig::config->my_server_id) {
-        if (NovaConfig::config->mode == SERVER_REDIRECT && !no_redirect) {
-            int server_id = store->RedirectClientRequest();
-            if (server_id != NovaConfig::config->my_server_id) {
-                uint64_t rdma_offset = 0;
-                // Redirect to another server.
-                GetResult result = store->mem_manager_->LocalGet(buf, nkey,
-                                                                 false);
-                DataEntry it = result.data_entry;
-                if (it.empty()) {
-                    char *response_buf = conn->buf;
-                    int nlen = 1;
-                    int len = int_to_str(response_buf, nlen);
-                    response_buf += len;
-                    response_buf[0] = RequestType::MISS;
-                    conn->response_buf = conn->buf;
-                    conn->response_size = len + nlen;
-                    return true;
-                }
-                uint32_t datasize = DataEntry::sizeof_data_entry(it.nkey,
-                                                                 it.nval);
-                conn->worker->stats.nget_hits++;
-                rdma_offset =
-                        it.data;
-                auto *response_buf = conn->buf;
-                int nsid = nint_to_str(server_id);
-                int noffset = nint_to_str(rdma_offset);
-                int nsize = nint_to_str(datasize);
-                int nlen = 1 + nsid + 1 + noffset + 1 + nsize + 1;
-                int len = int_to_str(response_buf, nlen);
-                RDMA_ASSERT(len + nlen < NovaConfig::config->max_msg_size);
-                response_buf += len;
-                response_buf[0] = RequestType::REDIRECT;
-                response_buf++;
-                response_buf += int_to_str(response_buf, server_id);
-                response_buf += int_to_str(response_buf, rdma_offset);
-                int_to_str(response_buf, datasize);
-                conn->response_size = len + nlen;
-                conn->response_buf = conn->buf;
-                return true;
-            }
-        }
+    conn->worker->stats.nget_hits++;
 
-        // Local lookup.
-        GetResult result = store->mem_manager_->LocalGet(buf, nkey, true);
-        DataEntry it = result.data_entry;
-        RDMA_ASSERT(!it.empty());
-        if (it.empty()) {
-            char *response_buf = conn->buf;
-            int nlen = 1;
-            int len = int_to_str(response_buf, nlen);
-            response_buf += len;
-            response_buf[0] = RequestType::MISS;
-            conn->response_buf = conn->buf;
-            conn->response_size = len + nlen;
-            return true;
-        }
+    std::string value;
+    leveldb::Slice key(buf, nkey);
+    leveldb::Status s = store->db_->Get(leveldb::ReadOptions(), key,
+                                        &value);
+    RDMA_ASSERT(s.ok());
+//    RDMA_ASSERT(value.size() == NovaConfig::config->load_default_value_size);
+    conn->response_buf = conn->buf;
+    char *response_buf = conn->response_buf;
+    conn->response_size = nint_to_str(value.size()) + 1 + 1 + value.size();
 
-        conn->worker->stats.nget_hits++;
-        conn->response_buf = it.value();
-        conn->response_size = nint_to_str(it.nval) + 1 + 1 + it.nval;
-        conn->try_free_entry_after_transmit_response = true;
-        conn->index_entry = result.index_entry;
-        conn->data_entry = result.data_entry;
-        RDMA_ASSERT(
-                conn->response_size < NovaConfig::config->max_msg_size);
-        return true;
+    response_buf += int_to_str(response_buf, value.size() + 1);
+    response_buf[0] = 'h';
+    response_buf += 1;
+    memcpy(response_buf, value.data(), value.size());
+    RDMA_ASSERT(
+            conn->response_size < NovaConfig::config->max_msg_size);
+    return true;
+}
+
+bool
+process_socket_range(int fd, Connection *conn) {
+    // Stats.
+    conn->worker->stats.nranges++;
+    char *buf = conn->request_buf;
+    RDMA_ASSERT(buf[0] == RequestType::REQ_RANGE) << buf;
+    char *startkey;
+
+    uint64_t key = 0;
+    buf++;
+    startkey = buf;
+    int nkey = str_to_int(buf, &key) - 1;
+    buf += nkey + 1;
+    uint64_t nrecords;
+    buf += str_to_int(buf, &nrecords);
+
+    NovaMemWorker *store = conn->worker;
+    std::string skey(startkey, nkey);
+    RDMA_LOG(DEBUG) << "memstore[" << store->thread_id_ << "]: "
+                    << " Range fd:"
+                    << fd << " key:" << skey << " nkey:" << nkey
+                    << " nrecords: " << nrecords;
+
+    leveldb::Iterator *iterator = store->db_->NewIterator(
+            leveldb::ReadOptions());
+    iterator->Seek(startkey);
+    int records = 0;
+    leveldb::Slice keys[nrecords];
+    leveldb::Slice values[nrecords];
+    uint64_t rangesize = 0;
+    while (iterator->Valid() && records < nrecords) {
+        keys[records] = iterator->key();
+        values[records] = iterator->value();
+        rangesize += nint_to_str(keys[records].size()) + 1;
+        rangesize += keys[records].size();
+        rangesize += nint_to_str(values[records].size()) + 1;
+        rangesize += values[records].size();
+        RDMA_LOG(DEBUG) << "memstore[" << store->thread_id_ << "]: "
+                        << " Range key " << keys[records].ToString()
+                        << " value "
+                        << values[records].ToString();
+        records++;
+        iterator->Next();
     }
 
-    // I'm not the home server. This must be a redirect request.
-    RDMA_ASSERT(!no_redirect);
-    RDMA_ASSERT(NovaConfig::config->mode == SERVER_REDIRECT ||
-                NovaConfig::config->mode == PROXY);
-    if (remote_offset != 0 && remote_size != 0) {
-        // Initiate an RDMA get request.
-        store->PostRDMAGETRequest(fd, buf, nkey, home_server, remote_offset,
-                                  remote_size);
-        return false;
+    conn->response_buf = conn->buf;
+    char *response_buf = conn->response_buf;
+    conn->response_size = nint_to_str(rangesize) + 1 + rangesize;
+    response_buf += int_to_str(response_buf, rangesize);
+
+    for (int i = 0; i < records; i++) {
+        response_buf += int_to_str(response_buf, keys[i].size());
+        memcpy(response_buf, keys[i].data(), keys[i].size());
+        response_buf += keys[i].size();
+        response_buf += int_to_str(response_buf, values[i].size());
+        memcpy(response_buf, values[i].data(), values[i].size());
+        response_buf += values[i].size();
     }
-    // Does not provide an offset and size.
-    IndexEntry entry = store->mem_manager_->RemoteGet(buf, nkey);
-    conn->worker->stats.nget_lc++;
-    if (!entry.empty()) {
-        conn->worker->stats.nget_lc_hits++;
-        // Initiate an RDMA get request.
-        store->PostRDMAGETRequest(fd, buf, nkey, home_server,
-                                  entry.data_ptr,
-                                  entry.data_size);
-    } else {
-        // Initiate an RDMA get index request.
-        store->PostRDMAGETIndexRequest(fd, buf, nkey,
-                                       home_server, /*remote_offset=*/0);
-    }
-    return false;
+
+    RDMA_ASSERT(
+            conn->response_size < NovaConfig::config->max_msg_size);
+    return true;
 }
 
 bool process_socket_put(int fd, Connection *conn) {
@@ -315,12 +290,20 @@ bool process_socket_put(int fd, Connection *conn) {
                     << " put fd:"
                     << fd << ": key:" << key << " nkey:" << nkey << " nval:"
                     << nval << " buf:" << conn->request_buf;
+//    RDMA_ASSERT(nval == NovaConfig::config->load_default_value_size);
     int home_server = frag->server_id;
     // I'm the home.
-    RDMA_ASSERT(home_server == NovaConfig::config->my_server_id);
-    RDMA_ASSERT(
-            store->mem_manager_->LocalPut(ckey, nkey, val, nval, true,
-                                          false).success);
+    leveldb::Slice dbkey(ckey, nkey);
+    leveldb::Slice dbval(val, nval);
+    leveldb::WriteOptions option;
+    option.sync = NovaConfig::config->fsync;
+    leveldb::Status status = store->db_->Put(option, dbkey, dbval);
+    RDMA_ASSERT(status.ok()) << status.ToString();
+
+//    RDMA_ASSERT(home_server == NovaConfig::config->my_server_id);
+//    RDMA_ASSERT(
+//            store->mem_manager_->LocalPut(ckey, nkey, val, nval, true,
+//                                          false).success);
     char *response_buf = conn->buf;
     int nlen = 1;
     int len = int_to_str(response_buf, nlen);
@@ -337,6 +320,9 @@ bool process_socket_request_handler(int fd, Connection *conn) {
     }
     if (buf[0] == RequestType::FORCE_GET) {
         return process_socket_get(fd, conn, /*no_redirect=*/true);
+    }
+    if (buf[0] == RequestType::REQ_RANGE) {
+        return process_socket_range(fd, conn);
     }
     if (buf[0] == RequestType::PUT) {
         return process_socket_put(fd, conn);
@@ -408,6 +394,8 @@ void stats_handler(int fd, short which, void *arg) {
                    << " w=" << diff.nwrites
                    << " wa=" << diff.nwritesagain
                    << " g=" << diff.ngets
+                   << " p=" << diff.nputs
+                   << " range=" << diff.nranges
                    << " gh=" << diff.nget_hits
                    << " pl=" << diff.nput_lc
                    << " gl=" << diff.nget_lc
@@ -418,11 +406,19 @@ void stats_handler(int fd, short which, void *arg) {
                    << " rig=" << diff.ngetindex_rdma
                    << " rigd=" << diff.ngetindex_rdma_indirect
                    << " rigi=" << diff.ngetindex_rdma_invalid
-                   << " p=" << diff.nputs
                    << " st=" << service_time
                    << " rst=" << read_service_time
                    << " wst=" << write_service_time;
     store->prev_stats = store->stats;
+
+    if (store->store_id_ == 0) {
+        std::string value;
+        store->db_->GetProperty("leveldb.sstables", &value);
+        RDMA_LOG(INFO) << "\n" << value;
+        value.clear();
+        store->db_->GetProperty("leveldb.approximate-memory-usage", &value);
+        RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
+    }
 }
 
 void new_conn_handler(int fd, short which, void *arg) {
@@ -469,24 +465,6 @@ void new_conn_handler(int fd, short which, void *arg) {
 //    RDMA_ASSERT(buf[0] == 'c');
 //    new_conn_handler(fd, which, store);
 //}
-
-int NovaMemWorker::RedirectClientRequest() {
-    int my_sid = NovaConfig::config->my_server_id;
-    if (my_sid != 0) {
-        return my_sid;
-    }
-    if (rr_server_redirect_reqs == 100) {
-        rr_server_redirect_reqs = 0;
-    }
-    rr_server_redirect_reqs++;
-    for (int i = 0; i < nservers; i++) {
-        if (rr_server_redirect_reqs <= shed_load[i]) {
-            return i;
-        }
-    }
-    RDMA_ASSERT(false);
-    return -1;
-}
 
 void NovaMemWorker::Start() {
     RDMA_LOG(INFO) << "memstore[" << thread_id_ << "]: "

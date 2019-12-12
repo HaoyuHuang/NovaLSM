@@ -82,22 +82,21 @@ uint32_t safe_mod(uint32_t key, uint32_t n) {
     return key % n;
 }
 
-uint32_t str_to_int(char *str, uint64_t *out, uint32_t nkey) {
+uint32_t str_to_int(const char *str, uint64_t *out, uint32_t nkey) {
     if (str[0] == MSG_TERMINATER_CHAR) {
         return 0;
     }
     uint32_t len = 0;
     uint64_t x = 0;
-    while (str[0] != TERMINATER_CHAR) {
+    while (str[len] != TERMINATER_CHAR) {
         if (nkey != 0 && len == nkey) {
             break;
         }
-        if (str[0] > '9' || str[0] < '0') {
+        if (str[len] > '9' || str[len] < '0') {
             break;
         }
-        x = x * 10 + (str[0] - '0');
+        x = x * 10 + (str[len] - '0');
         len += 1;
-        str += 1;
     }
     *out = x;
     return len + 1;

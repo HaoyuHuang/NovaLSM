@@ -30,16 +30,18 @@ namespace leveldb {
     }
 
     TableCache::TableCache(const std::string &dbname, const Options &options,
-                           int entries)
+                           int entries, DBProfiler *db_profiler)
             : env_(options.env),
               dbname_(dbname),
               options_(options),
-              cache_(NewLRUCache(entries)) {}
+              cache_(NewLRUCache(entries)), db_profiler_(db_profiler) {}
 
     TableCache::~TableCache() { delete cache_; }
 
-    Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
-                                 Cache::Handle **handle) {
+    Status
+    TableCache::FindTable(uint64_t file_number,
+                          uint64_t file_size, int level,
+                          Cache::Handle **handle) {
         Status s;
         char buf[sizeof(file_number)];
         EncodeFixed64(buf, file_number);
@@ -57,7 +59,8 @@ namespace leveldb {
                 }
             }
             if (s.ok()) {
-                s = Table::Open(options_, file, file_size, &table);
+                s = Table::Open(options_, file, file_size, level, file_number,
+                                &table, db_profiler_);
             }
 
             if (!s.ok()) {
@@ -75,22 +78,24 @@ namespace leveldb {
         return s;
     }
 
-    Iterator *TableCache::NewIterator(const ReadOptions &options,
-                                      uint64_t file_number, uint64_t file_size,
-                                      Table **tableptr) {
+    Iterator *
+    TableCache::NewIterator(AccessCaller caller, const ReadOptions &options,
+                            uint64_t file_number, int level,
+                            uint64_t file_size,
+                            Table **tableptr) {
         if (tableptr != nullptr) {
             *tableptr = nullptr;
         }
 
         Cache::Handle *handle = nullptr;
-        Status s = FindTable(file_number, file_size, &handle);
+        Status s = FindTable(file_number,
+                             file_size, level, &handle);
         if (!s.ok()) {
             return NewErrorIterator(s);
         }
-
         Table *table = reinterpret_cast<TableAndFile *>(cache_->Value(
                 handle))->table;
-        Iterator *result = table->NewIterator(options);
+        Iterator *result = table->NewIterator(caller, options);
         result->RegisterCleanup(&UnrefEntry, cache_, handle);
         if (tableptr != nullptr) {
             *tableptr = table;
@@ -99,11 +104,13 @@ namespace leveldb {
     }
 
     Status TableCache::Get(const ReadOptions &options, uint64_t file_number,
-                           uint64_t file_size, const Slice &k, void *arg,
+                           uint64_t file_size, int level, const Slice &k,
+                           void *arg,
                            void (*handle_result)(void *, const Slice &,
                                                  const Slice &)) {
         Cache::Handle *handle = nullptr;
-        Status s = FindTable(file_number, file_size, &handle);
+        Status s = FindTable(file_number, file_size,
+                             level, &handle);
         if (s.ok()) {
             Table *t = reinterpret_cast<TableAndFile *>(cache_->Value(
                     handle))->table;

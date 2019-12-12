@@ -23,3 +23,5 @@ liblibnova.a
 twemcache
 nova_mem_server
 nova_test
+
+ycsb/YCSB_C.cbp

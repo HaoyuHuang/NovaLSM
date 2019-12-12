@@ -6,6 +6,7 @@
 
 #include <netinet/tcp.h>
 #include <signal.h>
+#include <leveldb/write_batch.h>
 #include "nova_mem_server.h"
 
 void start(NovaMemWorker *store) {
@@ -13,26 +14,47 @@ void start(NovaMemWorker *store) {
 }
 
 void NovaMemServer::LoadDataWithRangePartition() {
-    char key[1024];
-    char value[NovaConfig::config->load_default_value_size];
     // load data.
     timeval start{};
     gettimeofday(&start, nullptr);
     int loaded_keys = 0;
     Fragment **frags = NovaConfig::config->fragments;
+    leveldb::WriteOptions option;
+    option.sync = NovaConfig::config->fsync;
+
     for (int i = 0; i < NovaConfig::config->nfragments; i++) {
         if (frags[i]->server_id != NovaConfig::config->my_server_id) {
             continue;
         }
-        for (uint64_t j = frags[i]->key_start;
-             j <= frags[i]->key_end; j++) {
-            uint32_t nkey = int_to_str(key, j) - 1;
-            auto v = static_cast<char>((j % 10) + '0');
-            memset(value, v, NovaConfig::config->load_default_value_size);
+        leveldb::WriteBatch batch;
+        int bs = 0;
+        // Insert cold keys first so that hot keys will be at the top level.
+        std::vector<std::string*> pointers;
+        for (uint64_t j = frags[i]->key_end;
+             j >= frags[i]->key_start; j--) {
+            auto v = static_cast<char>((j % 10) + 'a');
             RDMA_LOG(DEBUG) << "Insert " << j;
-            RDMA_ASSERT(manager->LocalPut(key, nkey, value,
-                                          NovaConfig::config->load_default_value_size,
-                                          true, false).success);
+
+            std::string *key = new std::string(std::to_string(j));
+            std::string *val = new std::string(
+                    NovaConfig::config->load_default_value_size, v);
+            pointers.push_back(key);
+            pointers.push_back(val);
+            batch.Put(*key, *val);
+            bs += 1;
+
+            if (bs == 1000) {
+//                RDMA_LOG(INFO) << "Write batch of " << bs << " to leveldb";
+                leveldb::Status status = db_->Write(option, &batch);
+                RDMA_ASSERT(status.ok()) << status.ToString();
+                batch.Clear();
+                bs = 0;
+                for (std::string* p : pointers) {
+                    delete p;
+                }
+                pointers.clear();
+            }
+
             loaded_keys++;
             if (loaded_keys % 100000 == 0) {
                 timeval now{};
@@ -40,9 +62,24 @@ void NovaMemServer::LoadDataWithRangePartition() {
                 RDMA_LOG(INFO) << "Load " << loaded_keys << " entries took "
                                << now.tv_sec - start.tv_sec;
             }
+
+            if (j == frags[i]->key_start) {
+                break;
+            }
+        }
+        if (bs > 0) {
+            leveldb::Status status = db_->Write(option, &batch);
+            RDMA_ASSERT(status.ok()) << status.ToString();
+            for (std::string* p : pointers) {
+                delete p;
+            }
         }
     }
+
     RDMA_LOG(INFO) << "Completed loading data " << loaded_keys;
+    // Compact the database.
+    // db_->CompactRange(nullptr, nullptr);
+
     // Assert the loaded data is valid.
     for (int i = 0; i < NovaConfig::config->nfragments; i++) {
         if (frags[i]->server_id != NovaConfig::config->my_server_id) {
@@ -50,20 +87,16 @@ void NovaMemServer::LoadDataWithRangePartition() {
         }
         for (uint64_t j = frags[i]->key_start;
              j <= frags[i]->key_end; j++) {
-            uint32_t nkey = int_to_str(key, j) - 1;
-            auto v = static_cast<char>((j % 10) + '0');
-            memset(value, v, NovaConfig::config->load_default_value_size);
-            GetResult result = manager->LocalGet(key, nkey);
-            DataEntry it = result.data_entry;
-            RDMA_ASSERT(it.stale == 0);
-            RDMA_ASSERT(it.nkey == nkey) << key << " " << i << " "
-                                         << it.nkey;
-            RDMA_ASSERT(it.nval == NovaConfig::config->load_default_value_size)
-                    << key;
-            RDMA_ASSERT(memcmp(it.user_key(), key, nkey) == 0) << key;
-            RDMA_ASSERT(
-                    memcmp(it.user_value(), value, it.nval) ==
-                    0) << key;
+            auto v = static_cast<char>((j % 10) + 'a');
+            std::string key = std::to_string(j);
+            std::string expected_val(
+                    NovaConfig::config->load_default_value_size, v
+            );
+            std::string val;
+            leveldb::Status status = db_->Get(leveldb::ReadOptions(), key,
+                                              &val);
+            RDMA_ASSERT(status.ok()) << status.ToString();
+            RDMA_ASSERT(expected_val.compare(val) == 0) << val;
         }
     }
 }
@@ -110,7 +143,7 @@ void NovaMemServer::LoadDataWithHashPartition() {
             RDMA_ASSERT(it.stale == 0);
             RDMA_ASSERT(it.nkey == nkey) << key << " " << it.nkey;
             RDMA_ASSERT(it.nval == NovaConfig::config->load_default_value_size)
-                    << key;
+                << key;
             RDMA_ASSERT(memcmp(it.user_key(), key, nkey) == 0) << key;
             RDMA_ASSERT(
                     memcmp(it.user_value(), value, it.nval) ==
@@ -121,7 +154,7 @@ void NovaMemServer::LoadDataWithHashPartition() {
 
 void NovaMemServer::LoadData() {
     if (NovaConfig::config->partition_mode == NovaRDMAPartitionMode::HASH) {
-        LoadDataWithHashPartition();
+//        LoadDataWithHashPartition();
     } else if (NovaConfig::config->partition_mode ==
                NovaRDMAPartitionMode::RANGE) {
         LoadDataWithRangePartition();
@@ -129,9 +162,17 @@ void NovaMemServer::LoadData() {
     if (RDMA_LOG_LEVEL == DEBUG) {
         manager->PrintHashTable();
     }
+    std::string value;
+    db_->GetProperty("leveldb.sstables", &value);
+    RDMA_LOG(INFO) << "\n" << value;
+    value.clear();
+    db_->GetProperty("leveldb.approximate-memory-usage", &value);
+    RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
 }
 
-NovaMemServer::NovaMemServer(char *rdmabuf, int nport) : nport_(nport) {
+NovaMemServer::NovaMemServer(leveldb::DB *db, char *rdmabuf, int nport)
+        : nport_(nport) {
+    db_ = db;
     workers = new NovaMemWorker *[NovaConfig::config->num_mem_workers];
     char *buf = rdmabuf;
     uint64_t nrdmatotal_per_store =
@@ -145,6 +186,7 @@ NovaMemServer::NovaMemServer(char *rdmabuf, int nport) : nport_(nport) {
     if (NovaConfig::config->enable_load_data) {
         LoadData();
     }
+    db_->StartTracing();
     for (int worker_id = 0;
          worker_id < NovaConfig::config->num_mem_workers; worker_id++) {
         workers[worker_id] = new NovaMemWorker(worker_id, worker_id, this);
@@ -156,20 +198,21 @@ NovaMemServer::NovaMemServer(char *rdmabuf, int nport) : nport_(nport) {
         }
         workers[worker_id]->set_rdma_store(store);
         workers[worker_id]->set_mem_manager(manager);
+        workers[worker_id]->set_db(db);
         worker_threads.emplace_back(start, workers[worker_id]);
         buf += nrdmatotal_per_store;
     }
 
 //    int cores[] = {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31};
-    for (int i = 0; i < worker_threads.size(); i++) {
-        // Create a cpu_set_t object representing a set of CPUs. Clear it and mark
-        // only CPU i as set.
-        cpu_set_t cpuset;
-        CPU_ZERO(&cpuset);
-        CPU_SET(i, &cpuset);
-        int rc = pthread_setaffinity_np(worker_threads[i].native_handle(),
-                                        sizeof(cpu_set_t), &cpuset);
-    }
+//    for (int i = 0; i < worker_threads.size(); i++) {
+//        // Create a cpu_set_t object representing a set of CPUs. Clear it and mark
+//        // only CPU i as set.
+//        cpu_set_t cpuset;
+//        CPU_ZERO(&cpuset);
+//        CPU_SET(i, &cpuset);
+//        int rc = pthread_setaffinity_np(worker_threads[i].native_handle(),
+//                                        sizeof(cpu_set_t), &cpuset);
+//    }
     current_store_id_ = 0;
 }
 
