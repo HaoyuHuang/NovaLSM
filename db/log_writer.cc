@@ -5,6 +5,7 @@
 #include "db/log_writer.h"
 
 #include <stdint.h>
+#include <nova/logging.hpp>
 
 #include "leveldb/env.h"
 #include "util/coding.h"
@@ -50,6 +51,7 @@ namespace leveldb {
                         static_assert(kHeaderSize == 7, "");
                         dest_->Append(
                                 Slice("\x00\x00\x00\x00\x00\x00", leftover));
+                        file_offset_ += kHeaderSize;
                     }
                     block_offset_ = 0;
                 }
@@ -80,6 +82,26 @@ namespace leveldb {
             return s;
         }
 
+        Status Writer::AddIndex(uint32_t file_offset, uint32_t nrecords,
+                                nova::GlobalSSTableHandle table_handle) {
+            PutVarint32(&index_, file_offset);
+            PutVarint32(&index_, nrecords);
+            // TODO()
+//            PutVarint32(&index_, partition_id);
+//            PutVarint32(&index_, memtable_id);
+            return Status::OK();
+        }
+
+        Status Writer::WriteFooter() {
+            uint32_t index_start = file_offset_;
+            std::string footer;
+            PutVarint32(&footer, index_start);
+            dest_->Append(index_);
+            dest_->Append(footer);
+
+            RDMA_ASSERT(dest_->Flush().ok());
+        }
+
         Status Writer::EmitPhysicalRecord(RecordType t, const char *ptr,
                                           size_t length) {
             assert(length <= 0xffff);  // Must fit in two bytes
@@ -105,6 +127,7 @@ namespace leveldb {
                 }
             }
             block_offset_ += kHeaderSize + length;
+            file_offset_ += kHeaderSize + length;
             return s;
         }
 

@@ -126,6 +126,16 @@ namespace leveldb {
         // initially populating a large database.
         size_t max_file_size = 2 * 1024 * 1024;
 
+        // The maximum log file size a MC maintains.
+        // When the log file is full, MC flushes the log to DC.
+        size_t max_log_file_size = 4 * 1024 * 1024;
+
+        // The number of sstables per group.
+        // It creates a headroom to dedup.
+        size_t l0_sstables_per_group = 8;
+
+        bool mc_enable_eager_trim_log_records = false;
+
         // Compress blocks using the specified compression algorithm.  This
         // parameter can be changed dynamically.
         //

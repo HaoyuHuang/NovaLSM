@@ -22,6 +22,6 @@ cmake_install.cmake
 liblibnova.a
 twemcache
 nova_mem_server
-nova_test
+nova_mc_test
 
 ycsb/YCSB_C.cbp

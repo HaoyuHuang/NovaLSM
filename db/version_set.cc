@@ -1285,27 +1285,28 @@ namespace leveldb {
         GetRange(all, smallest, largest);
     }
 
-    Iterator *VersionSet::MakeInputIterator(Compaction *c) {
+    Iterator *Compaction::MakeInputIterator(const Options &opt,
+                                            const InternalKeyComparator icmp,
+                                            TableCache *table_cache) {
         ReadOptions options;
-        options.verify_checksums = options_->paranoid_checks;
+        options.verify_checksums = opt.paranoid_checks;
         options.fill_cache = false;
 
         // Level-0 files have to be merged together.  For other levels,
         // we will make a concatenating iterator per level.
         // TODO(opt): use concatenating iterator for level-0 if there is no overlap
-        const int space = (c->level() == 0 ? c->inputs_[0].size() + 1 : 2);
+        const int space = (level() == 0 ? inputs_[0].size() + 1 : 2);
         Iterator **list = new Iterator *[space];
         int num = 0;
         for (int which = 0; which < 2; which++) {
-            if (!c->inputs_[which].empty()) {
-                if (c->level() + which == 0) {
-                    const std::vector<FileMetaData *> &files = c->inputs_[which];
+            if (!inputs_[which].empty()) {
+                if (level() + which == 0) {
+                    const std::vector<FileMetaData *> &files = inputs_[which];
                     for (size_t i = 0; i < files.size(); i++) {
-                        list[num++] = table_cache_->NewIterator(
+                        list[num++] = table_cache->NewIterator(
                                 AccessCaller::kCompaction, options,
                                 files[i]->number,
-                                c->level() +
-                                which,
+                                level() + which,
                                 files[i]->file_size);
                     }
                 } else {
@@ -1313,18 +1314,18 @@ namespace leveldb {
                     BlockReadContext context = {
                             .caller = AccessCaller::kCompaction,
                             .file_number = 0,
-                            .level = c->level() + which,
+                            .level = level() + which,
                     };
                     list[num++] = NewTwoLevelIterator(
-                            new Version::LevelFileNumIterator(icmp_,
-                                                              &c->inputs_[which]),
+                            new Version::LevelFileNumIterator(icmp,
+                                                              &inputs_[which]),
                             context,
-                            &GetFileIterator, table_cache_, options);
+                            &GetFileIterator, table_cache, options);
                 }
             }
         }
         assert(num <= space);
-        Iterator *result = NewMergingIterator(&icmp_, list, num);
+        Iterator *result = NewMergingIterator(&icmp, list, num);
         delete[] list;
         return result;
     }

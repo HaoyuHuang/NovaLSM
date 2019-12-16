@@ -36,17 +36,20 @@ namespace utils {
 
     inline std::string Properties::GetProperty(const std::string &key,
                                                const std::string &default_value) const {
-        std::map<std::string, std::string>::const_iterator it = properties_.find(key);
+        std::map<std::string, std::string>::const_iterator it = properties_.find(
+                key);
         if (properties_.end() == it) {
             return default_value;
         } else return it->second;
     }
 
-    inline const std::string &Properties::operator[](const std::string &key) const {
+    inline const std::string &
+    Properties::operator[](const std::string &key) const {
         return properties_.at(key);
     }
 
-    inline const std::map<std::string, std::string> &Properties::properties() const {
+    inline const std::map<std::string, std::string> &
+    Properties::properties() const {
         return properties_;
     }
 

@@ -30,9 +30,9 @@ namespace leveldb {
 
         size_t size() const { return size_; }
 
-        uint64_t file_number() const {return file_number_;}
+        uint64_t file_number() const { return file_number_; }
 
-        uint64_t block_id() const {return block_id_;}
+        uint64_t block_id() const { return block_id_; }
 
         Iterator *NewIterator(const Comparator *comparator);
 

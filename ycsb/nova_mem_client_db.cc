@@ -190,7 +190,8 @@ namespace ycsbc {
             int sockfd, portno;
             struct sockaddr_in serv_addr;
             portno = stoi(ip_port[1], nullptr);
-            RDMA_ASSERT((sockfd = socket(AF_INET, SOCK_STREAM, 0)) >= 0) << "socket creation error";
+            RDMA_ASSERT((sockfd = socket(AF_INET, SOCK_STREAM, 0)) >= 0)
+                    << "socket creation error";
             memset(&serv_addr, 0, sizeof(serv_addr));
             serv_addr.sin_family = AF_INET;
             {
@@ -200,10 +201,12 @@ namespace ycsbc {
                        server->h_length);
             }
             serv_addr.sin_port = htons(portno);
-            int ret = connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+            int ret = connect(sockfd, (struct sockaddr *) &serv_addr,
+                              sizeof(serv_addr));
             while (ret != 0) {
                 usleep(10000);
-                ret = connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+                ret = connect(sockfd, (struct sockaddr *) &serv_addr,
+                              sizeof(serv_addr));
             }
             RDMA_ASSERT(ret >= 0) << "ERROR connecting " << ret;
             RDMA_LOG(INFO) << "connected to " << cache << " " << sockfd;
@@ -213,7 +216,8 @@ namespace ycsbc {
         shedLoad = new double[nova_client_sockets_.size()];
         shedLoad[0] = 100.0 - nShedLoad;
         if (nova_client_sockets_.size() > 1) {
-            double averageLoadPerServer = nShedLoad / (nova_client_sockets_.size() - 1);
+            double averageLoadPerServer =
+                    nShedLoad / (nova_client_sockets_.size() - 1);
             for (int i = 1; i < nova_client_sockets_.size(); i++) {
                 shedLoad[i] = shedLoad[i - 1];
                 shedLoad[i] += averageLoadPerServer;
@@ -226,7 +230,8 @@ namespace ycsbc {
         RDMA_LOG(INFO) << "init completed";
     }
 
-    int NovaMemClientDB::readYCSB(int serverId, int key, int offset, int valuesize) {
+    int NovaMemClientDB::readYCSB(int serverId, int key, int offset,
+                                  int valuesize) {
         RDMA_LOG(DEBUG) << "read " << key << " from " << serverId;
         int fd = nova_client_sockets_[serverId];
         int size = 0;
@@ -257,7 +262,8 @@ namespace ycsbc {
         } while (written != size);
 
         int response = read_response(fd);
-        RDMA_LOG(DEBUG) << "read " << key << " from " << serverId << " response " << response;
+        RDMA_LOG(DEBUG) << "read " << key << " from " << serverId
+                        << " response " << response;
         return response;
     }
 
@@ -279,8 +285,10 @@ namespace ycsbc {
             buf += str_to_int(buf, &remote_offset);
             buf += str_to_int(buf, &remote_size);
 
-            RDMA_LOG(DEBUG) << " remote offset " << redirect_server_id << " " << remote_offset << " " << remote_size;
-            len = readYCSB(redirect_server_id, intkey, remote_offset, remote_size);
+            RDMA_LOG(DEBUG) << " remote offset " << redirect_server_id << " "
+                            << remote_offset << " " << remote_size;
+            len = readYCSB(redirect_server_id, intkey, remote_offset,
+                           remote_size);
         }
 
         RDMA_ASSERT(len == expected_value_size);
@@ -294,19 +302,22 @@ namespace ycsbc {
         return DB::kOK;
     }
 
-    int NovaMemClientDB::Update(const std::string &table, const std::string &key,
-                                std::vector<KVPair> &values) {
+    int
+    NovaMemClientDB::Update(const std::string &table, const std::string &key,
+                            std::vector<KVPair> &values) {
 
         return DB::kOK;
     }
 
-    int NovaMemClientDB::Insert(const std::string &table, const std::string &key,
-                                std::vector<KVPair> &values) {
+    int
+    NovaMemClientDB::Insert(const std::string &table, const std::string &key,
+                            std::vector<KVPair> &values) {
 
         return DB::kOK;
     }
 
-    int NovaMemClientDB::Delete(const std::string &table, const std::string &key) {
+    int
+    NovaMemClientDB::Delete(const std::string &table, const std::string &key) {
         assert(false);
         return DB::kOK;
     }

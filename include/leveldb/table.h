@@ -33,6 +33,7 @@ namespace leveldb {
     class LEVELDB_EXPORT Table {
     public:
         struct Rep;
+
         // Attempt to open the table that is stored in bytes [0..file_size)
         // of "file", and read the metadata entries necessary to allow
         // retrieving data from the table.
@@ -69,6 +70,8 @@ namespace leveldb {
         // be close to the file length.
         uint64_t ApproximateOffsetOf(const Slice &key) const;
 
+        RandomAccessFile *backing_file() { return backing_file_; }
+
     private:
         friend class TableCache;
 
@@ -91,6 +94,7 @@ namespace leveldb {
 
         Rep *const rep_;
         DBProfiler *db_profiler_ = nullptr;
+        RandomAccessFile *backing_file_ = nullptr;
     };
 
 }  // namespace leveldb

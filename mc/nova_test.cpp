@@ -5,11 +5,11 @@
 //
 
 
-#include "rdma_ctrl.hpp"
-#include "nova_common.h"
-#include "nova_mem_config.h"
-#include "nova_rdma_rc_store.h"
-#include "nova_mem_server.h"
+#include "nova/rdma_ctrl.hpp"
+#include "nova/nova_common.h"
+#include "nova/nova_mem_config.h"
+#include "nova/nova_rdma_rc_store.h"
+#include "nova/nova_mem_server.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -20,6 +20,7 @@
 
 using namespace std;
 using namespace rdmaio;
+using namespace nova;
 
 NovaConfig *NovaConfig::config;
 RdmaCtrl *NovaConfig::rdma_ctrl;

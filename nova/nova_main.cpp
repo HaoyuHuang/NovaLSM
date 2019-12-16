@@ -24,6 +24,7 @@
 
 using namespace std;
 using namespace rdmaio;
+using namespace nova;
 
 NovaConfig *NovaConfig::config;
 RdmaCtrl *NovaConfig::rdma_ctrl;

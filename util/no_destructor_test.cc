@@ -11,37 +11,39 @@
 
 namespace leveldb {
 
-namespace {
+    namespace {
 
-struct DoNotDestruct {
- public:
-  DoNotDestruct(uint32_t a, uint64_t b) : a(a), b(b) {}
-  ~DoNotDestruct() { std::abort(); }
+        struct DoNotDestruct {
+        public:
+            DoNotDestruct(uint32_t a, uint64_t b) : a(a), b(b) {}
 
-  // Used to check constructor argument forwarding.
-  uint32_t a;
-  uint64_t b;
-};
+            ~DoNotDestruct() { std::abort(); }
 
-constexpr const uint32_t kGoldenA = 0xdeadbeef;
-constexpr const uint64_t kGoldenB = 0xaabbccddeeffaabb;
+            // Used to check constructor argument forwarding.
+            uint32_t a;
+            uint64_t b;
+        };
 
-}  // namespace
+        constexpr const uint32_t kGoldenA = 0xdeadbeef;
+        constexpr const uint64_t kGoldenB = 0xaabbccddeeffaabb;
 
-class NoDestructorTest {};
+    }  // namespace
 
-TEST(NoDestructorTest, StackInstance) {
-  NoDestructor<DoNotDestruct> instance(kGoldenA, kGoldenB);
-  ASSERT_EQ(kGoldenA, instance.get()->a);
-  ASSERT_EQ(kGoldenB, instance.get()->b);
-}
+    class NoDestructorTest {
+    };
 
-TEST(NoDestructorTest, StaticInstance) {
-  static NoDestructor<DoNotDestruct> instance(kGoldenA, kGoldenB);
-  ASSERT_EQ(kGoldenA, instance.get()->a);
-  ASSERT_EQ(kGoldenB, instance.get()->b);
-}
+    TEST(NoDestructorTest, StackInstance) {
+        NoDestructor<DoNotDestruct> instance(kGoldenA, kGoldenB);
+        ASSERT_EQ(kGoldenA, instance.get()->a);
+        ASSERT_EQ(kGoldenB, instance.get()->b);
+    }
+
+    TEST(NoDestructorTest, StaticInstance) {
+        static NoDestructor<DoNotDestruct> instance(kGoldenA, kGoldenB);
+        ASSERT_EQ(kGoldenA, instance.get()->a);
+        ASSERT_EQ(kGoldenB, instance.get()->b);
+    }
 
 }  // namespace leveldb
 
-int main(int argc, char** argv) { return leveldb::test::RunAllTests(); }
+int main(int argc, char **argv) { return leveldb::test::RunAllTests(); }

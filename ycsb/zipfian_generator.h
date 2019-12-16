@@ -109,7 +109,8 @@ namespace ycsbc {
             return last_value_ = 1;
         }
 
-        return last_value_ = base_ + num * std::pow(eta_ * u - eta_ + 1, alpha_);
+        return last_value_ =
+                       base_ + num * std::pow(eta_ * u - eta_ + 1, alpha_);
     }
 
     inline uint64_t ZipfianGenerator::Last() {

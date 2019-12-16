@@ -51,8 +51,7 @@ namespace leveldb {
     private:
         Status
         FindTable(uint64_t file_number, uint64_t file_size,
-                  int level,
-                  Cache::Handle **);
+                  int level, Cache::Handle **);
 
         Env *const env_;
         const std::string dbname_;

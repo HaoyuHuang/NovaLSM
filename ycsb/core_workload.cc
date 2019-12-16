@@ -82,14 +82,17 @@ void CoreWorkload::Init(const utils::Properties &p) {
 
     double read_proportion = std::stod(p.GetProperty(READ_PROPORTION_PROPERTY,
                                                      READ_PROPORTION_DEFAULT));
-    double update_proportion = std::stod(p.GetProperty(UPDATE_PROPORTION_PROPERTY,
-                                                       UPDATE_PROPORTION_DEFAULT));
-    double insert_proportion = std::stod(p.GetProperty(INSERT_PROPORTION_PROPERTY,
-                                                       INSERT_PROPORTION_DEFAULT));
+    double update_proportion = std::stod(
+            p.GetProperty(UPDATE_PROPORTION_PROPERTY,
+                          UPDATE_PROPORTION_DEFAULT));
+    double insert_proportion = std::stod(
+            p.GetProperty(INSERT_PROPORTION_PROPERTY,
+                          INSERT_PROPORTION_DEFAULT));
     double scan_proportion = std::stod(p.GetProperty(SCAN_PROPORTION_PROPERTY,
                                                      SCAN_PROPORTION_DEFAULT));
     double readmodifywrite_proportion = std::stod(p.GetProperty(
-            READMODIFYWRITE_PROPORTION_PROPERTY, READMODIFYWRITE_PROPORTION_DEFAULT));
+            READMODIFYWRITE_PROPORTION_PROPERTY,
+            READMODIFYWRITE_PROPORTION_DEFAULT));
 
     record_count_ = std::stoi(p.GetProperty(RECORD_COUNT_PROPERTY));
     std::string request_dist = p.GetProperty(REQUEST_DISTRIBUTION_PROPERTY,
@@ -103,10 +106,12 @@ void CoreWorkload::Init(const utils::Properties &p) {
 
     read_all_fields_ = utils::StrToBool(p.GetProperty(READ_ALL_FIELDS_PROPERTY,
                                                       READ_ALL_FIELDS_DEFAULT));
-    write_all_fields_ = utils::StrToBool(p.GetProperty(WRITE_ALL_FIELDS_PROPERTY,
-                                                       WRITE_ALL_FIELDS_DEFAULT));
+    write_all_fields_ = utils::StrToBool(
+            p.GetProperty(WRITE_ALL_FIELDS_PROPERTY,
+                          WRITE_ALL_FIELDS_DEFAULT));
 
-    if (p.GetProperty(INSERT_ORDER_PROPERTY, INSERT_ORDER_DEFAULT) == "hashed") {
+    if (p.GetProperty(INSERT_ORDER_PROPERTY, INSERT_ORDER_DEFAULT) ==
+        "hashed") {
         ordered_inserts_ = false;
     } else {
         ordered_inserts_ = true;
@@ -186,7 +191,8 @@ void CoreWorkload::BuildValues(std::vector<ycsbc::DB::KVPair> &values) {
     for (int i = 0; i < field_count_; ++i) {
         ycsbc::DB::KVPair pair;
         pair.first.append("field").append(std::to_string(i));
-        pair.second.append(field_len_generator_->Next(), utils::RandomPrintChar());
+        pair.second.append(field_len_generator_->Next(),
+                           utils::RandomPrintChar());
         values.push_back(pair);
     }
 }

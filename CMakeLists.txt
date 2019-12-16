@@ -130,6 +130,8 @@ target_sources(leveldb
         "db/builder.cc"
         "db/builder.h"
         "db/c.cc"
+        "db/compaction.cc"
+        "db/compaction.h"
         "db/db_impl.cc"
         "db/db_impl.h"
         "db/db_iter.cc"
@@ -484,75 +486,80 @@ if (LEVELDB_INSTALL)
     )
 endif (LEVELDB_INSTALL)
 
-
-set(YCSB_SOURCES
-        ycsb/logging.h
-        ycsb/client.h
-        ycsb/const_generator.h
-        ycsb/core_workload.cc
-        ycsb/core_workload.h
-        ycsb/counter_generator.h
-        ycsb/db.h
-        ycsb/discrete_generator.h
-        ycsb/generator.h
-        ycsb/properties.h
-        ycsb/scrambled_zipfian_generator.h
-        ycsb/skewed_latest_generator.h
-        ycsb/timer.h
-        ycsb/uniform_generator.h
-        ycsb/utils.h
-        ycsb/zipfian_generator.h
-        ycsb/basic_db.h
-        ycsb/db_factory.cc
-        ycsb/db_factory.h
-        ycsb/nova_mem_client_db.cc
-        ycsb/nova_mem_client_db.h)
-
-add_library(libycsb STATIC ${YCSB_SOURCES})
-set_target_properties(libycsb PROPERTIES LINKER_LANGUAGE CXX)
-target_link_libraries(libycsb -lpthread -fexceptions)
-
-add_executable(ycsbbench "ycsb/ycsbc.cc")
-target_link_libraries(ycsbbench libycsb)
+#set(YCSB_SOURCES
+#        ycsb/logging.h
+#        ycsb/client.h
+#        ycsb/const_generator.h
+#        ycsb/core_workload.cc
+#        ycsb/core_workload.h
+#        ycsb/counter_generator.h
+#        ycsb/db.h
+#        ycsb/discrete_generator.h
+#        ycsb/generator.h
+#        ycsb/properties.h
+#        ycsb/scrambled_zipfian_generator.h
+#        ycsb/skewed_latest_generator.h
+#        ycsb/timer.h
+#        ycsb/uniform_generator.h
+#        ycsb/utils.h
+#        ycsb/zipfian_generator.h
+#        ycsb/basic_db.h
+#        ycsb/db_factory.cc
+#        ycsb/db_factory.h
+#        ycsb/nova_mem_client_db.cc
+#        ycsb/nova_mem_client_db.h)
+#
+#add_library(libycsb STATIC ${YCSB_SOURCES})
+#set_target_properties(libycsb PROPERTIES LINKER_LANGUAGE CXX)
+#target_link_libraries(libycsb -lpthread -fexceptions)
+#
+#add_executable(ycsbbench "ycsb/ycsbc.cc")
+#target_link_libraries(ycsbbench libycsb)
 
 set(NOVA_SOURCES
-        network/city_hash.h
-        network/city_hash.cpp
-        network/common.hpp
-        network/logging.hpp
-        network/mr.hpp
-        network/msg_interface.hpp
-        network/pre_connector.hpp
-        network/qp.hpp
-        network/qp_impl.hpp
-        network/rdma_ctrl.hpp
-        network/rdma_ctrl_impl.hpp
-        network/rnic.hpp
-        network/nova_mem_config.h
-        network/nova_msg_parser.h
-        network/nova_mem_server.cpp
-        network/nova_mem_server.h
-        network/nova_mem_worker.cpp
-        network/nova_mem_worker.h
-        network/nova_common.cpp
-        network/nova_common.h
-        network/nova_msg_callback.h
-        network/nova_rdma_rc_store.cpp
-        network/nova_rdma_rc_store.h
-        network/nova_rdma_store.h
-        network/nova_mem_manager.h
-        network/nova_mem_manager.cpp
-        network/linked_list.h
-        network/nova_chained_hashtable.cpp
-        network/nova_chained_hashtable.h)
+        nova/city_hash.h
+        nova/city_hash.cpp
+        nova/common.hpp
+        nova/logging.hpp
+        nova/mr.hpp
+        nova/msg_interface.hpp
+        nova/pre_connector.hpp
+        nova/qp.hpp
+        nova/qp_impl.hpp
+        nova/rdma_ctrl.hpp
+        nova/rdma_ctrl_impl.hpp
+        nova/rnic.hpp
+        nova/nova_mem_config.h
+        nova/nova_msg_parser.h
+        nova/nova_mem_server.cpp
+        nova/nova_mem_server.h
+        nova/nova_mem_worker.cpp
+        nova/nova_mem_worker.h
+        nova/nova_common.cpp
+        nova/nova_common.h
+        nova/nova_msg_callback.h
+        nova/nova_rdma_rc_store.cpp
+        nova/nova_rdma_rc_store.h
+        nova/nova_rdma_store.h
+        mc/nova_mem_manager.h
+        mc/nova_mem_manager.cpp
+        nova/linked_list.h
+        mc/nova_chained_hashtable.cpp
+        mc/nova_chained_hashtable.h
+        mc/mc.cpp
+        mc/mc.h
+        mc/worker.cpp
+        mc/worker.h
+        log/nova_log.cpp
+        log/nova_log.h)
 
 
 add_library(libnova STATIC ${NOVA_SOURCES})
 set_target_properties(libnova PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(libnova -lpthread ibverbs event leveldb)
 
-add_executable(nova_mem_server "network/nova_main.cpp")
-add_executable(nova_test "network/nova_test.cpp")
+add_executable(nova_mem_server "nova/nova_main.cpp")
+add_executable(nova_test "mc/nova_test.cpp")
 
 target_link_libraries(nova_mem_server libnova -lgflags leveldb)
 target_link_libraries(nova_test libnova -lgflags leveldb)

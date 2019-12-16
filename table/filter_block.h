@@ -60,7 +60,7 @@ namespace leveldb {
 
         bool KeyMayMatch(uint64_t block_offset, const Slice &key);
 
-        uint64_t size() const {return size_;}
+        uint64_t size() const { return size_; }
 
     private:
         const FilterPolicy *policy_;

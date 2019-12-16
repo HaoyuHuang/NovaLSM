@@ -12,7 +12,7 @@
 #include <sstream>
 #include "nova_common.h"
 
-namespace novalist {
+namespace nova {
     template<class T>
     class NovaList {
     public:
@@ -20,7 +20,7 @@ namespace novalist {
             backing_array_ = new T[NOVA_LIST_BACK_ARRAY_SIZE];
         }
 
-        void append(T data) {
+        void append(const T data) {
             if (index_ == size_) {
                 expand();
             }

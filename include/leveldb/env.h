@@ -412,6 +412,80 @@ namespace leveldb {
         Env *target_;
     };
 
+    class LEVELDB_EXPORT MemReadableFile final : public RandomAccessFile {
+    public:
+        MemReadableFile(std::string filename, char *mmap_base,
+                        size_t length)
+                : mmap_base_(mmap_base),
+                  length_(length),
+                  filename_(std::move(filename)) {}
+
+        Status Read(uint64_t offset, size_t n, Slice *result,
+                    char *scratch) const override {
+            if (offset + n > length_) {
+                *result = Slice();
+                return Status::InvalidArgument("");
+            }
+
+            *result = Slice(mmap_base_ + offset, n);
+            return Status::OK();
+        }
+
+        const Slice backing_mem() { return Slice(mmap_base_, length_); }
+
+    private:
+        char *const mmap_base_;
+        const size_t length_;
+        const std::string filename_;
+    };
+
+    class LEVELDB_EXPORT MemWritableFile final : public WritableFile {
+    public:
+        MemWritableFile(std::string filename, char *membase,
+                        uint64_t size) : membase_(
+                membase), memsize_(size), filename_(filename) {
+        }
+
+        Status Append(const Slice &data) override {
+            if (index_ + data.size() >= memsize_) {
+                return Status::InvalidArgument("");
+            }
+            char *ptr = membase_ + index_;
+            memcpy(ptr, data.data(), data.size());
+            index_ += data.size();
+            return Status::OK();
+        }
+
+        Status Close() override {
+
+        }
+
+        Status Flush() override {
+            if (index_ + sizeof(uint32_t) > memsize_) {
+                return Status::IOError("Not enough capacity");
+            }
+            char *ptr = membase_ + memsize_ - sizeof(uint32_t);
+
+            // Platform-independent code.
+            // Currently, only gcc optimizes this to a single mov / str instruction.
+            ptr[0] = static_cast<uint8_t>(index_);
+            ptr[1] = static_cast<uint8_t>(index_ >> 8);
+            ptr[2] = static_cast<uint8_t>(index_ >> 16);
+            ptr[3] = static_cast<uint8_t>(index_ >> 24);
+        }
+
+        Status Sync() override {
+
+        }
+
+    private:
+        uint64_t index_ = 0;
+
+        char *membase_;
+        const uint64_t memsize_;
+        const std::string filename_;
+    };
+
 }  // namespace leveldb
 
 // Redefine DeleteFile if necessary.

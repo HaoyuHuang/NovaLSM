@@ -6,6 +6,7 @@
 #define STORAGE_LEVELDB_DB_LOG_WRITER_H_
 
 #include <stdint.h>
+#include <nova/nova_common.h>
 
 #include "db/log_format.h"
 #include "leveldb/slice.h"
@@ -13,42 +14,54 @@
 
 namespace leveldb {
 
-class WritableFile;
+    class WritableFile;
 
-namespace log {
+    namespace log {
 
-class Writer {
- public:
-  // Create a writer that will append data to "*dest".
-  // "*dest" must be initially empty.
-  // "*dest" must remain live while this Writer is in use.
-  explicit Writer(WritableFile* dest);
+        class Writer {
+        public:
+            // Create a writer that will append data to "*dest".
+            // "*dest" must be initially empty.
+            // "*dest" must remain live while this Writer is in use.
+            explicit Writer(WritableFile *dest);
 
-  // Create a writer that will append data to "*dest".
-  // "*dest" must have initial length "dest_length".
-  // "*dest" must remain live while this Writer is in use.
-  Writer(WritableFile* dest, uint64_t dest_length);
+            // Create a writer that will append data to "*dest".
+            // "*dest" must have initial length "dest_length".
+            // "*dest" must remain live while this Writer is in use.
+            Writer(WritableFile *dest, uint64_t dest_length);
 
-  Writer(const Writer&) = delete;
-  Writer& operator=(const Writer&) = delete;
+            Writer(const Writer &) = delete;
 
-  ~Writer();
+            Writer &operator=(const Writer &) = delete;
 
-  Status AddRecord(const Slice& slice);
+            ~Writer();
 
- private:
-  Status EmitPhysicalRecord(RecordType type, const char* ptr, size_t length);
+            Status AddRecord(const Slice &slice);
 
-  WritableFile* dest_;
-  int block_offset_;  // Current offset in block
+            Status AddIndex(uint32_t file_offset, uint32_t nrecords,
+                            nova::GlobalSSTableHandle table_handle);
 
-  // crc32c values for all supported record types.  These are
-  // pre-computed to reduce the overhead of computing the crc of the
-  // record type stored in the header.
-  uint32_t type_crc_[kMaxRecordType + 1];
-};
+            Status WriteFooter();
 
-}  // namespace log
+            const uint32_t file_offset() { return file_offset_; }
+
+
+        private:
+            Status
+            EmitPhysicalRecord(RecordType type, const char *ptr, size_t length);
+
+            WritableFile *dest_;
+            int block_offset_;  // Current offset in block
+            uint32_t file_offset_; // Current file offset.
+
+            // crc32c values for all supported record types.  These are
+            // pre-computed to reduce the overhead of computing the crc of the
+            // record type stored in the header.
+            uint32_t type_crc_[kMaxRecordType + 1];
+            std::string index_;
+        };
+
+    }  // namespace log
 }  // namespace leveldb
 
 #endif  // STORAGE_LEVELDB_DB_LOG_WRITER_H_

@@ -6,11 +6,11 @@
 
 #ifndef RLIB_NOVA_MSG_CALLBACK_H
 #define RLIB_NOVA_MSG_CALLBACK_H
+namespace nova {
 
-class NovaMsgCallback {
-public:
-    virtual void ProcessRDMAREAD(char *buf) = 0;
-};
-
-
+    class NovaMsgCallback {
+    public:
+        virtual void ProcessRDMAREAD(char *buf) = 0;
+    };
+}
 #endif //RLIB_NOVA_MSG_CALLBACK_H

@@ -158,9 +158,12 @@ namespace ycsbc {
         bool write_all_fields() const { return write_all_fields_; }
 
         CoreWorkload() :
-                field_count_(0), read_all_fields_(false), write_all_fields_(false),
-                field_len_generator_(NULL), key_generator_(NULL), key_chooser_(NULL),
-                field_chooser_(NULL), scan_len_chooser_(NULL), insert_key_sequence_(3),
+                field_count_(0), read_all_fields_(false),
+                write_all_fields_(false),
+                field_len_generator_(NULL), key_generator_(NULL),
+                key_chooser_(NULL),
+                field_chooser_(NULL), scan_len_chooser_(NULL),
+                insert_key_sequence_(3),
                 ordered_inserts_(true), record_count_(0) {
         }
 
@@ -173,7 +176,8 @@ namespace ycsbc {
         }
 
     protected:
-        static Generator<uint64_t> *GetFieldLenGenerator(const utils::Properties &p);
+        static Generator<uint64_t> *
+        GetFieldLenGenerator(const utils::Properties &p);
 
         std::string BuildKeyName(uint64_t key_num);
 
@@ -214,7 +218,8 @@ namespace ycsbc {
     }
 
     inline std::string CoreWorkload::NextFieldName() {
-        return std::string("field").append(std::to_string(field_chooser_->Next()));
+        return std::string("field").append(
+                std::to_string(field_chooser_->Next()));
     }
 
 } // ycsbc
