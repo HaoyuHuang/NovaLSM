@@ -378,12 +378,12 @@ namespace leveldb {
                                     const InternalKeyComparator icmp,
                                     TableCache *table_cache);
 
+        Compaction(const Options *options, int level);
+
     private:
         friend class Version;
 
         friend class VersionSet;
-
-        Compaction(const Options *options, int level);
 
         int level_;
         uint64_t max_output_file_size_;

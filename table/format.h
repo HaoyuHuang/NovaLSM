@@ -46,6 +46,16 @@ namespace leveldb {
 
         Status DecodeFrom(Slice *input);
 
+        bool operator<(const BlockHandle &h2) const {
+            if (offset_ < h2.offset_) {
+                return true;
+            }
+            if (size_ < h2.size_) {
+                return true;
+            }
+            return false;
+        }
+
     private:
         uint64_t offset_;
         uint64_t size_;

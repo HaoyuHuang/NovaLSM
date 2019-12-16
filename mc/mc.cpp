@@ -3,17 +3,38 @@
 // Created by Haoyu Huang on 12/12/19.
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
-#include <port/port.h>
-#include <leveldb/env.h>
+#include "port/port.h"
+#include "leveldb/env.h"
+#include "db/version_set.h"
+#include "db/compaction.h"
 #include <thread>
 #include "mc.h"
 
 namespace nova {
 
-    MemoryComponent::MemoryComponent(uint32_t mc_id,
+    leveldb::Status
+    MemoryComponent::MCTableCache::FindTable(
+            const nova::GlobalSSTableHandle &th,
+            leveldb::Cache::Handle **handle) {
+
+        SSTableContext *ctx = mc_->sstables_l0_[th];
+        char buf[th.size()];
+        th.Encode(buf);
+        leveldb::Slice key(buf, sizeof(buf));
+        leveldb::TableAndFile *tf = new leveldb::TableAndFile;
+        tf->file = ctx->table->backing_file();
+        tf->table = ctx->table;
+        *handle = cache_->Insert(key, tf, 1, &leveldb::DeleteEntry);
+    }
+
+    MemoryComponent::MemoryComponent(uint32_t mc_id, leveldb::Env *env,
                                      NovaMemManager *mem_manager,
-                                     const leveldb::Options &options) :
-            mc_id_(mc_id), mem_manager_(mem_manager), options_(options) {
+                                     const leveldb::Options &options,
+                                     const leveldb::InternalKeyComparator internal_comparator)
+            :
+            mc_id_(mc_id), env_(env), mem_manager_(mem_manager),
+            options_(options), internal_comparator_(internal_comparator),
+            table_cache_("", options, 1000, nullptr) {
         current_sstable_group_.store(
                 new std::map<GlobalSSTableHandle, leveldb::Table *>());
         current_log_bufs_.store(new std::vector<leveldb::Slice>());
@@ -122,7 +143,7 @@ namespace nova {
     }
 
     leveldb::Status
-    MemoryComponent::Flush(GlobalSSTableHandle handle,
+    MemoryComponent::Flush(const GlobalSSTableHandle &handle,
                            leveldb::SequenceNumber last_seq, char *sstable,
                            uint32_t size) {
         leveldb::Table *table = nullptr;
@@ -163,14 +184,21 @@ namespace nova {
             std::map<GlobalSSTableHandle, leveldb::Table *> *tables,
             leveldb::SequenceNumber last_seq) {
         // TODO.
+        leveldb::Compaction *compaction = new leveldb::Compaction(&options_, 0);
+        leveldb::CompactionState *state = new leveldb::CompactionState(
+                compaction, env_, "", options_,
+                table_cache_, internal_comparator_,
+                last_seq, nullptr);
+        state->DoCompactionWork();
     }
 
     leveldb::Status
-    MemoryComponent::FlushedToDC(GlobalSSTableHandle handle) {
+    MemoryComponent::FlushedToDC(const GlobalSSTableHandle &handle) {
         sstable_mutex_.Lock();
         tables_flushed_to_dc_.insert(handle);
         auto table = sstables_l0_.find(handle);
         sstables_l0_.erase(table);
+        table_cache_.Evict(handle);
         sstable_mutex_.Unlock();
 
         // Free its backing memory.
@@ -236,8 +264,8 @@ namespace nova {
                                                options_.max_log_file_size);
         leveldb::log::Writer writer(&writable_file);
         struct GlobalLogFileHandle log_handle = {
-                // TODO:
-                .configuration_id = 0,
+                // TODO: Put Configuration id here.
+                .configuration_id = 1,
                 .mc_id = mc_id_,
                 .log_id = log_id_
         };
@@ -292,7 +320,7 @@ namespace nova {
         sstable_mutex_.Unlock();
     }
 
-    void MemoryComponent::DeleteLogFile(GlobalLogFileHandle handle) {
+    void MemoryComponent::DeleteLogFile(const GlobalLogFileHandle &handle) {
         log_mutex_.Lock();
         log_files_.erase(handle);
         log_mutex_.Unlock();

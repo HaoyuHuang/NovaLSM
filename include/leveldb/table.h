@@ -11,6 +11,97 @@
 #include "leveldb/iterator.h"
 #include "db_profiler.h"
 
+namespace nova {
+
+    struct GlobalSSTableHandle {
+        uint32_t configuration_id;
+        uint32_t partition_id;
+        uint32_t cc_id;
+        uint32_t table_id;
+
+        uint32_t size() const {return 16;}
+
+        uint32_t Encode(char *data) const {
+            leveldb::EncodeFixed32(data, configuration_id);
+            leveldb::EncodeFixed32(data + 4, partition_id);
+            leveldb::EncodeFixed32(data + 8, cc_id);
+            leveldb::EncodeFixed32(data + 12, table_id);
+            return 16;
+        }
+
+        uint32_t Decode(char *data) {
+            configuration_id = leveldb::DecodeFixed32(data);
+            if (configuration_id == 0) {
+                return 0;
+            }
+            partition_id = leveldb::DecodeFixed32(data + 4);
+            cc_id = leveldb::DecodeFixed32(data + 8);
+            table_id = leveldb::DecodeFixed32(data + 12);
+            return 16;
+        }
+
+        bool operator<(const GlobalSSTableHandle &h2) const {
+            if (configuration_id < h2.configuration_id) {
+                return true;
+            }
+            if (partition_id < h2.partition_id) {
+                return true;
+            }
+            if (cc_id < h2.cc_id) {
+                return true;
+            }
+            if (table_id < h2.table_id) {
+                return true;
+            }
+            return false;
+        }
+    };
+
+    struct GlobalBlockHandle {
+        struct GlobalSSTableHandle table_handle;
+        leveldb::BlockHandle block_handle;
+
+        static uint32_t CacheKeySize() {
+            return 12;
+        }
+
+        void CacheKey(char *key) {
+            leveldb::EncodeFixed32(key, table_handle.cc_id);
+            leveldb::EncodeFixed32(key + 4, table_handle.table_id);
+            leveldb::EncodeFixed32(key + 8, block_handle.offset());
+        }
+
+        bool operator<(const GlobalBlockHandle &h2) const {
+            if (table_handle < h2.table_handle) {
+                return true;
+            }
+            if (block_handle < h2.block_handle) {
+                return true;
+            }
+            return false;
+        }
+    };
+
+    struct GlobalLogFileHandle {
+        uint32_t configuration_id;
+        uint32_t mc_id;
+        uint32_t log_id;
+
+        bool operator<(const GlobalLogFileHandle &h2) const {
+            if (configuration_id < h2.configuration_id) {
+                return true;
+            }
+            if (mc_id < h2.mc_id) {
+                return true;
+            }
+            if (log_id < h2.log_id) {
+                return true;
+            }
+            return false;
+        }
+    };
+}
+
 namespace leveldb {
 
     class Block;

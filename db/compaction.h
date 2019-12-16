@@ -7,6 +7,7 @@
 #ifndef LEVELDB_COMPACTION_H
 #define LEVELDB_COMPACTION_H
 
+#include "include/leveldb/db_profiler.h"
 #include "version_set.h"
 
 namespace leveldb {

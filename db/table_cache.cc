@@ -11,19 +11,14 @@
 
 namespace leveldb {
 
-    struct TableAndFile {
-        RandomAccessFile *file;
-        Table *table;
-    };
-
-    static void DeleteEntry(const Slice &key, void *value) {
+    void DeleteEntry(const Slice &key, void *value) {
         TableAndFile *tf = reinterpret_cast<TableAndFile *>(value);
         delete tf->table;
         delete tf->file;
         delete tf;
     }
 
-    static void UnrefEntry(void *arg1, void *arg2) {
+    void UnrefEntry(void *arg1, void *arg2) {
         Cache *cache = reinterpret_cast<Cache *>(arg1);
         Cache::Handle *h = reinterpret_cast<Cache::Handle *>(arg2);
         cache->Release(h);
@@ -39,27 +34,28 @@ namespace leveldb {
     TableCache::~TableCache() { delete cache_; }
 
     Status
-    TableCache::FindTable(uint64_t file_number,
-                          uint64_t file_size, int level,
+    TableCache::FindTable(const nova::GlobalSSTableHandle &th,
                           Cache::Handle **handle) {
         Status s;
-        char buf[sizeof(file_number)];
-        EncodeFixed64(buf, file_number);
+        char buf[sizeof(th.table_id)];
+        EncodeFixed64(buf, th.table_id);
         Slice key(buf, sizeof(buf));
         *handle = cache_->Lookup(key);
         if (*handle == nullptr) {
-            std::string fname = TableFileName(dbname_, file_number);
+            std::string fname = TableFileName(dbname_, th.table_id);
             RandomAccessFile *file = nullptr;
             Table *table = nullptr;
             s = env_->NewRandomAccessFile(fname, &file);
             if (!s.ok()) {
-                std::string old_fname = SSTTableFileName(dbname_, file_number);
+                std::string old_fname = SSTTableFileName(dbname_, th.table_id);
                 if (env_->NewRandomAccessFile(old_fname, &file).ok()) {
                     s = Status::OK();
                 }
             }
             if (s.ok()) {
-                s = Table::Open(options_, file, file_size, level, file_number,
+                // TODO: Fix.
+                s = Table::Open(options_, file, th.configuration_id,
+                                th.partition_id, th.table_id,
                                 &table, db_profiler_);
             }
 
@@ -80,16 +76,14 @@ namespace leveldb {
 
     Iterator *
     TableCache::NewIterator(AccessCaller caller, const ReadOptions &options,
-                            uint64_t file_number, int level,
-                            uint64_t file_size,
+                            const nova::GlobalSSTableHandle &th,
                             Table **tableptr) {
         if (tableptr != nullptr) {
             *tableptr = nullptr;
         }
 
         Cache::Handle *handle = nullptr;
-        Status s = FindTable(file_number,
-                             file_size, level, &handle);
+        Status s = FindTable(th, &handle);
         if (!s.ok()) {
             return NewErrorIterator(s);
         }
@@ -103,14 +97,15 @@ namespace leveldb {
         return result;
     }
 
-    Status TableCache::Get(const ReadOptions &options, uint64_t file_number,
-                           uint64_t file_size, int level, const Slice &k,
-                           void *arg,
-                           void (*handle_result)(void *, const Slice &,
-                                                 const Slice &)) {
+    Status
+    TableCache::Get(const ReadOptions &options,
+                    const nova::GlobalSSTableHandle &th,
+                    const Slice &k,
+                    void *arg,
+                    void (*handle_result)(void *, const Slice &,
+                                          const Slice &)) {
         Cache::Handle *handle = nullptr;
-        Status s = FindTable(file_number, file_size,
-                             level, &handle);
+        Status s = FindTable(th, &handle);
         if (s.ok()) {
             Table *t = reinterpret_cast<TableAndFile *>(cache_->Value(
                     handle))->table;
@@ -120,9 +115,9 @@ namespace leveldb {
         return s;
     }
 
-    void TableCache::Evict(uint64_t file_number) {
-        char buf[sizeof(file_number)];
-        EncodeFixed64(buf, file_number);
+    void TableCache::Evict(const nova::GlobalSSTableHandle &th) {
+        char buf[th.size()];
+        th.Encode(buf);
         cache_->Erase(Slice(buf, sizeof(buf)));
     }
 

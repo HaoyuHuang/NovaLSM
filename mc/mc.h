@@ -14,6 +14,7 @@
 
 #include "leveldb/status.h"
 #include "leveldb/write_batch.h"
+#include "db/table_cache.h"
 #include "leveldb/table.h"
 #include "table/format.h"
 
@@ -24,8 +25,10 @@
 namespace nova {
     class MemoryComponent {
     public:
-        MemoryComponent(uint32_t mc_id, NovaMemManager *mem_manager,
-                        const leveldb::Options &options);
+        MemoryComponent(uint32_t mc_id, leveldb::Env *env,
+                        NovaMemManager *mem_manager,
+                        const leveldb::Options &options,
+                        const leveldb::InternalKeyComparator internal_comparator);
 
         char *AllocateBuf(uint32_t size);
 
@@ -48,18 +51,19 @@ namespace nova {
 
         // FG: Flush the sstable from CC to MC.
         leveldb::Status
-        Flush(GlobalSSTableHandle handle, leveldb::SequenceNumber last_seq,
+        Flush(const GlobalSSTableHandle &handle,
+              leveldb::SequenceNumber last_seq,
               char *sstable, uint32_t size);
 
         // FG: Called when the sstable is flushed to DC.
         leveldb::Status
-        FlushedToDC(GlobalSSTableHandle handle);
+        FlushedToDC(const GlobalSSTableHandle &handle);
 
         // FG: Append log record.
         leveldb::Status AppendLogRecord(char *log_buf, int size);
 
         // FG: Called when the log file is written to DC.
-        void DeleteLogFile(GlobalLogFileHandle handle);
+        void DeleteLogFile(const GlobalLogFileHandle &handle);
 
         // FG: Called when the sstables are compacted with DC and persisted at DC. 
         void Delete(GlobalSSTableHandle *handles, int size);
@@ -129,10 +133,29 @@ namespace nova {
                 std::map<GlobalSSTableHandle, leveldb::Table *> *tables,
                 leveldb::SequenceNumber last_seq);
 
+        class MCTableCache : public leveldb::TableCache {
+        public:
+            MCTableCache(MemoryComponent *mc, const std::string &dbname,
+                         const leveldb::Options &options,
+                         int entries, leveldb::DBProfiler *db_profiler) : mc_(
+                    mc), leveldb::TableCache(dbname, options, entries,
+                                             db_profiler) {};
+
+            leveldb::Status
+            FindTable(const nova::GlobalSSTableHandle &th,
+                      leveldb::Cache::Handle **);
+
+        private:
+            MemoryComponent *mc_;
+        };
+
         leveldb::Options options_;
+        leveldb::Env *env_;
         NovaMemManager *mem_manager_;
         uint32_t mc_id_;
+        const leveldb::InternalKeyComparator internal_comparator_;
 
+        leveldb::TableCache table_cache_;
         leveldb::port::Mutex sstable_mutex_;
         std::map<GlobalSSTableHandle, SSTableContext *> sstables_l0_ GUARDED_BY(
                 sstable_mutex_);

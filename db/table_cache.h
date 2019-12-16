@@ -20,6 +20,15 @@ namespace leveldb {
 
     class Env;
 
+    struct TableAndFile {
+        RandomAccessFile *file;
+        Table *table;
+    };
+
+    void DeleteEntry(const Slice &key, void *value);
+
+    void UnrefEntry(void *arg1, void *arg2);
+
     class TableCache {
     public:
         TableCache(const std::string &dbname, const Options &options,
@@ -36,27 +45,28 @@ namespace leveldb {
         // returned iterator is live.
         Iterator *
         NewIterator(AccessCaller caller, const ReadOptions &options,
-                    uint64_t file_number, int level,
-                    uint64_t file_size, Table **tableptr = nullptr);
+                    const nova::GlobalSSTableHandle &handle,
+                    Table **tableptr = nullptr);
 
         // If a seek to internal key "k" in specified file finds an entry,
         // call (*handle_result)(arg, found_key, found_value).
-        Status Get(const ReadOptions &options, uint64_t file_number,
-                   uint64_t file_size, int level, const Slice &k, void *arg,
-                   void (*handle_result)(void *, const Slice &, const Slice &));
+        Status
+        Get(const ReadOptions &options, const nova::GlobalSSTableHandle &handle,
+            const Slice &k, void *arg,
+            void (*handle_result)(void *, const Slice &, const Slice &));
 
         // Evict any entry for the specified file number
-        void Evict(uint64_t file_number);
+        void Evict(const nova::GlobalSSTableHandle& handle);
 
-    private:
         Status
-        FindTable(uint64_t file_number, uint64_t file_size,
-                  int level, Cache::Handle **);
+        FindTable(const nova::GlobalSSTableHandle &th, Cache::Handle **);
 
+    protected:
+        Cache *cache_;
+    private:
         Env *const env_;
         const std::string dbname_;
         const Options &options_;
-        Cache *cache_;
         DBProfiler *db_profiler_ = nullptr;
     };
 
