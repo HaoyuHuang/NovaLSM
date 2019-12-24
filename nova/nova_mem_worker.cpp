@@ -562,7 +562,10 @@ namespace nova {
         RDMA_LOG(INFO) << "started";
     }
 
-    void NovaMemWorker::ProcessRDMAREAD(char *buf) {
+    void
+    NovaMemWorker::ProcessRDMAREAD(int remote_server_id,
+                                   char *buf) {
+
         uint64_t to_server_id = 0;
         uint64_t to_sock_fd = 0;
         char *key = nullptr;
@@ -692,6 +695,37 @@ namespace nova {
     }
 
     void
+    NovaMemWorker::ProcessRDMAWC(ibv_wc_opcode opcode,
+                                 int remote_server_id,
+                                 char *buf) {
+        if (opcode == IBV_WC_RDMA_READ) {
+            ProcessRDMAREAD(remote_server_id, buf);
+        } else if (opcode == IBV_WC_RDMA_WRITE) {
+            log_writer_->AckWriteSuccess(remote_server_id);
+        } else if (opcode == IBV_WC_RECV) {
+            if (buf[0] == RequestType::ALLOCATE_LOG_BUFFER) {
+                uint32_t size = leveldb::DecodeFixed32(buf + 1);
+                std::string log_file(buf + 5, size);
+                char *buf = log_writer_->AllocateLogBuf(log_file);
+                char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
+                send_buf[0] = RequestType::ALLOCATE_LOG_BUFFER_SUCC;
+                leveldb::EncodeFixed64(send_buf + 1, (uint64_t) buf);
+                leveldb::EncodeFixed64(send_buf + 9,
+                                       NovaConfig::config->log_buf_size);
+                rdma_store_->PostSend(nullptr, 1 + 8 + 8, remote_server_id);
+            } else if (buf[0] == RequestType::ALLOCATE_LOG_BUFFER_SUCC) {
+                uint64_t base = leveldb::DecodeFixed64(buf + 1);
+                uint64_t size = leveldb::DecodeFixed64(buf + 9);
+                log_writer_->AckAllocLogBuf(remote_server_id, base, size);
+            } else if (buf[0] == RequestType::DELETE_LOG_FILE) {
+                uint32_t size = leveldb::DecodeFixed32(buf + 1);
+                std::string log_file(buf + 5, size);
+                log_writer_->DeleteLogBuf(log_file);
+            }
+        }
+    }
+
+    void
     NovaMemWorker::PostRDMAGETRequest(int fd, char *key, uint64_t nkey,
                                       int home_server,
                                       uint64_t remote_offset,
@@ -706,7 +740,7 @@ namespace nova {
                         << fd << " key:" << key << " home:" << home_server
                         << " off:" << remote_offset << " size:" << remote_size
                         << " loff:" << local_offset;
-        rdma_store_->PostRead(remote_size,
+        rdma_store_->PostRead(nullptr, remote_size,
                               home_server,
                               local_offset, remote_offset, /*is_offset=*/false);
     }
@@ -730,7 +764,7 @@ namespace nova {
         char *rdma_send_buf = rdma_store_->GetSendBuf(home_server);
         int local_offset = GenerateRDMARequest(GET_INDEX, rdma_send_buf,
                                                home_server, fd, key, nkey);
-        rdma_store_->PostRead(bucket_size, home_server, local_offset,
+        rdma_store_->PostRead(nullptr, bucket_size, home_server, local_offset,
                               raddr, is_offset);
     }
 

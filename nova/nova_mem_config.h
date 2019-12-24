@@ -137,13 +137,12 @@ namespace nova {
             char output[5000];
             sprintf(output,
                     "rdma_port=[%d], mem_stores=[%d], max_msg_size=[%d], "
-                    "max_num_reads=[%d], max_num_sends=[%d], "
+                    "max_num_sends=[%d], "
                     "doorbell_batch=[%d], my_server_id=[%d], recordcount=[%d], "
                     "mode=[%d], partition_mode=[%d], "
                     "ingest_batch_size=[%d], value_size=[%lu], "
                     "enable_load=[%d], enable_rdma=[%d], cache_size_gb=[%lu], index_size_mb=[%lu]",
-                    rdma_port, num_mem_workers, max_msg_size,
-                    rdma_max_num_reads, rdma_max_num_sends,
+                    rdma_port, num_mem_workers, max_msg_size, rdma_max_num_sends,
                     rdma_doorbell_batch_size,
                     my_server_id, recordcount, mode, partition_mode,
                     rdma_pq_batch_size, load_default_value_size,
@@ -189,12 +188,12 @@ namespace nova {
         std::string db_path;
         std::string profiler_file_path;
         bool fsync;
+        uint32_t log_buf_size;
 
         NovaRDMAMode mode;
         NovaRDMAPartitionMode partition_mode;
         int rdma_port;
         int rdma_pq_batch_size;
-        int rdma_max_num_reads;
         int rdma_max_num_sends;
         int rdma_doorbell_batch_size;
         uint32_t rdma_number_of_get_retries;

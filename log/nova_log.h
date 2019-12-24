@@ -8,7 +8,7 @@
 #define LEVELDB_NOVA_LOG_H
 
 #include "db/dbformat.h"
-#include "db/log_writer.h"
+#include "leveldb/log_writer.h"
 #include "nova/linked_list.h"
 
 namespace nova {

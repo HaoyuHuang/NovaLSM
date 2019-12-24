@@ -257,6 +257,10 @@ namespace leveldb {
         // file at a level >= 1.
         int64_t MaxNextLevelOverlappingBytes();
 
+        // Create an iterator that reads over the compaction inputs for "*c".
+        // The caller should delete the iterator when no longer needed.
+        Iterator *MakeInputIterator(Compaction *c);
+
         // Returns true iff some level needs a compaction.
         bool NeedsCompaction() const {
             Version *v = current_;
@@ -329,7 +333,7 @@ namespace leveldb {
         std::string compact_pointer_[config::kNumLevels];
     };
 
-    // A Compaction encapsulates information about a compaction.
+// A Compaction encapsulates information about a compaction.
     class Compaction {
     public:
         ~Compaction();
@@ -372,18 +376,12 @@ namespace leveldb {
         // is successful.
         void ReleaseInputs();
 
-        // Create an iterator that reads over the compaction inputs.
-        // The caller should delete the iterator when no longer needed.
-        Iterator *MakeInputIterator(const Options &opt,
-                                    const InternalKeyComparator icmp,
-                                    TableCache *table_cache);
-
-        Compaction(const Options *options, int level);
-
     private:
         friend class Version;
 
         friend class VersionSet;
+
+        Compaction(const Options *options, int level);
 
         int level_;
         uint64_t max_output_file_size_;
@@ -412,4 +410,4 @@ namespace leveldb {
 
 }  // namespace leveldb
 
-#endif  // STORAGE_LEVELDB_DB_VERSION_SET_H_
+#endif  // STORAGE_LEVELDB_DB_VERSION_SET_H

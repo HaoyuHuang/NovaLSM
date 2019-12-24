@@ -10,7 +10,8 @@ namespace nova {
 
     class NovaMsgCallback {
     public:
-        virtual void ProcessRDMAREAD(char *buf) = 0;
+        virtual void ProcessRDMAWC(ibv_wc_opcode type, int remote_server_id,
+                                   char *buf) = 0;
     };
 }
 #endif //RLIB_NOVA_MSG_CALLBACK_H

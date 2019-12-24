@@ -179,8 +179,7 @@ namespace nova {
         workers = new NovaMemWorker *[NovaConfig::config->num_mem_workers];
         char *buf = rdmabuf;
         uint64_t nrdmatotal_per_store =
-                (NovaConfig::config->rdma_max_num_sends * 2 +
-                 NovaConfig::config->rdma_max_num_reads) *
+                (NovaConfig::config->rdma_max_num_sends * 2) *
                 NovaConfig::config->max_msg_size *
                 NovaConfig::config->servers.size();
         char *cache_buf =
@@ -203,6 +202,8 @@ namespace nova {
             workers[worker_id]->set_rdma_store(store);
             workers[worker_id]->set_mem_manager(manager);
             workers[worker_id]->set_db(db);
+            workers[worker_id]->log_writer_ = new leveldb::log::RDMALogWriter(
+                    store, manager);
             worker_threads.emplace_back(start, workers[worker_id]);
             buf += nrdmatotal_per_store;
         }

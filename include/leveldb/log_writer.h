@@ -6,7 +6,6 @@
 #define STORAGE_LEVELDB_DB_LOG_WRITER_H_
 
 #include <stdint.h>
-#include <nova/nova_common.h>
 
 #include "db/log_format.h"
 #include "leveldb/slice.h"
@@ -36,15 +35,12 @@ namespace leveldb {
 
             ~Writer();
 
-            Status AddRecord(const Slice &slice);
+            virtual Status AddRecord(const Slice &slice);
 
-            Status AddIndex(uint32_t file_offset, uint32_t nrecords,
-                            nova::GlobalSSTableHandle table_handle);
+            virtual Status
+            AddRecord(const std::string &log_file_name, const Slice &slice);
 
-            Status WriteFooter();
-
-            const uint32_t file_offset() { return file_offset_; }
-
+            virtual Status CloseLogFile(const std::string &log_file_name);
 
         private:
             Status
@@ -52,13 +48,11 @@ namespace leveldb {
 
             WritableFile *dest_;
             int block_offset_;  // Current offset in block
-            uint32_t file_offset_; // Current file offset.
 
             // crc32c values for all supported record types.  These are
             // pre-computed to reduce the overhead of computing the crc of the
             // record type stored in the header.
             uint32_t type_crc_[kMaxRecordType + 1];
-            std::string index_;
         };
 
     }  // namespace log

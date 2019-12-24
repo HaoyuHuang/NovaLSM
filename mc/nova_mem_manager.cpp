@@ -165,6 +165,15 @@ namespace nova {
         pthread_mutex_unlock(&slab_class_mutex_[scid]);
     }
 
+    void NovaMemManager::FreeItems(const std::vector<leveldb::Slice> &items,
+                                   uint32_t scid) {
+        pthread_mutex_lock(&slab_class_mutex_[scid]);
+        for (auto &buf : items) {
+            slab_classes_[scid].FreeItem((char *) buf.data());
+        }
+        pthread_mutex_unlock(&slab_class_mutex_[scid]);
+    }
+
     char *NovaMemManager::ItemEvict(uint32_t scid) {
         if (slab_classes_[scid].nslabs() == 0) {
             return nullptr;

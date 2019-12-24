@@ -9,6 +9,7 @@
 #include <string>
 
 #include "leveldb/export.h"
+#include "log_writer.h"
 
 namespace leveldb {
 
@@ -202,6 +203,9 @@ namespace leveldb {
         // with sync==true has similar crash semantics to a "write()"
         // system call followed by "fsync()".
         bool sync = false;
+
+        // The log writer used
+        log::Writer *writer = nullptr;
     };
 
 }  // namespace leveldb

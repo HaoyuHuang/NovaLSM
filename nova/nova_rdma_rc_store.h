@@ -16,6 +16,7 @@ namespace nova {
 
     using namespace rdmaio;
 
+    // Thread local. One thread has one RDMA RC Store.
     class NovaRDMARCStore : public NovaRDMAStore {
     public:
         NovaRDMARCStore(char *buf, int thread_id, NovaMsgCallback *callback) :
@@ -23,130 +24,105 @@ namespace nova {
                 thread_id_(thread_id),
                 callback_(callback) {
             RDMA_LOG(INFO) << "rc[" << thread_id << "]: " << "create rdma";
-            int max_num_reads = NovaConfig::config->rdma_max_num_reads;
             int max_num_sends = NovaConfig::config->rdma_max_num_sends;
-            int max_num_wrs = max_num_reads + max_num_sends;
+            int max_num_wrs = max_num_sends;
             int max_msg_size = NovaConfig::config->max_msg_size;
             int num_servers = NovaConfig::config->servers.size();
             int doorbell_batch_size = NovaConfig::config->rdma_doorbell_batch_size;
 
             wcs_ = (ibv_wc *) malloc(max_num_wrs * sizeof(ibv_wc));
             qp_ = (RCQP **) malloc(num_servers * sizeof(RCQP *));
-            rdma_read_buf_ = (char **) malloc(num_servers * sizeof(char *));
-            rdma_write_buf_ = (char **) malloc(num_servers * sizeof(char *));
+            rdma_send_buf_ = (char **) malloc(num_servers * sizeof(char *));
+            rdma_recv_buf_ = (char **) malloc(num_servers * sizeof(char *));
             send_sges_ = (struct ibv_sge **) malloc(
                     num_servers * sizeof(struct ibv_sge *));
             send_wrs_ = (ibv_send_wr **) malloc(
                     num_servers * sizeof(struct ibv_send_wr *));
             send_sge_index_ = (int *) malloc(num_servers * sizeof(int));
 
-            npending_read_ = (int *) malloc(num_servers * sizeof(int));
-            pread_index_ = (int *) malloc(num_servers * sizeof(int));
             npending_send_ = (int *) malloc(num_servers * sizeof(int));
             psend_index_ = (int *) malloc(num_servers * sizeof(int));
 
-            recv_sges_ = (struct ibv_sge **) malloc(
-                    num_servers * sizeof(struct ibv_sge *));
-            recv_wrs_ = (ibv_recv_wr **) malloc(
-                    num_servers * sizeof(struct ibv_recv_wr *));
-            pending_recv_index_ = (int *) malloc(num_servers * sizeof(int));
-            recv_sge_index_ = (int *) malloc(num_servers * sizeof(int));
-
-            uint64_t nwritebuf = max_num_sends * 2 * max_msg_size;
-            uint64_t nreadbuf = max_num_reads * max_msg_size;
-            uint64_t nbuf = nwritebuf + nreadbuf;
+            uint64_t nwritebuf = max_num_sends * max_msg_size;
+            uint64_t nsendbuf = max_num_sends * max_msg_size;
+            uint64_t nbuf = nwritebuf + nsendbuf;
 
             char *rdma_buf_start = buf;
             for (int i = 0; i < num_servers; i++) {
-                npending_read_[i] = 0;
-                pread_index_[i] = 0;
                 npending_send_[i] = 0;
                 psend_index_[i] = 0;
 
                 send_sge_index_[i] = 0;
-                recv_sge_index_[i] = 0;
                 qp_[i] = NULL;
 
-                rdma_write_buf_[i] = rdma_buf_start + nbuf * i;
-                memset(rdma_write_buf_[i], 0, nwritebuf);
+                rdma_recv_buf_[i] = rdma_buf_start + nbuf * i;
+                memset(rdma_recv_buf_[i], 0, nwritebuf);
 
-                rdma_read_buf_[i] = rdma_write_buf_[i] + nwritebuf;
-                memset(rdma_read_buf_[i], 0, nreadbuf);
-
-                pending_recv_index_[i] = 0;
-                recv_sge_index_[i] = 0;
+                rdma_send_buf_[i] = rdma_recv_buf_[i] + nwritebuf;
+                memset(rdma_send_buf_[i], 0, nsendbuf);
 
                 send_sges_[i] = (ibv_sge *) malloc(
                         doorbell_batch_size * sizeof(struct ibv_sge));
                 send_wrs_[i] = (ibv_send_wr *) malloc(
                         doorbell_batch_size * sizeof(struct ibv_send_wr));
-                recv_sges_[i] = (ibv_sge *) malloc(
-                        doorbell_batch_size * sizeof(struct ibv_sge));
-                recv_wrs_[i] = (ibv_recv_wr *) malloc(
-                        doorbell_batch_size * sizeof(struct ibv_recv_wr));
                 for (int j = 0; j < doorbell_batch_size; j++) {
                     memset(&send_sges_[i][j], 0, sizeof(struct ibv_sge));
                     memset(&send_wrs_[i][j], 0, sizeof(struct ibv_send_wr));
-                    memset(&recv_sges_[i][j], 0, sizeof(struct ibv_sge));
-                    memset(&recv_wrs_[i][j], 0, sizeof(struct ibv_recv_wr));
                 }
             }
             RDMA_LOG(INFO) << "rc[" << thread_id << "]: " << "created rdma";
         }
 
-        void Init() override;
+        void Init();
 
-        void PostRead(uint32_t size, int server_id, uint64_t local_offset,
-                      uint64_t remote_addr, bool is_offset) override;
+        void PostRead(char *localbuf, uint32_t size, int server_id,
+                      uint64_t local_offset,
+                      uint64_t remote_addr, bool is_remote_offset);
 
-        void PostSend(uint32_t size, int server_id) override;
+        void PostSend(char *localbuf, uint32_t size, int server_id);
 
-        void
-        PostWrite(uint32_t size, int server_id,
-                  uint64_t remote_offset) override;
+        void PostWrite(char *localbuf, uint32_t size, int server_id,
+                       uint64_t remote_offset, bool is_remote_offset);
 
-        void FlushPendingSends() override;
+        void FlushPendingSends();
 
         void PollSQ(int peer_sid);
 
-        void PollSQ() override;
+        void PollSQ();
 
-        void PostRecv(uint64_t wr_id) override;
+        void PostRecv(int peer_sid, int recv_buf_index);
 
-        void FlushPendingRecvs() override;
+        void FlushPendingRecvs();
 
-        void PollAndProcessRQ() override;
+        void PollRQ();
 
-        char *GetSendBuf() override;
+        void PollRQ(int peer_sid);
 
-        char *GetSendBuf(int server_id) override;
+        char *GetSendBuf();
+
+        char *GetSendBuf(int server_id);
 
     private:
+        void PostRDMASEND(char* localbuf, ibv_wr_opcode type, uint32_t size, int server_id,
+                          uint64_t local_offset,
+                          uint64_t remote_addr, bool is_offset);
+
         int thread_id_;
         char *rdma_buf_;
 
         // RDMA variables
         ibv_wc *wcs_;
         RCQP **qp_;
-        char **rdma_read_buf_;
-        char **rdma_write_buf_;
+        char **rdma_send_buf_;
+        char **rdma_recv_buf_;
 
         struct ibv_sge **send_sges_;
         ibv_send_wr **send_wrs_;
         int *send_sge_index_;
 
-        // pending reads.
-        int *npending_read_;
-        int *pread_index_;
-
-        // pending writes.
+        // pending sends.
         int *npending_send_;
         int *psend_index_;
-
-        struct ibv_sge **recv_sges_;
-        ibv_recv_wr **recv_wrs_;
-        int *pending_recv_index_;
-        int *recv_sge_index_;
         NovaMsgCallback *callback_;
     };
 }

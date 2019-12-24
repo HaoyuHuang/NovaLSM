@@ -12,11 +12,10 @@
 #include <leveldb/db_profiler.h>
 
 #include "db/dbformat.h"
-#include "db/log_writer.h"
+#include "leveldb/log_writer.h"
 #include "db/snapshot.h"
 #include "leveldb/db.h"
 #include "leveldb/env.h"
-#include "compaction.h"
 #include "port/port.h"
 #include "port/thread_annotations.h"
 
@@ -93,6 +92,7 @@ namespace leveldb {
     private:
         friend class DB;
 
+        struct CompactionState;
         struct Writer;
 
         DBProfiler *db_profiler_ = nullptr;
@@ -104,6 +104,22 @@ namespace leveldb {
             const InternalKey *begin;  // null means beginning of key range
             const InternalKey *end;    // null means end of key range
             InternalKey tmp_storage;   // Used to keep track of compaction progress
+        };
+
+        // Per level compaction stats.  stats_[level] stores the stats for
+        // compactions that produced data for the specified "level".
+        struct CompactionStats {
+            CompactionStats() : micros(0), bytes_read(0), bytes_written(0) {}
+
+            void Add(const CompactionStats &c) {
+                this->micros += c.micros;
+                this->bytes_read += c.bytes_read;
+                this->bytes_written += c.bytes_written;
+            }
+
+            int64_t micros;
+            int64_t bytes_read;
+            int64_t bytes_written;
         };
 
         Iterator *NewInternalIterator(const ReadOptions &,
@@ -136,7 +152,7 @@ namespace leveldb {
         Status WriteLevel0Table(MemTable *mem, VersionEdit *edit, Version *base)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-        Status MakeRoomForWrite(bool force /* compact even if there is room? */)
+        Status MakeRoomForWrite(bool force /* compact even if there is room? */, const WriteOptions& write_options)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         WriteBatch *BuildBatchGroup(Writer **last_writer)
@@ -151,6 +167,20 @@ namespace leveldb {
         void BackgroundCall();
 
         void BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+        void CleanupCompaction(CompactionState *compact)
+        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+        Status DoCompactionWork(CompactionState *compact)
+        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+        Status OpenCompactionOutputFile(CompactionState *compact);
+
+        Status
+        FinishCompactionOutputFile(CompactionState *compact, Iterator *input);
+
+        Status InstallCompactionResults(CompactionState *compact)
+        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         const Comparator *user_comparator() const {
             return internal_comparator_.user_comparator();
@@ -204,6 +234,7 @@ namespace leveldb {
         Status bg_error_ GUARDED_BY(mutex_);
 
         CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
+        std::string current_log_file_name_;
     };
 
 // Sanitize db options.  The caller should delete result.info_log if

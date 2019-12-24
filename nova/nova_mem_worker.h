@@ -13,6 +13,7 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <log/rdma_log_writer.h>
 
 #include "nova_mem_server.h"
 #include "nova_msg_callback.h"
@@ -120,7 +121,10 @@ namespace nova {
 
         void Start();
 
-        void ProcessRDMAREAD(char *buf) override;
+        void ProcessRDMAWC(ibv_wc_opcode type, int remote_server_id,
+                           char *buf) override;
+
+        void ProcessRDMAREAD(int remote_server_id, char *buf);
 
         void ProcessRDMAGETResponse(uint64_t to_sock_fd,
                                     DataEntry *entry, bool fetch_from_origin);
@@ -165,6 +169,8 @@ namespace nova {
         NovaRDMAStore *rdma_store_ = nullptr;
         struct event_base *base = nullptr;
 
+        leveldb::log::RDMALogWriter *log_writer_ = nullptr;
+
         int on_new_conn_send_fd = 0;
         int on_new_conn_recv_fd = 0;
         int nconns = 0;
@@ -191,13 +197,13 @@ namespace nova {
         NovaMemWorker *worker;
         struct event event;
         int event_flags;
-
 //    bool try_free_entry_after_transmit_response = false;
 //    IndexEntry index_entry;
 //    DataEntry data_entry;
         uint32_t number_get_retries = 0;
 
         void Init(int f, NovaMemWorker *store);
+
         void UpdateEventFlags(int new_flags);
     };
 }

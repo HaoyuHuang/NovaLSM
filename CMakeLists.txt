@@ -145,7 +145,7 @@ target_sources(leveldb
         "db/log_reader.cc"
         "db/log_reader.h"
         "db/log_writer.cc"
-        "db/log_writer.h"
+        "include/leveldb/log_writer.h"
         "db/memtable.cc"
         "db/memtable.h"
         "db/repair.cc"
@@ -551,7 +551,9 @@ set(NOVA_SOURCES
         mc/worker.cpp
         mc/worker.h
         log/nova_log.cpp
-        log/nova_log.h)
+        log/nova_log.h
+        log/rdma_log_writer.cc
+        log/rdma_log_writer.h)
 
 
 add_library(libnova STATIC ${NOVA_SOURCES})

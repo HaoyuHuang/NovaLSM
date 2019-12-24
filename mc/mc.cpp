@@ -16,15 +16,15 @@ namespace nova {
     MemoryComponent::MCTableCache::FindTable(
             const nova::GlobalSSTableHandle &th,
             leveldb::Cache::Handle **handle) {
-
-        SSTableContext *ctx = mc_->sstables_l0_[th];
-        char buf[th.size()];
-        th.Encode(buf);
-        leveldb::Slice key(buf, sizeof(buf));
-        leveldb::TableAndFile *tf = new leveldb::TableAndFile;
-        tf->file = ctx->table->backing_file();
-        tf->table = ctx->table;
-        *handle = cache_->Insert(key, tf, 1, &leveldb::DeleteEntry);
+//
+//        SSTableContext *ctx = mc_->sstables_l0_[th];
+//        char buf[th.size()];
+//        th.Encode(buf);
+//        leveldb::Slice key(buf, sizeof(buf));
+//        leveldb::TableAndFile *tf = new leveldb::TableAndFile;
+//        tf->file = ctx->table->backing_file();
+//        tf->table = ctx->table;
+//        *handle = cache_->Insert(key, tf, 1, &leveldb::DeleteEntry);
     }
 
     MemoryComponent::MemoryComponent(uint32_t mc_id, leveldb::Env *env,
@@ -115,9 +115,9 @@ namespace nova {
                     // Found.
                     results[i].hit = true;
                     it->second->mutex.Lock();
-                    leveldb::ReadBlock(it->second->table->backing_file(), {},
-                                       handles[i].block_handle,
-                                       &(results[i].block));
+//                    leveldb::ReadBlock(it->second->table->backing_file(), {},
+//                                       handles[i].block_handle,
+//                                       &(results[i].block));
                     // Insert the block into the cache.
                     mem_manager_->LocalPut(cache_key, nkey,
                                            (char *) results[i].block.data.data(),
@@ -184,33 +184,33 @@ namespace nova {
             std::map<GlobalSSTableHandle, leveldb::Table *> *tables,
             leveldb::SequenceNumber last_seq) {
         // TODO.
-        leveldb::Compaction *compaction = new leveldb::Compaction(&options_, 0);
-        leveldb::CompactionState *state = new leveldb::CompactionState(
-                compaction, env_, "", options_,
-                table_cache_, internal_comparator_,
-                last_seq, nullptr);
-        state->DoCompactionWork();
+//        leveldb::Compaction *compaction = new leveldb::Compaction(&options_, 0);
+//        leveldb::CompactionState *state = new leveldb::CompactionState(
+//                compaction, env_, "", options_,
+//                table_cache_, internal_comparator_,
+//                last_seq, nullptr);
+//        state->DoCompactionWork();
     }
 
     leveldb::Status
     MemoryComponent::FlushedToDC(const GlobalSSTableHandle &handle) {
-        sstable_mutex_.Lock();
-        tables_flushed_to_dc_.insert(handle);
-        auto table = sstables_l0_.find(handle);
-        sstables_l0_.erase(table);
-        table_cache_.Evict(handle);
-        sstable_mutex_.Unlock();
-
-        // Free its backing memory.
-        table->second->mutex.Lock();
-        leveldb::MemReadableFile *backing_file = static_cast<leveldb::MemReadableFile *>(table->second->table->backing_file());
-        leveldb::Slice backing_mem = backing_file->backing_mem();
-        FreeBuf((char *) backing_mem.data(), backing_mem.size());
-        table->second->mutex.Unlock();
-
-        // Remove its log records.
-        trim_log_file_worker_->AddRequest(new Request());
-        trim_log_file_worker_->WakeupForWork();
+//        sstable_mutex_.Lock();
+//        tables_flushed_to_dc_.insert(handle);
+//        auto table = sstables_l0_.find(handle);
+//        sstables_l0_.erase(table);
+//        table_cache_.Evict(handle);
+//        sstable_mutex_.Unlock();
+//
+//        // Free its backing memory.
+//        table->second->mutex.Lock();
+//        leveldb::MemReadableFile *backing_file = static_cast<leveldb::MemReadableFile *>(table->second->table->backing_file());
+//        leveldb::Slice backing_mem = backing_file->backing_mem();
+//        FreeBuf((char *) backing_mem.data(), backing_mem.size());
+//        table->second->mutex.Unlock();
+//
+//        // Remove its log records.
+//        trim_log_file_worker_->AddRequest(new Request());
+//        trim_log_file_worker_->WakeupForWork();
     }
 
     leveldb::Status MemoryComponent::AppendLogRecord(char *log_buf, int size) {
@@ -255,69 +255,69 @@ namespace nova {
             std::map<GlobalSSTableHandle, NovaList<LogRecord>> *log_records,
             std::vector<leveldb::Slice> *log_bufs) {
         // Trim log records that has been flushed.
-        sstable_mutex_.Lock();
-        std::set<GlobalSSTableHandle> tables_flushed_to_dc = tables_flushed_to_dc_;
-        sstable_mutex_.Unlock();
-
-        char *base = AllocateBuf(options_.max_log_file_size);
-        leveldb::MemWritableFile writable_file("tmp", base,
-                                               options_.max_log_file_size);
-        leveldb::log::Writer writer(&writable_file);
-        struct GlobalLogFileHandle log_handle = {
-                // TODO: Put Configuration id here.
-                .configuration_id = 1,
-                .mc_id = mc_id_,
-                .log_id = log_id_
-        };
-        LogFile *log_file = new LogFile(log_handle, base,
-                                        options_.max_log_file_size);
-        int writte_log_records = 0;
-        for (auto it = log_records->begin();
-             it != log_records->end(); it++) {
-            uint32_t file_offset = writer.file_offset();
-            uint32_t nrecords = it->second.size();
-            const GlobalSSTableHandle &table_handle = it->first;
-
-            if (tables_flushed_to_dc.find(table_handle) !=
-                tables_flushed_to_dc.end()) {
-                // Already flushed.
-                continue;
-            }
-            writte_log_records += nrecords;
-            writer.AddIndex(file_offset, nrecords, table_handle);
-            LogFile::TableIndex table_index = {
-                    .handle = table_handle,
-                    .file_offset = file_offset,
-                    .nrecords = nrecords
-            };
-
-            log_file->AddIndex(table_index);
-            for (int i = 0; i < it->second.size(); i++) {
-                writer.AddRecord(it->second.value(i).backing_mem);
-            }
-        }
-
-        if (writte_log_records > 0) {
-            writer.WriteFooter();
-
-            // Insert into log file.
-            log_mutex_.Lock();
-            log_files_.insert(std::make_pair(log_handle, log_file));
-            log_mutex_.Unlock();
-        } else {
-            // Discard if the log file is empty.
-        }
-
-        // Release memory for log buffers.
-        uint32_t scid = mem_manager_->slabclassid(log_bufs->begin()->size());
-        mem_manager_->FreeItems(*log_bufs, scid);
-
-        // Clean up
-        sstable_mutex_.Lock();
-        tables_flushed_to_dc_.insert(gced_tables_log_records_.begin(),
-                                     gced_tables_log_records_.end());
-        gced_tables_log_records_.clear();
-        sstable_mutex_.Unlock();
+//        sstable_mutex_.Lock();
+//        std::set<GlobalSSTableHandle> tables_flushed_to_dc = tables_flushed_to_dc_;
+//        sstable_mutex_.Unlock();
+//
+//        char *base = AllocateBuf(options_.max_log_file_size);
+//        leveldb::MemWritableFile writable_file("tmp", base,
+//                                               options_.max_log_file_size);
+//        leveldb::log::Writer writer(&writable_file);
+//        struct GlobalLogFileHandle log_handle = {
+//                // TODO: Put Configuration id here.
+//                .configuration_id = 1,
+//                .mc_id = mc_id_,
+//                .log_id = log_id_
+//        };
+//        LogFile *log_file = new LogFile(log_handle, base,
+//                                        options_.max_log_file_size);
+//        int writte_log_records = 0;
+//        for (auto it = log_records->begin();
+//             it != log_records->end(); it++) {
+////            uint32_t file_offset = writer.file_offset();
+////            uint32_t nrecords = it->second.size();
+////            const GlobalSSTableHandle &table_handle = it->first;
+////
+////            if (tables_flushed_to_dc.find(table_handle) !=
+////                tables_flushed_to_dc.end()) {
+////                // Already flushed.
+////                continue;
+////            }
+////            writte_log_records += nrecords;
+////            writer.AddIndex(file_offset, nrecords, table_handle);
+//            LogFile::TableIndex table_index = {
+//                    .handle = table_handle,
+//                    .file_offset = file_offset,
+//                    .nrecords = nrecords
+//            };
+//
+//            log_file->AddIndex(table_index);
+//            for (int i = 0; i < it->second.size(); i++) {
+//                writer.AddRecord(it->second.value(i).backing_mem);
+//            }
+//        }
+//
+//        if (writte_log_records > 0) {
+//            writer.WriteFooter();
+//
+//            // Insert into log file.
+//            log_mutex_.Lock();
+//            log_files_.insert(std::make_pair(log_handle, log_file));
+//            log_mutex_.Unlock();
+//        } else {
+//            // Discard if the log file is empty.
+//        }
+//
+//        // Release memory for log buffers.
+//        uint32_t scid = mem_manager_->slabclassid(log_bufs->begin()->size());
+//        mem_manager_->FreeItems(*log_bufs, scid);
+//
+//        // Clean up
+//        sstable_mutex_.Lock();
+//        tables_flushed_to_dc_.insert(gced_tables_log_records_.begin(),
+//                                     gced_tables_log_records_.end());
+//        gced_tables_log_records_.clear();
+//        sstable_mutex_.Unlock();
     }
 
     void MemoryComponent::DeleteLogFile(const GlobalLogFileHandle &handle) {

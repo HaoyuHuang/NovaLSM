@@ -55,10 +55,8 @@ DEFINE_uint64(lc_main_bucket_mem_percent, 0,
               "Location cache: The percentage of memory dedicated to main buckets.");
 DEFINE_uint64(rdma_port, 0, "The port used by RDMA.");
 DEFINE_uint64(rdma_max_msg_size, 0, "The maximum message size used by RDMA.");
-DEFINE_uint64(rdma_max_num_reads, 0,
-              "The maximum number of pending RDMA reads.");
 DEFINE_uint64(rdma_max_num_sends, 0,
-              "The maximum number of pending RDMA sends.");
+              "The maximum number of pending RDMA sends. This includes READ/WRITE/SEND. We also post the same number of RECV events. ");
 DEFINE_uint64(rdma_doorbell_batch_size, 0, "The doorbell batch size.");
 DEFINE_uint64(rdma_pq_batch_size, 0,
               "The number of pending requests a worker thread waits before polling RNIC.");
@@ -142,7 +140,6 @@ int main(int argc, char *argv[]) {
     // RDMA
     NovaConfig::config->rdma_port = FLAGS_rdma_port;
     NovaConfig::config->max_msg_size = FLAGS_rdma_max_msg_size;
-    NovaConfig::config->rdma_max_num_reads = FLAGS_rdma_max_num_reads;
     NovaConfig::config->rdma_max_num_sends = FLAGS_rdma_max_num_sends;
     NovaConfig::config->rdma_doorbell_batch_size = FLAGS_rdma_doorbell_batch_size;
     NovaConfig::config->rdma_pq_batch_size = FLAGS_rdma_pq_batch_size;
@@ -182,8 +179,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
                                          NovaConfig::config->rdma_port);
     int port = NovaConfig::config->servers[NovaConfig::config->my_server_id].port;
-    uint64_t nrdmatotal = (NovaConfig::config->rdma_max_num_sends * 2 +
-                           NovaConfig::config->rdma_max_num_reads) *
+    uint64_t nrdmatotal = (NovaConfig::config->rdma_max_num_sends * 2) *
                           NovaConfig::config->max_msg_size *
                           NovaConfig::config->servers.size() *
                           NovaConfig::config->num_mem_workers;
