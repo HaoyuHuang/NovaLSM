@@ -7,6 +7,7 @@
 #ifndef LEVELDB_NOVA_LOG_H
 #define LEVELDB_NOVA_LOG_H
 
+#include "mc/nova_mem_manager.h"
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
 #include "nova/linked_list.h"
@@ -50,6 +51,23 @@ namespace nova {
         char *backing_mem_;
         uint64_t file_size_;
         std::vector<TableIndex> table_index_;
+    };
+
+    class LogFileManager {
+    public:
+        LogFileManager(NovaMemManager *mem_manager) : mem_manager_(
+                mem_manager) {
+
+        }
+
+        void Add(const std::string &log_file, char *buf);
+
+        void DeleteLogBuf(const std::string &log_file);
+
+    private:
+        NovaMemManager *mem_manager_;
+        std::map<std::string, std::vector<leveldb::Slice>> logfiles_;
+        leveldb::port::Mutex mutex_;
     };
 }
 

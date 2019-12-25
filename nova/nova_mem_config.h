@@ -35,12 +35,19 @@ namespace nova {
         WRITE_THROUGH = 1
     };
 
+    enum NovaLogRecordMode {
+        LOG_LOCAL = 0,
+        LOG_RDMA = 1,
+        LOG_NIC = 2
+    };
+
     struct Fragment {
         // for range partition only.
         uint64_t key_start;
         uint64_t key_end;
-        uint32_t worker_id;
+        uint32_t db_id;
         uint32_t server_id;
+        std::vector<uint32_t> secondaries;
     };
 
     class NovaConfig {
@@ -76,7 +83,7 @@ namespace nova {
                     else
                         r = m - 1;
                 }
-                RDMA_ASSERT(home->worker_id < config->num_mem_workers);
+                RDMA_ASSERT(home->db_id < config->num_mem_workers);
                 RDMA_ASSERT(home->server_id == config->my_server_id) << key
                                                                      << ":"
                                                                      << home->server_id
@@ -99,7 +106,7 @@ namespace nova {
                 RDMA_ASSERT(
                         (iss >> frag->key_start >> frag->key_end
                              >> frag->server_id
-                             >> frag->worker_id));
+                             >> frag->db_id));
                 frags.push_back(frag);
             }
             nfragments = static_cast<uint32_t>(frags.size());
@@ -114,7 +121,7 @@ namespace nova {
                                 << fragments[i]->key_start
                                 << "-" << fragments[i]->key_end
                                 << "-" << fragments[i]->server_id
-                                << "-" << fragments[i]->worker_id;
+                                << "-" << fragments[i]->db_id;
             }
         }
 
@@ -189,6 +196,8 @@ namespace nova {
         std::string profiler_file_path;
         bool fsync;
         uint32_t log_buf_size;
+        NovaLogRecordMode log_record_mode;
+
 
         NovaRDMAMode mode;
         NovaRDMAPartitionMode partition_mode;

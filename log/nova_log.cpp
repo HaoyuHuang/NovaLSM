@@ -4,6 +4,7 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
+#include <nova/nova_mem_config.h>
 #include "nova_log.h"
 
 namespace nova {
@@ -46,4 +47,36 @@ namespace nova {
                      uint64_t file_size) : handle_(handle),
                                            backing_mem_(backing_mem),
                                            file_size_(file_size) {}
+
+    void LogFileManager::Add(const std::string &log_file, char *buf) {
+        mutex_.Lock();
+        auto it = logfiles_.find(log_file);
+        if (it != logfiles_.end()) {
+            it->second.emplace_back(
+                    leveldb::Slice(buf,
+                                   nova::NovaConfig::config->log_buf_size));
+        } else {
+            std::vector<leveldb::Slice> bufs;
+            bufs.emplace_back(
+                    leveldb::Slice(buf,
+                                   nova::NovaConfig::config->log_buf_size));
+            logfiles_.insert(std::make_pair(log_file, bufs));
+        }
+        mutex_.Unlock();
+    }
+
+    void LogFileManager::DeleteLogBuf(const std::string &log_file) {
+        uint32_t slabclassid = mem_manager_->slabclassid(
+                nova::NovaConfig::config->log_buf_size);
+        mutex_.Lock();
+        auto it = logfiles_.find(log_file);
+        if (it == logfiles_.end()) {
+            mutex_.Unlock();
+            return;
+        }
+        std::vector<leveldb::Slice> &items = it->second;
+        logfiles_.erase(log_file);
+        mutex_.Unlock();
+        mem_manager_->FreeItems(items, slabclassid);
+    }
 }

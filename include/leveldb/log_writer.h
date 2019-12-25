@@ -40,6 +40,10 @@ namespace leveldb {
             virtual Status
             AddRecord(const std::string &log_file_name, const Slice &slice);
 
+            virtual char *
+            AddLocalRecord(const std::string &log_file_name,
+                           const Slice &slice);
+
             virtual Status CloseLogFile(const std::string &log_file_name);
 
         private:

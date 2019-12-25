@@ -9,6 +9,7 @@
 #include "logging.hpp"
 #include "nova_common.h"
 #include "nova_mem_config.h"
+#include "nova_client_sock.h"
 
 #include <sys/types.h>
 #include <sys/signalfd.h>
@@ -301,6 +302,19 @@ namespace nova {
         leveldb::Slice dbval(val, nval);
         leveldb::WriteOptions option;
         option.sync = NovaConfig::config->fsync;
+
+        switch (NovaConfig::config->log_record_mode) {
+            case LOG_LOCAL:
+                option.writer = nullptr;
+                break;
+            case LOG_RDMA:
+                option.writer = store->rdma_log_writer_;
+                break;
+            case LOG_NIC:
+                option.writer = store->nic_log_writer_;
+                break;
+        }
+
         leveldb::Status status = store->db_->Put(option, dbkey, dbval);
         RDMA_ASSERT(status.ok()) << status.ToString();
 
@@ -313,6 +327,67 @@ namespace nova {
         int len = int_to_str(response_buf, nlen);
         conn->response_buf = conn->buf;
         conn->response_size = len + nlen;
+        RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
+        return true;
+    }
+
+    bool process_socket_replicate_log_record(int fd, Connection *conn) {
+        // Stats.
+        NovaMemWorker *store = conn->worker;
+
+        conn->worker->stats.nputs++;
+        char *buf = conn->request_buf;
+        RDMA_ASSERT(buf[0] == RequestType::REPLICATE_LOG_RECORD) << buf;
+        buf++;
+        uint32_t logfilename_size = leveldb::DecodeFixed32(buf);
+        std::string logfile(buf + 4, logfilename_size);
+        buf += 4;
+        buf += logfilename_size;
+        uint32_t logrecord_size = leveldb::DecodeFixed32(buf);
+        buf += 4;
+
+        RDMA_LOG(DEBUG) << "memstore[" << store->thread_id_ << "]: "
+                        << " replicate log record fd:"
+                        << fd << ": log:" << logfile << " nlog:"
+                        << logfilename_size << " nlogrecord:"
+                        << logrecord_size << " buf:" << conn->request_buf;
+
+        store->nic_log_writer_->AddLocalRecord(logfile, leveldb::Slice(buf,
+                                                                       logrecord_size));
+
+        char *response_buf = conn->buf;
+        leveldb::EncodeFixed32(response_buf, 1);
+        response_buf += 4;
+        response_buf[0] = RequestType::REPLICATE_LOG_RECORD;
+        conn->response_buf = conn->buf;
+        conn->response_size = 5;
+        RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
+        return true;
+    }
+
+    bool process_socket_delete_log_file(int fd, Connection *conn) {
+        // Stats.
+        NovaMemWorker *store = conn->worker;
+
+        conn->worker->stats.nputs++;
+        char *buf = conn->request_buf;
+        RDMA_ASSERT(buf[0] == RequestType::DELETE_LOG_FILE) << buf;
+        buf++;
+        uint32_t logfilename_size = leveldb::DecodeFixed32(buf);
+        std::string logfile(buf + 4, logfilename_size);
+
+        RDMA_LOG(DEBUG) << "memstore[" << store->thread_id_ << "]: "
+                        << " delete log file fd:"
+                        << fd << ": log:" << logfile << " nlog:"
+                        << logfilename_size << " buf:" << conn->request_buf;
+        store->log_manager_->DeleteLogBuf(logfile);
+
+        char *response_buf = conn->buf;
+        leveldb::EncodeFixed32(response_buf, 1);
+        response_buf += 4;
+        response_buf[0] = RequestType::DELETE_LOG_FILE;
+        conn->response_buf = conn->buf;
+        conn->response_size = 5;
         RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
         return true;
     }
@@ -330,6 +405,12 @@ namespace nova {
         }
         if (buf[0] == RequestType::PUT) {
             return process_socket_put(fd, conn);
+        }
+        if (buf[0] == RequestType::REPLICATE_LOG_RECORD) {
+            return process_socket_replicate_log_record(fd, conn);
+        }
+        if (buf[0] == RequestType::DELETE_LOG_FILE) {
+            return process_socket_delete_log_file(fd, conn);
         }
         RDMA_ASSERT(false);
         return false;
@@ -560,6 +641,16 @@ namespace nova {
         }
         RDMA_ASSERT(event_base_loop(base, 0) == 0) << on_new_conn_recv_fd;
         RDMA_LOG(INFO) << "started";
+
+        for (int server_id = 0;
+             server_id < NovaConfig::config->servers.size(); server_id++) {
+            if (server_id == NovaConfig::config->my_server_id) {
+                continue;
+            }
+            NovaClientSock *sock = new NovaClientSock();
+            sock->Connect(NovaConfig::config->servers[server_id]);
+            socks_.push_back(sock);
+        }
     }
 
     void
@@ -701,12 +792,12 @@ namespace nova {
         if (opcode == IBV_WC_RDMA_READ) {
             ProcessRDMAREAD(remote_server_id, buf);
         } else if (opcode == IBV_WC_RDMA_WRITE) {
-            log_writer_->AckWriteSuccess(remote_server_id);
+            rdma_log_writer_->AckWriteSuccess(remote_server_id);
         } else if (opcode == IBV_WC_RECV) {
             if (buf[0] == RequestType::ALLOCATE_LOG_BUFFER) {
                 uint32_t size = leveldb::DecodeFixed32(buf + 1);
                 std::string log_file(buf + 5, size);
-                char *buf = log_writer_->AllocateLogBuf(log_file);
+                char *buf = rdma_log_writer_->AllocateLogBuf(log_file);
                 char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                 send_buf[0] = RequestType::ALLOCATE_LOG_BUFFER_SUCC;
                 leveldb::EncodeFixed64(send_buf + 1, (uint64_t) buf);
@@ -716,11 +807,11 @@ namespace nova {
             } else if (buf[0] == RequestType::ALLOCATE_LOG_BUFFER_SUCC) {
                 uint64_t base = leveldb::DecodeFixed64(buf + 1);
                 uint64_t size = leveldb::DecodeFixed64(buf + 9);
-                log_writer_->AckAllocLogBuf(remote_server_id, base, size);
+                rdma_log_writer_->AckAllocLogBuf(remote_server_id, base, size);
             } else if (buf[0] == RequestType::DELETE_LOG_FILE) {
                 uint32_t size = leveldb::DecodeFixed32(buf + 1);
                 std::string log_file(buf + 5, size);
-                log_writer_->DeleteLogBuf(log_file);
+                log_manager_->DeleteLogBuf(log_file);
             }
         }
     }

@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <log/rdma_log_writer.h>
+#include <log/nic_log_writer.h>
 
 #include "nova_mem_server.h"
 #include "nova_msg_callback.h"
@@ -169,7 +170,10 @@ namespace nova {
         NovaRDMAStore *rdma_store_ = nullptr;
         struct event_base *base = nullptr;
 
-        leveldb::log::RDMALogWriter *log_writer_ = nullptr;
+        leveldb::log::RDMALogWriter *rdma_log_writer_ = nullptr;
+        LogFileManager *log_manager_ = nullptr;
+        leveldb::log::NICLogWriter *nic_log_writer_ = nullptr;
+        std::vector<NovaClientSock*> socks_;
 
         int on_new_conn_send_fd = 0;
         int on_new_conn_recv_fd = 0;

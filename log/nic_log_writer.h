@@ -1,11 +1,16 @@
 
 //
-// Created by Haoyu Huang on 12/23/19.
+// Created by Haoyu Huang on 12/24/19.
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
-#ifndef LEVELDB_RDMA_LOG_WRITER_H
-#define LEVELDB_RDMA_LOG_WRITER_H
+#ifndef LEVELDB_NIC_LOG_WRITER_H
+#define LEVELDB_NIC_LOG_WRITER_H
+
+#include <vector>
+#include "mc/nova_mem_manager.h"
+#include "nova/nova_client_sock.h"
+#include "nova_log.h"
 
 #include <mc/nova_mem_manager.h>
 #include "leveldb/status.h"
@@ -20,20 +25,20 @@ namespace leveldb {
 
     namespace log {
 
-        class RDMALogWriter : public Writer {
+        class NICLogWriter : public Writer {
         public:
             // Create a writer that will append data to "*dest".
             // "*dest" must be initially empty.
             // "*dest" must remain live while this Writer is in use.
-            RDMALogWriter(nova::NovaRDMAStore *store,
-                          nova::NovaMemManager *mem_manager,
-                          nova::LogFileManager *log_manager
+            NICLogWriter(std::vector<nova::NovaClientSock*>& sockets,
+                         nova::NovaMemManager *mem_manager,
+                         nova::LogFileManager *log_manager
             );
 
             // Create a writer that will append data to "*dest".
             // "*dest" must have initial length "dest_length".
             // "*dest" must remain live while this Writer is in use.
-            RDMALogWriter(WritableFile *dest, uint64_t dest_length);
+            NICLogWriter(WritableFile *dest, uint64_t dest_length);
 
             Status
             AddRecord(const std::string &log_file_name,
@@ -46,37 +51,20 @@ namespace leveldb {
 
             char *AllocateLogBuf(const std::string &log_file);
 
-            void AckAllocLogBuf(int remote_sid, uint64_t offset, uint64_t size);
-
-            void AckWriteSuccess(int remote_sid);
-
         private:
             struct LogFileBuf {
-                uint64_t base;
-                uint64_t offset;
-                uint64_t size;
+                char *base;
+                uint32_t size;
+                uint32_t offset;
             };
 
-
-            void Init(const std::string &log_file_name);
-
-            nova::NovaRDMAStore *store_;
+            std::vector<nova::NovaClientSock*> sockets_;
             nova::NovaMemManager *mem_manager_;
             nova::LogFileManager *log_manager_;
-            std::map<std::string, LogFileBuf *> logfile_last_buf_;
-
-            enum WriteResult {
-                NONE,
-                WAIT_FOR_ALLOC,
-                ALLOC_SUCCESS,
-                WAIT_FOR_WRITE,
-                WRITE_SUCESS,
-            };
-            std::string *current_log_file_;
-            WriteResult *write_result_;
+            std::map<std::string, LogFileBuf> logfile_last_buf_;
         };
 
     }  // namespace log
 }  // namespace leveldb
 
-#endif //LEVELDB_RDMA_LOG_WRITER_H
+#endif //LEVELDB_NIC_LOG_WRITER_H

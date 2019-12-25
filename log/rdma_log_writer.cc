@@ -12,17 +12,12 @@ namespace leveldb {
 // "*dest" must be initially empty.
 // "*dest" must remain live while this Writer is in use.
         RDMALogWriter::RDMALogWriter(nova::NovaRDMAStore *store,
-                                     nova::NovaMemManager *mem_manager)
-                : store_(store), mem_manager_(mem_manager), Writer(nullptr) {
-            server_remote_cur_offset_ = new uint64_t[nova::NovaConfig::config->servers.size()];
-            server_remote_base_offset_ = new uint64_t[nova::NovaConfig::config->servers.size()];
-            server_remote_buf_size_ = new uint64_t[nova::NovaConfig::config->servers.size()];
+                                     nova::NovaMemManager *mem_manager,
+                                     nova::LogFileManager *log_manager)
+                : store_(store), mem_manager_(mem_manager),
+                  log_manager_(log_manager), Writer(nullptr) {
             write_result_ = new WriteResult[nova::NovaConfig::config->servers.size()];
-
             for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
-                server_remote_buf_size_[i] = 0;
-                server_remote_cur_offset_[i] = 0;
-                server_remote_base_offset_[i] = 0;
                 write_result_[i] = WriteResult::NONE;
             }
         }
@@ -30,57 +25,60 @@ namespace leveldb {
         RDMALogWriter::RDMALogWriter(WritableFile *dest, uint64_t dest_length)
                 : Writer(dest, dest_length) {}
 
+
+        void RDMALogWriter::Init(const std::string &log_file_name) {
+            auto it = logfile_last_buf_.find(log_file_name);
+            if (it == logfile_last_buf_.end()) {
+                LogFileBuf *buf = new LogFileBuf[nova::NovaConfig::config->servers.size()];
+                logfile_last_buf_.insert(std::make_pair(log_file_name, buf));
+                for (int i = 0;
+                     i < nova::NovaConfig::config->servers.size(); i++) {
+                    buf[i] = {
+                            .base = 0,
+                            .offset = 0,
+                            .size = 0
+                    };
+                }
+            }
+        }
+
         char *RDMALogWriter::AllocateLogBuf(const std::string &log_file) {
             uint32_t slabclassid = mem_manager_->slabclassid(
                     nova::NovaConfig::config->log_buf_size);
+            int server_id = nova::NovaConfig::config->my_server_id;
             char *buf = mem_manager_->ItemAlloc(slabclassid);
-            auto it = logfile_bufs.find(log_file);
-            if (it != logfile_bufs.end()) {
-                it->second.emplace_back(
-                        Slice(buf, nova::NovaConfig::config->log_buf_size));
-            } else {
-                std::vector<Slice> bufs;
-                bufs.emplace_back(
-                        Slice(buf, nova::NovaConfig::config->log_buf_size));
-                logfile_bufs.insert(std::make_pair(log_file, bufs));
-            }
+            Init(log_file);
+            logfile_last_buf_[log_file][server_id] = {
+                    .base = (uint64_t) buf,
+                    .offset = 0,
+                    .size = nova::NovaConfig::config->log_buf_size
+            };
+            log_manager_->Add(log_file, buf);
             return buf;
-        }
-
-        void RDMALogWriter::DeleteLogBuf(const std::string &log_file) {
-            uint32_t slabclassid = mem_manager_->slabclassid(
-                    nova::NovaConfig::config->log_buf_size);
-            auto it = logfile_bufs.find(log_file);
-            if (it == logfile_bufs.end()) {
-                return;
-            }
-            mem_manager_->FreeItems(it->second, slabclassid);
         }
 
         char *RDMALogWriter::AddLocalRecord(const std::string &log_file_name,
                                             const Slice &slice) {
             int server_id = nova::NovaConfig::config->my_server_id;
             char *buf = nullptr;
-            if (server_remote_cur_offset_[server_id] + slice.size() >=
-                server_remote_buf_size_[server_id]) {
-                buf = AllocateLogBuf(log_file_name);
-                server_remote_buf_size_[server_id] = nova::NovaConfig::config->log_buf_size;
-            } else {
-                auto it = logfile_bufs.find(log_file_name);
-                RDMA_ASSERT(it != logfile_bufs.end());
-                buf = (char *) it->second[it->second.size() - 1].data();
+            Init(log_file_name);
+            auto &it = logfile_last_buf_[log_file_name];
+            if (it[server_id].offset + slice.size() >=
+                it[server_id].size) {
+                AllocateLogBuf(log_file_name);
             }
+            buf = (char *) it[server_id].base;
             memcpy(buf, slice.data(), slice.size());
-            server_remote_cur_offset_[server_id] += slice.size();
+            it[server_id].offset += slice.size();
             return buf;
         }
 
         void RDMALogWriter::AckAllocLogBuf(int remote_sid, uint64_t offset,
                                            uint64_t size) {
             write_result_[remote_sid] = WriteResult::ALLOC_SUCCESS;
-            server_remote_base_offset_[remote_sid] = offset;
-            server_remote_buf_size_[remote_sid] = size;
-            server_remote_cur_offset_[remote_sid] = 0;
+            logfile_last_buf_[*current_log_file_][remote_sid].base = offset;
+            logfile_last_buf_[*current_log_file_][remote_sid].size = size;
+            logfile_last_buf_[*current_log_file_][remote_sid].offset = 0;
         }
 
         void RDMALogWriter::AckWriteSuccess(int remote_sid) {
@@ -90,6 +88,7 @@ namespace leveldb {
         Status
         RDMALogWriter::AddRecord(const std::string &log_file_name,
                                  const Slice &slice) {
+            *current_log_file_ = log_file_name;
             int nreplicas = 0;
             char *buf = AddLocalRecord(log_file_name, slice);
             for (int remote_server_id = 0; remote_server_id <
@@ -99,16 +98,12 @@ namespace leveldb {
                     continue;
                 }
                 nreplicas++;
-                if (server_remote_cur_offset_[remote_server_id] + slice.size() <
-                    server_remote_buf_size_[remote_server_id]) {
-                    // WRITE.
-                    store_->PostWrite(buf, slice.size(), remote_server_id,
-                                      server_remote_cur_offset_[remote_server_id] +
-                                      server_remote_base_offset_[remote_server_id],
-                                      false);
-                    server_remote_cur_offset_[remote_server_id] += slice.size();
-                    write_result_[remote_server_id] = WriteResult::WAIT_FOR_WRITE;
-                } else {
+
+                auto &it = logfile_last_buf_[log_file_name];
+                if (it[remote_server_id].base == 0 ||
+                    (it[remote_server_id].offset + slice.size() >
+                     it[remote_server_id].size)) {
+                    // Allocate a new buf.
                     char *send_buf = store_->GetSendBuf(remote_server_id);
                     send_buf[0] = nova::RequestType::ALLOCATE_LOG_BUFFER;
                     send_buf++;
@@ -119,12 +114,21 @@ namespace leveldb {
                     store_->PostSend(nullptr, 1 + 4 + log_file_name.size(),
                                      remote_server_id);
                     write_result_[remote_server_id] = WriteResult::WAIT_FOR_ALLOC;
+                } else {
+                    // WRITE.
+                    store_->PostWrite(buf, slice.size(), remote_server_id,
+                                      it[remote_server_id].base +
+                                      it[remote_server_id].offset,
+                                      false);
+                    it[remote_server_id].offset += slice.size();
+                    write_result_[remote_server_id] = WriteResult::WAIT_FOR_WRITE;
                 }
             }
 
             // Pull all pending writes.
             while (true) {
                 int acks = 0;
+                LogFileBuf *it = nullptr;
                 for (int remote_server_id = 0; remote_server_id <
                                                nova::NovaConfig::config->servers.size(); remote_server_id++) {
                     switch (write_result_[remote_server_id]) {
@@ -137,11 +141,13 @@ namespace leveldb {
                             store_->PollSQ(remote_server_id);
                             break;
                         case WriteResult::ALLOC_SUCCESS:
+                            it = logfile_last_buf_[*current_log_file_];
                             store_->PostWrite(buf, slice.size(),
                                               remote_server_id,
-                                              server_remote_cur_offset_[remote_server_id], /*is_remote_offset=*/
+                                              it[remote_server_id].base +
+                                              it[remote_server_id].offset, /*is_remote_offset=*/
                                               false);
-                            server_remote_cur_offset_[remote_server_id] += slice.size();
+                            it[remote_server_id].offset += slice.size();
                             write_result_[remote_server_id] = WriteResult::WAIT_FOR_WRITE;
                             break;
                         case WriteResult::WRITE_SUCESS:
@@ -157,7 +163,9 @@ namespace leveldb {
         }
 
         Status RDMALogWriter::CloseLogFile(const std::string &log_file_name) {
-            DeleteLogBuf(log_file_name);
+            delete logfile_last_buf_[log_file_name];
+            logfile_last_buf_.erase(log_file_name);
+            log_manager_->DeleteLogBuf(log_file_name);
             for (int remote_server_id = 0; remote_server_id <
                                            nova::NovaConfig::config->servers.size(); remote_server_id++) {
                 if (remote_server_id ==

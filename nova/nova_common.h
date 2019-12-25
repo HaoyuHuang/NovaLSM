@@ -38,6 +38,7 @@ namespace nova {
         ALLOCATE_LOG_BUFFER = 'a',
         ALLOCATE_LOG_BUFFER_SUCC = 'A',
         DELETE_LOG_FILE = 'd',
+        REPLICATE_LOG_RECORD = 'l',
         REDIRECT = 'r',
         GET_INDEX = 'i',
         EXISTS = 'h',

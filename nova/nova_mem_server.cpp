@@ -186,6 +186,7 @@ namespace nova {
                 buf +
                 NovaConfig::config->num_mem_workers * nrdmatotal_per_store;
         manager = new NovaMemManager(cache_buf);
+        log_manager = new LogFileManager(manager);
         if (NovaConfig::config->enable_load_data) {
             LoadData();
         }
@@ -202,8 +203,11 @@ namespace nova {
             workers[worker_id]->set_rdma_store(store);
             workers[worker_id]->set_mem_manager(manager);
             workers[worker_id]->set_db(db);
-            workers[worker_id]->log_writer_ = new leveldb::log::RDMALogWriter(
-                    store, manager);
+            workers[worker_id]->rdma_log_writer_ = new leveldb::log::RDMALogWriter(
+                    store, manager, log_manager);
+            workers[worker_id]->nic_log_writer_ = new leveldb::log::NICLogWriter(
+                    workers[worker_id]->socks_, manager, log_manager);
+            workers[worker_id]->log_manager_ = log_manager;
             worker_threads.emplace_back(start, workers[worker_id]);
             buf += nrdmatotal_per_store;
         }

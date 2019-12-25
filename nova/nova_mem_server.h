@@ -36,6 +36,7 @@ namespace nova {
 
         leveldb::DB *db_;
         NovaMemManager *manager;
+        LogFileManager *log_manager;
         NovaMemWorker **workers;
         struct event_base *base;
         int current_store_id_;

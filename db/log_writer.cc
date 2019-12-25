@@ -32,12 +32,19 @@ namespace leveldb {
         Writer::~Writer() = default;
 
         Status
-        Writer::AddRecord(const std::string &log_file_name, const Slice &slice) {
+        Writer::AddRecord(const std::string &log_file_name,
+                          const Slice &slice) {
             return AddRecord(slice);
         }
 
         Status Writer::CloseLogFile(const std::string &log_file_name) {
             return Status::OK();
+        }
+
+        char *
+        Writer::AddLocalRecord(const std::string &log_file_name,
+                               const Slice &slice) {
+            return nullptr;
         }
 
         Status Writer::AddRecord(const Slice &slice) {
