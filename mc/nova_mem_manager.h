@@ -80,7 +80,7 @@ namespace nova {
 
         void FreeItem(char *buf, uint32_t scid);
 
-        void FreeItems(const std::vector<leveldb::Slice> &items, uint32_t scid);
+        void FreeItems(const std::vector<char *> &items, uint32_t scid);
 
         char *ItemEvict(uint32_t scid);
 

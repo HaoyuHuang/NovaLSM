@@ -66,7 +66,7 @@ namespace nova {
 
     private:
         NovaMemManager *mem_manager_;
-        std::map<std::string, std::vector<leveldb::Slice>> logfiles_;
+        std::map<std::string, std::vector<char *>> logfiles_;
         leveldb::port::Mutex mutex_;
     };
 }

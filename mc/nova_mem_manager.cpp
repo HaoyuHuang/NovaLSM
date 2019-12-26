@@ -120,7 +120,7 @@ namespace nova {
             res++;
             if (res == MAX_NUMBER_OF_SLAB_CLASSES) {
                 /* won't fit in the biggest slab */
-                RDMA_LOG(WARNING) << "item larger than 1MB " << size;
+                RDMA_LOG(WARNING) << "item larger than 2MB " << size;
                 return MAX_NUMBER_OF_SLAB_CLASSES;
             }
         }
@@ -165,11 +165,11 @@ namespace nova {
         pthread_mutex_unlock(&slab_class_mutex_[scid]);
     }
 
-    void NovaMemManager::FreeItems(const std::vector<leveldb::Slice> &items,
+    void NovaMemManager::FreeItems(const std::vector<char *> &items,
                                    uint32_t scid) {
         pthread_mutex_lock(&slab_class_mutex_[scid]);
-        for (auto &buf : items) {
-            slab_classes_[scid].FreeItem((char *) buf.data());
+        for (auto buf : items) {
+            slab_classes_[scid].FreeItem(buf);
         }
         pthread_mutex_unlock(&slab_class_mutex_[scid]);
     }

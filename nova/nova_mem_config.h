@@ -45,14 +45,13 @@ namespace nova {
         // for range partition only.
         uint64_t key_start;
         uint64_t key_end;
-        uint32_t db_id;
-        uint32_t server_id;
-        std::vector<uint32_t> secondaries;
+        std::vector<uint32_t> server_ids;
+        std::vector<uint32_t> db_ids;
     };
 
     class NovaConfig {
     public:
-        static uint64_t keyhash(char *key, uint64_t nkey) {
+        static uint64_t keyhash(const char *key, uint64_t nkey) {
             uint64_t hv = 0;
             str_to_int(key, &hv, nkey);
             return hv;
@@ -83,16 +82,33 @@ namespace nova {
                     else
                         r = m - 1;
                 }
-                RDMA_ASSERT(home->db_id < config->num_mem_workers);
-                RDMA_ASSERT(home->server_id == config->my_server_id) << key
-                                                                     << ":"
-                                                                     << home->server_id
-                                                                     << ":"
-                                                                     << config->my_server_id;
+                RDMA_ASSERT(home->server_ids[0] == config->my_server_id) << key
+                                                                         << ":"
+                                                                         << ToString(
+                                                                                 home->server_ids)
+                                                                         << ":"
+                                                                         << config->my_server_id;
                 return home;
             }
             assert(false);
             return NULL;
+        }
+
+        int ParseNumberOfDatabases(uint32_t server_id) {
+            std::set<uint32_t> ndbs;
+            for (int i = 0; i < nfragments; i++) {
+                if (fragments[i]->server_ids[0] == server_id) {
+                    ndbs.insert(fragments[i]->db_ids[0]);
+                }
+            }
+            db_fragment = (Fragment **) malloc(
+                    ndbs.size() * sizeof(Fragment *));
+            for (int i = 0; i < nfragments; i++) {
+                if (fragments[i]->server_ids[0] == server_id) {
+                    db_fragment[fragments[i]->db_ids[0]] = fragments[i];
+                }
+            }
+            return ndbs.size();
         }
 
         void ReadFragments(const std::string &path) {
@@ -101,12 +117,18 @@ namespace nova {
             file.open(path);
             vector<Fragment *> frags;
             while (std::getline(file, line)) {
-                std::istringstream iss(line);
                 auto *frag = new Fragment();
-                RDMA_ASSERT(
-                        (iss >> frag->key_start >> frag->key_end
-                             >> frag->server_id
-                             >> frag->db_id));
+                std::vector<std::string> tokens = SplitByDelimiter(&line, ",");
+                frag->key_start = std::stoi(tokens[0]);
+                frag->key_end = std::stoi(tokens[1]);
+
+                int nreplicas = (tokens.size() - 2) / 2;
+                int index = 2;
+                for (int i = 0; i < nreplicas; i++) {
+                    frag->server_ids.push_back(std::stoi(tokens[index]));
+                    frag->db_ids.push_back(std::stoi(tokens[index + 1]));
+                    index += 2;
+                }
                 frags.push_back(frag);
             }
             nfragments = static_cast<uint32_t>(frags.size());
@@ -120,8 +142,8 @@ namespace nova {
                 RDMA_LOG(DEBUG) << "frag[" << i << "]: "
                                 << fragments[i]->key_start
                                 << "-" << fragments[i]->key_end
-                                << "-" << fragments[i]->server_id
-                                << "-" << fragments[i]->db_id;
+                                << "-" << ToString(fragments[i]->server_ids)
+                                << "-" << ToString(fragments[i]->db_ids);
             }
         }
 
@@ -149,7 +171,8 @@ namespace nova {
                     "mode=[%d], partition_mode=[%d], "
                     "ingest_batch_size=[%d], value_size=[%lu], "
                     "enable_load=[%d], enable_rdma=[%d], cache_size_gb=[%lu], index_size_mb=[%lu]",
-                    rdma_port, num_mem_workers, max_msg_size, rdma_max_num_sends,
+                    rdma_port, num_mem_workers, max_msg_size,
+                    rdma_max_num_sends,
                     rdma_doorbell_batch_size,
                     my_server_id, recordcount, mode, partition_mode,
                     rdma_pq_batch_size, load_default_value_size,
@@ -171,6 +194,9 @@ namespace nova {
         uint32_t nfragments;
         uint64_t cache_size_gb;
         Fragment **fragments;
+        Fragment **db_fragment;
+
+
         int max_msg_size;
         NovaCacheMode cache_mode;
 
@@ -197,7 +223,6 @@ namespace nova {
         bool fsync;
         uint32_t log_buf_size;
         NovaLogRecordMode log_record_mode;
-
 
         NovaRDMAMode mode;
         NovaRDMAPartitionMode partition_mode;

@@ -50,18 +50,7 @@ namespace nova {
 
     void LogFileManager::Add(const std::string &log_file, char *buf) {
         mutex_.Lock();
-        auto it = logfiles_.find(log_file);
-        if (it != logfiles_.end()) {
-            it->second.emplace_back(
-                    leveldb::Slice(buf,
-                                   nova::NovaConfig::config->log_buf_size));
-        } else {
-            std::vector<leveldb::Slice> bufs;
-            bufs.emplace_back(
-                    leveldb::Slice(buf,
-                                   nova::NovaConfig::config->log_buf_size));
-            logfiles_.insert(std::make_pair(log_file, bufs));
-        }
+        logfiles_[log_file].push_back(buf);
         mutex_.Unlock();
     }
 
@@ -74,7 +63,8 @@ namespace nova {
             mutex_.Unlock();
             return;
         }
-        std::vector<leveldb::Slice> &items = it->second;
+        // Make a copy.
+        std::vector<char *> items = it->second;
         logfiles_.erase(log_file);
         mutex_.Unlock();
         mem_manager_->FreeItems(items, slabclassid);

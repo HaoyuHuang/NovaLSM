@@ -19,6 +19,7 @@
 #include <vector>
 #include <mutex>
 #include <condition_variable>
+#include <event.h>
 
 #include "rdma_ctrl.hpp"
 #include "table/format.h"
@@ -27,6 +28,47 @@
 namespace nova {
     using namespace std;
     using namespace rdmaio;
+
+    enum ConnState {
+        READ, WRITE
+    };
+
+    enum SocketState {
+        INCOMPLETE, COMPLETE, CLOSED
+    };
+
+
+    class Connection {
+    public:
+        int fd;
+        int req_ind;
+        int req_size;
+        int response_ind;
+        uint32_t response_size;
+        char *request_buf;
+        char *response_buf = nullptr; // A pointer points to the response buffer.
+        char *buf; // buf used for responses.
+        ConnState state;
+        void *worker;
+        struct event event;
+        int event_flags;
+//    bool try_free_entry_after_transmit_response = false;
+//    IndexEntry index_entry;
+//    DataEntry data_entry;
+        uint32_t number_get_retries = 0;
+
+        void Init(int f, void *store);
+
+        void UpdateEventFlags(int new_flags);
+    };
+
+    SocketState socket_read_handler(int fd, short which, Connection *conn);
+
+    bool process_socket_request_handler(int fd, Connection *conn);
+
+    void write_socket_complete(int fd, Connection *conn);
+
+    SocketState socket_write_handler(int fd, Connection *conn);
 
 #define EPOLL_MAX_EVENT 1024
 #define EPOLL_WAIT_TIME 0
@@ -59,6 +101,15 @@ namespace nova {
         }
         RDMA_ASSERT(false) << "Unknown request type " << c;
     }
+
+    std::vector<std::string>
+    SplitByDelimiter(std::string *s, std::string delimiter);
+
+    std::string ToString(const std::vector<uint32_t> &x);
+
+    std::string DBName(const std::string& dbname, uint64_t index);
+
+    void ParseDBName(const std::string& logname, uint64_t* index);
 
     enum ResponseType : char {
         GETR = 'G',

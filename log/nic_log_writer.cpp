@@ -5,13 +5,21 @@
 //
 
 #include "nic_log_writer.h"
+#include "nova/nova_common.h"
 
 namespace leveldb {
     namespace log {
+        namespace {
+            uint32_t LogRecordSize(const std::string &log_file_name,
+                                   const Slice &slice) {
+                return 1 + 4 + log_file_name.size() + 4 + slice.size() + 1;
+            }
+        }
+
         // Create a writer that will append data to "*dest".
 // "*dest" must be initially empty.
 // "*dest" must remain live while this Writer is in use.
-        NICLogWriter::NICLogWriter(std::vector<nova::NovaClientSock *> &sockets,
+        NICLogWriter::NICLogWriter(std::vector<nova::NovaClientSock *> *sockets,
                                    nova::NovaMemManager *mem_manager,
                                    nova::LogFileManager *log_manager)
                 : sockets_(sockets), mem_manager_(mem_manager),
@@ -43,13 +51,13 @@ namespace leveldb {
             }
             RDMA_ASSERT(it != logfile_last_buf_.end());
             LogFileBuf &buf = it->second;
-
-            if (buf.offset + 1 + 4 + log_file_name.size() + 4 + slice.size() +
-                1 > buf.size) {
+            uint32_t log_record_size = LogRecordSize(log_file_name, slice);
+            if (buf.offset + log_record_size > buf.size) {
                 AllocateLogBuf(log_file_name);
                 buf = logfile_last_buf_[log_file_name];
             }
-            char *base = buf.base + buf.offset;
+            char *start = buf.base + buf.offset;
+            char *base = start;
             base[0] = nova::RequestType::REPLICATE_LOG_RECORD;
             base++;
             leveldb::EncodeFixed32(base, log_file_name.size());
@@ -61,48 +69,69 @@ namespace leveldb {
             memcpy(base, slice.data(), slice.size());
             base += slice.size();
             base[0] = MSG_TERMINATER_CHAR;
-            buf.offset += slice.size();
-            return base;
+            buf.offset += log_record_size;
+            return start;
         }
 
         Status
         NICLogWriter::AddRecord(const std::string &log_file_name,
                                 const Slice &slice) {
+            uint64_t db_index;
+            nova::ParseDBName(log_file_name, &db_index);
+            nova::Fragment *frag = nova::NovaConfig::config->db_fragment[db_index];
+
+            RDMA_LOG(rdmaio::DEBUG) << "NIC Replicate Log record of "
+                                    << log_file_name << " size " << slice.size()
+                                    << " to "
+                                    << nova::ToString(frag->server_ids);
+
             char *buf = AddLocalRecord(log_file_name, slice);
-            for (int remote_server_id = 0; remote_server_id <
-                                           nova::NovaConfig::config->servers.size(); remote_server_id++) {
+            uint32_t log_record_size = LogRecordSize(log_file_name, slice);
+            for (int i = 0; i < frag->server_ids.size(); i++) {
+                uint32_t remote_server_id = frag->server_ids[i];
                 if (remote_server_id ==
                     nova::NovaConfig::config->my_server_id) {
                     continue;
                 }
-                sockets_[remote_server_id]->Send(buf,
-                                                 1 + 4 + log_file_name.size() +
-                                                 4 + slice.size() + 1);
+                nova::NovaClientSock *sock = (*sockets_)[remote_server_id];
+                sock->Send(buf, log_record_size);
             }
 
             // Pull all pending writes.
-            for (int remote_server_id = 0; remote_server_id <
-                                           nova::NovaConfig::config->servers.size(); remote_server_id++) {
+            for (int i = 0; i < frag->server_ids.size(); i++) {
+                uint32_t remote_server_id = frag->server_ids[i];
                 if (remote_server_id ==
                     nova::NovaConfig::config->my_server_id) {
                     continue;
                 }
-                sockets_[remote_server_id]->Receive();
+                RDMA_LOG(rdmaio::DEBUG) << "NIC log record wait for response "
+                                        << remote_server_id;
+                nova::NovaClientSock *sock = (*sockets_)[remote_server_id];
+                sock->Receive();
             }
+            RDMA_LOG(rdmaio::DEBUG) << "NIC log record replicated.";
             return Status::OK();
         }
 
         Status NICLogWriter::CloseLogFile(const std::string &log_file_name) {
+            uint64_t db_index;
+            nova::ParseDBName(log_file_name, &db_index);
+            nova::Fragment *frag = nova::NovaConfig::config->db_fragment[db_index];
             logfile_last_buf_.erase(log_file_name);
             log_manager_->DeleteLogBuf(log_file_name);
-            for (int remote_server_id = 0; remote_server_id <
-                                           nova::NovaConfig::config->servers.size(); remote_server_id++) {
+
+            RDMA_LOG(rdmaio::DEBUG) << "NIC close log file "
+                                    << log_file_name << " to "
+                                    << nova::ToString(frag->server_ids);
+
+            for (int i = 0; i < frag->server_ids.size(); i++) {
+                uint32_t remote_server_id = frag->server_ids[i];
                 if (remote_server_id ==
                     nova::NovaConfig::config->my_server_id) {
                     continue;
                 }
 
-                char *send_buf = sockets_[remote_server_id]->send_buf();
+                char *send_buf = (*sockets_)[remote_server_id]->send_buf();
                 send_buf[0] = nova::RequestType::DELETE_LOG_FILE;
                 send_buf++;
                 leveldb::EncodeFixed32(send_buf, log_file_name.size());
@@ -110,9 +139,10 @@ namespace leveldb {
                 memcpy(send_buf, log_file_name.data(), log_file_name.size());
                 send_buf += log_file_name.size();
                 send_buf[0] = MSG_TERMINATER_CHAR;
-                sockets_[remote_server_id]->Send(nullptr,
-                                                 1 + 4 + log_file_name.size() +
-                                                 1);
+                (*sockets_)[remote_server_id]->Send(nullptr,
+                                                    1 + 4 +
+                                                    log_file_name.size() +
+                                                    1);
             }
             return Status::OK();
         }

@@ -553,7 +553,7 @@ set(NOVA_SOURCES
         log/nova_log.cpp
         log/nova_log.h
         log/rdma_log_writer.cc
-        log/rdma_log_writer.h log/nic_log_writer.cpp log/nic_log_writer.h nova/nova_client_sock.cpp nova/nova_client_sock.h)
+        log/rdma_log_writer.h log/nic_log_writer.cpp log/nic_log_writer.h nova/nova_client_sock.cpp nova/nova_client_sock.h nova/nova_async_worker.cpp nova/nova_async_worker.h)
 
 
 add_library(libnova STATIC ${NOVA_SOURCES})

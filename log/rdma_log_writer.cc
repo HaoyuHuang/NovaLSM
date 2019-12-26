@@ -88,11 +88,15 @@ namespace leveldb {
         Status
         RDMALogWriter::AddRecord(const std::string &log_file_name,
                                  const Slice &slice) {
+            uint64_t db_index;
+            nova::ParseDBName(log_file_name, &db_index);
+            nova::Fragment *frag = nova::NovaConfig::config->db_fragment[db_index];
+
             *current_log_file_ = log_file_name;
             int nreplicas = 0;
             char *buf = AddLocalRecord(log_file_name, slice);
-            for (int remote_server_id = 0; remote_server_id <
-                                           nova::NovaConfig::config->servers.size(); remote_server_id++) {
+            for (int i = 0; i < frag->server_ids.size(); i++) {
+                uint32_t remote_server_id = frag->server_ids[i];
                 if (remote_server_id ==
                     nova::NovaConfig::config->my_server_id) {
                     continue;
@@ -125,12 +129,14 @@ namespace leveldb {
                 }
             }
 
+            store_->FlushPendingSends();
+
             // Pull all pending writes.
             while (true) {
                 int acks = 0;
                 LogFileBuf *it = nullptr;
-                for (int remote_server_id = 0; remote_server_id <
-                                               nova::NovaConfig::config->servers.size(); remote_server_id++) {
+                for (int i = 0; i < frag->server_ids.size(); i++) {
+                    uint32_t remote_server_id = frag->server_ids[i];
                     switch (write_result_[remote_server_id]) {
                         case WriteResult::NONE:
                             break;
@@ -163,11 +169,15 @@ namespace leveldb {
         }
 
         Status RDMALogWriter::CloseLogFile(const std::string &log_file_name) {
+            uint64_t db_index;
+            nova::ParseDBName(log_file_name, &db_index);
+            nova::Fragment *frag = nova::NovaConfig::config->db_fragment[db_index];
+
             delete logfile_last_buf_[log_file_name];
             logfile_last_buf_.erase(log_file_name);
             log_manager_->DeleteLogBuf(log_file_name);
-            for (int remote_server_id = 0; remote_server_id <
-                                           nova::NovaConfig::config->servers.size(); remote_server_id++) {
+            for (int i = 0; i < frag->server_ids.size(); i++) {
+                uint32_t remote_server_id = frag->server_ids[i];
                 if (remote_server_id ==
                     nova::NovaConfig::config->my_server_id) {
                     continue;

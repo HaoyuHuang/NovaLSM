@@ -15,12 +15,14 @@
 #include "leveldb/filter_policy.h"
 #include "leveldb/comparator.h"
 
+#include <sys/stat.h>
 #include <stdio.h>
 #include <string.h>
 #include <thread>
 #include <assert.h>
 #include <csignal>
 #include <gflags/gflags.h>
+#include <db/filename.h>
 
 using namespace std;
 using namespace rdmaio;
@@ -34,6 +36,7 @@ DEFINE_uint64(block_cache_mb, 0, "leveldb block cache size in mb");
 DEFINE_bool(write_sync, false, "fsync write");
 DEFINE_string(persist_log_records_mode, "", "local/rdma/nic");
 DEFINE_uint64(write_buffer_size_mb, 0, "write buffer size in mb");
+DEFINE_uint32(log_buf_size, 0, "log buffer size");
 
 DEFINE_string(profiler_file_path, "", "profiler file path.");
 DEFINE_string(servers, "localhost:11211", "A list of peer servers");
@@ -104,6 +107,37 @@ void start(NovaMemServer *server) {
     server->Start();
 }
 
+leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache) {
+    leveldb::DB *db;
+    leveldb::Options options;
+    options.block_cache = cache;
+    if (FLAGS_write_buffer_size_mb > 0) {
+        options.write_buffer_size = FLAGS_write_buffer_size_mb * 1024 * 1024;
+    }
+    options.create_if_missing = true;
+    options.compression = leveldb::kNoCompression;
+    options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+    if (NovaConfig::config->profiler_file_path.empty()) {
+        options.enable_tracing = false;
+    } else {
+        options.enable_tracing = true;
+        options.trace_file_path = NovaConfig::config->profiler_file_path;
+    }
+    options.comparator = new YCSBKeyComparator();
+    std::string db_path = DBName(NovaConfig::config->db_path, db_index);
+
+    mkdir(db_path.c_str(), 0777);
+
+    leveldb::Status status = leveldb::DB::Open(options, db_path, &db);
+    RDMA_ASSERT(status.ok()) << "Open leveldb failed " << status.ToString();
+
+    uint64_t index = 0;
+    std::string logname = leveldb::LogFileName(db_path, 1111);
+    ParseDBName(logname, &index);
+    RDMA_ASSERT(index == db_index);
+    return db;
+}
+
 int main(int argc, char *argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);
     int i;
@@ -151,6 +185,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->db_path = FLAGS_db_path;
     NovaConfig::config->profiler_file_path = FLAGS_profiler_file_path;
     NovaConfig::config->fsync = FLAGS_write_sync;
+    NovaConfig::config->log_buf_size = FLAGS_log_buf_size;
     if (FLAGS_persist_log_records_mode == "local") {
         NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_LOCAL;
     } else if (FLAGS_persist_log_records_mode == "rdma") {
@@ -207,31 +242,18 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->nnovabuf = ntotal;
     RDMA_ASSERT(buf != NULL) << "Not enough memory";
 
-    leveldb::DB *db;
-    leveldb::Options options;
+    leveldb::Cache *cache = nullptr;
     if (FLAGS_block_cache_mb > 0) {
-        options.block_cache = leveldb::NewLRUCache(
+        cache = leveldb::NewLRUCache(
                 FLAGS_block_cache_mb * 1024 * 1024);
     }
-    if (FLAGS_write_buffer_size_mb > 0) {
-        options.write_buffer_size = FLAGS_write_buffer_size_mb * 1024 * 1024;
+    int ndbs = NovaConfig::config->ParseNumberOfDatabases(
+            NovaConfig::config->my_server_id);
+    std::vector<leveldb::DB *> dbs;
+    for (int db_index = 0; db_index < ndbs; db_index++) {
+        dbs.push_back(CreateDatabase(db_index, cache));
     }
-    options.create_if_missing = true;
-    options.compression = leveldb::kNoCompression;
-    options.filter_policy = leveldb::NewBloomFilterPolicy(10);
-    if (NovaConfig::config->profiler_file_path.empty()) {
-        options.enable_tracing = false;
-    } else {
-        options.enable_tracing = true;
-        options.trace_file_path = NovaConfig::config->profiler_file_path;
-    }
-    options.comparator = new YCSBKeyComparator();
-    leveldb::Status status = leveldb::DB::Open(options,
-                                               NovaConfig::config->db_path,
-                                               &db);
-    RDMA_ASSERT(status.ok()) << "Open leveldb failed " << status.ToString();
-
-    auto *mem_server = new NovaMemServer(db, buf, port);
+    auto *mem_server = new NovaMemServer(dbs, buf, port);
     mem_server->Start();
 
 //    int cores[] = {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31};

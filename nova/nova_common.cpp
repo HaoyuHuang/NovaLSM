@@ -171,6 +171,44 @@ namespace nova {
         return len;
     }
 
+    std::vector<std::string>
+    SplitByDelimiter(std::string *s, std::string delimiter) {
+        size_t pos = 0;
+        std::string token;
+        std::vector<std::string> tokens;
+        while ((pos = s->find(delimiter)) != std::string::npos) {
+            token = s->substr(0, pos);
+            tokens.push_back(token);
+            s->erase(0, pos + delimiter.length());
+        }
+        if (!s->empty()) {
+            tokens.push_back(*s);
+        }
+        return tokens;
+    }
+
+    std::string ToString(const std::vector<uint32_t> &x) {
+        stringstream result;
+        auto it = x.begin();
+        result << *it;
+        it++;
+        for (; it != x.end(); it++) {
+            result << ",";
+            result << *it;
+        }
+        return result.str();
+    }
+
+    std::string DBName(const std::string &dbname, uint64_t index) {
+        return dbname + "/" + std::to_string(index);
+    }
+
+    void ParseDBName(const std::string &logname, uint64_t *index) {
+        int end = logname.find_last_of('/') - 1;
+        int start = logname.find_last_of('/', end) + 1;
+        str_to_int(logname.data() + start, index, end - start + 1);
+    }
+
 //inline __attribute__ ((always_inline))
     uint32_t int_to_str(char *str, uint64_t x) {
         uint32_t len = 0, p = 0;

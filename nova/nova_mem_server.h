@@ -19,7 +19,7 @@ namespace nova {
 
     class NovaMemServer {
     public:
-        NovaMemServer(leveldb::DB *db, char *rdmabuf, int nport);
+        NovaMemServer(const std::vector<leveldb::DB *>& dbs, char *rdmabuf, int nport);
 
         void Start();
 
@@ -34,13 +34,14 @@ namespace nova {
         int nport_;
         int listen_fd_ = -1;            /* listener descriptor      */
 
-        leveldb::DB *db_;
+        std::vector<leveldb::DB *> dbs_;
         NovaMemManager *manager;
         LogFileManager *log_manager;
         NovaMemWorker **workers;
         struct event_base *base;
         int current_store_id_;
         vector<thread> worker_threads;
+        vector<thread> async_worker_threads;
     };
 }
 

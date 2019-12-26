@@ -30,7 +30,7 @@ namespace leveldb {
             // Create a writer that will append data to "*dest".
             // "*dest" must be initially empty.
             // "*dest" must remain live while this Writer is in use.
-            NICLogWriter(std::vector<nova::NovaClientSock*>& sockets,
+            NICLogWriter(std::vector<nova::NovaClientSock *> *sockets,
                          nova::NovaMemManager *mem_manager,
                          nova::LogFileManager *log_manager
             );
@@ -58,7 +58,7 @@ namespace leveldb {
                 uint32_t offset;
             };
 
-            std::vector<nova::NovaClientSock*> sockets_;
+            std::vector<nova::NovaClientSock *> *sockets_;
             nova::NovaMemManager *mem_manager_;
             nova::LogFileManager *log_manager_;
             std::map<std::string, LogFileBuf> logfile_last_buf_;

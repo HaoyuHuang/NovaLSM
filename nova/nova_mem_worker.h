@@ -24,34 +24,16 @@
 #include "nova_mem_config.h"
 #include "mc/nova_mem_manager.h"
 #include "leveldb/db.h"
+#include "nova_async_worker.h"
 
 
 namespace nova {
-    enum ConnState {
-        READ, WRITE
-    };
-
-    enum SocketState {
-        INCOMPLETE, COMPLETE, CLOSED
-    };
-
-    class Connection;
 
     class NovaMemServer;
 
-//extern Connection **nova_conns;
-
-    SocketState socket_read_handler(int fd, short which, Connection *conn);
-
-    bool process_socket_request_handler(int fd, Connection *conn);
-
-    void write_socket_complete(int fd, Connection *conn);
-
-    SocketState socket_write_handler(int fd, Connection *conn);
-
     void event_handler(int fd, short which, void *arg);
 
-    void timer_event_handler(int fd, short event, void *arg);
+    void rdma_timer_event_handler(int fd, short event, void *arg);
 
     struct Stats {
         uint64_t nreqs = 0;
@@ -147,8 +129,8 @@ namespace nova {
             mem_manager_ = mem_manager;
         };
 
-        void set_db(leveldb::DB *db) {
-            db_ = db;
+        void set_dbs(const std::vector<leveldb::DB *> &dbs) {
+            dbs_ = dbs;
         }
 
         timeval start{};
@@ -165,15 +147,17 @@ namespace nova {
 
         NovaMemManager *mem_manager_ = nullptr;
 
-        leveldb::DB *db_ = nullptr;
+        std::vector<leveldb::DB *> dbs_;
 
         NovaRDMAStore *rdma_store_ = nullptr;
         struct event_base *base = nullptr;
 
         leveldb::log::RDMALogWriter *rdma_log_writer_ = nullptr;
         LogFileManager *log_manager_ = nullptr;
+
+        NovaAsyncWorker *async_worker_ = nullptr;
         leveldb::log::NICLogWriter *nic_log_writer_ = nullptr;
-        std::vector<NovaClientSock*> socks_;
+        std::vector<NovaClientSock *> socks_;
 
         int on_new_conn_send_fd = 0;
         int on_new_conn_recv_fd = 0;
@@ -185,30 +169,6 @@ namespace nova {
         vector<Connection *> conns;
         Stats stats;
         Stats prev_stats;
-    };
-
-    class Connection {
-    public:
-        int fd;
-        int req_ind;
-        int req_size;
-        int response_ind;
-        uint32_t response_size;
-        char *request_buf;
-        char *response_buf = nullptr; // A pointer points to the response buffer.
-        char *buf; // buf used for responses.
-        ConnState state;
-        NovaMemWorker *worker;
-        struct event event;
-        int event_flags;
-//    bool try_free_entry_after_transmit_response = false;
-//    IndexEntry index_entry;
-//    DataEntry data_entry;
-        uint32_t number_get_retries = 0;
-
-        void Init(int f, NovaMemWorker *store);
-
-        void UpdateEventFlags(int new_flags);
     };
 }
 

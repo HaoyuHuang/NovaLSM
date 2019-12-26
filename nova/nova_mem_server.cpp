@@ -25,17 +25,21 @@ namespace nova {
         option.sync = NovaConfig::config->fsync;
 
         for (int i = 0; i < NovaConfig::config->nfragments; i++) {
-            if (frags[i]->server_id != NovaConfig::config->my_server_id) {
+            if (frags[i]->server_ids[0] != NovaConfig::config->my_server_id) {
                 continue;
             }
             leveldb::WriteBatch batch;
             int bs = 0;
             // Insert cold keys first so that hot keys will be at the top level.
             std::vector<std::string *> pointers;
+            leveldb::DB *db = dbs_[frags[i]->db_ids[0]];
+
+            RDMA_LOG(INFO) << "Insert " << frags[i]->key_start << " to "
+                           << frags[i]->key_end;
+
             for (uint64_t j = frags[i]->key_end;
                  j >= frags[i]->key_start; j--) {
                 auto v = static_cast<char>((j % 10) + 'a');
-                RDMA_LOG(DEBUG) << "Insert " << j;
 
                 std::string *key = new std::string(std::to_string(j));
                 std::string *val = new std::string(
@@ -46,8 +50,7 @@ namespace nova {
                 bs += 1;
 
                 if (bs == 1000) {
-//                RDMA_LOG(INFO) << "Write batch of " << bs << " to leveldb";
-                    leveldb::Status status = db_->Write(option, &batch);
+                    leveldb::Status status = db->Write(option, &batch);
                     RDMA_ASSERT(status.ok()) << status.ToString();
                     batch.Clear();
                     bs = 0;
@@ -56,7 +59,6 @@ namespace nova {
                     }
                     pointers.clear();
                 }
-
                 loaded_keys++;
                 if (loaded_keys % 100000 == 0) {
                     timeval now{};
@@ -70,7 +72,7 @@ namespace nova {
                 }
             }
             if (bs > 0) {
-                leveldb::Status status = db_->Write(option, &batch);
+                leveldb::Status status = db->Write(option, &batch);
                 RDMA_ASSERT(status.ok()) << status.ToString();
                 for (std::string *p : pointers) {
                     delete p;
@@ -84,9 +86,10 @@ namespace nova {
 
         // Assert the loaded data is valid.
         for (int i = 0; i < NovaConfig::config->nfragments; i++) {
-            if (frags[i]->server_id != NovaConfig::config->my_server_id) {
+            if (frags[i]->server_ids[0] != NovaConfig::config->my_server_id) {
                 continue;
             }
+            leveldb::DB *db = dbs_[frags[i]->db_ids[0]];
             for (uint64_t j = frags[i]->key_start;
                  j <= frags[i]->key_end; j++) {
                 auto v = static_cast<char>((j % 10) + 'a');
@@ -95,8 +98,8 @@ namespace nova {
                         NovaConfig::config->load_default_value_size, v
                 );
                 std::string val;
-                leveldb::Status status = db_->Get(leveldb::ReadOptions(), key,
-                                                  &val);
+                leveldb::Status status = db->Get(leveldb::ReadOptions(), key,
+                                                 &val);
                 RDMA_ASSERT(status.ok()) << status.ToString();
                 RDMA_ASSERT(expected_val.compare(val) == 0) << val;
             }
@@ -113,7 +116,7 @@ namespace nova {
         for (uint64_t record_id = 0;
              record_id < NovaConfig::config->recordcount; record_id++) {
             Fragment *frag = NovaConfig::home_fragment(record_id);
-            if (frag->server_id == NovaConfig::config->my_server_id) {
+            if (frag->server_ids[0] == NovaConfig::config->my_server_id) {
                 uint32_t nkey = int_to_str(key, record_id) - 1;
                 auto v = static_cast<char>((record_id % 26) + 'a');
                 memset(value, v, NovaConfig::config->load_default_value_size);
@@ -136,7 +139,7 @@ namespace nova {
         for (uint64_t record_id = 0;
              record_id < NovaConfig::config->recordcount; record_id++) {
             Fragment *frag = NovaConfig::home_fragment(record_id);
-            if (frag->server_id == NovaConfig::config->my_server_id) {
+            if (frag->server_ids[0] == NovaConfig::config->my_server_id) {
                 uint32_t nkey = int_to_str(key, record_id) - 1;
                 auto v = static_cast<char>((record_id % 26) + 'a');
                 memset(value, v, NovaConfig::config->load_default_value_size);
@@ -165,17 +168,21 @@ namespace nova {
         if (RDMA_LOG_LEVEL == DEBUG) {
             manager->PrintHashTable();
         }
-        std::string value;
-        db_->GetProperty("leveldb.sstables", &value);
-        RDMA_LOG(INFO) << "\n" << value;
-        value.clear();
-        db_->GetProperty("leveldb.approximate-memory-usage", &value);
-        RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
+        for (int i = 0; i < dbs_.size(); i++) {
+            RDMA_LOG(INFO) << "Database " << i;
+            std::string value;
+            dbs_[i]->GetProperty("leveldb.sstables", &value);
+            RDMA_LOG(INFO) << "\n" << value;
+            value.clear();
+            dbs_[i]->GetProperty("leveldb.approximate-memory-usage", &value);
+            RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
+        }
     }
 
-    NovaMemServer::NovaMemServer(leveldb::DB *db, char *rdmabuf, int nport)
+    NovaMemServer::NovaMemServer(const std::vector<leveldb::DB *> &dbs,
+                                 char *rdmabuf, int nport)
             : nport_(nport) {
-        db_ = db;
+        dbs_ = dbs;
         workers = new NovaMemWorker *[NovaConfig::config->num_mem_workers];
         char *buf = rdmabuf;
         uint64_t nrdmatotal_per_store =
@@ -190,7 +197,9 @@ namespace nova {
         if (NovaConfig::config->enable_load_data) {
             LoadData();
         }
-        db_->StartTracing();
+        for (auto db : dbs) {
+            db->StartTracing();
+        }
         for (int worker_id = 0;
              worker_id < NovaConfig::config->num_mem_workers; worker_id++) {
             workers[worker_id] = new NovaMemWorker(worker_id, worker_id, this);
@@ -202,12 +211,15 @@ namespace nova {
             }
             workers[worker_id]->set_rdma_store(store);
             workers[worker_id]->set_mem_manager(manager);
-            workers[worker_id]->set_db(db);
+            workers[worker_id]->set_dbs(dbs);
             workers[worker_id]->rdma_log_writer_ = new leveldb::log::RDMALogWriter(
                     store, manager, log_manager);
             workers[worker_id]->nic_log_writer_ = new leveldb::log::NICLogWriter(
-                    workers[worker_id]->socks_, manager, log_manager);
+                    &workers[worker_id]->socks_, manager, log_manager);
             workers[worker_id]->log_manager_ = log_manager;
+            workers[worker_id]->async_worker_ = new NovaAsyncWorker(dbs);
+            async_worker_threads.emplace_back(&NovaAsyncWorker::Start,
+                                              workers[worker_id]->async_worker_);
             worker_threads.emplace_back(start, workers[worker_id]);
             buf += nrdmatotal_per_store;
         }

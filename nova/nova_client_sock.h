@@ -17,7 +17,7 @@ namespace nova {
 
         void Connect(const Host &host);
 
-        void Send(char* send, int size);
+        void Send(char *send, int size);
 
         int Receive();
 
@@ -26,7 +26,7 @@ namespace nova {
         char *recv_buf() { return recv_buf_; }
 
     private:
-        int sockfd_;
+        int sockfd_ = 0;
         char *send_buf_;
         char *recv_buf_;
     };
