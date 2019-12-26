@@ -237,7 +237,7 @@ namespace nova {
         inline void notify() {
             std::unique_lock<std::mutex> lock(mtx);
             count++;
-            cv.notify_one();
+            cv.notify_all();
         }
 
         inline void wait() {
@@ -251,7 +251,7 @@ namespace nova {
     private:
         std::mutex mtx;
         std::condition_variable cv;
-        int count;
+        int count = 0;
     };
 
 

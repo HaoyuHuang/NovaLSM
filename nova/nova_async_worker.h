@@ -12,6 +12,7 @@
 #include <leveldb/db.h>
 #include "leveldb/options.h"
 #include "nova_common.h"
+#include <semaphore.h>
 #include <list>
 
 namespace nova {
@@ -23,19 +24,35 @@ namespace nova {
         Connection *conn;
     };
 
+    struct NovaAsyncCompleteTask {
+        Connection *conn;
+    };
+
+    struct NovaAsyncCompleteQueue {
+        std::list<NovaAsyncCompleteTask> queue;
+        leveldb::port::Mutex mutex;
+        int read_fd;
+        int write_fd;
+        struct event readevent;
+    };
+
     class NovaAsyncWorker {
     public:
-        NovaAsyncWorker(const std::vector<leveldb::DB *> &dbs) : dbs_(dbs) {}
+        NovaAsyncWorker(const std::vector<leveldb::DB *> &dbs,
+                        NovaAsyncCompleteQueue *cq) : dbs_(dbs), cq_(cq) {
+            sem_init(&sem_, 0, 0);
+        }
 
         void Start();
 
         void AddTask(const NovaAsyncTask &task);
 
     private:
-        Semaphore semaphore_;
+        sem_t sem_;
         std::vector<leveldb::DB *> dbs_;
         leveldb::port::Mutex mutex_;
         std::list<NovaAsyncTask> queue_;
+        NovaAsyncCompleteQueue *cq_;
     };
 }
 

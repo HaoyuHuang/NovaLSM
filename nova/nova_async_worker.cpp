@@ -13,21 +13,22 @@ namespace nova {
         mutex_.Lock();
         queue_.push_back(task);
         mutex_.Unlock();
-        semaphore_.notify();
+        sem_post(&sem_);
     }
 
     void NovaAsyncWorker::Start() {
         RDMA_LOG(INFO) << "Async worker started";
 
         while (true) {
-            semaphore_.wait();
+            sem_wait(&sem_);
             mutex_.Lock();
-            std::list<NovaAsyncTask> queue(queue_.begin(), queue_.end());
-            mutex_.Unlock();
 
-            if (queue.empty()) {
+            if (queue_.empty()) {
+                mutex_.Unlock();
                 continue;
             }
+            std::list<NovaAsyncTask> queue(queue_.begin(), queue_.end());
+            mutex_.Unlock();
 
             for (const NovaAsyncTask &task : queue) {
                 uint64_t hv = NovaConfig::keyhash(task.key.data(),
@@ -45,18 +46,29 @@ namespace nova {
                 int len = int_to_str(response_buf, nlen);
                 task.conn->response_buf = task.conn->buf;
                 task.conn->response_size = len + nlen;
-                RDMA_ASSERT(
-                        socket_write_handler(task.sock_fd, task.conn) ==
-                        COMPLETE);
-                write_socket_complete(task.sock_fd, task.conn);
+//                RDMA_ASSERT(
+//                        socket_write_handler(task.sock_fd, task.conn) ==
+//                        COMPLETE);
+//                write_socket_complete(task.sock_fd, task.conn);
             }
-//            RDMA_LOG(DEBUG) << "Async worker processed " << queue.size();
+
             mutex_.Lock();
             auto begin = queue_.begin();
             auto end = queue_.begin();
             std::advance(end, queue.size());
             queue_.erase(begin, end);
             mutex_.Unlock();
+
+            cq_->mutex.Lock();
+            for (const NovaAsyncTask &task : queue) {
+                NovaAsyncCompleteTask t;
+                t.conn = task.conn;
+                cq_->queue.push_back(t);
+            }
+            cq_->mutex.Unlock();
+            char buf[1];
+            buf[0] = 'a';
+            RDMA_ASSERT(write(cq_->write_fd, buf, 1) == 1);
         }
     }
 }

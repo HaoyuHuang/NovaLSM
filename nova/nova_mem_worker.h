@@ -100,6 +100,10 @@ namespace nova {
             nservers = NovaConfig::config->servers.size();
             RDMA_LOG(INFO) << "memstore[" << thread_id << "]: " << "create "
                            << store_id << ":" << thread_id << ":";
+            int fd[2];
+            pipe(fd);
+            async_queue_.read_fd = fd[0];
+            async_queue_.write_fd = fd[1];
         }
 
         void Start();
@@ -156,6 +160,7 @@ namespace nova {
         LogFileManager *log_manager_ = nullptr;
 
         NovaAsyncWorker *async_worker_ = nullptr;
+        NovaAsyncCompleteQueue async_queue_;
         leveldb::log::NICLogWriter *nic_log_writer_ = nullptr;
         std::vector<NovaClientSock *> socks_;
 

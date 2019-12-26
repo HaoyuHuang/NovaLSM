@@ -217,7 +217,8 @@ namespace nova {
             workers[worker_id]->nic_log_writer_ = new leveldb::log::NICLogWriter(
                     &workers[worker_id]->socks_, manager, log_manager);
             workers[worker_id]->log_manager_ = log_manager;
-            workers[worker_id]->async_worker_ = new NovaAsyncWorker(dbs);
+            workers[worker_id]->async_worker_ = new NovaAsyncWorker(dbs,
+                                                                    &workers[worker_id]->async_queue_);
             async_worker_threads.emplace_back(&NovaAsyncWorker::Start,
                                               workers[worker_id]->async_worker_);
             worker_threads.emplace_back(start, workers[worker_id]);

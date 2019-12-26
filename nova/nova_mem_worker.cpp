@@ -45,6 +45,24 @@ namespace nova {
         worker->rdma_store_->PollRQ();
     }
 
+    void async_complete_event_handler(int fd, short event, void *arg) {
+        auto *worker = (NovaMemWorker *) arg;
+        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_
+                        << "]: read async complete queue";
+        char buffer[1] = {0};
+        RDMA_ASSERT(read(fd, buffer, 1) == 1);
+        RDMA_ASSERT(buffer[0] == 'a');
+
+        worker->async_queue_.mutex.Lock();
+        for (const NovaAsyncCompleteTask &task : worker->async_queue_.queue) {
+            RDMA_ASSERT(socket_write_handler(task.conn->fd, task.conn) ==
+                        SocketState::COMPLETE);
+            write_socket_complete(task.conn->fd, task.conn);
+        }
+        worker->async_queue_.queue.clear();
+        worker->async_queue_.mutex.Unlock();
+    }
+
     SocketState socket_write_handler(int fd, Connection *conn) {
         RDMA_LOG(DEBUG) << "WSOCK " << conn->response_size;
         RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
@@ -164,7 +182,7 @@ namespace nova {
                     elapsed;
             worker->stats.write_service_time += write_elapsed;
         }
-        conn->UpdateEventFlags(EV_READ | EV_PERSIST);
+//        conn->UpdateEventFlags(EV_READ | EV_PERSIST);
         // processing complete.
         conn->request_buf[0] = '~';
         conn->state = READ;
@@ -425,7 +443,7 @@ namespace nova {
         if (buf[0] == RequestType::DELETE_LOG_FILE) {
             return process_socket_delete_log_file(fd, conn);
         }
-        RDMA_ASSERT(false);
+        RDMA_ASSERT(false) << buf[0];
         return false;
     }
 
@@ -632,10 +650,10 @@ namespace nova {
             RDMA_LOG(INFO) << "All FD types are supported.";
         }
 
-        int fds[2];
-        RDMA_ASSERT(pipe(fds) == 0);
-        on_new_conn_recv_fd = fds[0];
-        on_new_conn_send_fd = fds[1];
+//        int fds[2];
+//        RDMA_ASSERT(pipe(fds) == 0);
+//        on_new_conn_recv_fd = fds[0];
+//        on_new_conn_send_fd = fds[1];
 
         /* Timer event for new connection */
         {
@@ -647,6 +665,17 @@ namespace nova {
                     event_assign(&new_conn_timer_event, base, -1, EV_PERSIST,
                                  new_conn_handler, (void *) this) == 0);
             RDMA_ASSERT(event_add(&new_conn_timer_event, &tv) == 0);
+        }
+        {
+            RDMA_ASSERT(event_assign(&async_queue_.readevent, base,
+                                     async_queue_.read_fd,
+                                     EV_READ | EV_PERSIST,
+                                     async_complete_event_handler,
+                                     this) ==
+                        0)
+                << async_queue_.read_fd;
+            RDMA_ASSERT(event_add(&async_queue_.readevent, 0) == 0)
+                << async_queue_.read_fd;
         }
         /* Timer event for stats */
         {
