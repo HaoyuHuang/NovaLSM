@@ -45,6 +45,20 @@ namespace nova {
         worker->rdma_store_->PollRQ();
     }
 
+    void async_complete_timer_event_handler(int fd, short event, void *arg) {
+        auto *worker = (NovaMemWorker *) arg;
+        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_
+                        << "]: read async complete queue";
+        worker->async_queue_.mutex.Lock();
+        for (const NovaAsyncCompleteTask &task : worker->async_queue_.queue) {
+            RDMA_ASSERT(socket_write_handler(task.conn->fd, task.conn) ==
+                        SocketState::COMPLETE);
+            write_socket_complete(task.sock_fd, task.conn);
+        }
+        worker->async_queue_.queue.clear();
+        worker->async_queue_.mutex.Unlock();
+    }
+
     void async_complete_event_handler(int fd, short event, void *arg) {
         auto *worker = (NovaMemWorker *) arg;
         RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_
@@ -57,11 +71,12 @@ namespace nova {
         for (const NovaAsyncCompleteTask &task : worker->async_queue_.queue) {
             RDMA_ASSERT(socket_write_handler(task.conn->fd, task.conn) ==
                         SocketState::COMPLETE);
-            write_socket_complete(task.conn->fd, task.conn);
+            write_socket_complete(task.sock_fd, task.conn);
         }
         worker->async_queue_.queue.clear();
         worker->async_queue_.mutex.Unlock();
     }
+
 
     SocketState socket_write_handler(int fd, Connection *conn) {
         RDMA_LOG(DEBUG) << "WSOCK " << conn->response_size;
@@ -163,6 +178,7 @@ namespace nova {
                 worker->stats.nreqs_to_poll_rdma = 0;
             }
         }
+        async_complete_timer_event_handler(-1, 0, worker);
     }
 
     void write_socket_complete(int fd, Connection *conn) {
@@ -618,6 +634,7 @@ namespace nova {
         struct event event;
         struct event new_conn_timer_event;
         struct event rdma_timer_event;
+        struct event async_timer_event;
         struct event connect_other_peer_timer_event;
         struct event stats_event;
         struct event_config *ev_config;
@@ -667,16 +684,29 @@ namespace nova {
             RDMA_ASSERT(event_add(&new_conn_timer_event, &tv) == 0);
         }
         {
-            RDMA_ASSERT(event_assign(&async_queue_.readevent, base,
-                                     async_queue_.read_fd,
-                                     EV_READ | EV_PERSIST,
-                                     async_complete_event_handler,
-                                     this) ==
-                        0)
-                << async_queue_.read_fd;
-            RDMA_ASSERT(event_add(&async_queue_.readevent, 0) == 0)
-                << async_queue_.read_fd;
+
+            struct timeval tv;
+            tv.tv_sec = 0;
+            tv.tv_usec = 10000;
+            memset(&async_timer_event, 0, sizeof(struct event));
+            RDMA_ASSERT(
+                    event_assign(&async_timer_event, base, -1, EV_PERSIST,
+                                 async_complete_timer_event_handler,
+                                 (void *) this) ==
+                    0);
+            RDMA_ASSERT(event_add(&async_timer_event, &tv) == 0);
         }
+//        {
+//            RDMA_ASSERT(event_assign(&async_queue_.readevent, base,
+//                                     async_queue_.read_fd,
+//                                     EV_READ | EV_PERSIST,
+//                                     async_complete_event_handler,
+//                                     this) ==
+//                        0)
+//                << async_queue_.read_fd;
+//            RDMA_ASSERT(event_add(&async_queue_.readevent, 0) == 0)
+//                << async_queue_.read_fd;
+//        }
         /* Timer event for stats */
         {
             struct timeval tv;

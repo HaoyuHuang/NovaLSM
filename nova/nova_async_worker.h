@@ -25,6 +25,7 @@ namespace nova {
     };
 
     struct NovaAsyncCompleteTask {
+        int sock_fd;
         Connection *conn;
     };
 

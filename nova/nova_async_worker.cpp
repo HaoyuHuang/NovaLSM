@@ -46,10 +46,6 @@ namespace nova {
                 int len = int_to_str(response_buf, nlen);
                 task.conn->response_buf = task.conn->buf;
                 task.conn->response_size = len + nlen;
-//                RDMA_ASSERT(
-//                        socket_write_handler(task.sock_fd, task.conn) ==
-//                        COMPLETE);
-//                write_socket_complete(task.sock_fd, task.conn);
             }
 
             mutex_.Lock();
@@ -62,13 +58,14 @@ namespace nova {
             cq_->mutex.Lock();
             for (const NovaAsyncTask &task : queue) {
                 NovaAsyncCompleteTask t;
+                t.sock_fd = task.sock_fd;
                 t.conn = task.conn;
                 cq_->queue.push_back(t);
             }
-            cq_->mutex.Unlock();
             char buf[1];
             buf[0] = 'a';
             RDMA_ASSERT(write(cq_->write_fd, buf, 1) == 1);
+            cq_->mutex.Unlock();
         }
     }
 }
