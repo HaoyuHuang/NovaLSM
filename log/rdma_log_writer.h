@@ -66,13 +66,13 @@ namespace leveldb {
             std::map<std::string, LogFileBuf *> logfile_last_buf_;
 
             enum WriteResult {
-                NONE,
-                WAIT_FOR_ALLOC,
-                ALLOC_SUCCESS,
-                WAIT_FOR_WRITE,
-                WRITE_SUCESS,
+                NONE = 0,
+                WAIT_FOR_ALLOC = 1,
+                ALLOC_SUCCESS = 2,
+                WAIT_FOR_WRITE = 3,
+                WRITE_SUCESS =4,
             };
-            std::string *current_log_file_;
+            std::string current_log_file_;
             WriteResult *write_result_;
         };
 

@@ -76,9 +76,9 @@ namespace leveldb {
         void RDMALogWriter::AckAllocLogBuf(int remote_sid, uint64_t offset,
                                            uint64_t size) {
             write_result_[remote_sid] = WriteResult::ALLOC_SUCCESS;
-            logfile_last_buf_[*current_log_file_][remote_sid].base = offset;
-            logfile_last_buf_[*current_log_file_][remote_sid].size = size;
-            logfile_last_buf_[*current_log_file_][remote_sid].offset = 0;
+            logfile_last_buf_[current_log_file_][remote_sid].base = offset;
+            logfile_last_buf_[current_log_file_][remote_sid].size = size;
+            logfile_last_buf_[current_log_file_][remote_sid].offset = 0;
         }
 
         void RDMALogWriter::AckWriteSuccess(int remote_sid) {
@@ -92,7 +92,7 @@ namespace leveldb {
             nova::ParseDBName(log_file_name, &db_index);
             nova::Fragment *frag = nova::NovaConfig::config->db_fragment[db_index];
 
-            *current_log_file_ = log_file_name;
+            current_log_file_ = log_file_name;
             int nreplicas = 0;
             char *buf = AddLocalRecord(log_file_name, slice);
             for (int i = 0; i < frag->server_ids.size(); i++) {
@@ -135,8 +135,19 @@ namespace leveldb {
             while (true) {
                 int acks = 0;
                 LogFileBuf *it = nullptr;
+                bool post_write = false;
+
                 for (int i = 0; i < frag->server_ids.size(); i++) {
                     uint32_t remote_server_id = frag->server_ids[i];
+                    if (remote_server_id ==
+                        nova::NovaConfig::config->my_server_id) {
+                        continue;
+                    }
+
+//                    RDMA_LOG(rdmaio::DEBUG) << "RDMA log status s:"
+//                                            << remote_server_id << " w:"
+//                                            << write_result_[remote_server_id];
+
                     switch (write_result_[remote_server_id]) {
                         case WriteResult::NONE:
                             break;
@@ -147,7 +158,7 @@ namespace leveldb {
                             store_->PollSQ(remote_server_id);
                             break;
                         case WriteResult::ALLOC_SUCCESS:
-                            it = logfile_last_buf_[*current_log_file_];
+                            it = logfile_last_buf_[current_log_file_];
                             store_->PostWrite(buf, slice.size(),
                                               remote_server_id,
                                               it[remote_server_id].base +
@@ -155,10 +166,15 @@ namespace leveldb {
                                               false);
                             it[remote_server_id].offset += slice.size();
                             write_result_[remote_server_id] = WriteResult::WAIT_FOR_WRITE;
+                            post_write = true;
                             break;
                         case WriteResult::WRITE_SUCESS:
                             acks++;
                             break;
+                    }
+
+                    if (post_write) {
+                        store_->FlushPendingSends();
                     }
                 }
                 if (acks == nreplicas) {

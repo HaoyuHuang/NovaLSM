@@ -82,18 +82,18 @@ namespace nova {
                                                    NovaConfig::config->lc_main_bucket_mem_percent);
         }
         char *data_buf = buf + index_size + location_cache_size;
-        uint64_t slab_size = SLAB_SIZE_MB * 1024 * 1024;
-        uint32_t size = 64;
+        uint64_t slab_size = NovaConfig::config->log_buf_size * 4; //SLAB_SIZE_MB * 1024 * 1024;
+        uint64_t size = NovaConfig::config->log_buf_size;
         for (int i = 0; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) {
-            if (size % CHUNK_ALIGN_BYTES) {
-                size += CHUNK_ALIGN_BYTES - (size % CHUNK_ALIGN_BYTES);
-            }
+//            if (size % CHUNK_ALIGN_BYTES) {
+//                size += CHUNK_ALIGN_BYTES - (size % CHUNK_ALIGN_BYTES);
+//            }
             slab_classes_[i].size = size;
             slab_classes_[i].nitems_per_slab = slab_size / size;
+            RDMA_LOG(INFO) << "slab class " << i << " size:" << size
+                           << " nitems:"
+                           << slab_size / size;
             size *= SLAB_SIZE_FACTOR;
-            RDMA_LOG(DEBUG) << "slab class " << i << " size:" << size
-                            << " nitems:"
-                            << slab_size / size;
         }
         uint64_t ndataslabs = data_size / slab_size;
         RDMA_LOG(INFO) << " nslabs: " << ndataslabs;

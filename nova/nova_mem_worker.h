@@ -37,6 +37,7 @@ namespace nova {
 
     struct Stats {
         uint64_t nreqs = 0;
+        uint64_t nresponses = 0;
         uint64_t nreads = 0;
         uint64_t nreadsagain = 0;
         uint64_t nwrites = 0;
@@ -63,11 +64,16 @@ namespace nova {
 
         uint64_t nranges = 0;
 
+        uint64_t nreplicate_log_records = 0;
+
+        uint64_t nremove_log_records = 0;
+
         uint64_t nreqs_to_poll_rdma = 0;
 
         Stats diff(const Stats &other) {
             Stats diff{};
             diff.nreqs = nreqs - other.nreqs;
+            diff.nresponses = nresponses - other.nresponses;
             diff.nreads = nreads - other.nreads;
             diff.nreadsagain = nreadsagain - other.nreadsagain;
             diff.nwrites = nwrites - other.nwrites;

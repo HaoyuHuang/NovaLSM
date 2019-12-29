@@ -70,12 +70,12 @@ namespace leveldb {
     inline void EncodeFixed32(char *dst, uint32_t value) {
         uint8_t *const buffer = reinterpret_cast<uint8_t *>(dst);
 
-        if (port::kLittleEndian) {
-            // Fast path for little-endian CPUs. All major compilers optimize this to a
-            // single mov (x86_64) / str (ARM) instruction.
-            std::memcpy(buffer, &value, sizeof(uint32_t));
-            return;
-        }
+//        if (port::kLittleEndian) {
+//            // Fast path for little-endian CPUs. All major compilers optimize this to a
+//            // single mov (x86_64) / str (ARM) instruction.
+//            std::memcpy(buffer, &value, sizeof(uint32_t));
+//            return;
+//        }
 
         // Platform-independent code.
         // Currently, only gcc optimizes this to a single mov / str instruction.
@@ -88,12 +88,12 @@ namespace leveldb {
     inline void EncodeFixed64(char *dst, uint64_t value) {
         uint8_t *const buffer = reinterpret_cast<uint8_t *>(dst);
 
-        if (port::kLittleEndian) {
-            // Fast path for little-endian CPUs. All major compilers optimize this to a
-            // single mov (x86_64) / str (ARM) instruction.
-            std::memcpy(buffer, &value, sizeof(uint64_t));
-            return;
-        }
+//        if (port::kLittleEndian) {
+//            // Fast path for little-endian CPUs. All major compilers optimize this to a
+//            // single mov (x86_64) / str (ARM) instruction.
+//            std::memcpy(buffer, &value, sizeof(uint64_t));
+//            return;
+//        }
 
         // Platform-independent code.
         // Currently, only gcc optimizes this to a single mov / str instruction.
@@ -113,13 +113,13 @@ namespace leveldb {
     inline uint32_t DecodeFixed32(const char *ptr) {
         const uint8_t *const buffer = reinterpret_cast<const uint8_t *>(ptr);
 
-        if (port::kLittleEndian) {
-            // Fast path for little-endian CPUs. All major compilers optimize this to a
-            // single mov (x86_64) / ldr (ARM) instruction.
-            uint32_t result;
-            std::memcpy(&result, buffer, sizeof(uint32_t));
-            return result;
-        }
+//        if (port::kLittleEndian) {
+//            // Fast path for little-endian CPUs. All major compilers optimize this to a
+//            // single mov (x86_64) / ldr (ARM) instruction.
+//            uint32_t result;
+//            std::memcpy(&result, buffer, sizeof(uint32_t));
+//            return result;
+//        }
 
         // Platform-independent code.
         // Clang and gcc optimize this to a single mov / ldr instruction.
@@ -132,13 +132,13 @@ namespace leveldb {
     inline uint64_t DecodeFixed64(const char *ptr) {
         const uint8_t *const buffer = reinterpret_cast<const uint8_t *>(ptr);
 
-        if (port::kLittleEndian) {
-            // Fast path for little-endian CPUs. All major compilers optimize this to a
-            // single mov (x86_64) / ldr (ARM) instruction.
-            uint64_t result;
-            std::memcpy(&result, buffer, sizeof(uint64_t));
-            return result;
-        }
+//        if (port::kLittleEndian) {
+//            // Fast path for little-endian CPUs. All major compilers optimize this to a
+//            // single mov (x86_64) / ldr (ARM) instruction.
+//            uint64_t result;
+//            std::memcpy(&result, buffer, sizeof(uint64_t));
+//            return result;
+//        }
 
         // Platform-independent code.
         // Clang and gcc optimize this to a single mov / ldr instruction.

@@ -16,6 +16,13 @@ namespace nova {
         sem_post(&sem_);
     }
 
+    int NovaAsyncWorker::size() {
+        mutex_.Lock();
+        int size = queue_.size();
+        mutex_.Unlock();
+        return size;
+    }
+
     void NovaAsyncWorker::Start() {
         RDMA_LOG(INFO) << "Async worker started";
 
@@ -25,6 +32,9 @@ namespace nova {
 
             if (queue_.empty()) {
                 mutex_.Unlock();
+//                char buf[1];
+//                buf[0] = 'a';
+//                RDMA_ASSERT(write(cq_->write_fd, buf, 1) == 1);
                 continue;
             }
             std::list<NovaAsyncTask> queue(queue_.begin(), queue_.end());
@@ -41,11 +51,6 @@ namespace nova {
                                 << task.sock_fd
                                 << ":" << task.key;
                 RDMA_ASSERT(status.ok()) << status.ToString();
-                char *response_buf = task.conn->buf;
-                int nlen = 1;
-                int len = int_to_str(response_buf, nlen);
-                task.conn->response_buf = task.conn->buf;
-                task.conn->response_size = len + nlen;
             }
 
             mutex_.Lock();
@@ -62,10 +67,11 @@ namespace nova {
                 t.conn = task.conn;
                 cq_->queue.push_back(t);
             }
+            cq_->mutex.Unlock();
+
             char buf[1];
             buf[0] = 'a';
             RDMA_ASSERT(write(cq_->write_fd, buf, 1) == 1);
-            cq_->mutex.Unlock();
         }
     }
 }

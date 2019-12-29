@@ -48,6 +48,8 @@ namespace nova {
 
         void AddTask(const NovaAsyncTask &task);
 
+        int size();
+
     private:
         sem_t sem_;
         std::vector<leveldb::DB *> dbs_;

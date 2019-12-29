@@ -44,20 +44,26 @@ namespace nova {
         worker->rdma_store_->PollSQ();
         worker->rdma_store_->PollRQ();
     }
-
-    void async_complete_timer_event_handler(int fd, short event, void *arg) {
-        auto *worker = (NovaMemWorker *) arg;
-        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_
-                        << "]: read async complete queue";
-        worker->async_queue_.mutex.Lock();
-        for (const NovaAsyncCompleteTask &task : worker->async_queue_.queue) {
-            RDMA_ASSERT(socket_write_handler(task.conn->fd, task.conn) ==
-                        SocketState::COMPLETE);
-            write_socket_complete(task.sock_fd, task.conn);
-        }
-        worker->async_queue_.queue.clear();
-        worker->async_queue_.mutex.Unlock();
-    }
+//
+//    void async_complete_timer_event_handler(int fd, short event, void *arg) {
+//        auto *worker = (NovaMemWorker *) arg;
+//        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_
+//                        << "]: read async complete queue";
+//        worker->async_queue_.mutex.Lock();
+//        for (const NovaAsyncCompleteTask &task : worker->async_queue_.queue) {
+//            char *response_buf = task.conn->buf;
+//            int nlen = 1;
+//            int len = int_to_str(response_buf, nlen);
+//            task.conn->response_buf = task.conn->buf;
+//            task.conn->response_size = len + nlen;
+//
+//            RDMA_ASSERT(socket_write_handler(task.conn->fd, task.conn) ==
+//                        SocketState::COMPLETE);
+//            write_socket_complete(task.sock_fd, task.conn);
+//        }
+//        worker->async_queue_.queue.clear();
+//        worker->async_queue_.mutex.Unlock();
+//    }
 
     void async_complete_event_handler(int fd, short event, void *arg) {
         auto *worker = (NovaMemWorker *) arg;
@@ -69,11 +75,33 @@ namespace nova {
 
         worker->async_queue_.mutex.Lock();
         for (const NovaAsyncCompleteTask &task : worker->async_queue_.queue) {
-            RDMA_ASSERT(socket_write_handler(task.conn->fd, task.conn) ==
-                        SocketState::COMPLETE);
-            write_socket_complete(task.sock_fd, task.conn);
+            char *response_buf = task.conn->buf;
+            int nlen = 1;
+            int len = int_to_str(response_buf, nlen);
+            task.conn->response_buf = task.conn->buf;
+            task.conn->response_size = len + nlen;
+
+            if (socket_write_handler(task.sock_fd, task.conn) ==
+                SocketState::COMPLETE) {
+                write_socket_complete(task.sock_fd, task.conn);
+            }
         }
         worker->async_queue_.queue.clear();
+
+//        if (!worker->async_queue_.queue.empty()) {
+//            const NovaAsyncCompleteTask &task = worker->async_queue_.queue.front();
+//            char *response_buf = task.conn->buf;
+//            int nlen = 1;
+//            int len = int_to_str(response_buf, nlen);
+//            task.conn->response_buf = task.conn->buf;
+//            task.conn->response_size = len + nlen;
+//
+//            if (socket_write_handler(task.sock_fd, task.conn) ==
+//                SocketState::COMPLETE) {
+//                write_socket_complete(task.sock_fd, task.conn);
+//            }
+//            worker->async_queue_.queue.pop_front();
+//        }
         worker->async_queue_.mutex.Unlock();
     }
 
@@ -91,6 +119,9 @@ namespace nova {
         msg.msg_iovlen = 1;
         int n = 0;
         int total = 0;
+        if (conn->response_ind == 0) {
+            store->stats.nresponses++;
+        }
         do {
             iovec_array[0].iov_base = (char *) (iovec_array[0].iov_base) + n;
             iovec_array[0].iov_len -= n;
@@ -175,10 +206,10 @@ namespace nova {
                 NovaConfig::config->rdma_pq_batch_size) {
                 worker->rdma_store_->FlushPendingSends();
                 worker->rdma_store_->PollSQ();
+                worker->rdma_store_->PollRQ();
                 worker->stats.nreqs_to_poll_rdma = 0;
             }
         }
-        async_complete_timer_event_handler(-1, 0, worker);
     }
 
     void write_socket_complete(int fd, Connection *conn) {
@@ -198,7 +229,7 @@ namespace nova {
                     elapsed;
             worker->stats.write_service_time += write_elapsed;
         }
-//        conn->UpdateEventFlags(EV_READ | EV_PERSIST);
+        conn->UpdateEventFlags(EV_READ | EV_PERSIST);
         // processing complete.
         conn->request_buf[0] = '~';
         conn->state = READ;
@@ -383,7 +414,7 @@ namespace nova {
     bool process_socket_replicate_log_record(int fd, Connection *conn) {
         // Stats.
         NovaMemWorker *worker = (NovaMemWorker *) conn->worker;
-        worker->stats.nputs++;
+        worker->stats.nreplicate_log_records++;
         char *buf = conn->request_buf;
         RDMA_ASSERT(buf[0] == RequestType::REPLICATE_LOG_RECORD) << buf;
         buf++;
@@ -406,7 +437,7 @@ namespace nova {
         char *response_buf = conn->buf;
         leveldb::EncodeFixed32(response_buf, 1);
         response_buf += 4;
-        response_buf[0] = RequestType::REPLICATE_LOG_RECORD;
+        response_buf[0] = RequestType::REPLICATE_LOG_RECORD_SUCC;
         conn->response_buf = conn->buf;
         conn->response_size = 5;
         RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
@@ -416,7 +447,7 @@ namespace nova {
     bool process_socket_delete_log_file(int fd, Connection *conn) {
         // Stats.
         NovaMemWorker *worker = (NovaMemWorker *) conn->worker;
-        worker->stats.nputs++;
+        worker->stats.nremove_log_records++;
         char *buf = conn->request_buf;
         RDMA_ASSERT(buf[0] == RequestType::DELETE_LOG_FILE) << buf;
         buf++;
@@ -432,7 +463,7 @@ namespace nova {
         char *response_buf = conn->buf;
         leveldb::EncodeFixed32(response_buf, 1);
         response_buf += 4;
-        response_buf[0] = RequestType::DELETE_LOG_FILE;
+        response_buf[0] = RequestType::DELETE_LOG_FILE_SUCC;
         conn->response_buf = conn->buf;
         conn->response_size = 5;
         RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
@@ -542,9 +573,20 @@ namespace nova {
             write_service_time =
                     store->stats.write_service_time / store->stats.nreqs;
         }
+
+        int asize = store->async_worker_->size();
+        int csize = 0;
+        {
+            store->async_queue_.mutex.Lock();
+            csize = store->async_queue_.queue.size();
+            store->async_queue_.mutex.Unlock();
+        }
         RDMA_LOG(INFO) << "memstore[" << store->thread_id_ << "]: req="
                        << diff.nreqs
+                       << " res=" << diff.nresponses
                        << " r=" << diff.nreads
+                       << " asize=" << asize
+                       << " csize=" << csize
                        << " ra=" << diff.nreadsagain
                        << " w=" << diff.nwrites
                        << " wa=" << diff.nwritesagain
@@ -563,7 +605,12 @@ namespace nova {
                        << " rigi=" << diff.ngetindex_rdma_invalid
                        << " st=" << service_time
                        << " rst=" << read_service_time
-                       << " wst=" << write_service_time;
+                       << " wst=" << write_service_time
+                       << " treq=" << store->stats.nreqs
+                       << " tres=" << store->stats.nresponses
+                       << " tput=" << store->stats.nputs
+                       << " treplicate=" << store->stats.nreplicate_log_records
+                       << " tclose=" << store->stats.nremove_log_records;
         store->prev_stats = store->stats;
 
         if (store->store_id_ == 0) {
@@ -671,7 +718,6 @@ namespace nova {
 //        RDMA_ASSERT(pipe(fds) == 0);
 //        on_new_conn_recv_fd = fds[0];
 //        on_new_conn_send_fd = fds[1];
-
         /* Timer event for new connection */
         {
             struct timeval tv;
@@ -683,30 +729,30 @@ namespace nova {
                                  new_conn_handler, (void *) this) == 0);
             RDMA_ASSERT(event_add(&new_conn_timer_event, &tv) == 0);
         }
-        {
-
-            struct timeval tv;
-            tv.tv_sec = 0;
-            tv.tv_usec = 10000;
-            memset(&async_timer_event, 0, sizeof(struct event));
-            RDMA_ASSERT(
-                    event_assign(&async_timer_event, base, -1, EV_PERSIST,
-                                 async_complete_timer_event_handler,
-                                 (void *) this) ==
-                    0);
-            RDMA_ASSERT(event_add(&async_timer_event, &tv) == 0);
-        }
 //        {
-//            RDMA_ASSERT(event_assign(&async_queue_.readevent, base,
-//                                     async_queue_.read_fd,
-//                                     EV_READ | EV_PERSIST,
-//                                     async_complete_event_handler,
-//                                     this) ==
-//                        0)
-//                << async_queue_.read_fd;
-//            RDMA_ASSERT(event_add(&async_queue_.readevent, 0) == 0)
-//                << async_queue_.read_fd;
+//            struct timeval tv;
+//            tv.tv_sec = 0;
+//            tv.tv_usec = 10000;
+//            memset(&async_timer_event, 0, sizeof(struct event));
+//            RDMA_ASSERT(
+//                    event_assign(&async_timer_event, base, -1, EV_PERSIST,
+//                                 async_complete_timer_event_handler,
+//                                 (void *) this) ==
+//                    0);
+//            RDMA_ASSERT(event_add(&async_timer_event, &tv) == 0);
 //        }
+        {
+            memset(&async_queue_.readevent, 0, sizeof(struct event));
+            RDMA_ASSERT(event_assign(&async_queue_.readevent, base,
+                                     async_queue_.read_fd,
+                                     EV_READ | EV_PERSIST,
+                                     async_complete_event_handler,
+                                     this) ==
+                        0)
+                << async_queue_.read_fd;
+            RDMA_ASSERT(event_add(&async_queue_.readevent, 0) == 0)
+                << async_queue_.read_fd;
+        }
         /* Timer event for stats */
         {
             struct timeval tv;
@@ -738,8 +784,8 @@ namespace nova {
         /* Timer event for RDMA */
         if (NovaConfig::config->enable_rdma) {
             struct timeval tv;
-            tv.tv_sec = 1;
-            tv.tv_usec = 0;
+            tv.tv_sec = 0;
+            tv.tv_usec = 5000;
             memset(&rdma_timer_event, 0, sizeof(struct event));
             RDMA_ASSERT(
                     event_assign(&rdma_timer_event, base, -1, EV_PERSIST,
@@ -913,7 +959,20 @@ namespace nova {
                 uint32_t size = leveldb::DecodeFixed32(buf + 1);
                 std::string log_file(buf + 5, size);
                 log_manager_->DeleteLogBuf(log_file);
+                stats.nremove_log_records += 1;
+            } else {
+                RDMA_ASSERT(false) << "memstore[" << thread_id_
+                                   << "]: unknown recv from "
+                                   << remote_server_id << " buf:"
+                                   << buf;
             }
+        } else if (opcode == IBV_WC_SEND) {
+
+        } else {
+            RDMA_ASSERT(false) << "memstore[" << thread_id_
+                               << "]: unknown opcode from "
+                               << remote_server_id << " buf:"
+                               << buf;
         }
     }
 

@@ -217,7 +217,6 @@ int main(int argc, char *argv[]) {
         NovaConfig::config->partition_mode = NovaRDMAPartitionMode::DEBUG_RDMA;
     }
 
-
     RDMA_LOG(INFO) << NovaConfig::config->to_string();
     NovaConfig::config->ReadFragments(path);
     NovaConfig::rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,

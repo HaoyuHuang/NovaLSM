@@ -80,7 +80,9 @@ namespace nova {
         ALLOCATE_LOG_BUFFER = 'a',
         ALLOCATE_LOG_BUFFER_SUCC = 'A',
         DELETE_LOG_FILE = 'd',
+        DELETE_LOG_FILE_SUCC = 'D',
         REPLICATE_LOG_RECORD = 'l',
+        REPLICATE_LOG_RECORD_SUCC = 'L',
         REDIRECT = 'r',
         GET_INDEX = 'i',
         EXISTS = 'h',
@@ -269,6 +271,10 @@ namespace nova {
     uint64_t noop_hash(const char *key, size_t len);
 
     uint64_t mul_hash(const char *key, size_t len);
+
+    std::string ibv_wr_opcode_str(ibv_wr_opcode code);
+
+    std::string ibv_wc_opcode_str(ibv_wc_opcode code);
 
 // MD4 truncated to 12 B
 //#include <openssl/md4.h>

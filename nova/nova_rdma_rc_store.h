@@ -43,9 +43,9 @@ namespace nova {
             npending_send_ = (int *) malloc(num_servers * sizeof(int));
             psend_index_ = (int *) malloc(num_servers * sizeof(int));
 
-            uint64_t nwritebuf = max_num_sends * max_msg_size;
             uint64_t nsendbuf = max_num_sends * max_msg_size;
-            uint64_t nbuf = nwritebuf + nsendbuf;
+            uint64_t nrecvbuf = max_num_sends * max_msg_size;
+            uint64_t nbuf = nsendbuf + nrecvbuf;
 
             char *rdma_buf_start = buf;
             for (int i = 0; i < num_servers; i++) {
@@ -56,9 +56,9 @@ namespace nova {
                 qp_[i] = NULL;
 
                 rdma_recv_buf_[i] = rdma_buf_start + nbuf * i;
-                memset(rdma_recv_buf_[i], 0, nwritebuf);
+                memset(rdma_recv_buf_[i], 0, nrecvbuf);
 
-                rdma_send_buf_[i] = rdma_recv_buf_[i] + nwritebuf;
+                rdma_send_buf_[i] = rdma_recv_buf_[i] + nrecvbuf;
                 memset(rdma_send_buf_[i], 0, nsendbuf);
 
                 send_sges_[i] = (ibv_sge *) malloc(
