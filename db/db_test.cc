@@ -2109,6 +2109,12 @@ namespace leveldb {
             return DB::Put(o, k, v);
         }
 
+        Status
+        GenerateLogRecords(const WriteOptions &options,
+                           WriteBatch *updates) {
+            return Status::OK();
+        }
+
         Status Delete(const WriteOptions &o, const Slice &key) override {
             return DB::Delete(o, key);
         }

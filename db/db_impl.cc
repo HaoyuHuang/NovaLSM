@@ -12,6 +12,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <list>
 
 #include "db/builder.h"
 #include "db/db_iter.h"
@@ -1306,6 +1307,30 @@ namespace leveldb {
         return DB::Delete(options, key);
     }
 
+    Status DBImpl::GenerateLogRecords(const leveldb::WriteOptions &options,
+                                      leveldb::WriteBatch *updates) {
+        mutex_.Lock();
+        std::string logfile = current_log_file_name_;
+        std::list<std::string> closed_files(closed_log_files_.begin(),
+                                            closed_log_files_.end());
+        mutex_.Unlock();
+        options.writer->AddRecord(logfile,
+                                  WriteBatchInternal::Contents(updates));
+        for (const auto &file : closed_files) {
+            options.writer->CloseLogFile(file);
+        }
+
+        if (!closed_files.empty()) {
+            mutex_.Lock();
+            auto s = closed_log_files_.begin();
+            auto e = closed_log_files_.end();
+            std::advance(e, closed_files.size());
+            closed_log_files_.erase(s, e);
+            mutex_.Unlock();
+        }
+        return Status::OK();
+    }
+
     Status DBImpl::Write(const WriteOptions &options, WriteBatch *updates) {
         Writer w(&mutex_);
         w.batch = updates;
@@ -1337,11 +1362,7 @@ namespace leveldb {
             // into mem_.
             {
                 mutex_.Unlock();
-                if (options.writer != nullptr) {
-                    options.writer->AddRecord(current_log_file_name_,
-                                              WriteBatchInternal::Contents(
-                                                      write_batch));
-                } else {
+                if (options.local_write) {
                     status = log_->AddRecord(
                             WriteBatchInternal::Contents(write_batch));
                 }
@@ -1490,9 +1511,7 @@ namespace leveldb {
                     break;
                 }
                 // Close the current log file. 
-                if (write_options.writer != nullptr) {
-                    write_options.writer->CloseLogFile(current_log_file_name_);
-                }
+                closed_log_files_.push_back(current_log_file_name_);
                 current_log_file_name_ = LogFileName(dbname_, new_log_number);
                 delete log_;
                 delete logfile_;

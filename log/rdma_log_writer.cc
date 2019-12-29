@@ -85,6 +85,22 @@ namespace leveldb {
             write_result_[remote_sid] = WriteResult::WRITE_SUCESS;
         }
 
+        std::string RDMALogWriter::write_result_str(
+                leveldb::log::RDMALogWriter::WriteResult wr) {
+            switch (wr) {
+                case NONE:
+                    return "none";
+                case WAIT_FOR_ALLOC:
+                    return "wait_for_alloc";
+                case ALLOC_SUCCESS:
+                    return "alloc_success";
+                case WAIT_FOR_WRITE:
+                    return "wait_for_write";
+                case WRITE_SUCESS:
+                    return "write_success";
+            }
+        }
+
         Status
         RDMALogWriter::AddRecord(const std::string &log_file_name,
                                  const Slice &slice) {
@@ -132,11 +148,17 @@ namespace leveldb {
             store_->FlushPendingSends();
 
             // Pull all pending writes.
+            int n = 0;
             while (true) {
                 int acks = 0;
                 LogFileBuf *it = nullptr;
                 bool post_write = false;
 
+                // We need to poll both queues here since a live lock may occur when a remote thread S issue requests to myself while I have a pending request to S.
+                store_->PollSQ();
+                store_->PollRQ();
+
+                n++;
                 for (int i = 0; i < frag->server_ids.size(); i++) {
                     uint32_t remote_server_id = frag->server_ids[i];
                     if (remote_server_id ==
@@ -144,18 +166,28 @@ namespace leveldb {
                         continue;
                     }
 
-//                    RDMA_LOG(rdmaio::DEBUG) << "RDMA log status s:"
-//                                            << remote_server_id << " w:"
-//                                            << write_result_[remote_server_id];
+                    if (n % 1000000 == 0) {
+                        if (write_result_[remote_server_id] !=
+                            WriteResult::WRITE_SUCESS) {
+                            RDMA_LOG(rdmaio::DEBUG) << "rdma-rc["
+                                                    << store_->store_id()
+                                                    << "]: "
+                                                    << "RDMA log status s:"
+                                                    << remote_server_id << " w:"
+                                                    << write_result_str(
+                                                            write_result_[remote_server_id]);
+                        }
+                    }
+
 
                     switch (write_result_[remote_server_id]) {
                         case WriteResult::NONE:
                             break;
                         case WriteResult::WAIT_FOR_ALLOC:
-                            store_->PollRQ(remote_server_id);
+//                            store_->PollRQ(remote_server_id);
                             break;
                         case WriteResult::WAIT_FOR_WRITE:
-                            store_->PollSQ(remote_server_id);
+//                            store_->PollSQ(remote_server_id);
                             break;
                         case WriteResult::ALLOC_SUCCESS:
                             it = logfile_last_buf_[current_log_file_];
@@ -172,10 +204,10 @@ namespace leveldb {
                             acks++;
                             break;
                     }
+                }
 
-                    if (post_write) {
-                        store_->FlushPendingSends();
-                    }
+                if (post_write) {
+                    store_->FlushPendingSends();
                 }
                 if (acks == nreplicas) {
                     break;

@@ -204,7 +204,8 @@ namespace leveldb {
         // system call followed by "fsync()".
         bool sync = false;
 
-        // The log writer used
+        bool local_write = false;
+
         log::Writer *writer = nullptr;
     };
 

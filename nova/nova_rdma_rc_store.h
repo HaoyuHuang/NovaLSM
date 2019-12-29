@@ -86,6 +86,8 @@ namespace nova {
 
         void FlushPendingSends();
 
+        void FlushPendingSends(int peer_sid) override;
+
         void PollSQ(int peer_sid);
 
         void PollSQ();
@@ -102,8 +104,11 @@ namespace nova {
 
         char *GetSendBuf(int server_id);
 
+        uint32_t store_id() { return thread_id_; }
+
     private:
-        void PostRDMASEND(char* localbuf, ibv_wr_opcode type, uint32_t size, int server_id,
+        void PostRDMASEND(char *localbuf, ibv_wr_opcode type, uint32_t size,
+                          int server_id,
                           uint64_t local_offset,
                           uint64_t remote_addr, bool is_offset);
 

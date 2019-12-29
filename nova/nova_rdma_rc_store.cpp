@@ -13,7 +13,8 @@ namespace nova {
     RNicHandler *device = nullptr;
 
     void NovaRDMARCStore::Init() {
-        RDMA_LOG(INFO) << "RDMA client thread " << thread_id_ << " started";
+        RDMA_LOG(INFO) << "RDMA client thread " << thread_id_
+                       << " initializing";
         RdmaCtrl::DevIdx idx{.dev_id = 0, .port_id = 1}; // using the first RNIC's first port
         char *cache_buf = NovaConfig::config->nova_buf;
         int num_servers = NovaConfig::config->servers.size();
@@ -87,6 +88,7 @@ namespace nova {
                 PostRecv(peer_sid, i);
             }
         }
+        RDMA_LOG(INFO) << "RDMA client thread " << thread_id_ << " initialized";
     }
 
     void NovaRDMARCStore::PostRDMASEND(char *localbuf, ibv_wr_opcode opcode,
@@ -171,23 +173,29 @@ namespace nova {
         PostRDMASEND(localbuf, IBV_WR_SEND, size, server_id, 0, 0, false);
     }
 
+    void NovaRDMARCStore::FlushPendingSends(int peer_sid) {
+        if (peer_sid == NovaConfig::config->my_server_id) {
+            return;
+        }
+        if (send_sge_index_[peer_sid] == 0) {
+            return;
+        }
+        RDMA_LOG(DEBUG) << "rdma-rc[" << thread_id_ << "]: "
+                        << "flush pending sends "
+                        << send_sge_index_[peer_sid];
+        send_wrs_[peer_sid][send_sge_index_[peer_sid] - 1].next = NULL;
+        send_sge_index_[peer_sid] = 0;
+        ibv_send_wr *bad_sr;
+        int ret = ibv_post_send(qp_[peer_sid]->qp_, &send_wrs_[peer_sid][0],
+                                &bad_sr);
+        RDMA_ASSERT(ret == 0) << ret;
+    }
+
+
     void NovaRDMARCStore::FlushPendingSends() {
         for (int peer_sid = 0;
              peer_sid < NovaConfig::config->servers.size(); peer_sid++) {
-            if (peer_sid == NovaConfig::config->my_server_id) {
-                continue;
-            }
-            if (send_sge_index_[peer_sid] == 0) {
-                continue;
-            }
-            RDMA_LOG(DEBUG) << "flush pending reads "
-                            << send_sge_index_[peer_sid];
-            send_wrs_[peer_sid][send_sge_index_[peer_sid] - 1].next = NULL;
-            send_sge_index_[peer_sid] = 0;
-            ibv_send_wr *bad_sr;
-            int ret = ibv_post_send(qp_[peer_sid]->qp_, &send_wrs_[peer_sid][0],
-                                    &bad_sr);
-            RDMA_ASSERT(ret == 0) << ret;
+            FlushPendingSends(peer_sid);
         }
     }
 
@@ -234,12 +242,6 @@ namespace nova {
     }
 
     void NovaRDMARCStore::PollSQ() {
-        if (NovaConfig::config->mode == NovaRDMAMode::NORMAL) {
-            return;
-        }
-        if (NovaConfig::config->my_server_id == 0) {
-            return;
-        }
         for (int peer_sid = 0;
              peer_sid < NovaConfig::config->servers.size(); peer_sid++) {
             if (peer_sid == NovaConfig::config->my_server_id) {

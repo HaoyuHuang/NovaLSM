@@ -98,7 +98,7 @@ namespace nova {
         }
     };
 
-    class NovaMemWorker : public NovaMsgCallback {
+    class NovaMemWorker {
     public:
         NovaMemWorker(int store_id, int thread_id, NovaMemServer *server)
                 : store_id_(store_id),
@@ -113,27 +113,6 @@ namespace nova {
         }
 
         void Start();
-
-        void ProcessRDMAWC(ibv_wc_opcode type, int remote_server_id,
-                           char *buf) override;
-
-        void ProcessRDMAREAD(int remote_server_id, char *buf);
-
-        void ProcessRDMAGETResponse(uint64_t to_sock_fd,
-                                    DataEntry *entry, bool fetch_from_origin);
-
-        void
-        PostRDMAGETRequest(int fd, char *key, uint64_t nkey, int home_server,
-                           uint64_t remote_offset, uint64_t remote_size);
-
-        void
-        PostRDMAGETIndexRequest(int fd, char *key, uint64_t nkey,
-                                int home_server,
-                                uint64_t remote_addr);
-
-        void set_rdma_store(NovaRDMAStore *rdma_store) {
-            rdma_store_ = rdma_store;
-        };
 
         void set_mem_manager(NovaMemManager *mem_manager) {
             mem_manager_ = mem_manager;
@@ -159,15 +138,11 @@ namespace nova {
 
         std::vector<leveldb::DB *> dbs_;
 
-        NovaRDMAStore *rdma_store_ = nullptr;
         struct event_base *base = nullptr;
 
-        leveldb::log::RDMALogWriter *rdma_log_writer_ = nullptr;
         LogFileManager *log_manager_ = nullptr;
-
         NovaAsyncWorker *async_worker_ = nullptr;
         NovaAsyncCompleteQueue async_queue_;
-        leveldb::log::NICLogWriter *nic_log_writer_ = nullptr;
         std::vector<NovaClientSock *> socks_;
 
         int on_new_conn_send_fd = 0;

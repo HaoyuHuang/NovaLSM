@@ -203,26 +203,33 @@ namespace nova {
         for (int worker_id = 0;
              worker_id < NovaConfig::config->num_mem_workers; worker_id++) {
             workers[worker_id] = new NovaMemWorker(worker_id, worker_id, this);
+            workers[worker_id]->async_worker_ = new NovaAsyncWorker(dbs,
+                                                                    &workers[worker_id]->async_queue_);
+
             NovaRDMAStore *store = nullptr;
             if (NovaConfig::config->enable_rdma) {
-                store = new NovaRDMARCStore(buf, worker_id, workers[worker_id]);
+                store = new NovaRDMARCStore(buf, worker_id,
+                                            workers[worker_id]->async_worker_);
             } else {
                 store = new NovaRDMANoopStore();
             }
-            workers[worker_id]->set_rdma_store(store);
+
+            // Log writers.
+            workers[worker_id]->async_worker_->nic_log_writer_ = new leveldb::log::NICLogWriter(
+                    &workers[worker_id]->socks_, manager, log_manager);
+            workers[worker_id]->async_worker_->rdma_log_writer_ = new leveldb::log::RDMALogWriter(
+                    store, manager, log_manager);
+
             workers[worker_id]->set_mem_manager(manager);
             workers[worker_id]->set_dbs(dbs);
-            workers[worker_id]->rdma_log_writer_ = new leveldb::log::RDMALogWriter(
-                    store, manager, log_manager);
-            workers[worker_id]->nic_log_writer_ = new leveldb::log::NICLogWriter(
-                    &workers[worker_id]->socks_, manager, log_manager);
             workers[worker_id]->log_manager_ = log_manager;
-            workers[worker_id]->async_worker_ = new NovaAsyncWorker(dbs,
-                                                                    &workers[worker_id]->async_queue_);
-            async_worker_threads.emplace_back(&NovaAsyncWorker::Start,
-                                              workers[worker_id]->async_worker_);
+            workers[worker_id]->async_worker_->log_manager_ = log_manager;
+
             worker_threads.emplace_back(start, workers[worker_id]);
             buf += nrdmatotal_per_store;
+            workers[worker_id]->async_worker_->set_rdma_store(store);
+            async_worker_threads.emplace_back(&NovaAsyncWorker::Start,
+                                              workers[worker_id]->async_worker_);
         }
 
 //    int cores[] = {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31};

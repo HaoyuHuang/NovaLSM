@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 #include <leveldb/db_profiler.h>
+#include <list>
 
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -44,6 +45,10 @@ namespace leveldb {
         // Implementations of the DB interface
         Status Put(const WriteOptions &, const Slice &key,
                    const Slice &value) override;
+
+        Status
+        GenerateLogRecords(const WriteOptions &options,
+                           WriteBatch *updates) override;
 
         Status Delete(const WriteOptions &, const Slice &key) override;
 
@@ -152,7 +157,8 @@ namespace leveldb {
         Status WriteLevel0Table(MemTable *mem, VersionEdit *edit, Version *base)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-        Status MakeRoomForWrite(bool force /* compact even if there is room? */, const WriteOptions& write_options)
+        Status MakeRoomForWrite(bool force /* compact even if there is room? */,
+                                const WriteOptions &write_options)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         WriteBatch *BuildBatchGroup(Writer **last_writer)
@@ -234,7 +240,8 @@ namespace leveldb {
         Status bg_error_ GUARDED_BY(mutex_);
 
         CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
-        std::string current_log_file_name_;
+        std::string current_log_file_name_ GUARDED_BY(mutex_);
+        std::list<std::string> closed_log_files_  GUARDED_BY(mutex_);
     };
 
 // Sanitize db options.  The caller should delete result.info_log if

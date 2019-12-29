@@ -65,7 +65,6 @@ DEFINE_uint64(rdma_max_num_sends, 0,
 DEFINE_uint64(rdma_doorbell_batch_size, 0, "The doorbell batch size.");
 DEFINE_uint64(rdma_pq_batch_size, 0,
               "The number of pending requests a worker thread waits before polling RNIC.");
-DEFINE_string(rdma_mode, "none", "Server mode: none, server_redirect, proxy.");
 DEFINE_bool(enable_rdma, false, "Enable RDMA messaging.");
 DEFINE_bool(enable_load_data, false, "Enable loading data.");
 DEFINE_uint64(rdma_number_of_get_retries, 3, "Number of RDMA retries for get.");
@@ -194,21 +193,11 @@ int main(int argc, char *argv[]) {
         NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_NIC;
     }
 
-    string rdma_mode = FLAGS_rdma_mode;
-
-    // sheding load.
     NovaConfig::config->enable_rdma = FLAGS_enable_rdma;
     NovaConfig::config->enable_load_data = FLAGS_enable_load_data;
     std::string path = FLAGS_config_path;
     printf("config path=%s\n", path.c_str());
 
-    if (rdma_mode.find("none") != string::npos) {
-        NovaConfig::config->mode = NovaRDMAMode::NORMAL;
-    } else if (rdma_mode.find("server_redirect") != string::npos) {
-        NovaConfig::config->mode = NovaRDMAMode::SERVER_REDIRECT;
-    } else {
-        NovaConfig::config->mode = NovaRDMAMode::PROXY;
-    }
     if (data_partition.find("hash") != string::npos) {
         NovaConfig::config->partition_mode = NovaRDMAPartitionMode::HASH;
     } else if (data_partition.find("range") != string::npos) {
@@ -233,10 +222,10 @@ int main(int argc, char *argv[]) {
     ntotal += NovaConfig::config->lc_size_mb * 1024 * 1024;
     NovaConfig::config->data_buf_offset = ntotal;
     ntotal += NovaConfig::config->cache_size_gb * 1024 * 1024 * 1024;
+    RDMA_LOG(INFO) << "Allocated buffer size in bytes: " << ntotal;
+
     auto *buf = (char *) malloc(ntotal);
     memset(buf, 0, ntotal);
-
-    RDMA_LOG(INFO) << "Allocated buffer size in bytes: " << ntotal;
     NovaConfig::config->nova_buf = buf;
     NovaConfig::config->nnovabuf = ntotal;
     RDMA_ASSERT(buf != NULL) << "Not enough memory";

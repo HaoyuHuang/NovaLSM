@@ -72,6 +72,9 @@ namespace leveldb {
                 WAIT_FOR_WRITE = 3,
                 WRITE_SUCESS =4,
             };
+
+            std::string write_result_str(WriteResult wr);
+
             std::string current_log_file_;
             WriteResult *write_result_;
         };

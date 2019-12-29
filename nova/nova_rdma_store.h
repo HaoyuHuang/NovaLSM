@@ -26,6 +26,8 @@ namespace nova {
 
         virtual void FlushPendingSends() = 0;
 
+        virtual void FlushPendingSends(int peer_sid) = 0;
+
         virtual void PollSQ(int peer_sid) = 0;
 
         virtual void PollSQ() = 0;
@@ -41,6 +43,8 @@ namespace nova {
         virtual char *GetSendBuf() = 0;
 
         virtual char *GetSendBuf(int server_id) = 0;
+
+        virtual uint32_t store_id() = 0;
     };
 
 
@@ -55,6 +59,8 @@ namespace nova {
 
         void PostWrite(char *localbuf, uint32_t size, int server_id,
                        uint64_t remote_offset, bool is_remote_offset) {}
+
+        void FlushPendingSends(int peer_sid) {}
 
         void FlushPendingSends() {}
 
@@ -73,6 +79,8 @@ namespace nova {
         char *GetSendBuf() { return NULL; }
 
         char *GetSendBuf(int server_id) { return NULL; }
+
+        uint32_t store_id() { return 0; }
     };
 }
 #endif //RLIB_NOVA_RDMA_STORE_H

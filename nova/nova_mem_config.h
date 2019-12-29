@@ -18,21 +18,10 @@ namespace nova {
     using namespace std;
     using namespace rdmaio;
 
-    enum NovaRDMAMode {
-        NORMAL = 0,
-        SERVER_REDIRECT = 1,
-        PROXY = 2,
-    };
-
     enum NovaRDMAPartitionMode {
         RANGE = 0,
         HASH = 1,
         DEBUG_RDMA = 2
-    };
-
-    enum NovaCacheMode {
-        WRITE_AROUND = 0,
-        WRITE_THROUGH = 1
     };
 
     enum NovaLogRecordMode {
@@ -168,13 +157,13 @@ namespace nova {
                     "rdma_port=[%d], mem_stores=[%d], max_msg_size=[%d], "
                     "max_num_sends=[%d], "
                     "doorbell_batch=[%d], my_server_id=[%d], recordcount=[%d], "
-                    "mode=[%d], partition_mode=[%d], "
+                    "partition_mode=[%d], "
                     "ingest_batch_size=[%d], value_size=[%lu], "
                     "enable_load=[%d], enable_rdma=[%d], cache_size_gb=[%lu], index_size_mb=[%lu]",
                     rdma_port, num_mem_workers, max_msg_size,
                     rdma_max_num_sends,
                     rdma_doorbell_batch_size,
-                    my_server_id, recordcount, mode, partition_mode,
+                    my_server_id, recordcount, partition_mode,
                     rdma_pq_batch_size, load_default_value_size,
                     enable_load_data, enable_rdma, cache_size_gb,
                     index_size_mb);
@@ -198,7 +187,6 @@ namespace nova {
 
 
         int max_msg_size;
-        NovaCacheMode cache_mode;
 
         // Index.
         uint64_t index_buf_offset;
@@ -224,7 +212,6 @@ namespace nova {
         uint32_t log_buf_size;
         NovaLogRecordMode log_record_mode;
 
-        NovaRDMAMode mode;
         NovaRDMAPartitionMode partition_mode;
         int rdma_port;
         int rdma_pq_batch_size;
