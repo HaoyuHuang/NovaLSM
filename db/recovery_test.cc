@@ -148,7 +148,7 @@ namespace leveldb {
         MakeLogFile(uint64_t lognum, SequenceNumber seq, Slice key, Slice val) {
             std::string fname = LogFileName(dbname_, lognum);
             WritableFile *file;
-            ASSERT_OK(env_->NewWritableFile(fname, &file));
+            ASSERT_OK(env_->NewWritableFile(fname, {}, &file));
             log::Writer writer(file);
             WriteBatch batch;
             batch.Put(key, val);

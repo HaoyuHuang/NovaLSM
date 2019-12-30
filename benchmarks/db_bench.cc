@@ -932,7 +932,7 @@ namespace leveldb {
             snprintf(fname, sizeof(fname), "%s/heap-%04d", FLAGS_db,
                      ++heap_counter_);
             WritableFile *file;
-            Status s = g_env->NewWritableFile(fname, &file);
+            Status s = g_env->NewWritableFile(fname, {}, &file);
             if (!s.ok()) {
                 fprintf(stderr, "%s\n", s.ToString().c_str());
                 return;

@@ -272,7 +272,7 @@ namespace leveldb {
         ASSERT_OK(WriteStringToFile(env_, "0123456789", file_path));
 
         leveldb::WritableFile *file = nullptr;
-        ASSERT_OK(env_->NewWritableFile(file_path, &file));
+        ASSERT_OK(env_->NewWritableFile(file_path, {}, &file));
         CheckCloseOnExecDoesNotLeakFDs(open_fds);
         delete file;
 

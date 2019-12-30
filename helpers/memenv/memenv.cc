@@ -266,6 +266,7 @@ namespace leveldb {
             }
 
             Status NewWritableFile(const std::string &fname,
+                                   const EnvFileMetadata &metadata,
                                    WritableFile **result) override {
                 MutexLock lock(&mutex_);
                 FileSystem::iterator it = file_map_.find(fname);

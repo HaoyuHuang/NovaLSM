@@ -57,6 +57,20 @@ namespace leveldb {
 
     class WritableFile;
 
+    struct EnvFileMetadata {
+        int level;
+    };
+
+    enum NovaSSTableMode {
+        SSTABLE_DISK = 0,
+        SSTABLE_MEM = 1,
+        SSTABLE_HYBRID = 2,
+    };
+
+    struct EnvOptions {
+        NovaSSTableMode sstable_mode;
+    };
+
     class LEVELDB_EXPORT Env {
     public:
         Env() = default;
@@ -103,6 +117,7 @@ namespace leveldb {
         //
         // The returned file will only be accessed by one thread at a time.
         virtual Status NewWritableFile(const std::string &fname,
+                                       const EnvFileMetadata &metadata,
                                        WritableFile **result) = 0;
 
         // Create an object that either appends to an existing file, or
@@ -194,6 +209,13 @@ namespace leveldb {
 
         // Sleep/delay the thread for the prescribed number of micro-seconds.
         virtual void SleepForMicroseconds(int micros) = 0;
+
+        void set_env_option(const EnvOptions &env_option) {
+            env_options_ = env_option;
+        }
+
+    protected:
+        EnvOptions env_options_;
     };
 
 // A file abstraction for reading sequentially through a file
@@ -340,8 +362,9 @@ namespace leveldb {
         }
 
         Status
-        NewWritableFile(const std::string &f, WritableFile **r) override {
-            return target_->NewWritableFile(f, r);
+        NewWritableFile(const std::string &f, const EnvFileMetadata &metadata,
+                        WritableFile **r) override {
+            return target_->NewWritableFile(f, metadata, r);
         }
 
         Status
@@ -438,54 +461,6 @@ namespace leveldb {
         const size_t length_;
         const std::string filename_;
     };
-
-    class LEVELDB_EXPORT MemWritableFile final : public WritableFile {
-    public:
-        MemWritableFile(std::string filename, char *membase,
-                        uint64_t size) : membase_(
-                membase), memsize_(size), filename_(filename) {
-        }
-
-        Status Append(const Slice &data) override {
-            if (index_ + data.size() >= memsize_) {
-                return Status::InvalidArgument("");
-            }
-            char *ptr = membase_ + index_;
-            memcpy(ptr, data.data(), data.size());
-            index_ += data.size();
-            return Status::OK();
-        }
-
-        Status Close() override {
-
-        }
-
-        Status Flush() override {
-            if (index_ + sizeof(uint32_t) > memsize_) {
-                return Status::IOError("Not enough capacity");
-            }
-            char *ptr = membase_ + memsize_ - sizeof(uint32_t);
-
-            // Platform-independent code.
-            // Currently, only gcc optimizes this to a single mov / str instruction.
-            ptr[0] = static_cast<uint8_t>(index_);
-            ptr[1] = static_cast<uint8_t>(index_ >> 8);
-            ptr[2] = static_cast<uint8_t>(index_ >> 16);
-            ptr[3] = static_cast<uint8_t>(index_ >> 24);
-        }
-
-        Status Sync() override {
-
-        }
-
-    private:
-        uint64_t index_ = 0;
-
-        char *membase_;
-        const uint64_t memsize_;
-        const std::string filename_;
-    };
-
 }  // namespace leveldb
 
 // Redefine DeleteFile if necessary.

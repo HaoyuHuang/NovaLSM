@@ -198,7 +198,9 @@ namespace leveldb {
 
         const std::string manifest = DescriptorFileName(dbname_, 1);
         WritableFile *file;
-        Status s = env_->NewWritableFile(manifest, &file);
+        Status s = env_->NewWritableFile(manifest, {
+                .level = -1
+        }, &file);
         if (!s.ok()) {
             return s;
         }
@@ -853,7 +855,9 @@ namespace leveldb {
 
         // Make the output file
         std::string fname = TableFileName(dbname_, file_number);
-        Status s = env_->NewWritableFile(fname, &compact->outfile);
+        Status s = env_->NewWritableFile(fname, {
+                .level = compact->compaction->level() + 1
+        }, &compact->outfile);
         if (s.ok()) {
             compact->builder = new TableBuilder(options_, compact->outfile);
         }
@@ -1313,20 +1317,12 @@ namespace leveldb {
         std::string logfile = current_log_file_name_;
         std::list<std::string> closed_files(closed_log_files_.begin(),
                                             closed_log_files_.end());
+        closed_log_files_.clear();
         mutex_.Unlock();
         options.writer->AddRecord(logfile,
                                   WriteBatchInternal::Contents(updates));
         for (const auto &file : closed_files) {
             options.writer->CloseLogFile(file);
-        }
-
-        if (!closed_files.empty()) {
-            mutex_.Lock();
-            auto s = closed_log_files_.begin();
-            auto e = closed_log_files_.end();
-            std::advance(e, closed_files.size());
-            closed_log_files_.erase(s, e);
-            mutex_.Unlock();
         }
         return Status::OK();
     }
@@ -1493,17 +1489,20 @@ namespace leveldb {
                 // one is still being compacted, so we wait.
                 Log(options_.info_log, "Current memtable full; waiting...\n");
                 background_work_finished_signal_.Wait();
+                Log(options_.info_log, "Current memtable full; resuming...\n");
             } else if (versions_->NumLevelFiles(0) >=
                        config::kL0_StopWritesTrigger) {
                 // There are too many level-0 files.
                 Log(options_.info_log, "Too many L0 files; waiting...\n");
                 background_work_finished_signal_.Wait();
+                Log(options_.info_log, "Too many L0 files; resuming...\n");
             } else {
                 // Attempt to switch to a new memtable and trigger compaction of old
                 assert(versions_->PrevLogNumber() == 0);
                 uint64_t new_log_number = versions_->NewFileNumber();
                 WritableFile *lfile = nullptr;
                 s = env_->NewWritableFile(LogFileName(dbname_, new_log_number),
+                                          {.level = -1},
                                           &lfile);
                 if (!s.ok()) {
                     // Avoid chewing through file number space in a tight loop.
@@ -1646,6 +1645,7 @@ namespace leveldb {
             WritableFile *lfile;
             s = options.env->NewWritableFile(
                     LogFileName(dbname, new_log_number),
+                    {.level = -1},
                     &lfile);
             impl->current_log_file_name_ = LogFileName(dbname, new_log_number);
             if (s.ok()) {

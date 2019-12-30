@@ -65,7 +65,7 @@ namespace leveldb {
             if (s.ok()) {
                 std::string tmp_name = GetDirName(filename) + "/truncate.tmp";
                 WritableFile *tmp_file;
-                s = env->NewWritableFile(tmp_name, &tmp_file);
+                s = env->NewWritableFile(tmp_name, {}, &tmp_file);
                 if (s.ok()) {
                     s = tmp_file->Append(result);
                     delete tmp_file;
@@ -140,6 +140,7 @@ namespace leveldb {
         ~FaultInjectionTestEnv() override = default;
 
         Status NewWritableFile(const std::string &fname,
+                               const EnvFileMetadata &metadata,
                                WritableFile **result) override;
 
         Status NewAppendableFile(const std::string &fname,
@@ -250,9 +251,10 @@ namespace leveldb {
     }
 
     Status FaultInjectionTestEnv::NewWritableFile(const std::string &fname,
+                                                  const EnvFileMetadata &metadata,
                                                   WritableFile **result) {
         WritableFile *actual_writable_file;
-        Status s = target()->NewWritableFile(fname, &actual_writable_file);
+        Status s = target()->NewWritableFile(fname, {}, &actual_writable_file);
         if (s.ok()) {
             FileState state(fname);
             state.pos_ = 0;

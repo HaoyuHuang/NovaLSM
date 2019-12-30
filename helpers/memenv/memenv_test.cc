@@ -37,7 +37,7 @@ namespace leveldb {
         ASSERT_EQ(0, children.size());
 
         // Create a file.
-        ASSERT_OK(env_->NewWritableFile("/dir/f", &writable_file));
+        ASSERT_OK(env_->NewWritableFile("/dir/f", {}, &writable_file));
         ASSERT_OK(env_->GetFileSize("/dir/f", &file_size));
         ASSERT_EQ(0, file_size);
         delete writable_file;
@@ -51,7 +51,7 @@ namespace leveldb {
         ASSERT_EQ("f", children[0]);
 
         // Write to the file.
-        ASSERT_OK(env_->NewWritableFile("/dir/f", &writable_file));
+        ASSERT_OK(env_->NewWritableFile("/dir/f", {}, &writable_file));
         ASSERT_OK(writable_file->Append("abc"));
         delete writable_file;
 
@@ -102,7 +102,7 @@ namespace leveldb {
 
         ASSERT_OK(env_->CreateDir("/dir"));
 
-        ASSERT_OK(env_->NewWritableFile("/dir/f", &writable_file));
+        ASSERT_OK(env_->NewWritableFile("/dir/f", {}, &writable_file));
         ASSERT_OK(writable_file->Append("hello "));
         ASSERT_OK(writable_file->Append("world"));
         delete writable_file;
@@ -150,7 +150,7 @@ namespace leveldb {
         ASSERT_TRUE(!test_dir.empty());
 
         WritableFile *writable_file;
-        ASSERT_OK(env_->NewWritableFile("/a/b", &writable_file));
+        ASSERT_OK(env_->NewWritableFile("/a/b", {}, &writable_file));
 
         // These are no-ops, but we test they return success.
         ASSERT_OK(writable_file->Sync());
@@ -169,7 +169,7 @@ namespace leveldb {
         }
 
         WritableFile *writable_file;
-        ASSERT_OK(env_->NewWritableFile("/dir/f", &writable_file));
+        ASSERT_OK(env_->NewWritableFile("/dir/f", {}, &writable_file));
         ASSERT_OK(writable_file->Append("foo"));
         ASSERT_OK(writable_file->Append(write_data));
         delete writable_file;

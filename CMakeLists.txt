@@ -199,6 +199,9 @@ target_sources(leveldb
         "util/random.h"
         "util/status.cc"
         "util/db_profiler.cpp"
+        "util/env_mem.cc"
+        "util/env_mem.h"
+        "util/env_posix.h"
 
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>

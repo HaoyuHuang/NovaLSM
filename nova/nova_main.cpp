@@ -14,6 +14,7 @@
 #include "leveldb/cache.h"
 #include "leveldb/filter_policy.h"
 #include "leveldb/comparator.h"
+#include "leveldb/env.h"
 
 #include <sys/stat.h>
 #include <stdio.h>
@@ -37,6 +38,7 @@ DEFINE_bool(write_sync, false, "fsync write");
 DEFINE_string(persist_log_records_mode, "", "local/rdma/nic");
 DEFINE_uint64(write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint32(log_buf_size, 0, "log buffer size");
+DEFINE_string(sstable_mode, "disk", "sstable mode");
 
 DEFINE_string(profiler_file_path, "", "profiler file path.");
 DEFINE_string(servers, "localhost:11211", "A list of peer servers");
@@ -107,6 +109,15 @@ void start(NovaMemServer *server) {
 }
 
 leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache) {
+    leveldb::EnvOptions env_option;
+    if (FLAGS_sstable_mode == "disk") {
+        env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
+    } else if (FLAGS_sstable_mode == "mem") {
+        env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_MEM;
+    } else if (FLAGS_sstable_mode == "hybrid") {
+        env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_HYBRID;
+    }
+    leveldb::Env::Default()->set_env_option(env_option);
     leveldb::DB *db;
     leveldb::Options options;
     options.block_cache = cache;
@@ -123,10 +134,12 @@ leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache) {
         options.trace_file_path = NovaConfig::config->profiler_file_path;
     }
     options.comparator = new YCSBKeyComparator();
+    leveldb::Logger *log = nullptr;
     std::string db_path = DBName(NovaConfig::config->db_path, db_index);
-
     mkdir(db_path.c_str(), 0777);
-
+    RDMA_ASSERT(leveldb::Env::Default()->NewLogger(
+            db_path + "/LOG-" + std::to_string(db_index), &log).ok());
+    options.info_log = log;
     leveldb::Status status = leveldb::DB::Open(options, db_path, &db);
     RDMA_ASSERT(status.ok()) << "Open leveldb failed " << status.ToString();
 
@@ -185,6 +198,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->profiler_file_path = FLAGS_profiler_file_path;
     NovaConfig::config->fsync = FLAGS_write_sync;
     NovaConfig::config->log_buf_size = FLAGS_log_buf_size;
+
     if (FLAGS_persist_log_records_mode == "local") {
         NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_LOCAL;
     } else if (FLAGS_persist_log_records_mode == "rdma") {

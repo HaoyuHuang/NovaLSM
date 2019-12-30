@@ -24,7 +24,7 @@ namespace leveldb {
         std::string fname = TableFileName(dbname, meta->number);
         if (iter->Valid()) {
             WritableFile *file;
-            s = env->NewWritableFile(fname, &file);
+            s = env->NewWritableFile(fname, {.level = 0}, &file);
             if (!s.ok()) {
                 return s;
             }

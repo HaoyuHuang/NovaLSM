@@ -36,7 +36,7 @@ namespace leveldb {
                                       const std::string &fname,
                                       bool should_sync) {
         WritableFile *file;
-        Status s = env->NewWritableFile(fname, &file);
+        Status s = env->NewWritableFile(fname, {}, &file);
         if (!s.ok()) {
             return s;
         }

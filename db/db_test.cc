@@ -211,7 +211,7 @@ namespace leveldb {
                 return Status::IOError("simulated write error");
             }
 
-            Status s = target()->NewWritableFile(f, r);
+            Status s = target()->NewWritableFile(f, {}, r);
             if (s.ok()) {
                 if (strstr(f.c_str(), ".ldb") != nullptr ||
                     strstr(f.c_str(), ".log") != nullptr) {

@@ -41,7 +41,7 @@ namespace leveldb {
 
         // Make the output file
         std::string fname = TableFileName(dbname_, file_number);
-        Status s = env_->NewWritableFile(fname, &outfile_);
+        Status s = env_->NewWritableFile(fname, {}, &outfile_);
         if (s.ok()) {
             builder_ = new TableBuilder(options_, outfile_);
         }
