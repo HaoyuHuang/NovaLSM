@@ -52,6 +52,8 @@ namespace nova {
             sem_init(&sem_, 0, 0);
         }
 
+        bool IsInitialized();
+
         void ProcessRDMAWC(ibv_wc_opcode type, int remote_server_id,
                            char *buf) override;
 
@@ -68,6 +70,8 @@ namespace nova {
         leveldb::log::RDMALogWriter *rdma_log_writer_ = nullptr;
         leveldb::log::NICLogWriter *nic_log_writer_ = nullptr;
         LogFileManager *log_manager_ = nullptr;
+        std::vector<NovaClientSock *> socks_;
+
     private:
         int ProcessQueue();
 
@@ -87,7 +91,8 @@ namespace nova {
 
         NovaRDMAStore *rdma_store_ = nullptr;
 
-        bool is_running_ = true;
+        bool is_running_ = false;
+
 
         sem_t sem_;
         std::vector<leveldb::DB *> dbs_;

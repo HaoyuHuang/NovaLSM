@@ -360,7 +360,7 @@ namespace rdmaio {
                                     << strerror(errno);
                     continue;
                 }
-                if (!PreConnector::wait_recv(csfd, 6000)) {
+                if (!PreConnector::wait_recv(csfd, 10000)) {
                     close(csfd);
                     continue;
                 }

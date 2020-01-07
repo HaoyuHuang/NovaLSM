@@ -24,6 +24,7 @@
 #include <csignal>
 #include <gflags/gflags.h>
 #include <db/filename.h>
+#include <util/env_posix.h>
 
 using namespace std;
 using namespace rdmaio;
@@ -117,15 +118,17 @@ leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache) {
     } else if (FLAGS_sstable_mode == "hybrid") {
         env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_HYBRID;
     }
-    leveldb::Env::Default()->set_env_option(env_option);
+    leveldb::PosixEnv *env = new leveldb::PosixEnv;
+    env->set_env_option(env_option);
     leveldb::DB *db;
     leveldb::Options options;
     options.block_cache = cache;
     if (FLAGS_write_buffer_size_mb > 0) {
         options.write_buffer_size = FLAGS_write_buffer_size_mb * 1024 * 1024;
     }
+    options.env = env;
     options.create_if_missing = true;
-    options.compression = leveldb::kNoCompression;
+    options.compression = leveldb::kSnappyCompression;
     options.filter_policy = leveldb::NewBloomFilterPolicy(10);
     if (NovaConfig::config->profiler_file_path.empty()) {
         options.enable_tracing = false;
@@ -137,7 +140,8 @@ leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache) {
     leveldb::Logger *log = nullptr;
     std::string db_path = DBName(NovaConfig::config->db_path, db_index);
     mkdir(db_path.c_str(), 0777);
-    RDMA_ASSERT(leveldb::Env::Default()->NewLogger(
+
+    RDMA_ASSERT(env->NewLogger(
             db_path + "/LOG-" + std::to_string(db_index), &log).ok());
     options.info_log = log;
     leveldb::Status status = leveldb::DB::Open(options, db_path, &db);

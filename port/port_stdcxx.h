@@ -58,9 +58,23 @@ namespace leveldb {
 
             Mutex &operator=(const Mutex &) = delete;
 
-            void Lock() EXCLUSIVE_LOCK_FUNCTION() { mu_.lock(); }
+            void Lock() EXCLUSIVE_LOCK_FUNCTION() {
+//                unsigned long queue_me;
+                mu_.lock();
+//                std::unique_lock<std::mutex> lock(mu_, std::adopt_lock);
+//                queue_me = queue_tail;
+//                queue_tail++;
+//                while (queue_me != queue_head) {
+//                    cond_.wait(lock);
+//                }
+//                lock.release();
+            }
 
-            void Unlock() UNLOCK_FUNCTION() { mu_.unlock(); }
+            void Unlock() UNLOCK_FUNCTION() {
+//                queue_head++;
+//                cond_.notify_all();
+                mu_.unlock();
+            }
 
             void AssertHeld() ASSERT_EXCLUSIVE_LOCK() {}
 
@@ -68,6 +82,9 @@ namespace leveldb {
             friend class CondVar;
 
             std::mutex mu_;
+            std::condition_variable cond_;
+
+            unsigned long queue_head = 0, queue_tail = 0;
         };
 
 // Thinly wraps std::condition_variable.
@@ -84,6 +101,12 @@ namespace leveldb {
             void Wait() {
                 std::unique_lock<std::mutex> lock(mu_->mu_, std::adopt_lock);
                 cv_.wait(lock);
+                lock.release();
+            }
+
+            void WaitFor(int seconds) {
+                std::unique_lock<std::mutex> lock(mu_->mu_, std::adopt_lock);
+                cv_.wait_for(lock, std::chrono::seconds(seconds));
                 lock.release();
             }
 

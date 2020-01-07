@@ -15,7 +15,7 @@ namespace nova {
     }
 
     void Slab::Init(uint32_t item_size) {
-        uint64_t size = SLAB_SIZE_MB * 1024 * 1024;
+        uint64_t size = NovaConfig::config->log_buf_size;
         item_size_ = item_size;
         auto num_items = static_cast<uint32_t>(size / item_size);
         available_bytes_ = item_size * num_items;
@@ -82,7 +82,7 @@ namespace nova {
                                                    NovaConfig::config->lc_main_bucket_mem_percent);
         }
         char *data_buf = buf + index_size + location_cache_size;
-        uint64_t slab_size = NovaConfig::config->log_buf_size * 4; //SLAB_SIZE_MB * 1024 * 1024;
+        uint64_t slab_size = NovaConfig::config->log_buf_size; //SLAB_SIZE_MB * 1024 * 1024;
         uint64_t size = NovaConfig::config->log_buf_size;
         for (int i = 0; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) {
 //            if (size % CHUNK_ALIGN_BYTES) {
@@ -114,7 +114,7 @@ namespace nova {
 
     uint32_t NovaMemManager::slabclassid(uint32_t size) {
         uint32_t res = 0;
-        if (size == 0 || size > SLAB_SIZE_MB * 1024 * 1024)
+        if (size == 0 || size > NovaConfig::config->log_buf_size)
             return 0;
         while (size > slab_classes_[res].size) {
             res++;

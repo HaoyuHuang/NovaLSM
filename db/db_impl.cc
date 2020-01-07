@@ -709,6 +709,7 @@ namespace leveldb {
         } else {
             background_compaction_scheduled_ = true;
             env_->Schedule(&DBImpl::BGWork, this);
+            Log(options_.info_log, "BG: Schedule compaction.");
         }
     }
 
@@ -717,7 +718,9 @@ namespace leveldb {
     }
 
     void DBImpl::BackgroundCall() {
+        Log(options_.info_log, "BG: Scheduled compaction.");
         MutexLock l(&mutex_);
+        Log(options_.info_log, "BG: Scheduled compaction. Acquired Lock.");
         assert(background_compaction_scheduled_);
         if (shutting_down_.load(std::memory_order_acquire)) {
             // No more background work when shutting down.
@@ -737,7 +740,6 @@ namespace leveldb {
 
     void DBImpl::BackgroundCompaction() {
         mutex_.AssertHeld();
-
         if (imm_ != nullptr) {
             CompactMemTable();
             return;
@@ -1462,6 +1464,7 @@ namespace leveldb {
         assert(!writers_.empty());
         bool allow_delay = !force;
         Status s;
+        bool wait = false;
         while (true) {
             if (!bg_error_.ok()) {
                 // Yield previous error
@@ -1483,19 +1486,24 @@ namespace leveldb {
                        (mem_->ApproximateMemoryUsage() <=
                         options_.write_buffer_size)) {
                 // There is room in current memtable
+                if (wait) {
+                    Log(options_.info_log, "Make room; resuming...\n");
+                }
                 break;
             } else if (imm_ != nullptr) {
                 // We have filled up the current memtable, but the previous
                 // one is still being compacted, so we wait.
-                Log(options_.info_log, "Current memtable full; waiting...\n");
+                Log(options_.info_log,
+                    "Current memtable full; Make room waiting...\n");
                 background_work_finished_signal_.Wait();
-                Log(options_.info_log, "Current memtable full; resuming...\n");
+                wait = true;
             } else if (versions_->NumLevelFiles(0) >=
                        config::kL0_StopWritesTrigger) {
                 // There are too many level-0 files.
-                Log(options_.info_log, "Too many L0 files; waiting...\n");
+                Log(options_.info_log,
+                    "Too many L0 files; Make room waiting...\n");
                 background_work_finished_signal_.Wait();
-                Log(options_.info_log, "Too many L0 files; resuming...\n");
+                wait = true;
             } else {
                 // Attempt to switch to a new memtable and trigger compaction of old
                 assert(versions_->PrevLogNumber() == 0);

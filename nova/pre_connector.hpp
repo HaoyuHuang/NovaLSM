@@ -110,7 +110,7 @@ namespace rdmaio {
 
                 struct timeval s_timeout = {10, timeout};
                 int ready = select(socket + 1, &rfds, NULL, NULL, NULL);
-                RDMA_ASSERT(ready != -1);
+                RDMA_ASSERT(ready != -1) << strerror(errno);
 
                 if (ready == 0) { // no file descriptor found
                     continue;

@@ -351,7 +351,7 @@ namespace leveldb {
             }
         }
 
-        static const int kNumShardBits = 4;
+        static const int kNumShardBits = 8;
         static const int kNumShards = 1 << kNumShardBits;
 
         class ShardedLRUCache : public Cache {

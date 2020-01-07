@@ -143,7 +143,6 @@ namespace nova {
         LogFileManager *log_manager_ = nullptr;
         NovaAsyncWorker *async_worker_ = nullptr;
         NovaAsyncCompleteQueue async_queue_;
-        std::vector<NovaClientSock *> socks_;
 
         int on_new_conn_send_fd = 0;
         int on_new_conn_recv_fd = 0;

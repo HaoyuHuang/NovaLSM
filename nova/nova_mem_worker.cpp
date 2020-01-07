@@ -196,7 +196,7 @@ namespace nova {
         }
 
         if (state == CLOSED) {
-            RDMA_LOG(INFO) << "closed " << fd;
+//            RDMA_LOG(INFO) << "closed " << fd;
             RDMA_ASSERT(event_del(&conn->event) == 0) << fd;
             close(fd);
         }
@@ -525,26 +525,6 @@ namespace nova {
         return COMPLETE;
     }
 
-    void connect_to_other_server_handler(int fd, short which, void *arg) {
-        NovaMemWorker *store = (NovaMemWorker *) arg;
-        if (NovaConfig::config->servers.size() > 0) {
-            if (!store->socks_.empty()) {
-                return;
-            }
-        }
-        RDMA_LOG(INFO) << "memstore[" << store->thread_id_ << "]: "
-                       << "Connecting to other nodes.";
-        for (int server_id = 0;
-             server_id < NovaConfig::config->servers.size(); server_id++) {
-            NovaClientSock *sock = new NovaClientSock();
-            store->socks_.push_back(sock);
-            if (server_id == NovaConfig::config->my_server_id) {
-                continue;
-            }
-            sock->Connect(NovaConfig::config->servers[server_id]);
-        }
-    }
-
     void stats_handler(int fd, short which, void *arg) {
         NovaMemWorker *store = (NovaMemWorker *) arg;
         Stats diff = store->stats.diff(store->prev_stats);
@@ -600,16 +580,16 @@ namespace nova {
         store->prev_stats = store->stats;
 
         if (store->store_id_ == 0) {
-            for (int i = 0; i < store->dbs_.size(); i++) {
-                RDMA_LOG(INFO) << "Database index " + i;
-                std::string value;
-                store->dbs_[i]->GetProperty("leveldb.sstables", &value);
-                RDMA_LOG(INFO) << "\n" << value;
-                value.clear();
-                store->dbs_[i]->GetProperty("leveldb.approximate-memory-usage",
-                                            &value);
-                RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
-            }
+//            for (int i = 0; i < store->dbs_.size(); i++) {
+//                RDMA_LOG(INFO) << "Database index " + i;
+//                std::string value;
+//                store->dbs_[i]->GetProperty("leveldb.sstables", &value);
+//                RDMA_LOG(INFO) << "\n" << value;
+//                value.clear();
+//                store->dbs_[i]->GetProperty("leveldb.approximate-memory-usage",
+//                                            &value);
+//                RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
+//            }
         }
     }
 
@@ -661,6 +641,11 @@ namespace nova {
     void NovaMemWorker::Start() {
         RDMA_LOG(INFO) << "memstore[" << thread_id_ << "]: "
                        << "starting mem worker";
+
+        while (!async_worker_->IsInitialized()) {
+            usleep(10000);
+        }
+
         struct event event;
         struct event new_conn_timer_event;
         struct event rdma_timer_event;
@@ -731,16 +716,6 @@ namespace nova {
                                  stats_handler,
                                  (void *) this) == 0);
             RDMA_ASSERT(event_add(&stats_event, &tv) == 0);
-        }
-        /* Timer event for connecting to other servers */
-        if (NovaConfig::config->log_record_mode == NovaLogRecordMode::LOG_NIC) {
-            struct timeval tv;
-            tv.tv_sec = 0;
-            tv.tv_usec = 0;
-            memset(&connect_other_peer_timer_event, 0, sizeof(struct event));
-            event_base_once(base, -1, EV_TIMEOUT,
-                            connect_to_other_server_handler,
-                            (void *) this, &tv);
         }
         /* Timer event for RDMA */
 //        if (NovaConfig::config->enable_rdma) {

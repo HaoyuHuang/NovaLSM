@@ -85,25 +85,25 @@ namespace nova {
         // db_->CompactRange(nullptr, nullptr);
 
         // Assert the loaded data is valid.
-        for (int i = 0; i < NovaConfig::config->nfragments; i++) {
-            if (frags[i]->server_ids[0] != NovaConfig::config->my_server_id) {
-                continue;
-            }
-            leveldb::DB *db = dbs_[frags[i]->db_ids[0]];
-            for (uint64_t j = frags[i]->key_start;
-                 j <= frags[i]->key_end; j++) {
-                auto v = static_cast<char>((j % 10) + 'a');
-                std::string key = std::to_string(j);
-                std::string expected_val(
-                        NovaConfig::config->load_default_value_size, v
-                );
-                std::string val;
-                leveldb::Status status = db->Get(leveldb::ReadOptions(), key,
-                                                 &val);
-                RDMA_ASSERT(status.ok()) << status.ToString();
-                RDMA_ASSERT(expected_val.compare(val) == 0) << val;
-            }
-        }
+//        for (int i = 0; i < NovaConfig::config->nfragments; i++) {
+//            if (frags[i]->server_ids[0] != NovaConfig::config->my_server_id) {
+//                continue;
+//            }
+//            leveldb::DB *db = dbs_[frags[i]->db_ids[0]];
+//            for (uint64_t j = frags[i]->key_start;
+//                 j <= frags[i]->key_end; j++) {
+//                auto v = static_cast<char>((j % 10) + 'a');
+//                std::string key = std::to_string(j);
+//                std::string expected_val(
+//                        NovaConfig::config->load_default_value_size, v
+//                );
+//                std::string val;
+//                leveldb::Status status = db->Get(leveldb::ReadOptions(), key,
+//                                                 &val);
+//                RDMA_ASSERT(status.ok()) << status.ToString();
+//                RDMA_ASSERT(expected_val.compare(val) == 0) << val;
+//            }
+//        }
     }
 
     void NovaMemServer::LoadDataWithHashPartition() {
@@ -216,7 +216,8 @@ namespace nova {
 
             // Log writers.
             workers[worker_id]->async_worker_->nic_log_writer_ = new leveldb::log::NICLogWriter(
-                    &workers[worker_id]->socks_, manager, log_manager);
+                    &workers[worker_id]->async_worker_->socks_, manager,
+                    log_manager);
             workers[worker_id]->async_worker_->rdma_log_writer_ = new leveldb::log::RDMALogWriter(
                     store, manager, log_manager);
 
@@ -225,11 +226,11 @@ namespace nova {
             workers[worker_id]->log_manager_ = log_manager;
             workers[worker_id]->async_worker_->log_manager_ = log_manager;
 
-            worker_threads.emplace_back(start, workers[worker_id]);
-            buf += nrdmatotal_per_store;
             workers[worker_id]->async_worker_->set_rdma_store(store);
             async_worker_threads.emplace_back(&NovaAsyncWorker::Start,
                                               workers[worker_id]->async_worker_);
+            worker_threads.emplace_back(start, workers[worker_id]);
+            buf += nrdmatotal_per_store;
         }
 
 //    int cores[] = {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31};

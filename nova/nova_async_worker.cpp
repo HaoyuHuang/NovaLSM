@@ -16,7 +16,9 @@ namespace nova {
         mutex_.Unlock();
         if (NovaConfig::config->log_record_mode !=
             NovaLogRecordMode::LOG_RDMA) {
-            sem_post(&sem_);
+            if (sem_post(&sem_) != 0) {
+                RDMA_LOG(ERROR) << "sem_post error " << strerror(errno);
+            }
         }
     }
 
@@ -91,12 +93,35 @@ namespace nova {
         return queue.size();
     }
 
+    bool NovaAsyncWorker::IsInitialized() {
+        mutex_.Lock();
+        bool t = is_running_;
+        mutex_.Unlock();
+        return t;
+    }
+
     void NovaAsyncWorker::Start() {
         RDMA_LOG(INFO) << "Async worker started";
+
+        if (NovaConfig::config->log_record_mode == NovaLogRecordMode::LOG_NIC) {
+            for (int server_id = 0;
+                 server_id < NovaConfig::config->servers.size(); server_id++) {
+                NovaClientSock *sock = new NovaClientSock();
+                socks_.push_back(sock);
+                if (server_id == NovaConfig::config->my_server_id) {
+                    continue;
+                }
+                sock->Connect(NovaConfig::config->servers[server_id]);
+            }
+        }
 
         if (NovaConfig::config->enable_rdma) {
             rdma_store_->Init();
         }
+
+        mutex_.Lock();
+        is_running_ = true;
+        mutex_.Unlock();
 
         bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
@@ -106,7 +131,6 @@ namespace nova {
                 if (should_sleep) {
                     usleep(timeout);
                 }
-
                 rdma_store_->PollSQ();
                 rdma_store_->PollRQ();
 
@@ -122,7 +146,13 @@ namespace nova {
                     timeout = RDMA_POLL_MIN_TIMEOUT_US;
                 }
             } else {
-                sem_wait(&sem_);
+                timespec t = {
+                        .tv_sec = 1,
+                        .tv_nsec  = 0
+                };
+                if (sem_timedwait(&sem_, &t) != 0 && errno != ETIMEDOUT) {
+                    RDMA_LOG(ERROR) << "sem_wait error " << strerror(errno);
+                }
                 ProcessQueue();
             }
         }
