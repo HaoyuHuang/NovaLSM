@@ -98,57 +98,48 @@ namespace nova {
         }
     };
 
-    class NovaMemWorker {
+    class NovaConnWorker {
     public:
-        NovaMemWorker(int store_id, int thread_id, NovaMemServer *server)
-                : store_id_(store_id),
-                  thread_id_(thread_id), mem_server_(server) {
-            nservers = NovaConfig::config->servers.size();
-            RDMA_LOG(INFO) << "memstore[" << thread_id << "]: " << "create "
-                           << store_id << ":" << thread_id << ":";
+        NovaConnWorker(int thread_id, NovaMemServer *server,
+                       NovaAsyncCompleteQueue *async_cq)
+                :
+                thread_id_(thread_id), mem_server_(server),
+                async_cq_(async_cq) {
+            RDMA_LOG(INFO) << "memstore[" << thread_id << "]: "
+                           << "create conn thread :" << thread_id;
             int fd[2];
             pipe(fd);
-            async_queue_.read_fd = fd[0];
-            async_queue_.write_fd = fd[1];
+            async_cq_->read_fd = fd[0];
+            async_cq_->write_fd = fd[1];
         }
 
         void Start();
-
-        void set_mem_manager(NovaMemManager *mem_manager) {
-            mem_manager_ = mem_manager;
-        };
 
         void set_dbs(const std::vector<leveldb::DB *> &dbs) {
             dbs_ = dbs;
         }
 
+        void AddTask(const NovaAsyncTask& task);
+
         timeval start{};
         timeval read_start{};
         timeval write_start{};
-        int store_id_ = 0;
         int thread_id_ = 0;
         int listen_fd_ = -1;            /* listener descriptor      */
         int epoll_fd_ = -1;      /* used for all notification*/
-        int rr_server_redirect_reqs = 0;
         std::mutex mutex_;
 
         NovaMemServer *mem_server_ = nullptr;
 
-        NovaMemManager *mem_manager_ = nullptr;
-
         std::vector<leveldb::DB *> dbs_;
-
         struct event_base *base = nullptr;
-
         LogFileManager *log_manager_ = nullptr;
-        NovaAsyncWorker *async_worker_ = nullptr;
-        NovaAsyncCompleteQueue async_queue_;
+        int current_async_worker_id_ = 0;
+        std::vector<NovaAsyncWorker*> async_workers_;
+        NovaAsyncCompleteQueue *async_cq_;
 
-        int on_new_conn_send_fd = 0;
-        int on_new_conn_recv_fd = 0;
         int nconns = 0;
 
-        int nservers = 0;
         mutex conn_mu;
         vector<int> conn_queue;
         vector<Connection *> conns;

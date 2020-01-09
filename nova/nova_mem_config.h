@@ -160,7 +160,7 @@ namespace nova {
                     "partition_mode=[%d], "
                     "ingest_batch_size=[%d], value_size=[%lu], "
                     "enable_load=[%d], enable_rdma=[%d], cache_size_gb=[%lu], index_size_mb=[%lu]",
-                    rdma_port, num_mem_workers, max_msg_size,
+                    rdma_port, num_conn_workers, max_msg_size,
                     rdma_max_num_sends,
                     rdma_doorbell_batch_size,
                     my_server_id, recordcount, partition_mode,
@@ -174,7 +174,8 @@ namespace nova {
         bool enable_rdma;
 
         vector<Host> servers;
-        int num_mem_workers;
+        int num_conn_workers;
+        int num_async_workers;
         int my_server_id;
         int recordcount;
         uint64_t load_default_value_size;

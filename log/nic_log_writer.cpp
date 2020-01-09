@@ -61,6 +61,7 @@ namespace leveldb {
 
         char *NICLogWriter::AddLocalRecord(const std::string &log_file_name,
                                            const Slice &slice) {
+            mutex_.lock();
             auto it = logfile_last_buf_.find(log_file_name);
             if (it == logfile_last_buf_.end()) {
                 AllocateLogBuf(log_file_name);
@@ -75,6 +76,7 @@ namespace leveldb {
             }
             PrepareLogRecord(buf.base + buf.offset, log_file_name, slice);
             buf.offset += log_record_size;
+            mutex_.unlock();
             return nullptr;
         }
 

@@ -11,7 +11,7 @@
 
 namespace nova {
 
-    void start(NovaMemWorker *store) {
+    void start(NovaConnWorker *store) {
         store->Start();
     }
 
@@ -183,7 +183,8 @@ namespace nova {
                                  char *rdmabuf, int nport)
             : nport_(nport) {
         dbs_ = dbs;
-        workers = new NovaMemWorker *[NovaConfig::config->num_mem_workers];
+        conn_workers = new NovaConnWorker *[NovaConfig::config->num_conn_workers];
+        async_workers = new NovaAsyncWorker *[NovaConfig::config->num_async_workers];
         char *buf = rdmabuf;
         uint64_t nrdmatotal_per_store =
                 (NovaConfig::config->rdma_max_num_sends * 2) *
@@ -191,7 +192,7 @@ namespace nova {
                 NovaConfig::config->servers.size();
         char *cache_buf =
                 buf +
-                NovaConfig::config->num_mem_workers * nrdmatotal_per_store;
+                NovaConfig::config->num_conn_workers * nrdmatotal_per_store;
         manager = new NovaMemManager(cache_buf);
         log_manager = new LogFileManager(manager);
         if (NovaConfig::config->enable_load_data) {
@@ -200,37 +201,84 @@ namespace nova {
         for (auto db : dbs) {
             db->StartTracing();
         }
-        for (int worker_id = 0;
-             worker_id < NovaConfig::config->num_mem_workers; worker_id++) {
-            workers[worker_id] = new NovaMemWorker(worker_id, worker_id, this);
-            workers[worker_id]->async_worker_ = new NovaAsyncWorker(dbs,
-                                                                    &workers[worker_id]->async_queue_);
+        NovaAsyncCompleteQueue **async_cq = new NovaAsyncCompleteQueue *[NovaConfig::config->num_conn_workers];
 
+        for (int worker_id = 0;
+             worker_id < NovaConfig::config->num_conn_workers; worker_id++) {
+            async_cq[worker_id] = new NovaAsyncCompleteQueue;
+            conn_workers[worker_id] = new NovaConnWorker(worker_id, this,
+                                                         async_cq[worker_id]);
+            conn_workers[worker_id]->set_dbs(dbs);
+            conn_workers[worker_id]->log_manager_ = log_manager;
+        }
+
+        for (int worker_id = 0;
+             worker_id < NovaConfig::config->num_async_workers; worker_id++) {
+            async_workers[worker_id] = new NovaAsyncWorker(dbs, async_cq);
             NovaRDMAStore *store = nullptr;
+
+            std::vector<QPEndPoint> endpoints;
+            for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
+                QPEndPoint qp;
+                qp.host = NovaConfig::config->servers[i];
+                qp.thread_id = worker_id;
+                endpoints.push_back(qp);
+            }
+
             if (NovaConfig::config->enable_rdma) {
-                store = new NovaRDMARCStore(buf, worker_id,
-                                            workers[worker_id]->async_worker_);
+                store = new NovaRDMARCStore(buf, worker_id, endpoints,
+                                            async_workers[worker_id]);
             } else {
                 store = new NovaRDMANoopStore();
             }
 
             // Log writers.
-            workers[worker_id]->async_worker_->nic_log_writer_ = new leveldb::log::NICLogWriter(
-                    &workers[worker_id]->async_worker_->socks_, manager,
+            async_workers[worker_id]->nic_log_writer_ = new leveldb::log::NICLogWriter(
+                    &async_workers[worker_id]->socks_, manager,
                     log_manager);
-            workers[worker_id]->async_worker_->rdma_log_writer_ = new leveldb::log::RDMALogWriter(
+            async_workers[worker_id]->rdma_log_writer_ = new leveldb::log::RDMALogWriter(
                     store, manager, log_manager);
-
-            workers[worker_id]->set_mem_manager(manager);
-            workers[worker_id]->set_dbs(dbs);
-            workers[worker_id]->log_manager_ = log_manager;
-            workers[worker_id]->async_worker_->log_manager_ = log_manager;
-
-            workers[worker_id]->async_worker_->set_rdma_store(store);
-            async_worker_threads.emplace_back(&NovaAsyncWorker::Start,
-                                              workers[worker_id]->async_worker_);
-            worker_threads.emplace_back(start, workers[worker_id]);
+            async_workers[worker_id]->log_manager_ = log_manager;
+            async_workers[worker_id]->set_rdma_store(store);
             buf += nrdmatotal_per_store;
+        }
+
+        // Assign async workers to conn workers.
+        if (NovaConfig::config->num_conn_workers <
+            NovaConfig::config->num_async_workers) {
+            int conn_worker_id = 0;
+            for (int worker_id = 0;
+                 worker_id <
+                 NovaConfig::config->num_async_workers; worker_id++) {
+                conn_workers[conn_worker_id]->async_workers_.push_back(
+                        async_workers[worker_id]);
+                conn_worker_id += 1;
+                conn_worker_id =
+                        conn_worker_id % NovaConfig::config->num_conn_workers;
+            }
+        } else {
+            int async_worker_id = 0;
+            for (int worker_id = 0;
+                 worker_id <
+                 NovaConfig::config->num_conn_workers; worker_id++) {
+                conn_workers[worker_id]->async_workers_.push_back(
+                        async_workers[async_worker_id]);
+                async_worker_id += 1;
+                async_worker_id =
+                        async_worker_id % NovaConfig::config->num_async_workers;
+            }
+        }
+
+
+        // Start the threads.
+        for (int worker_id = 0;
+             worker_id < NovaConfig::config->num_conn_workers; worker_id++) {
+            worker_threads.emplace_back(start, conn_workers[worker_id]);
+        }
+        for (int worker_id = 0;
+             worker_id < NovaConfig::config->num_async_workers; worker_id++) {
+            async_worker_threads.emplace_back(&NovaAsyncWorker::Start,
+                                              async_workers[worker_id]);
         }
 
 //    int cores[] = {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31};
@@ -268,12 +316,12 @@ namespace nova {
         make_socket_non_blocking(client_fd);
         RDMA_LOG(DEBUG) << "register " << client_fd;
 
-        NovaMemWorker *store = server->workers[server->current_store_id_];
-        if (NovaConfig::config->num_mem_workers == 1) {
+        NovaConnWorker *store = server->conn_workers[server->current_store_id_];
+        if (NovaConfig::config->num_conn_workers == 1) {
             server->current_store_id_ = 0;
         } else {
             server->current_store_id_ = (server->current_store_id_ + 1) %
-                                        NovaConfig::config->num_mem_workers;
+                                        NovaConfig::config->num_conn_workers;
         }
 
         store->conn_mu.lock();

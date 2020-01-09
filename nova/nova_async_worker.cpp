@@ -29,6 +29,92 @@ namespace nova {
         return size;
     }
 
+    void NovaAsyncWorker::ProcessPut(const nova::NovaAsyncTask &task) {
+        uint64_t hv = NovaConfig::keyhash(task.key.data(),
+                                          task.key.size());
+        leveldb::WriteOptions option;
+        option.sync = NovaConfig::config->fsync;
+        switch (NovaConfig::config->log_record_mode) {
+            case LOG_LOCAL:
+                option.local_write = true;
+                break;
+            case LOG_NIC:
+                option.local_write = false;
+                option.writer = nic_log_writer_;
+                break;
+            case LOG_RDMA:
+                option.local_write = false;
+                option.writer = rdma_log_writer_;
+                break;
+        }
+
+        Fragment *frag = NovaConfig::home_fragment(hv);
+        leveldb::DB *db = dbs_[frag->db_ids[0]];
+        if (!option.local_write) {
+            leveldb::WriteBatch batch;
+            batch.Put(task.key, task.value);
+            db->GenerateLogRecords(option, &batch);
+        }
+        leveldb::Status status = db->Put(option, task.key, task.value);
+        RDMA_LOG(DEBUG) << "############### Async worker processed task "
+                        << task.sock_fd
+                        << ":" << task.key;
+        RDMA_ASSERT(status.ok()) << status.ToString();
+
+        char *response_buf = task.conn->buf;
+        int nlen = 1;
+        int len = int_to_str(response_buf, nlen);
+        task.conn->response_buf = task.conn->buf;
+        task.conn->response_size = len + nlen;
+    }
+
+    void NovaAsyncWorker::ProcessGet(const nova::NovaAsyncTask &task) {
+        uint64_t hv = NovaConfig::keyhash(task.key.data(),
+                                          task.key.size());
+        Fragment *frag = NovaConfig::home_fragment(hv);
+        leveldb::DB *db = dbs_[frag->db_ids[0]];
+        std::string value;
+        leveldb::Status s = db->Get(
+                leveldb::ReadOptions(), task.key, &value);
+        RDMA_ASSERT(s.ok());
+        task.conn->response_buf = task.conn->buf;
+        char *response_buf = task.conn->response_buf;
+        task.conn->response_size =
+                nint_to_str(value.size()) + 1 + 1 + value.size();
+
+        response_buf += int_to_str(response_buf, value.size() + 1);
+        response_buf[0] = 'h';
+        response_buf += 1;
+        memcpy(response_buf, value.data(), value.size());
+        RDMA_ASSERT(
+                task.conn->response_size <
+                NovaConfig::config->max_msg_size);
+    }
+
+    void NovaAsyncWorker::ProcessReplicateLogRecords(
+            const nova::NovaAsyncTask &task) {
+        char *buf = task.conn->request_buf;
+        RDMA_ASSERT(buf[0] == RequestType::REPLICATE_LOG_RECORD) << buf;
+        buf++;
+        uint32_t logfilename_size = leveldb::DecodeFixed32(buf);
+        std::string logfile(buf + 4, logfilename_size);
+        buf += 4;
+        buf += logfilename_size;
+        uint32_t logrecord_size = leveldb::DecodeFixed32(buf);
+        buf += 4;
+
+        nic_log_writer_->AddLocalRecord(logfile,
+                                        leveldb::Slice(buf, logrecord_size));
+        char *response_buf = task.conn->buf;
+        leveldb::EncodeFixed32(response_buf, 1);
+        response_buf += 4;
+        response_buf[0] = RequestType::REPLICATE_LOG_RECORD_SUCC;
+        task.conn->response_buf = task.conn->buf;
+        task.conn->response_size = 5;
+        RDMA_ASSERT(
+                task.conn->response_size < NovaConfig::config->max_msg_size);
+    }
+
     int NovaAsyncWorker::ProcessQueue() {
         mutex_.Lock();
         if (queue_.empty()) {
@@ -38,37 +124,20 @@ namespace nova {
         std::list<NovaAsyncTask> queue(queue_.begin(), queue_.end());
         mutex_.Unlock();
 
-        for (const NovaAsyncTask &task : queue) {
-            uint64_t hv = NovaConfig::keyhash(task.key.data(),
-                                              task.key.size());
-            leveldb::WriteOptions option;
-            option.sync = NovaConfig::config->fsync;
-            switch (NovaConfig::config->log_record_mode) {
-                case LOG_LOCAL:
-                    option.local_write = true;
-                    break;
-                case LOG_NIC:
-                    option.local_write = false;
-                    option.writer = nic_log_writer_;
-                    break;
-                case LOG_RDMA:
-                    option.local_write = false;
-                    option.writer = rdma_log_writer_;
-                    break;
-            }
 
-            Fragment *frag = NovaConfig::home_fragment(hv);
-            leveldb::DB *db = dbs_[frag->db_ids[0]];
-            if (!option.local_write) {
-                leveldb::WriteBatch batch;
-                batch.Put(task.key, task.value);
-                db->GenerateLogRecords(option, &batch);
+        for (const NovaAsyncTask &task : queue) {
+            switch (task.type) {
+                case RequestType::PUT:
+                    ProcessPut(task);
+                    break;
+                case RequestType::GET:
+                    ProcessGet(task);
+                    break;
+                case RequestType::REPLICATE_LOG_RECORD:
+                    ProcessReplicateLogRecords(task);
+                    break;
             }
-            leveldb::Status status = db->Put(option, task.key, task.value);
-            RDMA_LOG(DEBUG) << "############### Async worker processed task "
-                            << task.sock_fd
-                            << ":" << task.key;
-            RDMA_ASSERT(status.ok()) << status.ToString();
+            conn_workers_[task.conn_worker_id] = true;
         }
 
         mutex_.Lock();
@@ -78,18 +147,28 @@ namespace nova {
         queue_.erase(begin, end);
         mutex_.Unlock();
 
-        cq_->mutex.Lock();
-        for (const NovaAsyncTask &task : queue) {
-            NovaAsyncCompleteTask t;
-            t.sock_fd = task.sock_fd;
-            t.conn = task.conn;
-            cq_->queue.push_back(t);
-        }
-        cq_->mutex.Unlock();
+        for (int i = 0; i < NovaConfig::config->num_conn_workers; i++) {
+            if (!conn_workers_[i]) {
+                continue;
+            }
+            conn_workers_[i] = false;
+            cqs_[i]->mutex.Lock();
+            for (const NovaAsyncTask &task : queue) {
+                if (task.conn_worker_id != i) {
+                    continue;
+                }
+                NovaAsyncCompleteTask t = {
+                        .sock_fd = task.sock_fd,
+                        .conn = task.conn
+                };
+                cqs_[i]->queue.push_back(t);
+            }
+            cqs_[i]->mutex.Unlock();
 
-        char buf[1];
-        buf[0] = 'a';
-        RDMA_ASSERT(write(cq_->write_fd, buf, 1) == 1);
+            char buf[1];
+            buf[0] = 'a';
+            RDMA_ASSERT(write(cqs_[i]->write_fd, buf, 1) == 1);
+        }
         return queue.size();
     }
 
@@ -146,13 +225,14 @@ namespace nova {
                     timeout = RDMA_POLL_MIN_TIMEOUT_US;
                 }
             } else {
-                timespec t = {
-                        .tv_sec = 1,
-                        .tv_nsec  = 0
-                };
-                if (sem_timedwait(&sem_, &t) != 0 && errno != ETIMEDOUT) {
-                    RDMA_LOG(ERROR) << "sem_wait error " << strerror(errno);
-                }
+                sem_wait(&sem_);
+//                timespec t = {
+//                        .tv_sec = 1,
+//                        .tv_nsec  = 0
+//                };
+//                if (sem_timedwait(&sem_, &t) != 0 && errno != ETIMEDOUT) {
+//                    RDMA_LOG(ERROR) << "sem_wait error " << strerror(errno);
+//                }
                 ProcessQueue();
             }
         }
@@ -173,7 +253,7 @@ namespace nova {
 //        RDMA_ASSERT(to_sock_fd < NOVA_MAX_CONN) << to_sock_fd;
 //        uint64_t hash = NovaConfig::keyhash(key, nkey);
 //        Connection *conn = nova_conns[to_sock_fd];
-//        NovaMemWorker *worker = (NovaMemWorker *) conn->worker;
+//        NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
 //
 //        char *databuf = buf + req_len;
 //        bool invalid = false;

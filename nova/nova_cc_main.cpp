@@ -40,6 +40,9 @@ DEFINE_string(persist_log_records_mode, "", "local/rdma/nic");
 DEFINE_uint64(write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint32(log_buf_size, 0, "log buffer size");
 DEFINE_string(sstable_mode, "disk", "sstable mode");
+DEFINE_uint32(num_async_workers, 0, "Number of async worker threads.");
+DEFINE_uint32(num_compaction_workers, 0,
+              "Number of compaction worker threads.");
 
 DEFINE_string(profiler_file_path, "", "profiler file path.");
 DEFINE_string(servers, "localhost:11211", "A list of peer servers");
@@ -48,7 +51,7 @@ DEFINE_uint64(recordcount, 0, "Number of records.");
 DEFINE_string(data_partition_alg, "hash",
               "Data partition algorithm: hash, range, debug.");
 
-DEFINE_uint64(num_mem_workers, 0, "Number of worker threads.");
+DEFINE_uint64(num_conn_workers, 0, "Number of connection threads.");
 DEFINE_uint64(cache_size_gb, 0, " Cache size in GB.");
 DEFINE_uint64(use_fixed_value_size, 0, "Fixed value size.");
 DEFINE_uint64(index_size_mb, 0, "Index size in MB.");
@@ -92,7 +95,6 @@ namespace {
                 return 1;
             }
             return 0;
-            return 0;
         }
 
         // Ignore the following methods for now:
@@ -109,7 +111,8 @@ void start(NovaMemServer *server) {
     server->Start();
 }
 
-leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache) {
+leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
+                            const std::vector<leveldb::EnvBGThread *> &bg_threads) {
     leveldb::EnvOptions env_option;
     if (FLAGS_sstable_mode == "disk") {
         env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
@@ -130,6 +133,7 @@ leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache) {
     options.create_if_missing = true;
     options.compression = leveldb::kSnappyCompression;
     options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+    options.bg_threads = bg_threads;
     if (NovaConfig::config->profiler_file_path.empty()) {
         options.enable_tracing = false;
     } else {
@@ -166,13 +170,21 @@ int main(int argc, char *argv[]) {
     if (FLAGS_server_id == -1) {
         exit(0);
     }
+    std::vector<gflags::CommandLineFlagInfo> flags;
+    gflags::GetAllFlags(&flags);
+    for (const auto &flag : flags) {
+        printf("%s=%s\n", flag.name.c_str(),
+               flag.current_value.c_str());
+    }
+
+
     // data
     NovaConfig::config = new NovaConfig();
     NovaConfig::config->my_server_id = FLAGS_server_id;
     std::string servers = FLAGS_servers;
     printf("Servers %s\n", servers.c_str());
     NovaConfig::config->servers = convert_hosts(servers);
-    NovaConfig::config->num_mem_workers = FLAGS_num_mem_workers;
+    NovaConfig::config->num_conn_workers = FLAGS_num_conn_workers;
     NovaConfig::config->recordcount = FLAGS_recordcount;
     NovaConfig::config->cache_size_gb = FLAGS_cache_size_gb;
     NovaConfig::config->load_default_value_size = FLAGS_use_fixed_value_size;
@@ -202,6 +214,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->profiler_file_path = FLAGS_profiler_file_path;
     NovaConfig::config->fsync = FLAGS_write_sync;
     NovaConfig::config->log_buf_size = FLAGS_log_buf_size;
+    NovaConfig::config->num_async_workers = FLAGS_num_async_workers;
 
     if (FLAGS_persist_log_records_mode == "local") {
         NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_LOCAL;
@@ -232,7 +245,7 @@ int main(int argc, char *argv[]) {
     uint64_t nrdmatotal = (NovaConfig::config->rdma_max_num_sends * 2) *
                           NovaConfig::config->max_msg_size *
                           NovaConfig::config->servers.size() *
-                          NovaConfig::config->num_mem_workers;
+                          NovaConfig::config->num_conn_workers;
     uint64_t ntotal = nrdmatotal;
     NovaConfig::config->index_buf_offset = ntotal;
     ntotal += NovaConfig::config->index_size_mb * 1024 * 1024;
@@ -256,8 +269,18 @@ int main(int argc, char *argv[]) {
     int ndbs = NovaConfig::config->ParseNumberOfDatabases(
             NovaConfig::config->my_server_id);
     std::vector<leveldb::DB *> dbs;
+
+    int bg_thread_id = 0;
+    std::vector<leveldb::EnvBGThread *> bgs;
+    for (int i = 0; i < FLAGS_num_compaction_workers; i++) {
+        bgs.push_back(new leveldb::PosixEnvBGThread);
+    }
     for (int db_index = 0; db_index < ndbs; db_index++) {
-        dbs.push_back(CreateDatabase(db_index, cache));
+        std::vector<leveldb::EnvBGThread *> bg_threads;
+        bg_threads.push_back(bgs[bg_thread_id]);
+        dbs.push_back(CreateDatabase(db_index, cache, bg_threads));
+        bg_thread_id += 1;
+        bg_thread_id %= bgs.size();
     }
     auto *mem_server = new NovaMemServer(dbs, buf, port);
     mem_server->Start();

@@ -157,7 +157,8 @@ namespace leveldb {
               background_compaction_scheduled_(false),
               manual_compaction_(nullptr),
               versions_(new VersionSet(dbname_, &options_, table_cache_,
-                                       &internal_comparator_)) {
+                                       &internal_comparator_)),
+              bg_threads_(raw_options.bg_threads) {
     }
 
     DBImpl::~DBImpl() {
@@ -695,6 +696,13 @@ namespace leveldb {
         }
     }
 
+    void DBImpl::Schedule(void (*function)(void *arg), void *arg) {
+        mutex_.AssertHeld();
+        bg_threads_[current_bg_thread_id_]->Schedule(function, arg);
+        current_bg_thread_id_ += 1;
+        current_bg_thread_id_ %= bg_threads_.size();
+    }
+
     void DBImpl::MaybeScheduleCompaction() {
         mutex_.AssertHeld();
         if (background_compaction_scheduled_) {
@@ -708,7 +716,7 @@ namespace leveldb {
             // No work to be done
         } else {
             background_compaction_scheduled_ = true;
-            env_->Schedule(&DBImpl::BGWork, this);
+            Schedule(&DBImpl::BGWork, this);
             Log(options_.info_log, "BG: Schedule compaction.");
         }
     }
@@ -896,6 +904,8 @@ namespace leveldb {
         if (s.ok()) {
             s = compact->outfile->Close();
         }
+
+        // TODO: RDMA Write the output file to DC.
         delete compact->outfile;
         compact->outfile = nullptr;
 

@@ -55,6 +55,8 @@ namespace leveldb {
             delete file;
             file = nullptr;
 
+            // TODO: RDMA WRITE TO DC.
+
             if (s.ok()) {
                 // Verify that the table is usable
                 Iterator *it = table_cache->NewIterator(

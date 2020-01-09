@@ -32,7 +32,7 @@ namespace rdmaio {
  * convert qp idx(node,worker,idx) -> key
  */
     inline uint32_t get_rc_key(const QPIdx idx) {
-        // 2^10 (1024) workers. 2^6 (64) nodes. 2^16 (65536) qps per worker
+        // 2^10 (1024) conn_workers. 2^6 (64) nodes. 2^16 (65536) qps per worker
         return static_cast<uint32_t>(static_cast<uint32_t>(idx.node_id) << 26) |
                (static_cast<uint32_t>(idx.worker_id) << 16) |
                static_cast<uint32_t>(idx.index);

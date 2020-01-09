@@ -312,6 +312,11 @@ namespace nova {
         int port;
     };
 
+    struct QPEndPoint {
+        Host host;
+        uint32_t thread_id;
+    };
+
     Host convert_host(string host_str);
 
     vector<Host> convert_hosts(string hosts_str);

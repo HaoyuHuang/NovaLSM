@@ -775,10 +775,6 @@ namespace leveldb {
     }
 
 
-    void PosixEnv::BackgroundThreadEntryPoint(PosixEnv *env) {
-        env->BackgroundThreadMain();
-    }
-
 // Return the maximum number of concurrent mmaps.
     int MaxMmaps() { return g_mmap_limit; }
 
@@ -801,23 +797,22 @@ namespace leveldb {
     }
 
     PosixEnv::PosixEnv()
-            : background_work_cv_(&background_work_mutex_),
-              started_background_thread_(false),
-              mmap_limiter_(MaxMmaps()),
-              fd_limiter_(MaxOpenFiles()) {}
+            :
+            mmap_limiter_(MaxMmaps()),
+            fd_limiter_(MaxOpenFiles()) {}
 
-    void PosixEnv::Schedule(
+
+    PosixEnvBGThread::PosixEnvBGThread() : background_work_cv_(
+            &background_work_mutex_) {
+        std::thread background_thread(&PosixEnvBGThread::BackgroundThreadMain,
+                                      this);
+        background_thread.detach();
+    }
+
+    void PosixEnvBGThread::Schedule(
             void (*background_work_function)(void *background_work_arg),
             void *background_work_arg) {
         background_work_mutex_.Lock();
-
-        // Start the background thread, if we haven't done so already.
-        if (!started_background_thread_) {
-            started_background_thread_ = true;
-            std::thread background_thread(PosixEnv::BackgroundThreadEntryPoint,
-                                          this);
-            background_thread.detach();
-        }
 
         // If the queue is empty, the background thread may be waiting for work.
         if (background_work_queue_.empty()) {
@@ -829,7 +824,7 @@ namespace leveldb {
         background_work_mutex_.Unlock();
     }
 
-    void PosixEnv::BackgroundThreadMain() {
+    void PosixEnvBGThread::BackgroundThreadMain() {
         std::cout << "BG thread started" << std::endl;
         while (true) {
             background_work_mutex_.Lock();

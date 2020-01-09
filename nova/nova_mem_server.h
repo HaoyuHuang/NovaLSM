@@ -12,10 +12,11 @@
 #include "nova_mem_config.h"
 #include "nova_rdma_store.h"
 #include "nova_rdma_rc_store.h"
+#include "nova_async_worker.h"
 #include "leveldb/db.h"
 
 namespace nova {
-    class NovaMemWorker;
+    class NovaConnWorker;
 
     class NovaMemServer {
     public:
@@ -37,7 +38,9 @@ namespace nova {
         std::vector<leveldb::DB *> dbs_;
         NovaMemManager *manager;
         LogFileManager *log_manager;
-        NovaMemWorker **workers;
+        NovaConnWorker **conn_workers;
+        NovaAsyncWorker **async_workers;
+
         struct event_base *base;
         int current_store_id_;
         vector<thread> worker_threads;

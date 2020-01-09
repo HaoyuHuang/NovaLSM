@@ -89,7 +89,7 @@ namespace leveldb {
         };
 
         RunState state;
-        env_->Schedule(&RunState::Run, &state);
+//        env_->Schedule(&RunState::Run, &state);
 
         MutexLock l(&state.mu);
         while (!state.called) {
@@ -126,10 +126,10 @@ namespace leveldb {
         Callback callback2(&state, 2);
         Callback callback3(&state, 3);
         Callback callback4(&state, 4);
-        env_->Schedule(&Callback::Run, &callback1);
-        env_->Schedule(&Callback::Run, &callback2);
-        env_->Schedule(&Callback::Run, &callback3);
-        env_->Schedule(&Callback::Run, &callback4);
+//        env_->Schedule(&Callback::Run, &callback1);
+//        env_->Schedule(&Callback::Run, &callback2);
+//        env_->Schedule(&Callback::Run, &callback3);
+//        env_->Schedule(&Callback::Run, &callback4);
 
         MutexLock l(&state.mu);
         while (state.last_id != 4) {

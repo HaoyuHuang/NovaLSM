@@ -202,6 +202,12 @@ target_sources(leveldb
         "util/env_mem.cc"
         "util/env_mem.h"
         "util/env_posix.h"
+        "dc/dc.cpp"
+        "dc/dc.h"
+        "dc/dc_client.cpp"
+        "dc/dc_client.h"
+        "dc/rdma_dc.cpp"
+        "dc/rdma_dc.h"
 
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
@@ -556,15 +562,24 @@ set(NOVA_SOURCES
         log/nova_log.cpp
         log/nova_log.h
         log/rdma_log_writer.cc
-        log/rdma_log_writer.h log/nic_log_writer.cpp log/nic_log_writer.h nova/nova_client_sock.cpp nova/nova_client_sock.h nova/nova_async_worker.cpp nova/nova_async_worker.h)
+        log/rdma_log_writer.h
+        log/nic_log_writer.cpp
+        log/nic_log_writer.h
+        nova/nova_client_sock.cpp
+        nova/nova_client_sock.h
+        nova/nova_async_worker.cpp
+        nova/nova_async_worker.h
+        )
 
 
 add_library(libnova STATIC ${NOVA_SOURCES})
 set_target_properties(libnova PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(libnova -lpthread ibverbs event leveldb)
 
-add_executable(nova_mem_server "nova/nova_main.cpp")
+add_executable(nova_cc "nova/nova_cc_main.cpp")
 add_executable(nova_test "mc/nova_test.cpp")
+add_executable(nova_dc "nova/nova_dc_main.cpp")
 
-target_link_libraries(nova_mem_server libnova -lgflags leveldb)
+target_link_libraries(nova_cc libnova -lgflags leveldb)
 target_link_libraries(nova_test libnova -lgflags leveldb)
+target_link_libraries(nova_dc libnova -lgflags leveldb)

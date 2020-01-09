@@ -17,11 +17,10 @@ namespace nova {
                        << " initializing";
         RdmaCtrl::DevIdx idx{.dev_id = 0, .port_id = 1}; // using the first RNIC's first port
         char *cache_buf = NovaConfig::config->nova_buf;
-        int num_servers = NovaConfig::config->servers.size();
+        int num_servers = end_points_.size();
         int max_num_sends = NovaConfig::config->rdma_max_num_sends;
         int max_num_wrs = max_num_sends;
         int my_server_id = NovaConfig::config->my_server_id;
-
         uint64_t my_memory_id = my_server_id;
 
         open_device_mutex.lock();
@@ -44,15 +43,16 @@ namespace nova {
             if (peer_sid == my_server_id) {
                 continue;
             }
-            Host peer_store = NovaConfig::config->servers[peer_sid];
+            QPEndPoint peer_store = end_points_[peer_sid];
             QPIdx my_rc_key = create_rc_idx(my_server_id, thread_id_, peer_sid);
-            QPIdx peer_rc_key = create_rc_idx(peer_sid, thread_id_,
+            QPIdx peer_rc_key = create_rc_idx(peer_sid, peer_store.thread_id,
                                               my_server_id);
             uint64_t peer_memory_id = static_cast<uint64_t >(peer_sid);
             RDMA_LOG(INFO) << "rdma-rc[" << thread_id_
                            << "]: get server memory id "
                            << peer_memory_id << " from "
-                           << peer_store.ip << ":" << peer_store.port;
+                           << peer_store.host.ip << ":" << peer_store.host.port
+                           << ":" << peer_store.thread_id;
             MemoryAttr local_mr = NovaConfig::rdma_ctrl->get_local_mr(
                     my_memory_id);
             ibv_cq *cq = NovaConfig::rdma_ctrl->create_cq(
@@ -65,7 +65,7 @@ namespace nova {
                                                                 cq, recv_cq);
             // get remote server's memory information
             MemoryAttr remote_mr;
-            while (QP::get_remote_mr(peer_store.ip,
+            while (QP::get_remote_mr(peer_store.host.ip,
                                      NovaConfig::config->rdma_port,
                                      peer_memory_id, &remote_mr) != SUCC) {
                 usleep(CONN_SLEEP);
@@ -73,16 +73,18 @@ namespace nova {
             qp_[peer_sid]->bind_remote_mr(remote_mr);
             RDMA_LOG(INFO) << "rdma-rc[" << thread_id_
                            << "]: connect to server "
-                           << peer_store.ip << ":" << peer_store.port;
+                           << peer_store.host.ip << ":" << peer_store.host.port
+                           << ":" << peer_store.thread_id;
             // bind to the previous allocated mr
-            while (qp_[peer_sid]->connect(peer_store.ip,
+            while (qp_[peer_sid]->connect(peer_store.host.ip,
                                           NovaConfig::config->rdma_port,
                                           peer_rc_key) != SUCC) {
                 usleep(CONN_SLEEP);
             }
             RDMA_LOG(INFO) << "rdma-rc[" << thread_id_
                            << "]: connected to server "
-                           << peer_store.ip << ":" << peer_store.port;
+                           << peer_store.host.ip << ":" << peer_store.host.port
+                           << ":" << peer_store.thread_id;
 
             for (int i = 0; i < max_num_sends; i++) {
                 PostRecv(peer_sid, i);

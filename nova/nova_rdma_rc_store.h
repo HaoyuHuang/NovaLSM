@@ -19,15 +19,18 @@ namespace nova {
     // Thread local. One thread has one RDMA RC Store.
     class NovaRDMARCStore : public NovaRDMAStore {
     public:
-        NovaRDMARCStore(char *buf, int thread_id, NovaMsgCallback *callback) :
+        NovaRDMARCStore(char *buf, int thread_id,
+                        const std::vector<QPEndPoint> &end_points,
+                        NovaMsgCallback *callback) :
                 rdma_buf_(buf),
                 thread_id_(thread_id),
+                end_points_(end_points),
                 callback_(callback) {
             RDMA_LOG(INFO) << "rc[" << thread_id << "]: " << "create rdma";
             int max_num_sends = NovaConfig::config->rdma_max_num_sends;
             int max_num_wrs = max_num_sends;
             int max_msg_size = NovaConfig::config->max_msg_size;
-            int num_servers = NovaConfig::config->servers.size();
+            int num_servers = end_points_.size();
             int doorbell_batch_size = NovaConfig::config->rdma_doorbell_batch_size;
 
             wcs_ = (ibv_wc *) malloc(max_num_wrs * sizeof(ibv_wc));
@@ -112,6 +115,7 @@ namespace nova {
                           uint64_t local_offset,
                           uint64_t remote_addr, bool is_offset);
 
+        std::vector<QPEndPoint> end_points_;
         int thread_id_;
         char *rdma_buf_;
 

@@ -30,6 +30,8 @@ namespace leveldb {
 // A Table is a sorted map from strings to strings.  Tables are
 // immutable and persistent.  A Table may be safely accessed from
 // multiple threads without external synchronization.
+// TODO: Create a new Table reader for CC to fetch the Table from DC.
+//
     class LEVELDB_EXPORT Table {
     public:
         struct Rep;

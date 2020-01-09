@@ -235,6 +235,40 @@ namespace leveldb {
         std::set<std::string> locked_files_ GUARDED_BY(mu_);
     };
 
+    class PosixEnvBGThread : public EnvBGThread {
+    public:
+        PosixEnvBGThread();
+
+        void Schedule(
+                void (*background_work_function)(void *background_work_arg),
+                void *background_work_arg) override;
+
+    private:
+        void BackgroundThreadMain();
+
+        // Stores the work item data in a Schedule() call.
+        //
+        // Instances are constructed on the thread calling Schedule() and used on the
+        // background thread.
+        //
+        // This structure is thread-safe beacuse it is immutable.
+        struct BackgroundWorkItem {
+            explicit BackgroundWorkItem(void (*function)(void *arg),
+                                        void *arg)
+                    : function(function), arg(arg) {}
+
+            void (*const function)(void *);
+
+            void *const arg;
+        };
+
+        port::Mutex background_work_mutex_;
+        port::CondVar background_work_cv_ GUARDED_BY(
+                background_work_mutex_);
+        std::queue<BackgroundWorkItem> background_work_queue_
+        GUARDED_BY(background_work_mutex_);
+    };
+
     class PosixEnv : public Env {
     public:
         PosixEnv();
@@ -276,10 +310,6 @@ namespace leveldb {
 
         Status UnlockFile(FileLock *lock) override;
 
-        void Schedule(
-                void (*background_work_function)(void *background_work_arg),
-                void *background_work_arg) override;
-
         void StartThread(void (*thread_main)(void *thread_main_arg),
                          void *thread_main_arg) override;
 
@@ -298,34 +328,6 @@ namespace leveldb {
         void DeleteFileInternal(const std::string &path);
 
         bool HasMemSSTables();
-
-        void BackgroundThreadMain();
-
-        static void BackgroundThreadEntryPoint(PosixEnv *env);
-
-        // Stores the work item data in a Schedule() call.
-        //
-        // Instances are constructed on the thread calling Schedule() and used on the
-        // background thread.
-        //
-        // This structure is thread-safe beacuse it is immutable.
-        struct BackgroundWorkItem {
-            explicit BackgroundWorkItem(void (*function)(void *arg),
-                                        void *arg)
-                    : function(function), arg(arg) {}
-
-            void (*const function)(void *);
-
-            void *const arg;
-        };
-
-        port::Mutex background_work_mutex_;
-        port::CondVar background_work_cv_ GUARDED_BY(
-                background_work_mutex_);
-        bool started_background_thread_ GUARDED_BY(background_work_mutex_);
-
-        std::queue<BackgroundWorkItem> background_work_queue_
-        GUARDED_BY(background_work_mutex_);
 
         PosixLockTable locks_;  // Thread-safe.
         Limiter mmap_limiter_;  // Thread-safe.

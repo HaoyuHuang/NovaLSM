@@ -26,6 +26,8 @@ namespace nova {
 #define RDMA_POLL_MAX_TIMEOUT_US 10000
 
     struct NovaAsyncTask {
+        RequestType type;
+        int conn_worker_id;
         std::string key;
         std::string value;
         int sock_fd;
@@ -48,8 +50,9 @@ namespace nova {
     class NovaAsyncWorker : public NovaMsgCallback {
     public:
         NovaAsyncWorker(const std::vector<leveldb::DB *> &dbs,
-                        NovaAsyncCompleteQueue *cq) : dbs_(dbs), cq_(cq) {
+                        NovaAsyncCompleteQueue **cqs) : dbs_(dbs), cqs_(cqs) {
             sem_init(&sem_, 0, 0);
+            conn_workers_ = new bool[NovaConfig::config->num_conn_workers];
         }
 
         bool IsInitialized();
@@ -73,6 +76,12 @@ namespace nova {
         std::vector<NovaClientSock *> socks_;
 
     private:
+        void ProcessGet(const NovaAsyncTask &task);
+
+        void ProcessPut(const NovaAsyncTask &task);
+
+        void ProcessReplicateLogRecords(const NovaAsyncTask &task);
+
         int ProcessQueue();
 
 //        void ProcessRDMAREAD(int remote_server_id, char *buf);
@@ -98,7 +107,8 @@ namespace nova {
         std::vector<leveldb::DB *> dbs_;
         leveldb::port::Mutex mutex_;
         std::list<NovaAsyncTask> queue_;
-        NovaAsyncCompleteQueue *cq_;
+        NovaAsyncCompleteQueue **cqs_;
+        bool *conn_workers_;
     };
 }
 

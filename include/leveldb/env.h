@@ -71,6 +71,17 @@ namespace leveldb {
         NovaSSTableMode sstable_mode;
     };
 
+    class LEVELDB_EXPORT EnvBGThread {
+    public:
+        // Arrange to run "(*function)(arg)" once in a background thread.
+        //
+        // "function" may run in an unspecified thread.  Multiple functions
+        // added to the same Env may run concurrently in different threads.
+        // I.e., the caller may not assume that background work items are
+        // serialized.
+        virtual void Schedule(void (*function)(void *arg), void *arg) = 0;
+    };
+
     class LEVELDB_EXPORT Env {
     public:
         Env() = default;
@@ -181,14 +192,6 @@ namespace leveldb {
         // REQUIRES: lock was returned by a successful LockFile() call
         // REQUIRES: lock has not already been unlocked.
         virtual Status UnlockFile(FileLock *lock) = 0;
-
-        // Arrange to run "(*function)(arg)" once in a background thread.
-        //
-        // "function" may run in an unspecified thread.  Multiple functions
-        // added to the same Env may run concurrently in different threads.
-        // I.e., the caller may not assume that background work items are
-        // serialized.
-        virtual void Schedule(void (*function)(void *arg), void *arg) = 0;
 
         // Start a new thread, invoking "function(arg)" within the new thread.
         // When "function(arg)" returns, the thread will be destroyed.
@@ -407,10 +410,6 @@ namespace leveldb {
 
         Status UnlockFile(FileLock *l) override {
             return target_->UnlockFile(l);
-        }
-
-        void Schedule(void (*f)(void *), void *a) override {
-            return target_->Schedule(f, a);
         }
 
         void StartThread(void (*f)(void *), void *a) override {

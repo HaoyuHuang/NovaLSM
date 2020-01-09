@@ -52,6 +52,7 @@ namespace leveldb {
             char *AllocateLogBuf(const std::string &log_file);
 
         private:
+
             struct LogFileBuf {
                 char *base;
                 uint32_t size;
@@ -62,6 +63,7 @@ namespace leveldb {
             nova::NovaMemManager *mem_manager_;
             nova::LogFileManager *log_manager_;
             std::map<std::string, LogFileBuf> logfile_last_buf_;
+            std::mutex mutex_;
         };
 
     }  // namespace log

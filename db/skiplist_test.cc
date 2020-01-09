@@ -361,7 +361,7 @@ namespace leveldb {
                 fprintf(stderr, "Run %d of %d\n", i, N);
             }
             TestState state(seed + 1);
-            Env::Default()->Schedule(ConcurrentReader, &state);
+//            Env::Default()->Schedule(ConcurrentReader, &state);
             state.Wait(TestState::RUNNING);
             for (int i = 0; i < kSize; i++) {
                 state.t_.WriteStep(&rnd);
