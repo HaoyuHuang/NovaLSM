@@ -10,35 +10,40 @@
 #include "rdma_ctrl.hpp"
 
 namespace nova {
+    using namespace rdmaio;
+
     class NovaRDMAStore {
     public:
-        virtual void Init() = 0;
+        virtual void Init(RdmaCtrl *rdma_ctrl) = 0;
 
-        virtual void PostRead(char *localbuf, uint32_t size, int server_id,
-                              uint64_t local_offset,
-                              uint64_t remote_addr, bool is_offset) = 0;
+        virtual uint64_t PostRead(char *localbuf, uint32_t size, int server_id,
+                                  uint64_t local_offset,
+                                  uint64_t remote_addr, bool is_offset) = 0;
 
-        virtual void PostSend(char *localbuf, uint32_t size, int server_id) = 0;
+        virtual uint64_t
+        PostSend(const char *localbuf, uint32_t size, int server_id,
+                 uint32_t imm_data) = 0;
 
-        virtual void PostWrite(char *localbuf, uint32_t size, int server_id,
-                               uint64_t remote_offset,
-                               bool is_remote_offset) = 0;
+        virtual uint64_t
+        PostWrite(const char *localbuf, uint32_t size, int server_id,
+                  uint64_t remote_offset,
+                  bool is_remote_offset, uint32_t imm_data) = 0;
 
         virtual void FlushPendingSends() = 0;
 
         virtual void FlushPendingSends(int peer_sid) = 0;
 
-        virtual void PollSQ(int peer_sid) = 0;
+        virtual uint32_t PollSQ(int peer_sid) = 0;
 
-        virtual void PollSQ() = 0;
+        virtual uint32_t PollSQ() = 0;
 
         virtual void PostRecv(int peer_sid, int recv_buf_index) = 0;
 
         virtual void FlushPendingRecvs() = 0;
 
-        virtual void PollRQ() = 0;
+        virtual uint32_t PollRQ() = 0;
 
-        virtual void PollRQ(int peer_sid) = 0;
+        virtual uint32_t PollRQ(int peer_sid) = 0;
 
         virtual char *GetSendBuf() = 0;
 
@@ -49,32 +54,34 @@ namespace nova {
 
 
     class NovaRDMANoopStore : public NovaRDMAStore {
-        void Init() {};
+        void Init(RdmaCtrl *rdma_ctrl) {};
 
-        void PostRead(char *localbuf, uint32_t size, int server_id,
-                      uint64_t local_offset,
-                      uint64_t remote_addr, bool is_offset) {}
+        uint64_t PostRead(char *localbuf, uint32_t size, int server_id,
+                          uint64_t local_offset,
+                          uint64_t remote_addr, bool is_offset) { return 0; }
 
-        void PostSend(char *localbuf, uint32_t size, int server_id) {}
+        uint64_t PostSend(const char *localbuf, uint32_t size, int server_id,
+                          uint32_t imm_data) { return 0; }
 
-        void PostWrite(char *localbuf, uint32_t size, int server_id,
-                       uint64_t remote_offset, bool is_remote_offset) {}
+        uint64_t PostWrite(const char *localbuf, uint32_t size, int server_id,
+                           uint64_t remote_offset, bool is_remote_offset,
+                           uint32_t imm_data) { return 0; }
 
         void FlushPendingSends(int peer_sid) {}
 
         void FlushPendingSends() {}
 
-        void PollSQ(int peer_sid) {}
+        uint32_t PollSQ(int peer_sid) { return 0; }
 
-        void PollSQ() {}
+        uint32_t PollSQ() { return 0; }
 
         void PostRecv(int peer_sid, int recv_buf_index) {}
 
         void FlushPendingRecvs() {}
 
-        void PollRQ() {}
+        uint32_t PollRQ() { return 0; }
 
-        void PollRQ(int peer_sid) {}
+        uint32_t PollRQ(int peer_sid) { return 0; }
 
         char *GetSendBuf() { return NULL; }
 

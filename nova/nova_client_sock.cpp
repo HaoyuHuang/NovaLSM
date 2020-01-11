@@ -5,7 +5,7 @@
 //
 
 #include "nova_client_sock.h"
-#include "nova_mem_config.h"
+#include "nova_config.h"
 
 namespace nova {
 

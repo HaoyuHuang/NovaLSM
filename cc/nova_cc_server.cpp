@@ -7,25 +7,26 @@
 #include <netinet/tcp.h>
 #include <signal.h>
 #include <leveldb/write_batch.h>
-#include "nova_mem_server.h"
+#include "nova_cc_server.h"
 
 namespace nova {
 
-    void start(NovaConnWorker *store) {
+    void start(NovaCCConnWorker *store) {
         store->Start();
     }
 
-    void NovaMemServer::LoadDataWithRangePartition() {
+    void NovaCCServer::LoadDataWithRangePartition() {
         // load data.
         timeval start{};
         gettimeofday(&start, nullptr);
         int loaded_keys = 0;
-        Fragment **frags = NovaConfig::config->fragments;
+        std::vector<Fragment *> &frags = NovaCCConfig::cc_config->fragments;
         leveldb::WriteOptions option;
-        option.sync = NovaConfig::config->fsync;
+        option.sync = true;
 
-        for (int i = 0; i < NovaConfig::config->nfragments; i++) {
-            if (frags[i]->server_ids[0] != NovaConfig::config->my_server_id) {
+        for (int i = 0; i < frags.size(); i++) {
+            if (frags[i]->server_ids[0] !=
+                NovaCCConfig::cc_config->my_cc_server_id) {
                 continue;
             }
             leveldb::WriteBatch batch;
@@ -106,68 +107,8 @@ namespace nova {
 //        }
     }
 
-    void NovaMemServer::LoadDataWithHashPartition() {
-        char key[1024];
-        char value[NovaConfig::config->load_default_value_size];
-        // load data.
-        timeval start{};
-        gettimeofday(&start, nullptr);
-        int loaded_keys = 0;
-        for (uint64_t record_id = 0;
-             record_id < NovaConfig::config->recordcount; record_id++) {
-            Fragment *frag = NovaConfig::home_fragment(record_id);
-            if (frag->server_ids[0] == NovaConfig::config->my_server_id) {
-                uint32_t nkey = int_to_str(key, record_id) - 1;
-                auto v = static_cast<char>((record_id % 26) + 'a');
-                memset(value, v, NovaConfig::config->load_default_value_size);
-                RDMA_LOG(DEBUG) << "Insert " << record_id;
-                RDMA_ASSERT(manager->LocalPut(key, nkey, value,
-                                              NovaConfig::config->load_default_value_size,
-                                              true, false).success);
-                loaded_keys++;
-                if (loaded_keys % 100000 == 0) {
-                    timeval now{};
-                    gettimeofday(&now, nullptr);
-                    RDMA_LOG(INFO) << "Load " << loaded_keys << " entries took "
-                                   << now.tv_sec - start.tv_sec;
-                }
-            }
-        }
-
-        RDMA_LOG(INFO) << "Completed loading data " << loaded_keys;
-        // Assert the loaded data is valid.
-        for (uint64_t record_id = 0;
-             record_id < NovaConfig::config->recordcount; record_id++) {
-            Fragment *frag = NovaConfig::home_fragment(record_id);
-            if (frag->server_ids[0] == NovaConfig::config->my_server_id) {
-                uint32_t nkey = int_to_str(key, record_id) - 1;
-                auto v = static_cast<char>((record_id % 26) + 'a');
-                memset(value, v, NovaConfig::config->load_default_value_size);
-                GetResult result = manager->LocalGet(key, nkey);
-                DataEntry it = result.data_entry;
-                RDMA_ASSERT(it.stale == 0);
-                RDMA_ASSERT(it.nkey == nkey) << key << " " << it.nkey;
-                RDMA_ASSERT(
-                        it.nval == NovaConfig::config->load_default_value_size)
-                    << key;
-                RDMA_ASSERT(memcmp(it.user_key(), key, nkey) == 0) << key;
-                RDMA_ASSERT(
-                        memcmp(it.user_value(), value, it.nval) ==
-                        0) << key;
-            }
-        }
-    }
-
-    void NovaMemServer::LoadData() {
-        if (NovaConfig::config->partition_mode == NovaRDMAPartitionMode::HASH) {
-//        LoadDataWithHashPartition();
-        } else if (NovaConfig::config->partition_mode ==
-                   NovaRDMAPartitionMode::RANGE) {
-            LoadDataWithRangePartition();
-        }
-        if (RDMA_LOG_LEVEL == DEBUG) {
-            manager->PrintHashTable();
-        }
+    void NovaCCServer::LoadData() {
+        LoadDataWithRangePartition();
         for (int i = 0; i < dbs_.size(); i++) {
             RDMA_LOG(INFO) << "Database " << i;
             std::string value;
@@ -179,20 +120,15 @@ namespace nova {
         }
     }
 
-    NovaMemServer::NovaMemServer(const std::vector<leveldb::DB *> &dbs,
-                                 char *rdmabuf, int nport)
+    NovaCCServer::NovaCCServer(RdmaCtrl *rdma_ctrl,
+                               const std::vector<leveldb::DB *> &dbs,
+                               char *rdmabuf, int nport)
             : nport_(nport) {
         dbs_ = dbs;
-        conn_workers = new NovaConnWorker *[NovaConfig::config->num_conn_workers];
-        async_workers = new NovaAsyncWorker *[NovaConfig::config->num_async_workers];
+        conn_workers = new NovaCCConnWorker *[NovaCCConfig::cc_config->num_conn_workers];
+        async_workers = new NovaRDMAComputeComponent *[NovaCCConfig::cc_config->num_async_workers];
         char *buf = rdmabuf;
-        uint64_t nrdmatotal_per_store =
-                (NovaConfig::config->rdma_max_num_sends * 2) *
-                NovaConfig::config->max_msg_size *
-                NovaConfig::config->servers.size();
-        char *cache_buf =
-                buf +
-                NovaConfig::config->num_conn_workers * nrdmatotal_per_store;
+        char *cache_buf = buf + nrdma_buf_cc();
         manager = new NovaMemManager(cache_buf);
         log_manager = new LogFileManager(manager);
         if (NovaConfig::config->enable_load_data) {
@@ -201,27 +137,33 @@ namespace nova {
         for (auto db : dbs) {
             db->StartTracing();
         }
-        NovaAsyncCompleteQueue **async_cq = new NovaAsyncCompleteQueue *[NovaConfig::config->num_conn_workers];
+        NovaAsyncCompleteQueue **async_cq = new NovaAsyncCompleteQueue *[NovaCCConfig::cc_config->num_conn_workers];
 
         for (int worker_id = 0;
-             worker_id < NovaConfig::config->num_conn_workers; worker_id++) {
+             worker_id <
+             NovaCCConfig::cc_config->num_conn_workers; worker_id++) {
             async_cq[worker_id] = new NovaAsyncCompleteQueue;
-            conn_workers[worker_id] = new NovaConnWorker(worker_id, this,
-                                                         async_cq[worker_id]);
+            conn_workers[worker_id] = new NovaCCConnWorker(worker_id, this,
+                                                           async_cq[worker_id]);
             conn_workers[worker_id]->set_dbs(dbs);
             conn_workers[worker_id]->log_manager_ = log_manager;
         }
 
         for (int worker_id = 0;
-             worker_id < NovaConfig::config->num_async_workers; worker_id++) {
-            async_workers[worker_id] = new NovaAsyncWorker(dbs, async_cq);
+             worker_id <
+             NovaCCConfig::cc_config->num_async_workers; worker_id++) {
+            async_workers[worker_id] = new NovaRDMAComputeComponent(rdma_ctrl,
+                                                                    dbs,
+                                                                    async_cq);
             NovaRDMAStore *store = nullptr;
-
             std::vector<QPEndPoint> endpoints;
-            for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
+            for (int i = 0;
+                 i < NovaDCConfig::dc_config->dc_servers.size(); i++) {
                 QPEndPoint qp;
-                qp.host = NovaConfig::config->servers[i];
-                qp.thread_id = worker_id;
+                qp.host = NovaDCConfig::dc_config->dc_servers[i];
+                qp.thread_id =
+                        worker_id % NovaDCConfig::dc_config->num_dc_workers;
+                qp.server_id = NovaCCConfig::cc_config->cc_servers.size() + i;
                 endpoints.push_back(qp);
             }
 
@@ -233,52 +175,50 @@ namespace nova {
             }
 
             // Log writers.
-            async_workers[worker_id]->nic_log_writer_ = new leveldb::log::NICLogWriter(
-                    &async_workers[worker_id]->socks_, manager,
-                    log_manager);
-            async_workers[worker_id]->rdma_log_writer_ = new leveldb::log::RDMALogWriter(
-                    store, manager, log_manager);
-            async_workers[worker_id]->log_manager_ = log_manager;
             async_workers[worker_id]->set_rdma_store(store);
-            buf += nrdmatotal_per_store;
+            buf += nrdma_buf_unit();
         }
 
         // Assign async workers to conn workers.
-        if (NovaConfig::config->num_conn_workers <
-            NovaConfig::config->num_async_workers) {
+        if (NovaCCConfig::cc_config->num_conn_workers <
+            NovaCCConfig::cc_config->num_async_workers) {
             int conn_worker_id = 0;
             for (int worker_id = 0;
                  worker_id <
-                 NovaConfig::config->num_async_workers; worker_id++) {
+                 NovaCCConfig::cc_config->num_async_workers; worker_id++) {
                 conn_workers[conn_worker_id]->async_workers_.push_back(
                         async_workers[worker_id]);
                 conn_worker_id += 1;
                 conn_worker_id =
-                        conn_worker_id % NovaConfig::config->num_conn_workers;
+                        conn_worker_id %
+                        NovaCCConfig::cc_config->num_conn_workers;
             }
         } else {
             int async_worker_id = 0;
             for (int worker_id = 0;
                  worker_id <
-                 NovaConfig::config->num_conn_workers; worker_id++) {
+                 NovaCCConfig::cc_config->num_conn_workers; worker_id++) {
                 conn_workers[worker_id]->async_workers_.push_back(
                         async_workers[async_worker_id]);
                 async_worker_id += 1;
                 async_worker_id =
-                        async_worker_id % NovaConfig::config->num_async_workers;
+                        async_worker_id %
+                        NovaCCConfig::cc_config->num_async_workers;
             }
         }
-
+        // TODO: BG workers.
 
         // Start the threads.
         for (int worker_id = 0;
-             worker_id < NovaConfig::config->num_conn_workers; worker_id++) {
-            worker_threads.emplace_back(start, conn_workers[worker_id]);
+             worker_id <
+             NovaCCConfig::cc_config->num_conn_workers; worker_id++) {
+            conn_worker_threads.emplace_back(start, conn_workers[worker_id]);
         }
         for (int worker_id = 0;
-             worker_id < NovaConfig::config->num_async_workers; worker_id++) {
-            async_worker_threads.emplace_back(&NovaAsyncWorker::Start,
-                                              async_workers[worker_id]);
+             worker_id <
+             NovaCCConfig::cc_config->num_async_workers; worker_id++) {
+            cc_workers.emplace_back(&NovaRDMAComputeComponent::Start,
+                                    async_workers[worker_id]);
         }
 
 //    int cores[] = {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31};
@@ -291,7 +231,7 @@ namespace nova {
 //        int rc = pthread_setaffinity_np(worker_threads[i].native_handle(),
 //                                        sizeof(cpu_set_t), &cpuset);
 //    }
-        current_store_id_ = 0;
+        current_conn_worker_id_ = 0;
     }
 
     void make_socket_non_blocking(int sockfd) {
@@ -301,7 +241,7 @@ namespace nova {
     }
 
     void on_accept(int fd, short which, void *arg) {
-        auto *server = (NovaMemServer *) arg;
+        auto *server = (NovaCCServer *) arg;
         RDMA_ASSERT(fd == server->listen_fd_);
         RDMA_LOG(DEBUG) << "new connection " << fd;
 
@@ -316,12 +256,13 @@ namespace nova {
         make_socket_non_blocking(client_fd);
         RDMA_LOG(DEBUG) << "register " << client_fd;
 
-        NovaConnWorker *store = server->conn_workers[server->current_store_id_];
-        if (NovaConfig::config->num_conn_workers == 1) {
-            server->current_store_id_ = 0;
+        NovaCCConnWorker *store = server->conn_workers[server->current_conn_worker_id_];
+        if (NovaCCConfig::cc_config->num_conn_workers == 1) {
+            server->current_conn_worker_id_ = 0;
         } else {
-            server->current_store_id_ = (server->current_store_id_ + 1) %
-                                        NovaConfig::config->num_conn_workers;
+            server->current_conn_worker_id_ =
+                    (server->current_conn_worker_id_ + 1) %
+                    NovaCCConfig::cc_config->num_conn_workers;
         }
 
         store->conn_mu.lock();
@@ -333,7 +274,7 @@ namespace nova {
 //    write(store->on_new_conn_send_fd, buf, 1);
     }
 
-    void NovaMemServer::Start() {
+    void NovaCCServer::Start() {
         SetupListener();
         struct event event{};
         struct event_config *ev_config;
@@ -375,7 +316,7 @@ namespace nova {
         RDMA_LOG(INFO) << "started";
     }
 
-    void NovaMemServer::SetupListener() {
+    void NovaCCServer::SetupListener() {
         int one = 1;
         struct linger ling = {0, 0};
         int fd = socket(AF_INET, SOCK_STREAM, 0);

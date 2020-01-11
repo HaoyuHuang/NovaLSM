@@ -4,8 +4,8 @@
 // Copyright (c) 2020 University of Southern California. All rights reserved.
 //
 
-#ifndef LEVELDB_DC_H
-#define LEVELDB_DC_H
+#ifndef LEVELDB_NOVA_DC_H
+#define LEVELDB_NOVA_DC_H
 
 #include "mc/nova_mem_manager.h"
 #include "include/leveldb/cache.h"
@@ -26,19 +26,20 @@ namespace leveldb {
         std::mutex mutex;
     };
 
-    class DiskComponent {
+    class NovaDiskComponent {
     public:
-        DiskComponent(Env *env, nova::NovaMemManager *mem_manager,
-                      Cache *cache, const std::vector<std::string>& dbs);
+        NovaDiskComponent(Env *env,
+                          Cache *cache, const std::vector<std::string> &dbs);
 
         // Read the blocks and return the total size.
         uint64_t
-        Read(const std::string &dbname, uint64_t file_number,
-             const std::vector<DCBlockHandle> &block_handls, char *buf);
+        ReadBlocks(const std::string &dbname, uint64_t file_number,
+                   const std::vector<DCBlockHandle> &block_handls, char *buf);
 
         // Read the SSTable and return the total size.
         uint64_t
-        Read(const std::string &dbname, uint64_t file_number, char *buf, uint64_t size);
+        ReadSSTable(const std::string &dbname, uint64_t file_number, char *buf,
+                    uint64_t size);
 
         void FlushSSTable(const std::string &dbname, uint64_t file_number,
                           char *buf,
@@ -52,9 +53,8 @@ namespace leveldb {
                   Cache::Handle **);
 
         Env *env_;
-        nova::NovaMemManager *mem_manager_;
         Cache *cache_;
-        std::map<std::string, DCTables*> db_tables_;
+        std::map<std::string, DCTables *> db_tables_;
     };
 }
-#endif //LEVELDB_DC_H
+#endif //LEVELDB_NOVA_DC_H

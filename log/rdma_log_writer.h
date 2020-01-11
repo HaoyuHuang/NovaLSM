@@ -48,7 +48,7 @@ namespace leveldb {
 
             void AckAllocLogBuf(int remote_sid, uint64_t offset, uint64_t size);
 
-            void AckWriteSuccess(int remote_sid);
+            void AckWriteSuccess(int remote_sid, uint64_t rdma_wr_id);
 
         private:
             struct LogFileBuf {
@@ -73,10 +73,15 @@ namespace leveldb {
                 WRITE_SUCESS =4,
             };
 
+            struct WriteState {
+                WriteResult result;
+                uint64_t rdma_wr_id;
+            };
+
             std::string write_result_str(WriteResult wr);
 
             std::string current_log_file_;
-            WriteResult *write_result_;
+            WriteState *write_result_;
         };
 
     }  // namespace log

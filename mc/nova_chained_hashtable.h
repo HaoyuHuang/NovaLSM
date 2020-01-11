@@ -10,7 +10,7 @@
 #include <atomic>
 #include <pthread.h>
 #include "nova/nova_common.h"
-#include "nova/nova_mem_config.h"
+#include "nova/nova_config.h"
 
 namespace nova {
     enum IndexEntryType : uint8_t {

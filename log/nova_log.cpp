@@ -4,7 +4,7 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
-#include <nova/nova_mem_config.h>
+#include <nova/nova_config.h>
 #include "nova_log.h"
 
 namespace nova {

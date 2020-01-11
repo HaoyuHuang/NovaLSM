@@ -96,50 +96,50 @@ namespace nova {
     leveldb::Status
     MemoryComponent::Get(GlobalBlockHandle *handles, GetResult *results,
                          int size) {
-        int nkey = GlobalBlockHandle::CacheKeySize();
-        char cache_key[nkey];
-        for (int i = 0; i < size; i++) {
-            handles[i].CacheKey(cache_key);
-            nova::GetResult result = mem_manager_->LocalGet(cache_key, nkey,
-                                                            true);
-            if (!result.index_entry.empty()) {
-                results[i].hit = true;
-                results[i].index = result.index_entry;
-                results[i].data = result.data_entry;
-            } else {
-                // Cache miss.
-                sstable_mutex_.Lock();
-                auto it = sstables_l0_.find(handles[i].table_handle);
-                sstable_mutex_.Unlock();
-                if (it != sstables_l0_.end()) {
-                    // Found.
-                    results[i].hit = true;
-                    it->second->mutex.Lock();
-//                    leveldb::ReadBlock(it->second->table->backing_file(), {},
-//                                       handles[i].block_handle,
-//                                       &(results[i].block));
-                    // Insert the block into the cache.
-                    mem_manager_->LocalPut(cache_key, nkey,
-                                           (char *) results[i].block.data.data(),
-                                           results[i].block.data.size(), true,
-                                           true);
-                    it->second->mutex.Unlock();
-                }
-            }
-        }
+//        int nkey = GlobalBlockHandle::CacheKeySize();
+//        char cache_key[nkey];
+//        for (int i = 0; i < size; i++) {
+//            handles[i].CacheKey(cache_key);
+//            nova::GetResult result = mem_manager_->LocalGet(cache_key, nkey,
+//                                                            true);
+//            if (!result.index_entry.empty()) {
+//                results[i].hit = true;
+//                results[i].index = result.index_entry;
+//                results[i].data = result.data_entry;
+//            } else {
+//                // Cache miss.
+//                sstable_mutex_.Lock();
+//                auto it = sstables_l0_.find(handles[i].table_handle);
+//                sstable_mutex_.Unlock();
+//                if (it != sstables_l0_.end()) {
+//                    // Found.
+//                    results[i].hit = true;
+//                    it->second->mutex.Lock();
+////                    leveldb::ReadBlock(it->second->table->backing_file(), {},
+////                                       handles[i].block_handle,
+////                                       &(results[i].block));
+//                    // Insert the block into the cache.
+//                    mem_manager_->LocalPut(cache_key, nkey,
+//                                           (char *) results[i].block.data.data(),
+//                                           results[i].block.data.size(), true,
+//                                           true);
+//                    it->second->mutex.Unlock();
+//                }
+//            }
+//        }
     }
 
     leveldb::Status
     MemoryComponent::Insert(GlobalBlockHandle *handles, char **blocks,
                             int size) {
-        int nkey = GlobalBlockHandle::CacheKeySize();
-        char cache_key[nkey];
-        for (int i = 0; i < size; i++) {
-            handles[i].CacheKey(cache_key);
-            mem_manager_->LocalPut(cache_key, nkey,
-                                   blocks[i],
-                                   handles[i].block_handle.size(), true, true);
-        }
+//        int nkey = GlobalBlockHandle::CacheKeySize();
+//        char cache_key[nkey];
+//        for (int i = 0; i < size; i++) {
+//            handles[i].CacheKey(cache_key);
+//            mem_manager_->LocalPut(cache_key, nkey,
+//                                   blocks[i],
+//                                   handles[i].block_handle.size(), true, true);
+//        }
     }
 
     leveldb::Status

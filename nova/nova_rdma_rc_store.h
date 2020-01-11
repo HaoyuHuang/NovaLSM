@@ -9,7 +9,7 @@
 
 #include "rdma_ctrl.hpp"
 #include "nova_rdma_store.h"
-#include "nova_mem_config.h"
+#include "nova_config.h"
 #include "nova_msg_callback.h"
 
 namespace nova {
@@ -76,32 +76,34 @@ namespace nova {
             RDMA_LOG(INFO) << "rc[" << thread_id << "]: " << "created rdma";
         }
 
-        void Init();
+        void Init(RdmaCtrl *rdma_ctrl);
 
-        void PostRead(char *localbuf, uint32_t size, int server_id,
-                      uint64_t local_offset,
-                      uint64_t remote_addr, bool is_remote_offset);
+        uint64_t PostRead(char *localbuf, uint32_t size, int server_id,
+                          uint64_t local_offset,
+                          uint64_t remote_addr, bool is_remote_offset);
 
-        void PostSend(char *localbuf, uint32_t size, int server_id);
+        uint64_t PostSend(const char *localbuf, uint32_t size, int server_id,
+                          uint32_t imm_data);
 
-        void PostWrite(char *localbuf, uint32_t size, int server_id,
-                       uint64_t remote_offset, bool is_remote_offset);
+        uint64_t PostWrite(const char *localbuf, uint32_t size, int server_id,
+                           uint64_t remote_offset, bool is_remote_offset,
+                           uint32_t imm_data);
 
         void FlushPendingSends();
 
         void FlushPendingSends(int peer_sid) override;
 
-        void PollSQ(int peer_sid);
+        uint32_t PollSQ(int peer_sid);
 
-        void PollSQ();
+        uint32_t PollSQ();
 
         void PostRecv(int peer_sid, int recv_buf_index);
 
         void FlushPendingRecvs();
 
-        void PollRQ();
+        uint32_t PollRQ();
 
-        void PollRQ(int peer_sid);
+        uint32_t PollRQ(int peer_sid);
 
         char *GetSendBuf();
 
@@ -110,10 +112,14 @@ namespace nova {
         uint32_t store_id() { return thread_id_; }
 
     private:
-        void PostRDMASEND(char *localbuf, ibv_wr_opcode type, uint32_t size,
-                          int server_id,
-                          uint64_t local_offset,
-                          uint64_t remote_addr, bool is_offset);
+        uint32_t to_qp_idx(uint32_t server_id);
+
+        uint64_t
+        PostRDMASEND(const char *localbuf, ibv_wr_opcode type, uint32_t size,
+                     int qp_idx,
+                     uint64_t local_offset,
+                     uint64_t remote_addr, bool is_offset,
+                     uint32_t imm_data);
 
         std::vector<QPEndPoint> end_points_;
         int thread_id_;

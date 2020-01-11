@@ -4,20 +4,20 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
-#ifndef LEVELDB_NOVA_ASYNC_WORKER_H
-#define LEVELDB_NOVA_ASYNC_WORKER_H
+#ifndef LEVELDB_NOVA_RDMA_CC_H
+#define LEVELDB_NOVA_RDMA_CC_H
 
 #include <string>
 #include <port/port_stdcxx.h>
 #include <leveldb/db.h>
 #include "leveldb/options.h"
-#include "nova_common.h"
-#include "nova_msg_callback.h"
-#include "nova_rdma_store.h"
+#include "nova/nova_common.h"
+#include "nova/nova_msg_callback.h"
+#include "nova/nova_rdma_store.h"
 #include <semaphore.h>
 #include <list>
+#include <dc/nova_dc_client.h>
 #include "log/nova_log.h"
-#include "log/nic_log_writer.h"
 #include "log/rdma_log_writer.h"
 
 namespace nova {
@@ -47,18 +47,20 @@ namespace nova {
         struct event readevent;
     };
 
-    class NovaAsyncWorker : public NovaMsgCallback {
+    class NovaRDMAComputeComponent : public NovaMsgCallback {
     public:
-        NovaAsyncWorker(const std::vector<leveldb::DB *> &dbs,
-                        NovaAsyncCompleteQueue **cqs) : dbs_(dbs), cqs_(cqs) {
-            sem_init(&sem_, 0, 0);
-            conn_workers_ = new bool[NovaConfig::config->num_conn_workers];
+        NovaRDMAComputeComponent(RdmaCtrl *rdma_ctrl,
+                                 const std::vector<leveldb::DB *> &dbs,
+                                 NovaAsyncCompleteQueue **cqs) : dbs_(dbs),
+                                                                 cqs_(cqs) {
+            conn_workers_ = new bool[NovaCCConfig::cc_config->num_conn_workers];
         }
 
         bool IsInitialized();
 
-        void ProcessRDMAWC(ibv_wc_opcode type, int remote_server_id,
-                           char *buf) override;
+        void
+        ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
+                      char *buf, uint32_t imm_data) override;
 
         void Start();
 
@@ -70,40 +72,17 @@ namespace nova {
             rdma_store_ = rdma_store;
         };
 
-        leveldb::log::RDMALogWriter *rdma_log_writer_ = nullptr;
-        leveldb::log::NICLogWriter *nic_log_writer_ = nullptr;
-        LogFileManager *log_manager_ = nullptr;
-        std::vector<NovaClientSock *> socks_;
-
     private:
         void ProcessGet(const NovaAsyncTask &task);
 
         void ProcessPut(const NovaAsyncTask &task);
 
-        void ProcessReplicateLogRecords(const NovaAsyncTask &task);
-
         int ProcessQueue();
 
-//        void ProcessRDMAREAD(int remote_server_id, char *buf);
-
-//        void ProcessRDMAGETResponse(uint64_t to_sock_fd,
-//                                    DataEntry *entry, bool fetch_from_origin);
-//
-//        void
-//        PostRDMAGETRequest(int fd, char *key, uint64_t nkey, int home_server,
-//                           uint64_t remote_offset, uint64_t remote_size);
-//
-//        void
-//        PostRDMAGETIndexRequest(int fd, char *key, uint64_t nkey,
-//                                int home_server,
-//                                uint64_t remote_addr);
-
+        RdmaCtrl *rdma_ctrl_ = nullptr;
         NovaRDMAStore *rdma_store_ = nullptr;
-
+        leveldb::NovaDCClient *dc_client_ = nullptr;
         bool is_running_ = false;
-
-
-        sem_t sem_;
         std::vector<leveldb::DB *> dbs_;
         leveldb::port::Mutex mutex_;
         std::list<NovaAsyncTask> queue_;
@@ -113,4 +92,4 @@ namespace nova {
 }
 
 
-#endif //LEVELDB_NOVA_ASYNC_WORKER_H
+#endif //LEVELDB_NOVA_RDMA_CC_H

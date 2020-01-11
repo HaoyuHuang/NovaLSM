@@ -51,6 +51,9 @@ namespace leveldb {
 
         void operator=(const MemFile &) = delete;
 
+        // Private since only Unref() should be used to delete it.
+        ~MemFile() { assert(refs_ == 0); }
+
         void Ref();
 
         bool is_lock_file() const { return is_lock_file_; }
@@ -74,11 +77,10 @@ namespace leveldb {
 
         uint64_t ModifiedTime() const { return modified_time_; }
 
+        const char *backing_mem() { return data_.data(); }
+
     private:
         uint64_t Now();
-
-        // Private since only Unref() should be used to delete it.
-        ~MemFile() { assert(refs_ == 0); }
 
         Env *env_;
         const std::string fn_;
@@ -93,6 +95,29 @@ namespace leveldb {
         std::atomic<uint64_t> size_;
         std::atomic<uint64_t> modified_time_;
         std::atomic<uint64_t> fsynced_bytes_;
+    };
+
+    class HeapMemFile : public MemFile {
+    public:
+        HeapMemFile(char *backing_mem, uint64_t allocated_size);
+
+        uint64_t Size() const { return used_size_; }
+
+        Status
+        Read(uint64_t offset, size_t n, Slice *result, char *scratch);
+
+        Status Write(uint64_t offset, const Slice &data);
+
+        Status Append(const Slice &data);
+
+        Status Fsync();
+
+        const char *backing_mem() { return backing_mem_; }
+
+    private:
+        char *backing_mem_;
+        uint32_t allocated_size_ = 0;
+        uint32_t used_size_ = 0;
     };
 
     class MemSequentialFile : public SequentialFile {
@@ -149,6 +174,8 @@ namespace leveldb {
         Status Flush() override;
 
         Status Sync() override;
+
+        MemFile *mem_file() { return file_; }
 
     private:
         MemFile *file_;

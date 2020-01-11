@@ -14,22 +14,21 @@
 #include <atomic>
 #include <chrono>
 #include <log/rdma_log_writer.h>
-#include <log/nic_log_writer.h>
 
-#include "nova_mem_server.h"
-#include "nova_msg_callback.h"
-#include "nova_rdma_store.h"
-#include "nova_common.h"
-#include "linked_list.h"
-#include "nova_mem_config.h"
+#include "cc/nova_cc_server.h"
+#include "nova/nova_msg_callback.h"
+#include "nova/nova_rdma_store.h"
+#include "nova/nova_common.h"
+#include "nova/linked_list.h"
+#include "nova/nova_config.h"
 #include "mc/nova_mem_manager.h"
 #include "leveldb/db.h"
-#include "nova_async_worker.h"
+#include "cc/nova_rdma_cc.h"
 
 
 namespace nova {
 
-    class NovaMemServer;
+    class NovaCCServer;
 
     void event_handler(int fd, short which, void *arg);
 
@@ -98,10 +97,10 @@ namespace nova {
         }
     };
 
-    class NovaConnWorker {
+    class NovaCCConnWorker {
     public:
-        NovaConnWorker(int thread_id, NovaMemServer *server,
-                       NovaAsyncCompleteQueue *async_cq)
+        NovaCCConnWorker(int thread_id, NovaCCServer *server,
+                         NovaAsyncCompleteQueue *async_cq)
                 :
                 thread_id_(thread_id), mem_server_(server),
                 async_cq_(async_cq) {
@@ -119,7 +118,7 @@ namespace nova {
             dbs_ = dbs;
         }
 
-        void AddTask(const NovaAsyncTask& task);
+        void AddTask(const NovaAsyncTask &task);
 
         timeval start{};
         timeval read_start{};
@@ -129,13 +128,13 @@ namespace nova {
         int epoll_fd_ = -1;      /* used for all notification*/
         std::mutex mutex_;
 
-        NovaMemServer *mem_server_ = nullptr;
+        NovaCCServer *mem_server_ = nullptr;
 
         std::vector<leveldb::DB *> dbs_;
         struct event_base *base = nullptr;
         LogFileManager *log_manager_ = nullptr;
         int current_async_worker_id_ = 0;
-        std::vector<NovaAsyncWorker*> async_workers_;
+        std::vector<NovaRDMAComputeComponent *> async_workers_;
         NovaAsyncCompleteQueue *async_cq_;
 
         int nconns = 0;

@@ -20,6 +20,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <event.h>
+#include <list>
 
 #include "rdma_ctrl.hpp"
 #include "table/format.h"
@@ -28,6 +29,31 @@
 namespace nova {
     using namespace std;
     using namespace rdmaio;
+
+    enum NovaRDMAPartitionMode {
+        RANGE = 0,
+        HASH = 1,
+        DEBUG_RDMA = 2
+    };
+
+    enum NovaLogRecordMode {
+        LOG_LOCAL = 0,
+        LOG_RDMA = 1,
+        LOG_NIC = 2
+    };
+
+    struct Fragment {
+        // for range partition only.
+        uint64_t key_start;
+        uint64_t key_end;
+        std::vector<uint32_t> server_ids;
+        std::vector<uint32_t> db_ids;
+    };
+
+    uint64_t keyhash(const char *key, uint64_t nkey);
+
+    Fragment *
+    homefragment(const std::vector<Fragment *>& fragments, uint64_t key);
 
     enum ConnState {
         READ, WRITE
@@ -109,9 +135,9 @@ namespace nova {
 
     std::string ToString(const std::vector<uint32_t> &x);
 
-    std::string DBName(const std::string& dbname, uint64_t index);
+    std::string DBName(const std::string &dbname, uint32_t server_id, uint64_t index);
 
-    void ParseDBName(const std::string& logname, uint64_t* index);
+    void ParseDBName(const std::string &logname, uint64_t *index);
 
     enum ResponseType : char {
         GETR = 'G',
@@ -314,6 +340,7 @@ namespace nova {
 
     struct QPEndPoint {
         Host host;
+        uint32_t server_id;
         uint32_t thread_id;
     };
 

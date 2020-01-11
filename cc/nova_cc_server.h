@@ -8,19 +8,20 @@
 #define RLIB_NOVA_MEM_SERVER_H
 
 #include "mc/nova_mem_manager.h"
-#include "nova_mem_worker.h"
-#include "nova_mem_config.h"
-#include "nova_rdma_store.h"
-#include "nova_rdma_rc_store.h"
-#include "nova_async_worker.h"
+#include "nova_cc_conn_worker.h"
+#include "nova/nova_config.h"
+#include "nova/nova_rdma_store.h"
+#include "nova/nova_rdma_rc_store.h"
+#include "cc/nova_rdma_cc.h"
 #include "leveldb/db.h"
 
 namespace nova {
-    class NovaConnWorker;
+    class NovaCCConnWorker;
 
-    class NovaMemServer {
+    class NovaCCServer {
     public:
-        NovaMemServer(const std::vector<leveldb::DB *>& dbs, char *rdmabuf, int nport);
+        NovaCCServer(RdmaCtrl *rdma_ctrl, const std::vector<leveldb::DB *> &dbs,
+                     char *rdmabuf, int nport);
 
         void Start();
 
@@ -30,21 +31,19 @@ namespace nova {
 
         void LoadDataWithRangePartition();
 
-        void LoadDataWithHashPartition();
-
         int nport_;
         int listen_fd_ = -1;            /* listener descriptor      */
 
         std::vector<leveldb::DB *> dbs_;
         NovaMemManager *manager;
         LogFileManager *log_manager;
-        NovaConnWorker **conn_workers;
-        NovaAsyncWorker **async_workers;
+        NovaCCConnWorker **conn_workers;
+        NovaRDMAComputeComponent **async_workers;
 
         struct event_base *base;
-        int current_store_id_;
-        vector<thread> worker_threads;
-        vector<thread> async_worker_threads;
+        int current_conn_worker_id_;
+        vector<thread> conn_worker_threads;
+        vector<thread> cc_workers;
     };
 }
 

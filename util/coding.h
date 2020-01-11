@@ -85,6 +85,13 @@ namespace leveldb {
         buffer[3] = static_cast<uint8_t>(value >> 24);
     }
 
+    inline uint32_t EncodeStr(char *dst, const std::string &src) {
+        EncodeFixed32(dst, src.size());
+        dst += 4;
+        memcpy(dst, src.data(), src.size());
+        return 4 + src.size();
+    }
+
     inline void EncodeFixed64(char *dst, uint64_t value) {
         uint8_t *const buffer = reinterpret_cast<uint8_t *>(dst);
 
@@ -150,6 +157,12 @@ namespace leveldb {
                (static_cast<uint64_t>(buffer[5]) << 40) |
                (static_cast<uint64_t>(buffer[6]) << 48) |
                (static_cast<uint64_t>(buffer[7]) << 56);
+    }
+
+    inline uint32_t DecodeStr(const char *src, std::string *result) {
+        uint32_t size = DecodeFixed32(src);
+        result->append(src + 4, size);
+        return size + 4;
     }
 
 // Internal routine for use by fallback path of GetVarint32Ptr
