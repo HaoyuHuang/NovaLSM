@@ -88,13 +88,10 @@ namespace nova {
 
         vector<Host> servers;
         int my_server_id;
-        int recordcount;
         uint64_t load_default_value_size;
         int max_msg_size;
 
         std::string db_path;
-        std::string profiler_file_path;
-        NovaLogRecordMode log_record_mode;
 
         int rdma_port;
         int rdma_pq_batch_size;

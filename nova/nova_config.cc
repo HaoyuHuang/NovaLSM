@@ -22,9 +22,8 @@ namespace nova {
     }
 
     uint64_t nrdma_buf_dc() {
-        // A DC thread needs to connect to
-        uint32_t dc_threads = NovaDCConfig::dc_config->num_dc_workers;
-        return nrdma_buf_unit() * dc_threads *
+        // A DC thread needs to connect to one thread at each CC node
+        return nrdma_buf_unit() * NovaDCConfig::dc_config->num_dc_workers *
                NovaCCConfig::cc_config->cc_servers.size();
     }
 

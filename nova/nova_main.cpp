@@ -42,9 +42,7 @@ DEFINE_string(cc_servers, "localhost:11211", "A list of cc servers");
 DEFINE_string(dc_servers, "localhost:11211", "A list of dc servers");
 DEFINE_int64(server_id, -1, "Server id.");
 
-DEFINE_uint64(recordcount, 0, "Number of records.");
-
-DEFINE_uint64(mem_pool_size_gb, 0, " Cache size in GB.");
+DEFINE_uint64(mem_pool_size_gb, 0, "Memory pool size in GB.");
 DEFINE_uint64(use_fixed_value_size, 0, "Fixed value size.");
 
 DEFINE_uint64(rdma_port, 0, "The port used by RDMA.");
@@ -68,8 +66,6 @@ DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
 
 DEFINE_string(dc_config_path, "/tmp/uniform-3-32-10000000-frags.txt",
               "The path that stores fragment configuration.");
-DEFINE_bool(dc_write_sync, false, "fsync write");
-DEFINE_string(dc_persist_log_records_mode, "", "local/rdma/nic");
 DEFINE_uint32(dc_log_buf_size, 0, "log buffer size");
 DEFINE_uint32(dc_workers, 0, "log buffer size");
 
@@ -93,8 +89,6 @@ void InitializeCC() {
     NovaConfig::config->nnovabuf = ntotal;
     RDMA_ASSERT(buf != NULL) << "Not enough memory";
 
-    NovaCCConfig::cc_config->block_cache_mb = FLAGS_cc_block_cache_mb;
-    NovaCCConfig::cc_config->write_buffer_size_mb = FLAGS_cc_write_buffer_size_mb;
     auto *mem_server = new NovaCCServer(rdma_ctrl, buf, port);
     mem_server->Start();
 }
@@ -102,7 +96,6 @@ void InitializeCC() {
 void InitializeDC() {
     RdmaCtrl *rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
                                        NovaConfig::config->rdma_port);
-    int port = NovaConfig::config->servers[NovaConfig::config->my_server_id].port;
     uint64_t nrdmatotal = nrdma_buf_dc();
     uint64_t ntotal = nrdmatotal;
     ntotal += NovaConfig::config->mem_pool_size_gb * 1024 * 1024 * 1024;
@@ -150,7 +143,6 @@ int main(int argc, char *argv[]) {
     NovaCCConfig::cc_config = new NovaCCConfig;
     NovaDCConfig::dc_config = new NovaDCConfig;
 
-    NovaConfig::config->recordcount = FLAGS_recordcount;
     NovaConfig::config->mem_pool_size_gb = FLAGS_mem_pool_size_gb;
     NovaConfig::config->load_default_value_size = FLAGS_use_fixed_value_size;
     // RDMA
@@ -159,6 +151,9 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->rdma_max_num_sends = FLAGS_rdma_max_num_sends;
     NovaConfig::config->rdma_doorbell_batch_size = FLAGS_rdma_doorbell_batch_size;
     NovaConfig::config->rdma_pq_batch_size = FLAGS_rdma_pq_batch_size;
+
+    NovaCCConfig::cc_config->block_cache_mb = FLAGS_cc_block_cache_mb;
+    NovaCCConfig::cc_config->write_buffer_size_mb = FLAGS_cc_write_buffer_size_mb;
 
     NovaConfig::config->db_path = FLAGS_db_path;
 
@@ -187,7 +182,6 @@ int main(int argc, char *argv[]) {
     NovaCCConfig::cc_config->num_conn_workers = FLAGS_cc_num_conn_workers;
     NovaCCConfig::cc_config->num_async_workers = FLAGS_cc_num_async_workers;
     NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
-
 
     NovaConfig::ReadFragments(FLAGS_dc_config_path,
                               &NovaDCConfig::dc_config->fragments);
