@@ -73,76 +73,9 @@ DEFINE_string(dc_persist_log_records_mode, "", "local/rdma/nic");
 DEFINE_uint32(dc_log_buf_size, 0, "log buffer size");
 DEFINE_uint32(dc_workers, 0, "log buffer size");
 
-namespace {
-    class YCSBKeyComparator : public leveldb::Comparator {
-    public:
-        //   if a < b: negative result
-        //   if a > b: positive result
-        //   else: zero result
-        int Compare(const leveldb::Slice &a, const leveldb::Slice &b) const {
-            uint64_t ai = 0;
-            str_to_int(a.data(), &ai, a.size());
-            uint64_t bi = 0;
-            str_to_int(b.data(), &bi, b.size());
-
-            if (ai < bi) {
-                return -1;
-            } else if (ai > bi) {
-                return 1;
-            }
-            return 0;
-        }
-
-        // Ignore the following methods for now:
-        const char *Name() const { return "YCSBKeyComparator"; }
-
-        void
-        FindShortestSeparator(std::string *, const leveldb::Slice &) const {}
-
-        void FindShortSuccessor(std::string *) const {}
-    };
-}
 
 void start(NovaCCServer *server) {
     server->Start();
-}
-
-leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
-                            const std::vector<leveldb::EnvBGThread *> &bg_threads) {
-    leveldb::EnvOptions env_option;
-    env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
-    leveldb::PosixEnv *env = new leveldb::PosixEnv;
-    env->set_env_option(env_option);
-    leveldb::DB *db;
-    leveldb::Options options;
-    options.block_cache = cache;
-    if (FLAGS_cc_write_buffer_size_mb > 0) {
-        options.write_buffer_size = FLAGS_cc_write_buffer_size_mb * 1024 * 1024;
-    }
-    options.env = env;
-    options.create_if_missing = true;
-    options.compression = leveldb::kSnappyCompression;
-    options.filter_policy = leveldb::NewBloomFilterPolicy(10);
-    options.bg_threads = bg_threads;
-    options.enable_tracing = false;
-    options.comparator = new YCSBKeyComparator();
-    leveldb::Logger *log = nullptr;
-    std::string db_path = DBName(NovaConfig::config->db_path,
-                                 NovaCCConfig::cc_config->my_cc_server_id,
-                                 db_index);
-    mkdir(db_path.c_str(), 0777);
-
-    RDMA_ASSERT(env->NewLogger(
-            db_path + "/LOG-" + std::to_string(db_index), &log).ok());
-    options.info_log = log;
-    leveldb::Status status = leveldb::DB::Open(options, db_path, &db);
-    RDMA_ASSERT(status.ok()) << "Open leveldb failed " << status.ToString();
-
-    uint64_t index = 0;
-    std::string logname = leveldb::LogFileName(db_path, 1111);
-    ParseDBName(logname, &index);
-    RDMA_ASSERT(index == db_index);
-    return db;
 }
 
 void InitializeCC() {
@@ -160,30 +93,9 @@ void InitializeCC() {
     NovaConfig::config->nnovabuf = ntotal;
     RDMA_ASSERT(buf != NULL) << "Not enough memory";
 
-    leveldb::Cache *cache = nullptr;
-    if (FLAGS_cc_block_cache_mb > 0) {
-        cache = leveldb::NewLRUCache(
-                FLAGS_cc_block_cache_mb * 1024 * 1024);
-    }
-    int ndbs = NovaConfig::ParseNumberOfDatabases(
-            NovaCCConfig::cc_config->fragments,
-            &NovaCCConfig::cc_config->db_fragment,
-            NovaCCConfig::cc_config->my_cc_server_id);
-    std::vector<leveldb::DB *> dbs;
-
-    int bg_thread_id = 0;
-    std::vector<leveldb::EnvBGThread *> bgs;
-    for (int i = 0; i < FLAGS_cc_num_compaction_workers; i++) {
-        bgs.push_back(new leveldb::PosixEnvBGThread);
-    }
-    for (int db_index = 0; db_index < ndbs; db_index++) {
-        std::vector<leveldb::EnvBGThread *> bg_threads;
-        bg_threads.push_back(bgs[bg_thread_id]);
-        dbs.push_back(CreateDatabase(db_index, cache, bg_threads));
-        bg_thread_id += 1;
-        bg_thread_id %= bgs.size();
-    }
-    auto *mem_server = new NovaCCServer(rdma_ctrl, dbs, buf, port);
+    NovaCCConfig::cc_config->block_cache_mb = FLAGS_cc_block_cache_mb;
+    NovaCCConfig::cc_config->write_buffer_size_mb = FLAGS_cc_write_buffer_size_mb;
+    auto *mem_server = new NovaCCServer(rdma_ctrl, buf, port);
     mem_server->Start();
 }
 

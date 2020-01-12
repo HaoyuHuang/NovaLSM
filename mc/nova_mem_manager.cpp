@@ -35,8 +35,9 @@ namespace nova {
     char *SlabClass::AllocItem() {
         // check free list first.
         if (free_list.size() > 0) {
-            char *ptr = free_list.poll();
+            char *ptr = free_list.front();
             RDMA_ASSERT(ptr != nullptr);
+            free_list.pop();
             return ptr;
         }
 
@@ -44,16 +45,16 @@ namespace nova {
             return nullptr;
         }
 
-        Slab *slab = slabs.value(slabs.size() - 1);
+        Slab *slab = slabs[slabs.size() - 1];
         return slab->AllocItem();
     }
 
     void SlabClass::FreeItem(char *buf) {
-        free_list.append(buf);
+        free_list.push(buf);
     }
 
     void SlabClass::AddSlab(Slab *slab) {
-        slabs.append(slab);
+        slabs.push_back(slab);
     }
 
     NovaMemManager::NovaMemManager(char *buf) {

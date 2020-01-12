@@ -54,8 +54,11 @@ namespace nova {
         Fragment *frag = NovaCCConfig::home_fragment(hv);
         leveldb::DB *db = dbs_[frag->db_ids[0]];
         std::string value;
-        leveldb::Status s = db->Get(
-                leveldb::ReadOptions(), task.key, &value);
+        leveldb::ReadOptions read_options;
+        read_options.dc_client = dc_client_;
+        read_options.mem_manager = mem_manager_;
+
+        leveldb::Status s = db->Get(read_options, task.key, &value);
         RDMA_ASSERT(s.ok());
         task.conn->response_buf = task.conn->buf;
         char *response_buf = task.conn->response_buf;

@@ -21,6 +21,8 @@
 
 #include "leveldb/export.h"
 #include "leveldb/status.h"
+#include "leveldb/dc_client.h"
+#include "leveldb/db_types.h"
 
 #if defined(_WIN32)
 // The leveldb::Env class below contains a DeleteFile method.
@@ -80,6 +82,10 @@ namespace leveldb {
         // I.e., the caller may not assume that background work items are
         // serialized.
         virtual void Schedule(void (*function)(void *arg), void *arg) = 0;
+
+        virtual DCClient *dc_client() = 0;
+
+        virtual MemManager *mem_manager() = 0;
     };
 
     class LEVELDB_EXPORT Env {
@@ -273,7 +279,7 @@ namespace leveldb {
         //
         // Safe for concurrent use by multiple threads.
         virtual Status Read(uint64_t offset, size_t n, Slice *result,
-                            char *scratch) const = 0;
+                            char *scratch) = 0;
     };
 
 // A file abstraction for sequential writing.  The implementation
@@ -443,7 +449,7 @@ namespace leveldb {
                   filename_(std::move(filename)) {}
 
         Status Read(uint64_t offset, size_t n, Slice *result,
-                    char *scratch) const override {
+                    char *scratch) override {
             if (offset + n > length_) {
                 *result = Slice();
                 return Status::InvalidArgument("");

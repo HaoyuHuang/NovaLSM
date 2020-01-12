@@ -10,10 +10,10 @@
 
 namespace leveldb {
 
-    void NovaDCClient::InitiateFlushSSTable(const std::string &dbname,
-                                        uint64_t file_number,
-                                        const leveldb::FileMetaData &meta,
-                                        leveldb::WritableFile *sstable) {
+    uint32_t NovaDCClient::InitiateFlushSSTable(const std::string &dbname,
+                                                uint64_t file_number,
+                                                const leveldb::FileMetaData &meta,
+                                                char *backing_mem) {
         uint32_t dc_id = HomeDCNode(meta);
         char *sendbuf = rdma_store_->GetSendBuf(dc_id);
         char *buf = sendbuf;
@@ -27,13 +27,15 @@ namespace leveldb {
         rdma_store_->PostSend(sendbuf, 4 + dbname.size() + 4 + 4, dc_id,
                               current_req_id_);
         DCRequestContext context = {};
+        uint32_t req_id = current_req_id_;
         context.done = false;
         context.meta = meta;
         context.file_number = file_number;
-        context.sstable = dynamic_cast<MemWritableFile *>(sstable);
+        context.sstable_backing_mem = backing_mem;
         context.dbname = dbname;
         request_context_[current_req_id_] = context;
         current_req_id_++;
+        return req_id;
     }
 
     uint32_t NovaDCClient::HomeDCNode(const leveldb::FileMetaData &meta) {
@@ -45,40 +47,44 @@ namespace leveldb {
     }
 
     uint32_t NovaDCClient::InitiateReadSSTable(const std::string &dbname,
-                                           uint64_t file_number,
-                                           const leveldb::FileMetaData &meta,
-                                           uint32_t table_size,
-                                           leveldb::RandomAccessFile **table_reader) {
+                                               uint64_t file_number,
+                                               const leveldb::FileMetaData &meta,
+                                               char *result) {
         // The request contains dbname, file number, and remote offset to accept the read SSTable.
         // DC issues a WRITE_IMM to write the read SSTable into the remote offset providing the request id.
-
-        uint32_t scid = mem_manager_->slabclassid(meta.file_size);
-        char *backing_mem = mem_manager_->ItemAlloc(scid);
-        *table_reader = new MemRandomAccessFile(
-                new HeapMemFile(backing_mem, meta.file_size));
-
         uint32_t dc_id = HomeDCNode(meta);
         char *sendbuf = rdma_store_->GetSendBuf(dc_id);
         uint32_t msg_size = 0;
         msg_size += leveldb::EncodeStr(sendbuf, dbname);
         leveldb::EncodeFixed32(sendbuf + msg_size, file_number);
         msg_size += 4;
-        leveldb::EncodeFixed64(sendbuf + msg_size, (uint64_t) backing_mem);
+        leveldb::EncodeFixed64(sendbuf + msg_size, (uint64_t) result);
         rdma_store_->PostSend(sendbuf, msg_size, dc_id,
                               current_req_id_);
 
         DCRequestContext context = {};
+        uint32_t req_id = current_req_id_;
         context.done = false;
         request_context_[current_req_id_] = context;
         current_req_id_++;
+        return req_id;
+    }
 
+    uint32_t NovaDCClient::InitiateReadBlock(const std::string &dbname,
+                                             uint64_t file_number,
+                                             const leveldb::FileMetaData &meta,
+                                             const leveldb::DCBlockHandle &block_handle,
+                                             char *result) {
+        std::vector<leveldb::DCBlockHandle> handles;
+        handles.emplace_back(block_handle);
+        return InitiateReadBlocks(dbname, file_number, meta, handles, result);
     }
 
     uint32_t NovaDCClient::InitiateReadBlocks(const std::string &dbname,
-                                          uint64_t file_number,
-                                          const leveldb::FileMetaData &meta,
-                                          const std::vector<leveldb::DCBlockHandle> &block_handls,
-                                          leveldb::BlockContents *results) {
+                                              uint64_t file_number,
+                                              const leveldb::FileMetaData &meta,
+                                              const std::vector<leveldb::DCBlockHandle> &block_handls,
+                                              char *result) {
         // The request contains dbname, file number, block handles, and remote offset to accept the read blocks.
         // DC issues a WRITE_IMM to write the read blocks into the remote offset providing the request id.
         uint32_t dc_id = HomeDCNode(meta);
@@ -95,18 +101,21 @@ namespace leveldb {
             leveldb::EncodeFixed64(sendbuf + msg_size, handle.size);
             msg_size += 8;
         }
-        leveldb::EncodeFixed64(sendbuf + msg_size,
-                               (uint64_t) results->data.data());
+        leveldb::EncodeFixed64(sendbuf + msg_size, (uint64_t) result);
         rdma_store_->PostSend(sendbuf, msg_size, dc_id,
                               current_req_id_);
-
+        uint32_t req_id = current_req_id_;
         DCRequestContext context = {};
         context.done = false;
         request_context_[current_req_id_] = context;
         current_req_id_++;
+        return req_id;
     }
 
     bool NovaDCClient::IsDone(uint32_t req_id) {
+        // Poll both queues.
+        rdma_store_->PollRQ();
+        rdma_store_->PollSQ();
         auto context_it = request_context_.find(req_id);
         RDMA_ASSERT(context_it != request_context_.end());
         context_it->second.done = true;
@@ -119,9 +128,10 @@ namespace leveldb {
 
 
     void
-    NovaDCClient::OnRecv(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
-                     char *buf,
-                     uint32_t imm_data) {
+    NovaDCClient::OnRecv(ibv_wc_opcode type, uint64_t wr_id,
+                         int remote_server_id,
+                         char *buf,
+                         uint32_t imm_data) {
         switch (type) {
             case IBV_WC_SEND:
                 break;
@@ -159,8 +169,8 @@ namespace leveldb {
                     RDMA_ASSERT(context_it != request_context_.end());
                     const DCRequestContext &context = context_it->second;
                     rdma_store_->PostWrite(
-                            context.sstable->mem_file()->backing_mem(),
-                            context.sstable->mem_file()->Size(),
+                            context.sstable_backing_mem,
+                            context.meta.file_size,
                             remote_server_id, remote_dc_offset,
                             false, imm_data);
                 } else if (buf[0] == DCRequestType::DC_FLUSH_SSTABLE_SUCC) {

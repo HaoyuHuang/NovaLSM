@@ -5,6 +5,8 @@
 //
 
 #include "nova_dc.h"
+#include "nova/logging.hpp"
+#include "util/coding.h"
 #include "db/filename.h"
 
 namespace leveldb {
@@ -20,8 +22,8 @@ namespace leveldb {
     }
 
     NovaDiskComponent::NovaDiskComponent(leveldb::Env *env,
-                                 Cache *cache,
-                                 const std::vector<std::string> &dbs)
+                                         Cache *cache,
+                                         const std::vector<std::string> &dbs)
             : env_(env),
               cache_(cache) {
         for (const auto &db : dbs) {
@@ -30,11 +32,14 @@ namespace leveldb {
     }
 
     Status
-    NovaDiskComponent::FindTable(const std::string &dbname, uint64_t file_number,
-                             leveldb::Cache::Handle **handle) {
+    NovaDiskComponent::FindTable(const std::string &dbname,
+                                 uint64_t file_number,
+                                 leveldb::Cache::Handle **handle) {
         Status s;
-        char buf[sizeof(file_number)];
-        EncodeFixed64(buf, file_number);
+        char buf[4 + dbname.size() + 4];
+        char *ptr = buf;
+        ptr += EncodeStr(ptr, dbname);
+        EncodeFixed64(ptr, file_number);
         Slice key(buf, sizeof(buf));
         *handle = cache_->Lookup(key);
         if (*handle == nullptr) {
@@ -60,9 +65,9 @@ namespace leveldb {
     }
 
     uint64_t NovaDiskComponent::ReadBlocks(const std::string &dbname,
-                                       uint64_t file_number,
-                                       const std::vector<leveldb::DCBlockHandle> &block_handls,
-                                       char *buf) {
+                                           uint64_t file_number,
+                                           const std::vector<leveldb::DCBlockHandle> &block_handls,
+                                           char *buf) {
         char *result_buf = buf;
         Cache::Handle *handle = nullptr;
         Status s = FindTable(dbname, file_number, &handle);
@@ -81,8 +86,8 @@ namespace leveldb {
     }
 
     void NovaDiskComponent::FlushSSTable(const std::string &dbname,
-                                     uint64_t file_number, char *buf,
-                                     uint64_t table_size) {
+                                         uint64_t file_number, char *buf,
+                                         uint64_t table_size) {
         DCTables *dc_tables = db_tables_[dbname];
         std::string tablename = TableFileName(dbname, file_number);
         dc_tables->mutex.lock();
@@ -98,7 +103,7 @@ namespace leveldb {
     }
 
     uint64_t NovaDiskComponent::TableSize(const std::string &dbname,
-                                      uint64_t file_number) {
+                                          uint64_t file_number) {
         DCTables *dc_tables = db_tables_[dbname];
         std::string tablename = TableFileName(dbname, file_number);
         dc_tables->mutex.lock();
@@ -108,8 +113,8 @@ namespace leveldb {
     }
 
     uint64_t NovaDiskComponent::ReadSSTable(const std::string &dbname,
-                                        uint64_t file_number, char *buf,
-                                        uint64_t size) {
+                                            uint64_t file_number, char *buf,
+                                            uint64_t size) {
         SequentialFile *file;
         RDMA_ASSERT(env_->NewSequentialFile(TableFileName(dbname, file_number),
                                             &file).ok());

@@ -14,14 +14,14 @@
 #include "nova/nova_rdma_rc_store.h"
 #include "cc/nova_rdma_cc.h"
 #include "leveldb/db.h"
+#include "nova_cc.h"
 
 namespace nova {
     class NovaCCConnWorker;
 
     class NovaCCServer {
     public:
-        NovaCCServer(RdmaCtrl *rdma_ctrl, const std::vector<leveldb::DB *> &dbs,
-                     char *rdmabuf, int nport);
+        NovaCCServer(RdmaCtrl *rdma_ctrl, char *rdmabuf, int nport);
 
         void Start();
 
@@ -39,11 +39,13 @@ namespace nova {
         LogFileManager *log_manager;
         NovaCCConnWorker **conn_workers;
         NovaRDMAComputeComponent **async_workers;
+        std::vector<leveldb::PosixEnvBGThread *> bgs;
 
         struct event_base *base;
         int current_conn_worker_id_;
         vector<thread> conn_worker_threads;
         vector<thread> cc_workers;
+        vector<thread> compaction_workers;
     };
 }
 

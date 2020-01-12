@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include <util/crc32c.h>
 #include "leveldb/table.h"
 
 #include "leveldb/cache.h"
@@ -58,14 +59,15 @@ namespace leveldb {
         if (!s.ok()) return s;
 
         // Read the index block
+        *table = new Table();
         BlockContents index_block_contents;
         if (s.ok()) {
             ReadOptions opt;
             if (options.paranoid_checks) {
                 opt.verify_checksums = true;
             }
-            s = ReadBlock(file, opt, footer.index_handle(),
-                          &index_block_contents);
+            s = (*table)->ReadBlock(file, opt, footer.index_handle(),
+                                    &index_block_contents);
         }
 
         if (s.ok()) {
@@ -85,7 +87,7 @@ namespace leveldb {
             rep->file_number = file_number;
             rep->level = level;
             rep->filter = nullptr;
-            *table = new Table(rep);
+            (*table)->rep_ = rep;
             (*table)->ReadMeta(footer);
             (*table)->db_profiler_ = db_profiler;
         }
@@ -194,8 +196,8 @@ namespace leveldb {
                     block = reinterpret_cast<Block *>(block_cache->Value(
                             cache_handle));
                 } else {
-                    s = ReadBlock(table->rep_->file, options, handle,
-                                  &contents);
+                    s = table->ReadBlock(table->rep_->file, options, handle,
+                                         &contents);
                     if (s.ok()) {
                         block = new Block(contents, table->rep_->file_number,
                                           handle.offset());
@@ -207,7 +209,8 @@ namespace leveldb {
                     }
                 }
             } else {
-                s = ReadBlock(table->rep_->file, options, handle, &contents);
+                s = table->ReadBlock(table->rep_->file, options, handle,
+                                     &contents);
                 if (s.ok()) {
                     block = new Block(contents, table->rep_->file_number,
                                       handle.offset());
@@ -336,6 +339,88 @@ namespace leveldb {
         }
         delete iiter;
         return s;
+    }
+
+    Status Table::ReadBlock(leveldb::RandomAccessFile *file,
+                            const leveldb::ReadOptions &options,
+                            const leveldb::BlockHandle &handle,
+                            leveldb::BlockContents *result) {
+        result->data = Slice();
+        result->cachable = false;
+        result->heap_allocated = false;
+
+        // Read the block contents as well as the type/crc footer.
+        // See table_builder.cc for the code that built this structure.
+        size_t n = static_cast<size_t>(handle.size());
+        char *buf = new char[n + kBlockTrailerSize];
+        Slice contents;
+        Status s = file->Read(handle.offset(), n + kBlockTrailerSize, &contents,
+                              buf);
+        if (!s.ok()) {
+            delete[] buf;
+            return s;
+        }
+        if (contents.size() != n + kBlockTrailerSize) {
+            delete[] buf;
+            return Status::Corruption("truncated block read");
+        }
+
+        // Check the crc of the type and the block contents
+        const char *data = contents.data();  // Pointer to where Read put the data
+        if (options.verify_checksums) {
+            const uint32_t crc = crc32c::Unmask(DecodeFixed32(data + n + 1));
+            const uint32_t actual = crc32c::Value(data, n + 1);
+            if (actual != crc) {
+                delete[] buf;
+                s = Status::Corruption("block checksum mismatch");
+                return s;
+            }
+        }
+
+        switch (data[n]) {
+            case kNoCompression:
+                if (data != buf) {
+                    // File implementation gave us pointer to some other data.
+                    // Use it directly under the assumption that it will be live
+                    // while the file is open.
+                    delete[] buf;
+                    result->data = Slice(data, n);
+                    result->heap_allocated = false;
+                    result->cachable = false;  // Do not double-cache
+                } else {
+                    result->data = Slice(buf, n);
+                    result->heap_allocated = true;
+                    result->cachable = true;
+                }
+
+                // Ok
+                break;
+            case kSnappyCompression: {
+                size_t ulength = 0;
+                if (!port::Snappy_GetUncompressedLength(data, n, &ulength)) {
+                    delete[] buf;
+                    return Status::Corruption(
+                            "corrupted compressed block contents");
+                }
+                char *ubuf = new char[ulength];
+                if (!port::Snappy_Uncompress(data, n, ubuf)) {
+                    delete[] buf;
+                    delete[] ubuf;
+                    return Status::Corruption(
+                            "corrupted compressed block contents");
+                }
+                delete[] buf;
+                result->data = Slice(ubuf, ulength);
+                result->heap_allocated = true;
+                result->cachable = true;
+                break;
+            }
+            default:
+                delete[] buf;
+                return Status::Corruption("bad block type");
+        }
+
+        return Status::OK();
     }
 
     uint64_t Table::ApproximateOffsetOf(const Slice &key) const {

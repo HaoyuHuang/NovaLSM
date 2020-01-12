@@ -7,15 +7,15 @@
 #ifndef LEVELDB_NOVA_DC_H
 #define LEVELDB_NOVA_DC_H
 
+#include <map>
+#include <mutex>
+#include "leveldb/env.h"
+
+#include "leveldb/dc_client.h"
 #include "mc/nova_mem_manager.h"
 #include "include/leveldb/cache.h"
 
 namespace leveldb {
-    struct DCBlockHandle {
-        uint64_t offset;
-        uint64_t size;
-    };
-
     struct DCTableMetadata {
         int file_size;
     };
@@ -26,6 +26,7 @@ namespace leveldb {
         std::mutex mutex;
     };
 
+    // Only one instance of this.
     class NovaDiskComponent {
     public:
         NovaDiskComponent(Env *env,
@@ -54,6 +55,7 @@ namespace leveldb {
 
         Env *env_;
         Cache *cache_;
+        // sstable file name to tables.
         std::map<std::string, DCTables *> db_tables_;
     };
 }

@@ -4,6 +4,7 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
+#include "nova/nova_config.h"
 #include "rdma_log_writer.h"
 
 namespace leveldb {

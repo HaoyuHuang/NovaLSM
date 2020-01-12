@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include "util/env_mem.h"
 #include "db/builder.h"
 
 #include "db/dbformat.h"
@@ -11,6 +12,7 @@
 #include "leveldb/db.h"
 #include "leveldb/env.h"
 #include "leveldb/iterator.h"
+#include "cc/nova_cc.h"
 
 namespace leveldb {
 
@@ -23,12 +25,14 @@ namespace leveldb {
 
         std::string fname = TableFileName(dbname, meta->number);
         if (iter->Valid()) {
-            WritableFile *file;
-            s = env->NewWritableFile(fname, {.level = 0}, &file);
-            if (!s.ok()) {
-                return s;
-            }
-
+            MemManager *mem_manager = options.bg_thread->mem_manager();
+            uint32_t scid = mem_manager->slabclassid(options.max_file_size);
+            char *buf = options.bg_thread->mem_manager()->ItemAlloc(scid);
+            NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(mem_manager,
+                                                                   options.bg_thread->dc_client(),
+                                                                   dbname, buf,
+                                                                   options.max_file_size);
+            WritableFile *file = new MemWritableFile(cc_file);
             TableBuilder *builder = new TableBuilder(options, file);
             meta->smallest.DecodeFrom(iter->key());
             for (; iter->Valid(); iter->Next()) {
@@ -45,6 +49,7 @@ namespace leveldb {
             }
             delete builder;
 
+            cc_file->set_meta(*meta);
             // Finish and check for file errors
             if (s.ok()) {
                 s = file->Sync();
@@ -55,17 +60,15 @@ namespace leveldb {
             delete file;
             file = nullptr;
 
-            // TODO: RDMA WRITE TO DC.
-
             if (s.ok()) {
                 // Verify that the table is usable
-                Iterator *it = table_cache->NewIterator(
-                        AccessCaller::kCompaction, ReadOptions(),
-                        meta->number,
-                        0,
-                        meta->file_size);
-                s = it->status();
-                delete it;
+//                Iterator *it = table_cache->NewIterator(
+//                        AccessCaller::kCompaction, ReadOptions(),
+//                        meta->number,
+//                        0,
+//                        meta->file_size);
+//                s = it->status();
+//                delete it;
             }
         }
 

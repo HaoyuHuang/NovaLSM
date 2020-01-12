@@ -7,6 +7,7 @@
 #ifndef LEVELDB_MC_H
 #define LEVELDB_MC_H
 
+#include <atomic>
 #include "port/port.h"
 #include "port/thread_annotations.h"
 

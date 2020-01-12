@@ -203,9 +203,8 @@ namespace leveldb {
 
         Slice value() const override {
             assert(Valid());
-            EncodeFixed64(value_buf_, (*flist_)[index_]->number);
-            EncodeFixed64(value_buf_ + 8, (*flist_)[index_]->file_size);
-            return Slice(value_buf_, sizeof(value_buf_));
+            uint32_t size = EncodeFileMetaData(*(*flist_)[index_], value_buf_);
+            return Slice(value_buf_, size);
         }
 
         Status status() const override { return Status::OK(); }
@@ -216,7 +215,7 @@ namespace leveldb {
         uint32_t index_;
 
         // Backing store for value().  Holds the file number and size.
-        mutable char value_buf_[16];
+        mutable char value_buf_[1024];
     };
 
     static Iterator *
@@ -229,10 +228,13 @@ namespace leveldb {
                     Status::Corruption(
                             "FileReader invoked with unexpected value"));
         } else {
-            return cache->NewIterator(context.caller, options,
-                                      DecodeFixed64(file_value.data()),
+            Slice value(file_value);
+            FileMetaData meta;
+            DecodeFileMetaData(value, &meta);
+            return cache->NewIterator(context.caller, options, meta,
+                                      meta.number,
                                       context.level,
-                                      DecodeFixed64(file_value.data() + 8));
+                                      meta.file_size);
         }
     }
 
@@ -256,7 +258,8 @@ namespace leveldb {
         for (size_t i = 0; i < files_[0].size(); i++) {
             iters->push_back(vset_->table_cache_->NewIterator(
                     AccessCaller::kUserIterator,
-                    options, files_[0][i]->number, 0, files_[0][i]->file_size));
+                    options, *files_[0][i], files_[0][i]->number, 0,
+                    files_[0][i]->file_size));
         }
 
         // For levels > 0, we can use a concatenating iterator that sequentially
@@ -378,6 +381,7 @@ namespace leveldb {
                 state->last_file_read = f;
                 state->last_file_read_level = level;
                 state->s = state->vset->table_cache_->Get(*state->options,
+                                                          *f,
                                                           f->number,
                                                           f->file_size,
                                                           level,
@@ -1201,15 +1205,16 @@ namespace leveldb {
                 } else {
                     // "ikey" falls in the range for this table.  Add the
                     // approximate offset of "ikey" within the table.
-                    Table *tableptr;
-                    Iterator *iter = table_cache_->NewIterator(
-                            AccessCaller::kApproximateSize,
-                            ReadOptions(), files[i]->number, level,
-                            files[i]->file_size, &tableptr);
-                    if (tableptr != nullptr) {
-                        result += tableptr->ApproximateOffsetOf(ikey.Encode());
-                    }
-                    delete iter;
+                    // TODO: Unsupported.
+//                    Table *tableptr;
+//                    Iterator *iter = table_cache_->NewIterator(
+//                            AccessCaller::kApproximateSize,
+//                            ReadOptions(), files[i]->number, level,
+//                            files[i]->file_size, &tableptr);
+//                    if (tableptr != nullptr) {
+//                        result += tableptr->ApproximateOffsetOf(ikey.Encode());
+//                    }
+//                    delete iter;
                 }
             }
         }
@@ -1305,6 +1310,7 @@ namespace leveldb {
                     for (size_t i = 0; i < files.size(); i++) {
                         list[num++] = table_cache_->NewIterator(
                                 AccessCaller::kCompaction, options,
+                                *files[i],
                                 files[i]->number,
                                 c->level() +
                                 which,

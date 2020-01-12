@@ -109,7 +109,7 @@ namespace leveldb {
         ~PosixRandomAccessFile() override;
 
         Status Read(uint64_t offset, size_t n, Slice *result,
-                    char *scratch) const override;
+                    char *scratch) override;
 
     private:
         const bool has_permanent_fd_;  // If false, the file is opened on every read.
@@ -139,7 +139,7 @@ namespace leveldb {
         ~PosixMmapReadableFile() override;
 
         Status Read(uint64_t offset, size_t n, Slice *result,
-                    char *scratch) const override;
+                    char *scratch) override;
 
     private:
         char *const mmap_base_;
@@ -233,40 +233,6 @@ namespace leveldb {
     private:
         port::Mutex mu_;
         std::set<std::string> locked_files_ GUARDED_BY(mu_);
-    };
-
-    class PosixEnvBGThread : public EnvBGThread {
-    public:
-        PosixEnvBGThread();
-
-        void Schedule(
-                void (*background_work_function)(void *background_work_arg),
-                void *background_work_arg) override;
-
-    private:
-        void BackgroundThreadMain();
-
-        // Stores the work item data in a Schedule() call.
-        //
-        // Instances are constructed on the thread calling Schedule() and used on the
-        // background thread.
-        //
-        // This structure is thread-safe beacuse it is immutable.
-        struct BackgroundWorkItem {
-            explicit BackgroundWorkItem(void (*function)(void *arg),
-                                        void *arg)
-                    : function(function), arg(arg) {}
-
-            void (*const function)(void *);
-
-            void *const arg;
-        };
-
-        port::Mutex background_work_mutex_;
-        port::CondVar background_work_cv_ GUARDED_BY(
-                background_work_mutex_);
-        std::queue<BackgroundWorkItem> background_work_queue_
-        GUARDED_BY(background_work_mutex_);
     };
 
     class PosixEnv : public Env {

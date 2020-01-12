@@ -97,29 +97,6 @@ namespace leveldb {
         std::atomic<uint64_t> fsynced_bytes_;
     };
 
-    class HeapMemFile : public MemFile {
-    public:
-        HeapMemFile(char *backing_mem, uint64_t allocated_size);
-
-        uint64_t Size() const { return used_size_; }
-
-        Status
-        Read(uint64_t offset, size_t n, Slice *result, char *scratch);
-
-        Status Write(uint64_t offset, const Slice &data);
-
-        Status Append(const Slice &data);
-
-        Status Fsync();
-
-        const char *backing_mem() { return backing_mem_; }
-
-    private:
-        char *backing_mem_;
-        uint32_t allocated_size_ = 0;
-        uint32_t used_size_ = 0;
-    };
-
     class MemSequentialFile : public SequentialFile {
     public:
         explicit MemSequentialFile(MemFile *file);
@@ -142,7 +119,7 @@ namespace leveldb {
         ~MemRandomAccessFile() override { file_->Unref(); }
 
         Status Read(uint64_t offset, size_t n, Slice *result,
-                    char *scratch) const override;
+                    char *scratch) override;
 
     private:
         MemFile *file_;
@@ -155,7 +132,7 @@ namespace leveldb {
         ~MemRandomRWFile() override { file_->Unref(); }
 
         Status Read(uint64_t offset, size_t n, Slice *result,
-                    char *scratch) const override;
+                    char *scratch) override;
 
     private:
         MemFile *file_;

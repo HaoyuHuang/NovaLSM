@@ -13,10 +13,43 @@
 
 namespace leveldb {
 
+    uint32_t EncodeFileMetaData(const FileMetaData& meta, char*) {
+        // TODO:
+        return 0;
+    }
+
+    void DecodeFileMetaData(const Slice& s, FileMetaData* meta) {
+        // TODO:
+    }
+
     static uint64_t PackSequenceAndType(uint64_t seq, ValueType t) {
         assert(seq <= kMaxSequenceNumber);
         assert(t <= kValueTypeForSeek);
         return (seq << 8) | t;
+    }
+
+
+    InternalKey::InternalKey(const leveldb::Slice &user_key,
+                             leveldb::SequenceNumber s, leveldb::ValueType t) {
+        AppendInternalKey(&rep_, ParsedInternalKey(user_key, s, t));
+    }
+
+    bool InternalKey::DecodeFrom(const leveldb::Slice &s) {
+        rep_.assign(s.data(), s.size());
+        return !rep_.empty();
+    }
+
+    Slice InternalKey::user_key() const {
+        return ExtractUserKey(rep_);
+    }
+
+    void InternalKey::SetFrom(const leveldb::ParsedInternalKey &p) {
+        rep_.clear();
+        AppendInternalKey(&rep_, p);
+    }
+
+    void InternalKey::Clear() {
+        rep_.clear();
     }
 
     void AppendInternalKey(std::string *result, const ParsedInternalKey &key) {

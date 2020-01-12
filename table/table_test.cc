@@ -121,7 +121,7 @@ namespace leveldb {
         uint64_t Size() const { return contents_.size(); }
 
         Status Read(uint64_t offset, size_t n, Slice *result,
-                    char *scratch) const override {
+                    char *scratch) override {
             if (offset >= contents_.size()) {
                 return Status::InvalidArgument("invalid Read offset");
             }

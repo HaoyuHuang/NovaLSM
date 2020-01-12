@@ -109,7 +109,7 @@ namespace leveldb {
     }
 
     Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice *result,
-                                       char *scratch) const {
+                                       char *scratch) {
         int fd = fd_;
         if (!has_permanent_fd_) {
             fd = ::open(filename_.c_str(), O_RDONLY | kOpenBaseFlags);
@@ -151,7 +151,7 @@ namespace leveldb {
     }
 
     Status PosixMmapReadableFile::Read(uint64_t offset, size_t n, Slice *result,
-                                       char *scratch) const {
+                                       char *scratch) {
         if (offset + n > length_) {
             *result = Slice();
             return PosixError(filename_, EINVAL);
@@ -801,48 +801,6 @@ namespace leveldb {
             mmap_limiter_(MaxMmaps()),
             fd_limiter_(MaxOpenFiles()) {}
 
-
-    PosixEnvBGThread::PosixEnvBGThread() : background_work_cv_(
-            &background_work_mutex_) {
-        std::thread background_thread(&PosixEnvBGThread::BackgroundThreadMain,
-                                      this);
-        background_thread.detach();
-    }
-
-    void PosixEnvBGThread::Schedule(
-            void (*background_work_function)(void *background_work_arg),
-            void *background_work_arg) {
-        background_work_mutex_.Lock();
-
-        // If the queue is empty, the background thread may be waiting for work.
-        if (background_work_queue_.empty()) {
-            background_work_cv_.Signal();
-        }
-
-        background_work_queue_.emplace(background_work_function,
-                                       background_work_arg);
-        background_work_mutex_.Unlock();
-    }
-
-    void PosixEnvBGThread::BackgroundThreadMain() {
-        std::cout << "BG thread started" << std::endl;
-        while (true) {
-            background_work_mutex_.Lock();
-
-            // Wait until there is work to be done.
-            while (background_work_queue_.empty()) {
-                background_work_cv_.Wait();
-            }
-
-            assert(!background_work_queue_.empty());
-            auto background_work_function = background_work_queue_.front().function;
-            void *background_work_arg = background_work_queue_.front().arg;
-            background_work_queue_.pop();
-
-            background_work_mutex_.Unlock();
-            background_work_function(background_work_arg);
-        }
-    }
 
     namespace {
 

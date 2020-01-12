@@ -6,6 +6,7 @@
 #define STORAGE_LEVELDB_INCLUDE_TABLE_H_
 
 #include <stdint.h>
+#include <table/format.h>
 
 #include "leveldb/export.h"
 #include "leveldb/iterator.h"
@@ -27,6 +28,8 @@ namespace leveldb {
 
     class TableCache;
 
+    class BlockContents;
+
 // A Table is a sorted map from strings to strings.  Tables are
 // immutable and persistent.  A Table may be safely accessed from
 // multiple threads without external synchronization.
@@ -35,6 +38,7 @@ namespace leveldb {
     class LEVELDB_EXPORT Table {
     public:
         struct Rep;
+
         // Attempt to open the table that is stored in bytes [0..file_size)
         // of "file", and read the metadata entries necessary to allow
         // retrieving data from the table.
@@ -72,13 +76,16 @@ namespace leveldb {
         uint64_t ApproximateOffsetOf(const Slice &key) const;
 
     private:
+        Status ReadBlock(RandomAccessFile *file, const ReadOptions &options,
+                         const BlockHandle &handle, BlockContents *result);
+
         friend class TableCache;
 
         static Iterator *
         BlockReader(void *, BlockReadContext, const ReadOptions &,
                     const Slice &);
 
-        explicit Table(Rep *rep) : rep_(rep) {}
+        explicit Table() {}
 
         // Calls (*handle_result)(arg, ...) with the entry found after a call
         // to Seek(key).  May not make such a call if filter policy says
@@ -91,7 +98,7 @@ namespace leveldb {
 
         void ReadFilter(const Slice &filter_handle_value);
 
-        Rep *const rep_;
+        Rep *rep_;
         DBProfiler *db_profiler_ = nullptr;
     };
 

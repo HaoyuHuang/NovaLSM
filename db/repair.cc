@@ -242,7 +242,7 @@ namespace leveldb {
                 ReadOptions r;
                 r.verify_checksums = options_.paranoid_checks;
                 return table_cache_->NewIterator(AccessCaller::kUncategorized,
-                                                 r, meta.number, -1,
+                                                 r, meta, meta.number, -1,
                                                  meta.file_size);
             }
 

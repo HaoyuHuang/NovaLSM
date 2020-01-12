@@ -236,7 +236,7 @@ namespace leveldb {
                 ~CountingFile() override { delete target_; }
 
                 Status Read(uint64_t offset, size_t n, Slice *result,
-                            char *scratch) const override {
+                            char *scratch) override {
                     counter_->Increment();
                     return target_->Read(offset, n, result, scratch);
                 }

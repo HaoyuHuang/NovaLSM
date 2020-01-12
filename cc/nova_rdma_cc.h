@@ -50,9 +50,11 @@ namespace nova {
     class NovaRDMAComputeComponent : public NovaMsgCallback {
     public:
         NovaRDMAComputeComponent(RdmaCtrl *rdma_ctrl,
+                                 NovaMemManager *mem_manager,
                                  const std::vector<leveldb::DB *> &dbs,
-                                 NovaAsyncCompleteQueue **cqs) : dbs_(dbs),
-                                                                 cqs_(cqs) {
+                                 NovaAsyncCompleteQueue **cqs) :
+                rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager), dbs_(dbs),
+                cqs_(cqs) {
             conn_workers_ = new bool[NovaCCConfig::cc_config->num_conn_workers];
         }
 
@@ -80,6 +82,7 @@ namespace nova {
         int ProcessQueue();
 
         RdmaCtrl *rdma_ctrl_ = nullptr;
+        NovaMemManager *mem_manager_ = nullptr;
         NovaRDMAStore *rdma_store_ = nullptr;
         leveldb::NovaDCClient *dc_client_ = nullptr;
         bool is_running_ = false;

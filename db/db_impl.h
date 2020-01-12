@@ -213,8 +213,7 @@ namespace leveldb {
         port::Mutex mutex_;
         std::atomic<bool> shutting_down_;
         port::CondVar background_work_finished_signal_ GUARDED_BY(mutex_);
-        int current_bg_thread_id_ = 0;
-        std::vector<EnvBGThread *> bg_threads_;
+        EnvBGThread *bg_thread_;
         MemTable *mem_;
         MemTable *imm_ GUARDED_BY(mutex_);  // Memtable being compacted
         std::atomic<bool> has_imm_;         // So bg thread can detect non-null imm_

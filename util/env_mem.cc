@@ -117,54 +117,6 @@ namespace leveldb {
         return static_cast<uint64_t>(unix_time);
     }
 
-    HeapMemFile::HeapMemFile(char *backing_mem, uint64_t allocated_size)
-            : backing_mem_(backing_mem), allocated_size_(allocated_size),
-              MemFile(
-                      nullptr, "", false) {
-
-    }
-
-    Status HeapMemFile::Read(uint64_t offset, size_t n, leveldb::Slice *result,
-                             char *scratch) {
-        const uint64_t available = Size() - std::min(Size(), offset);
-        size_t offset_ = static_cast<size_t>(offset);
-        if (n > available) {
-            n = static_cast<size_t>(available);
-        }
-        if (n == 0) {
-            *result = Slice();
-            return Status::OK();
-        }
-        if (scratch) {
-            memcpy(scratch, &(backing_mem_[offset_]), n);
-            *result = Slice(scratch, n);
-        } else {
-            *result = Slice(&(backing_mem_[offset_]), n);
-        }
-        return Status::OK();
-    }
-
-    Status HeapMemFile::Append(const leveldb::Slice &data) {
-        assert(used_size_ + data.size() < allocated_size_);
-        memcpy(backing_mem_ + used_size_, data.data(), data.size());
-        used_size_ += data.size();
-        return Status::OK();
-    }
-
-    Status HeapMemFile::Write(uint64_t offset, const leveldb::Slice &data) {
-        assert(offset + data.size() < allocated_size_);
-        memcpy(backing_mem_ + offset, data.data(), data.size());
-        if (offset + data.size() > used_size_) {
-            used_size_ = offset + data.size();
-        }
-        return Status::OK();
-    }
-
-    Status HeapMemFile::Fsync() {
-        // NOOP.
-    }
-
-
     MemSequentialFile::MemSequentialFile(MemFile *file) : file_(file), pos_(0) {
         file_->Ref();
     }
@@ -194,7 +146,7 @@ namespace leveldb {
 
 
     Status MemRandomAccessFile::Read(uint64_t offset, size_t n, Slice *result,
-                                     char *scratch) const {
+                                     char *scratch) {
         return file_->Read(offset, n, result, scratch);
     }
 
@@ -202,7 +154,7 @@ namespace leveldb {
             file) { file_->Ref(); }
 
     Status MemRandomRWFile::Read(uint64_t offset, size_t n, Slice *result,
-                                 char *scratch) const {
+                                 char *scratch) {
         return file_->Read(offset, n, result, scratch);
     }
 

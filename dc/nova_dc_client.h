@@ -9,6 +9,8 @@
 
 #include "util/env_mem.h"
 #include "db/version_edit.h"
+#include "include/leveldb/db_types.h"
+#include "include/leveldb/dc_client.h"
 #include "nova/nova_common.h"
 #include "nova_dc.h"
 #include "nova/nova_rdma_rc_store.h"
@@ -32,36 +34,46 @@ namespace leveldb {
         std::string dbname;
         uint64_t file_number;
         FileMetaData meta;
-        MemWritableFile *sstable;
+        char *sstable_backing_mem;
         bool done;
     };
 
-    class NovaDCClient {
+    class NovaDCClient : public DCClient {
     public:
+        NovaDCClient(nova::NovaRDMAStore *rdma_store,
+                     nova::NovaMemManager *mem_manager,
+                     leveldb::log::RDMALogWriter *rdma_log_writer)
+                : rdma_store_(rdma_store), mem_manager_(mem_manager),
+                  rdma_log_writer_(rdma_log_writer) {}
+
         uint32_t
         InitiateReadBlocks(const std::string &dbname, uint64_t file_number,
                            const FileMetaData &meta,
                            const std::vector<DCBlockHandle> &block_handls,
-                           BlockContents *results);
+                           char *result) override;
+
+        uint32_t
+        InitiateReadBlock(const std::string &dbname, uint64_t file_number,
+                          const FileMetaData &meta,
+                          const DCBlockHandle &block_handle,
+                          char *result) override;
 
         // Read the SSTable and return the total size.
         uint32_t
         InitiateReadSSTable(const std::string &dbname, uint64_t file_number,
-                            const FileMetaData &meta,
-                            uint32_t table_size,
-                            RandomAccessFile **table_reader);
+                            const FileMetaData &meta, char *result) override;
 
-        void InitiateFlushSSTable(const std::string &dbname,
-                                  uint64_t file_number,
-                                  const FileMetaData &meta,
-                                  WritableFile *sstable);
+        uint32_t InitiateFlushSSTable(const std::string &dbname,
+                                      uint64_t file_number,
+                                      const FileMetaData &meta,
+                                      char *backing_mem) override;
 
         void OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                     int remote_server_id, char *buf,
-                    uint32_t imm_data);
+                    uint32_t imm_data) override;
 
 
-        bool IsDone(uint32_t req_id);
+        bool IsDone(uint32_t req_id) override;
 
     private:
         nova::NovaRDMAStore *rdma_store_;

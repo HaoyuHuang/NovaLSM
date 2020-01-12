@@ -82,21 +82,22 @@ namespace leveldb {
 
         if (s.ok() && current_entries > 0) {
             // Verify that the table is usable
-            Iterator *iter =
-                    table_cache_->NewIterator(AccessCaller::kCompaction,
-                                              ReadOptions(), output_number,
-                                              compaction_->level() + 1,
-                                              current_bytes);
-            s = iter->status();
-            delete iter;
-            if (s.ok()) {
-                Log(options_.info_log,
-                    "Generated table #%llu@%d: %lld keys, %lld bytes",
-                    (unsigned long long) output_number,
-                    compaction_->level(),
-                    (unsigned long long) current_entries,
-                    (unsigned long long) current_bytes);
-            }
+            // TODO
+//            Iterator *iter =
+//                    table_cache_->NewIterator(AccessCaller::kCompaction,
+//                                              ReadOptions(), output_number,
+//                                              compaction_->level() + 1,
+//                                              current_bytes);
+//            s = iter->status();
+//            delete iter;
+//            if (s.ok()) {
+//                Log(options_.info_log,
+//                    "Generated table #%llu@%d: %lld keys, %lld bytes",
+//                    (unsigned long long) output_number,
+//                    compaction_->level(),
+//                    (unsigned long long) current_entries,
+//                    (unsigned long long) current_bytes);
+//            }
         }
         return s;
     }

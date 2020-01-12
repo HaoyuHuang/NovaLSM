@@ -6,10 +6,88 @@
 
 #include <netinet/tcp.h>
 #include <signal.h>
-#include <leveldb/write_batch.h>
+#include "leveldb/write_batch.h"
+#include "db/filename.h"
 #include "nova_cc_server.h"
+#include "nova_cc.h"
+#include "util/env_posix.h"
 
 namespace nova {
+
+
+    namespace {
+        class YCSBKeyComparator : public leveldb::Comparator {
+        public:
+            //   if a < b: negative result
+            //   if a > b: positive result
+            //   else: zero result
+            int
+            Compare(const leveldb::Slice &a, const leveldb::Slice &b) const {
+                uint64_t ai = 0;
+                str_to_int(a.data(), &ai, a.size());
+                uint64_t bi = 0;
+                str_to_int(b.data(), &bi, b.size());
+
+                if (ai < bi) {
+                    return -1;
+                } else if (ai > bi) {
+                    return 1;
+                }
+                return 0;
+            }
+
+            // Ignore the following methods for now:
+            const char *Name() const { return "YCSBKeyComparator"; }
+
+            void
+            FindShortestSeparator(std::string *,
+                                  const leveldb::Slice &) const {}
+
+            void FindShortSuccessor(std::string *) const {}
+        };
+
+        leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
+                                    leveldb::EnvBGThread *bg_thread) {
+            leveldb::EnvOptions env_option;
+            env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
+            leveldb::PosixEnv *env = new leveldb::PosixEnv;
+            env->set_env_option(env_option);
+            leveldb::DB *db;
+            leveldb::Options options;
+            options.block_cache = cache;
+            if (NovaCCConfig::cc_config->write_buffer_size_mb > 0) {
+                options.write_buffer_size =
+                        NovaCCConfig::cc_config->write_buffer_size_mb * 1024 *
+                        1024;
+            }
+            options.env = env;
+            options.create_if_missing = true;
+            options.compression = leveldb::kSnappyCompression;
+            options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+            options.bg_thread = bg_thread;
+            options.enable_tracing = false;
+            options.comparator = new YCSBKeyComparator();
+            leveldb::Logger *log = nullptr;
+            std::string db_path = DBName(NovaConfig::config->db_path,
+                                         NovaCCConfig::cc_config->my_cc_server_id,
+                                         db_index);
+            mkdir(db_path.c_str(), 0777);
+
+            RDMA_ASSERT(env->NewLogger(
+                    db_path + "/LOG-" + std::to_string(db_index), &log).ok());
+            options.info_log = log;
+            leveldb::Status status = leveldb::DB::Open(options, db_path, &db);
+            RDMA_ASSERT(status.ok()) << "Open leveldb failed "
+                                     << status.ToString();
+
+            uint64_t index = 0;
+            std::string logname = leveldb::LogFileName(db_path, 1111);
+            ParseDBName(logname, &index);
+            RDMA_ASSERT(index == db_index);
+            return db;
+        }
+    }
+
 
     void start(NovaCCConnWorker *store) {
         store->Start();
@@ -121,39 +199,55 @@ namespace nova {
     }
 
     NovaCCServer::NovaCCServer(RdmaCtrl *rdma_ctrl,
-                               const std::vector<leveldb::DB *> &dbs,
                                char *rdmabuf, int nport)
             : nport_(nport) {
-        dbs_ = dbs;
         conn_workers = new NovaCCConnWorker *[NovaCCConfig::cc_config->num_conn_workers];
         async_workers = new NovaRDMAComputeComponent *[NovaCCConfig::cc_config->num_async_workers];
         char *buf = rdmabuf;
         char *cache_buf = buf + nrdma_buf_cc();
         manager = new NovaMemManager(cache_buf);
         log_manager = new LogFileManager(manager);
-        if (NovaConfig::config->enable_load_data) {
-            LoadData();
-        }
-        for (auto db : dbs) {
-            db->StartTracing();
-        }
-        NovaAsyncCompleteQueue **async_cq = new NovaAsyncCompleteQueue *[NovaCCConfig::cc_config->num_conn_workers];
 
+        int ndbs = NovaConfig::ParseNumberOfDatabases(
+                NovaCCConfig::cc_config->fragments,
+                &NovaCCConfig::cc_config->db_fragment,
+                NovaCCConfig::cc_config->my_cc_server_id);
+
+        int bg_thread_id = 0;
+        for (int i = 0;
+             i < NovaCCConfig::cc_config->num_compaction_workers; i++) {
+            bgs.push_back(new leveldb::PosixEnvBGThread);
+        }
+
+        leveldb::Cache *cache = nullptr;
+        if (NovaCCConfig::cc_config->block_cache_mb > 0) {
+            cache = leveldb::NewLRUCache(
+                    NovaCCConfig::cc_config->block_cache_mb * 1024 * 1024);
+        }
+
+        for (int db_index = 0; db_index < ndbs; db_index++) {
+            dbs_.push_back(CreateDatabase(db_index, cache, bgs[bg_thread_id]));
+            bg_thread_id += 1;
+            bg_thread_id %= bgs.size();
+        }
+
+        NovaAsyncCompleteQueue **async_cq = new NovaAsyncCompleteQueue *[NovaCCConfig::cc_config->num_conn_workers];
         for (int worker_id = 0;
              worker_id <
              NovaCCConfig::cc_config->num_conn_workers; worker_id++) {
             async_cq[worker_id] = new NovaAsyncCompleteQueue;
             conn_workers[worker_id] = new NovaCCConnWorker(worker_id, this,
                                                            async_cq[worker_id]);
-            conn_workers[worker_id]->set_dbs(dbs);
+            conn_workers[worker_id]->set_dbs(dbs_);
             conn_workers[worker_id]->log_manager_ = log_manager;
         }
-
-        for (int worker_id = 0;
+        int worker_id = 0;
+        for (worker_id = 0;
              worker_id <
              NovaCCConfig::cc_config->num_async_workers; worker_id++) {
             async_workers[worker_id] = new NovaRDMAComputeComponent(rdma_ctrl,
-                                                                    dbs,
+                                                                    manager,
+                                                                    dbs_,
                                                                     async_cq);
             NovaRDMAStore *store = nullptr;
             std::vector<QPEndPoint> endpoints;
@@ -177,6 +271,42 @@ namespace nova {
             // Log writers.
             async_workers[worker_id]->set_rdma_store(store);
             buf += nrdma_buf_unit();
+        }
+
+        for (int i = 0;
+             i < NovaCCConfig::cc_config->num_compaction_workers; i++) {
+            NovaRDMAComputeComponent *cc = new NovaRDMAComputeComponent(
+                    rdma_ctrl,
+                    manager,
+                    dbs_,
+                    async_cq);
+
+            NovaRDMAStore *store = nullptr;
+            std::vector<QPEndPoint> endpoints;
+            for (int i = 0;
+                 i < NovaDCConfig::dc_config->dc_servers.size(); i++) {
+                QPEndPoint qp;
+                qp.host = NovaDCConfig::dc_config->dc_servers[i];
+                qp.thread_id = worker_id;
+                qp.server_id = NovaCCConfig::cc_config->cc_servers.size() + i;
+                endpoints.push_back(qp);
+            }
+
+            if (NovaConfig::config->enable_rdma) {
+                store = new NovaRDMARCStore(buf, worker_id, endpoints, cc);
+            } else {
+                store = new NovaRDMANoopStore();
+            }
+
+            leveldb::DCClient *dc_client = new leveldb::NovaDCClient(store,
+                                                                     manager,
+                                                                     new leveldb::log::RDMALogWriter(
+                                                                             store,
+                                                                             manager,
+                                                                             log_manager));
+            bgs[i]->mem_manager_ = manager;
+            bgs[i]->dc_client_ = dc_client;
+            worker_id++;
         }
 
         // Assign async workers to conn workers.
@@ -206,7 +336,6 @@ namespace nova {
                         NovaCCConfig::cc_config->num_async_workers;
             }
         }
-        // TODO: BG workers.
 
         // Start the threads.
         for (int worker_id = 0;
@@ -219,6 +348,19 @@ namespace nova {
              NovaCCConfig::cc_config->num_async_workers; worker_id++) {
             cc_workers.emplace_back(&NovaRDMAComputeComponent::Start,
                                     async_workers[worker_id]);
+        }
+        for (int i = 0;
+             i < NovaCCConfig::cc_config->num_compaction_workers; i++) {
+            compaction_workers.emplace_back(&leveldb::PosixEnvBGThread::Start,
+                                            bgs[i]);
+        }
+
+        if (NovaConfig::config->enable_load_data) {
+            LoadData();
+        }
+
+        for (auto db : dbs_) {
+            db->StartTracing();
         }
 
 //    int cores[] = {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31};

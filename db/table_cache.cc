@@ -4,6 +4,7 @@
 
 #include "db/table_cache.h"
 
+#include "cc/nova_cc.h"
 #include "db/filename.h"
 #include "leveldb/env.h"
 #include "leveldb/table.h"
@@ -39,7 +40,9 @@ namespace leveldb {
     TableCache::~TableCache() { delete cache_; }
 
     Status
-    TableCache::FindTable(uint64_t file_number,
+    TableCache::FindTable(AccessCaller caller, const ReadOptions &options,
+                          const FileMetaData &meta,
+                          uint64_t file_number,
                           uint64_t file_size, int level,
                           Cache::Handle **handle) {
         Status s;
@@ -47,17 +50,19 @@ namespace leveldb {
         EncodeFixed64(buf, file_number);
         Slice key(buf, sizeof(buf));
         *handle = cache_->Lookup(key);
+
         if (*handle == nullptr) {
             std::string fname = TableFileName(dbname_, file_number);
             RandomAccessFile *file = nullptr;
             Table *table = nullptr;
-            s = env_->NewRandomAccessFile(fname, &file);
-            if (!s.ok()) {
-                std::string old_fname = SSTTableFileName(dbname_, file_number);
-                if (env_->NewRandomAccessFile(old_fname, &file).ok()) {
-                    s = Status::OK();
-                }
+            bool read_all = false;
+            if (caller == AccessCaller::kCompaction) {
+                read_all = true;
             }
+            file = new NovaCCRemoteRandomAccessFile(dbname_, file_number, meta,
+                                                    options.dc_client,
+                                                    options.mem_manager,
+                                                    read_all);
             if (s.ok()) {
                 s = Table::Open(options_, file, file_size, level, file_number,
                                 &table, db_profiler_);
@@ -80,6 +85,7 @@ namespace leveldb {
 
     Iterator *
     TableCache::NewIterator(AccessCaller caller, const ReadOptions &options,
+                            const FileMetaData &meta,
                             uint64_t file_number, int level,
                             uint64_t file_size,
                             Table **tableptr) {
@@ -88,7 +94,7 @@ namespace leveldb {
         }
 
         Cache::Handle *handle = nullptr;
-        Status s = FindTable(file_number,
+        Status s = FindTable(caller, options, meta, file_number,
                              file_size, level, &handle);
         if (!s.ok()) {
             return NewErrorIterator(s);
@@ -103,13 +109,15 @@ namespace leveldb {
         return result;
     }
 
-    Status TableCache::Get(const ReadOptions &options, uint64_t file_number,
+    Status TableCache::Get(const ReadOptions &options, const FileMetaData &meta,
+                           uint64_t file_number,
                            uint64_t file_size, int level, const Slice &k,
                            void *arg,
                            void (*handle_result)(void *, const Slice &,
                                                  const Slice &)) {
         Cache::Handle *handle = nullptr;
-        Status s = FindTable(file_number, file_size,
+        Status s = FindTable(AccessCaller::kUserGet, options, meta, file_number,
+                             file_size,
                              level, &handle);
         if (s.ok()) {
             Table *t = reinterpret_cast<TableAndFile *>(cache_->Value(

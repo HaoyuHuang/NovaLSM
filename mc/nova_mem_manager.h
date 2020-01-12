@@ -7,13 +7,18 @@
 #ifndef RLIB_NOVA_MEM_MANAGER_H
 #define RLIB_NOVA_MEM_MANAGER_H
 
+#include <stdint.h>
 #include <cstring>
-#include <leveldb/slice.h>
-#include "nova_chained_hashtable.h"
-#include "nova/linked_list.h"
-#include "nova/nova_config.h"
+#include <vector>
+#include <queue>
+#include "leveldb/db_types.h"
 
 namespace nova {
+
+#define MAX_NUMBER_OF_SLAB_CLASSES 64
+#define SLAB_SIZE_FACTOR 1.25
+
+
     class Slab {
     public:
         Slab(char *base);
@@ -39,11 +44,11 @@ namespace nova {
 
         uint64_t nitems_per_slab;
         uint64_t size;
-        NovaList<Slab *> slabs;
-        NovaList<char *> free_list;
+        std::vector<Slab *> slabs;
+        std::queue<char *> free_list;
 
         Slab *get_slab(int index) {
-            return slabs.value(index);
+            return slabs[index];
         }
 
         int nslabs() {
@@ -51,17 +56,18 @@ namespace nova {
         }
     };
 
-    class NovaMemManager {
+    class NovaMemManager : public leveldb::MemManager {
     public:
         NovaMemManager(char *buf);
 
-        char *ItemAlloc(uint32_t scid);
+        char *ItemAlloc(uint32_t scid) override;
 
-        void FreeItem(char *buf, uint32_t scid);
+        void FreeItem(char *buf, uint32_t scid) override;
 
-        void FreeItems(const std::vector<char *> &items, uint32_t scid);
+        void
+        FreeItems(const std::vector<char *> &items, uint32_t scid) override;
 
-        uint32_t slabclassid(uint32_t size);
+        uint32_t slabclassid(uint32_t size) override;
 
     private:
         pthread_mutex_t slab_class_mutex_[MAX_NUMBER_OF_SLAB_CLASSES];

@@ -122,6 +122,8 @@ namespace nova {
         int num_conn_workers;
         int num_async_workers;
         int num_compaction_workers;
+        int block_cache_mb;
+        int write_buffer_size_mb;
         std::vector<Fragment *> fragments;
         std::vector<Fragment *> db_fragment;
 

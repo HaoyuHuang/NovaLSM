@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 #include <list>
+#include <cc/nova_cc.h>
 
 #include "db/builder.h"
 #include "db/db_iter.h"
@@ -81,7 +82,7 @@ namespace leveldb {
         std::vector<Output> outputs;
 
         // State kept for output being generated
-        WritableFile *outfile;
+        MemWritableFile *outfile;
         TableBuilder *builder;
 
         uint64_t total_bytes;
@@ -158,7 +159,7 @@ namespace leveldb {
               manual_compaction_(nullptr),
               versions_(new VersionSet(dbname_, &options_, table_cache_,
                                        &internal_comparator_)),
-              bg_threads_(raw_options.bg_threads) {
+              bg_thread_(raw_options.bg_thread) {
     }
 
     DBImpl::~DBImpl() {
@@ -698,9 +699,7 @@ namespace leveldb {
 
     void DBImpl::Schedule(void (*function)(void *arg), void *arg) {
         mutex_.AssertHeld();
-        bg_threads_[current_bg_thread_id_]->Schedule(function, arg);
-        current_bg_thread_id_ += 1;
-        current_bg_thread_id_ %= bg_threads_.size();
+        bg_thread_->Schedule(function, arg);
     }
 
     void DBImpl::MaybeScheduleCompaction() {
@@ -862,16 +861,19 @@ namespace leveldb {
             compact->outputs.push_back(out);
             mutex_.Unlock();
         }
-
+        // TODO:
         // Make the output file
         std::string fname = TableFileName(dbname_, file_number);
-        Status s = env_->NewWritableFile(fname, {
-                .level = compact->compaction->level() + 1
-        }, &compact->outfile);
-        if (s.ok()) {
-            compact->builder = new TableBuilder(options_, compact->outfile);
-        }
-        return s;
+        MemManager *mem_manager = options_.bg_thread->mem_manager();
+        uint32_t scid = mem_manager->slabclassid(options_.max_file_size);
+        char *buf = options_.bg_thread->mem_manager()->ItemAlloc(scid);
+        NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(mem_manager,
+                                                               options_.bg_thread->dc_client(),
+                                                               dbname_, buf,
+                                                               options_.max_file_size);
+        compact->outfile = new MemWritableFile(cc_file);
+        compact->builder = new TableBuilder(options_, compact->outfile);
+        return Status::OK();
     }
 
     Status DBImpl::FinishCompactionOutputFile(CompactionState *compact,
@@ -897,6 +899,14 @@ namespace leveldb {
         delete compact->builder;
         compact->builder = nullptr;
 
+        FileMetaData meta;
+        meta.number = output_number;
+        meta.file_size = current_bytes;
+        meta.smallest = compact->current_output()->smallest;
+        meta.largest = compact->current_output()->largest;
+        NovaCCRemoteMemFile *mem_file = static_cast<NovaCCRemoteMemFile *>(compact->outfile->mem_file());
+        mem_file->set_meta(meta);
+
         // Finish and check for file errors
         if (s.ok()) {
             s = compact->outfile->Sync();
@@ -912,8 +922,9 @@ namespace leveldb {
         if (s.ok() && current_entries > 0) {
             // Verify that the table is usable
             Iterator *iter =
-                    table_cache_->NewIterator(AccessCaller::kCompaction,
-                                              ReadOptions(), output_number,
+                    table_cache_->NewIterator(AccessCaller::kUncategorized,
+                                              ReadOptions(), meta,
+                                              output_number,
                                               compact->compaction->level() + 1,
                                               current_bytes);
             s = iter->status();
