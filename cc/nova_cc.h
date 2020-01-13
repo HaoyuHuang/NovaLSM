@@ -15,7 +15,8 @@ namespace leveldb {
 
     class NovaCCRemoteMemFile : public MemFile {
     public:
-        NovaCCRemoteMemFile(MemManager *mem_manager, DCClient *dc_client,
+        NovaCCRemoteMemFile(Env* env, const std::string& fname, MemManager *mem_manager,
+                            DCClient *dc_client,
                             const std::string &dbname,
                             char *backing_mem, uint64_t allocated_size);
 
@@ -37,6 +38,9 @@ namespace leveldb {
         void set_meta(const FileMetaData &meta) { meta_ = meta; }
 
     private:
+        Env* env_;
+        std::string fname_;
+        WritableFile *local_writable_file_;
         MemManager *mem_manager_;
         DCClient *dc_client_;
         std::string dbname_;
@@ -68,17 +72,17 @@ namespace leveldb {
         uint64_t file_number_;
         FileMetaData meta_;
 
-        bool cache_all_;
-        bool done_read_all_;
+        bool prefetch_all_;
+        bool done_prefetch_all_;
         char *backing_mem_table_ = nullptr;
         char *backing_mem_block_ = nullptr;
         MemManager *mem_manager_;
         DCClient *dc_client_;
     };
 
-    class PosixEnvBGThread : public EnvBGThread {
+    class NovaCCCompactionThread : public EnvBGThread {
     public:
-        PosixEnvBGThread();
+        explicit NovaCCCompactionThread(rdmaio::RdmaCtrl *rdma_ctrl);
 
         void Schedule(
                 void (*background_work_function)(void *background_work_arg),
@@ -91,7 +95,11 @@ namespace leveldb {
 
         MemManager *mem_manager() override { return mem_manager_; }
 
+        bool IsInitialized();
+
         void Start();
+
+        nova::NovaRDMAStore *rdma_store_;
 
     private:
         // Stores the work item data in a Schedule() call.
@@ -110,11 +118,15 @@ namespace leveldb {
             void *const arg;
         };
 
+        rdmaio::RdmaCtrl *rdma_ctrl_;
         port::Mutex background_work_mutex_;
         port::CondVar background_work_cv_ GUARDED_BY(
                 background_work_mutex_);
         std::queue<BackgroundWorkItem> background_work_queue_
         GUARDED_BY(background_work_mutex_);
+
+        bool is_running_ = false;
+        leveldb::port::Mutex mutex_;
     };
 }
 

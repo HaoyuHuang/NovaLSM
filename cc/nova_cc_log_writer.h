@@ -4,10 +4,10 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
-#ifndef LEVELDB_RDMA_LOG_WRITER_H
-#define LEVELDB_RDMA_LOG_WRITER_H
+#ifndef LEVELDB_NOVA_CC_LOG_WRITER_H
+#define LEVELDB_NOVA_CC_LOG_WRITER_H
 
-#include <mc/nova_mem_manager.h>
+#include "mc/nova_mem_manager.h"
 #include "leveldb/status.h"
 #include "leveldb/slice.h"
 #include "leveldb/log_writer.h"
@@ -20,35 +20,19 @@ namespace leveldb {
 
     namespace log {
 
-        class RDMALogWriter : public Writer {
+        class RDMALogWriter {
         public:
-            // Create a writer that will append data to "*dest".
-            // "*dest" must be initially empty.
-            // "*dest" must remain live while this Writer is in use.
-            RDMALogWriter(nova::NovaRDMAStore *store,
-                          nova::NovaMemManager *mem_manager,
-                          nova::LogFileManager *log_manager
-            );
-
-            // Create a writer that will append data to "*dest".
-            // "*dest" must have initial length "dest_length".
-            // "*dest" must remain live while this Writer is in use.
-            RDMALogWriter(WritableFile *dest, uint64_t dest_length);
+            RDMALogWriter(nova::NovaRDMAStore *store, char *rnic_buf);
 
             Status
             AddRecord(const std::string &log_file_name,
-                      const Slice &slice) override;
-
-            char *AddLocalRecord(const std::string &log_file_name,
-                                 const Slice &slice) override;
-
-            Status CloseLogFile(const std::string &log_file_name) override;
-
-            char *AllocateLogBuf(const std::string &log_file);
+                      const Slice &slice);
 
             void AckAllocLogBuf(int remote_sid, uint64_t offset, uint64_t size);
 
             void AckWriteSuccess(int remote_sid, uint64_t rdma_wr_id);
+
+            Status CloseLogFile(const std::string &log_file_name);
 
         private:
             struct LogFileBuf {
@@ -57,12 +41,9 @@ namespace leveldb {
                 uint64_t size;
             };
 
-
             void Init(const std::string &log_file_name);
 
             nova::NovaRDMAStore *store_;
-            nova::NovaMemManager *mem_manager_;
-            nova::LogFileManager *log_manager_;
             std::map<std::string, LogFileBuf *> logfile_last_buf_;
 
             enum WriteResult {
@@ -80,6 +61,8 @@ namespace leveldb {
 
             std::string write_result_str(WriteResult wr);
 
+            char *rnic_buf_;
+            uint32_t rnic_buf_size_;
             std::string current_log_file_;
             WriteState *write_result_;
         };
@@ -87,4 +70,4 @@ namespace leveldb {
     }  // namespace log
 }  // namespace leveldb
 
-#endif //LEVELDB_RDMA_LOG_WRITER_H
+#endif //LEVELDB_NOVA_CC_LOG_WRITER_H

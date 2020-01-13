@@ -11,6 +11,7 @@
 #include <string>
 #include <leveldb/db_profiler.h>
 #include <list>
+#include <map>
 
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -231,6 +232,7 @@ namespace leveldb {
         // Set of table files to protect from deletion because they are
         // part of ongoing compactions.
         std::set<uint64_t> pending_outputs_ GUARDED_BY(mutex_);
+        std::map<uint64_t, FileMetaData> compacted_tables_ GUARDED_BY(mutex_);
 
         // Has a background compaction been scheduled or is running?
         bool background_compaction_scheduled_ GUARDED_BY(mutex_);

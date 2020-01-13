@@ -123,10 +123,12 @@ endif (BUILD_SHARED_LIBS)
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
 
-add_library(leveldb "" cc/nova_cc.cpp cc/nova_cc.h include/leveldb/dc_client.h include/leveldb/db_types.h)
+add_library(leveldb "")
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
+        include/leveldb/dc_client.h
+        include/leveldb/db_types.h
         "db/builder.cc"
         "db/builder.h"
         "db/c.cc"
@@ -244,12 +246,14 @@ target_sources(leveldb
         mc/worker.h
         log/nova_log.cpp
         log/nova_log.h
-        log/rdma_log_writer.cc
-        log/rdma_log_writer.h
+        cc/nova_cc_log_writer.cc
+        cc/nova_cc_log_writer.h
         nova/nova_client_sock.cpp
         nova/nova_client_sock.h
         cc/nova_rdma_cc.cpp
         cc/nova_rdma_cc.h
+        cc/nova_cc.cpp
+        cc/nova_cc.h
         nova/nova_config.cc
         dc/nova_dc_server.cpp
         dc/nova_dc_server.h

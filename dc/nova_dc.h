@@ -48,6 +48,8 @@ namespace leveldb {
 
         uint64_t TableSize(const std::string &dbname, uint64_t file_number);
 
+        void DeleteTable(const std::string &dbname, uint64_t file_number);
+
     private:
         Status
         FindTable(const std::string &dbname, uint64_t file_number,

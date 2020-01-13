@@ -6,21 +6,31 @@
 
 #include "nova_cc.h"
 
+#define MAX_BLOCK_SIZE 102400
+
 namespace leveldb {
-    NovaCCRemoteMemFile::NovaCCRemoteMemFile(MemManager *mem_manager,
+    NovaCCRemoteMemFile::NovaCCRemoteMemFile(Env *env, const std::string &fname,
+                                             MemManager *mem_manager,
                                              DCClient *dc_client,
                                              const std::string &dbname,
                                              char *backing_mem,
                                              uint64_t allocated_size)
-            : mem_manager_(mem_manager), dc_client_(dc_client),
+            : env_(env), fname_(fname), mem_manager_(mem_manager),
+              dc_client_(dc_client),
               dbname_(dbname),
               backing_mem_(backing_mem), allocated_size_(allocated_size),
               MemFile(nullptr, "", false) {
+        EnvFileMetadata env_meta;
+        env_meta.level = 0;
+        RDMA_ASSERT(
+                env_->NewWritableFile(fname, env_meta,
+                                      &local_writable_file_).ok());
     }
 
     NovaCCRemoteMemFile::~NovaCCRemoteMemFile() {
         uint32_t scid = mem_manager_->slabclassid(allocated_size_);
         mem_manager_->FreeItem(backing_mem_, scid);
+        delete local_writable_file_;
     }
 
     Status
@@ -69,6 +79,8 @@ namespace leveldb {
         while (!dc_client_->IsDone(req_id)) {
             //
         }
+        local_writable_file_->Sync();
+        local_writable_file_->Close();
     }
 
 
@@ -77,7 +89,7 @@ namespace leveldb {
             const leveldb::FileMetaData &meta, leveldb::DCClient *dc_client,
             leveldb::MemManager *mem_manager, bool cache_all) : dbname_(
             dbname), file_number_(file_number), meta_(meta), dc_client_(
-            dc_client), mem_manager_(mem_manager), cache_all_(cache_all) {
+            dc_client), mem_manager_(mem_manager), prefetch_all_(cache_all) {
 
     }
 
@@ -87,7 +99,7 @@ namespace leveldb {
             mem_manager_->FreeItem(backing_mem_table_, scid);
         }
         if (backing_mem_block_) {
-            uint32_t scid = mem_manager_->slabclassid(10240);
+            uint32_t scid = mem_manager_->slabclassid(MAX_BLOCK_SIZE);
             mem_manager_->FreeItem(backing_mem_block_, scid);
         }
     }
@@ -96,8 +108,8 @@ namespace leveldb {
                                               leveldb::Slice *result,
                                               char *scratch) {
         RDMA_ASSERT(scratch);
-        if (!cache_all_ && backing_mem_block_ == nullptr) {
-            uint32_t scid = mem_manager_->slabclassid(10240);
+        if (!prefetch_all_ && backing_mem_block_ == nullptr) {
+            uint32_t scid = mem_manager_->slabclassid(MAX_BLOCK_SIZE);
             backing_mem_block_ = mem_manager_->ItemAlloc(scid);
         }
 
@@ -112,9 +124,10 @@ namespace leveldb {
         }
 
         char *ptr = nullptr;
-        if (cache_all_) {
-            if (!done_read_all_) {
+        if (prefetch_all_) {
+            if (!done_prefetch_all_) {
                 RDMA_ASSERT(ReadAll().ok());
+                done_prefetch_all_ = true;
             }
             ptr = &backing_mem_table_[offset];
         } else {
@@ -150,14 +163,14 @@ namespace leveldb {
         while (!dc_client_->IsDone(req_id)) {
 
         }
-
     }
 
-    PosixEnvBGThread::PosixEnvBGThread() : background_work_cv_(
+    NovaCCCompactionThread::NovaCCCompactionThread(rdmaio::RdmaCtrl *rdma_ctrl)
+            : rdma_ctrl_(rdma_ctrl), background_work_cv_(
             &background_work_mutex_) {
     }
 
-    void PosixEnvBGThread::Schedule(
+    void NovaCCCompactionThread::Schedule(
             void (*background_work_function)(void *background_work_arg),
             void *background_work_arg) {
         background_work_mutex_.Lock();
@@ -172,7 +185,20 @@ namespace leveldb {
         background_work_mutex_.Unlock();
     }
 
-    void PosixEnvBGThread::Start() {
+    bool NovaCCCompactionThread::IsInitialized() {
+        mutex_.Lock();
+        bool is_running = is_running_;
+        mutex_.Unlock();
+        return is_running;
+    }
+
+    void NovaCCCompactionThread::Start() {
+        rdma_store_->Init(rdma_ctrl_);
+
+        mutex_.Lock();
+        is_running_ = true;
+        mutex_.Unlock();
+
         std::cout << "BG thread started" << std::endl;
         while (true) {
             background_work_mutex_.Lock();

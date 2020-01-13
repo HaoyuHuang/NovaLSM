@@ -117,8 +117,7 @@ namespace leveldb {
                                                  const Slice &)) {
         Cache::Handle *handle = nullptr;
         Status s = FindTable(AccessCaller::kUserGet, options, meta, file_number,
-                             file_size,
-                             level, &handle);
+                             file_size, level, &handle);
         if (s.ok()) {
             Table *t = reinterpret_cast<TableAndFile *>(cache_->Value(
                     handle))->table;

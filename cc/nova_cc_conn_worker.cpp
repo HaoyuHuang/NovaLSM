@@ -246,14 +246,11 @@ namespace nova {
         uint64_t hv = keyhash(buf, nkey);
         char *tmp = buf;
         tmp += nkey + 1;
-        Fragment *frag = NovaCCConfig::home_fragment(hv);
         RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
                         << " Get fd:"
                         << fd << " key:" << int_key << " nkey:" << nkey
                         << " hv:"
-                        << hv << " home:" << frag->server_ids[0] << " db:"
-                        << frag->db_ids[0];
-        int home_server = frag->server_ids[0];
+                        << hv;
         worker->stats.nget_hits++;
 
         leveldb::Slice key(buf, nkey);
@@ -351,7 +348,6 @@ namespace nova {
         buf += str_to_int(buf, &nval);
         char *val = buf;
         uint64_t hv = keyhash(ckey, nkey);
-        Fragment *frag = NovaCCConfig::home_fragment(hv);
         RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
                         << " put fd:"
                         << fd << ": key:" << key << " nkey:" << nkey << " nval:"
@@ -588,19 +584,6 @@ namespace nova {
     void NovaCCConnWorker::Start() {
         RDMA_LOG(INFO) << "memstore[" << thread_id_ << "]: "
                        << "starting mem worker";
-        bool all_initialized = false;
-
-        while (!all_initialized) {
-            all_initialized = true;
-            for (const auto &worker : async_workers_) {
-                if (!worker->IsInitialized()) {
-                    all_initialized = false;
-                    break;
-                }
-            }
-            usleep(10000);
-        }
-
         struct event new_conn_timer_event;
         struct event stats_event;
         struct event_config *ev_config;

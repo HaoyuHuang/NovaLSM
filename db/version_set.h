@@ -261,6 +261,8 @@ namespace leveldb {
         // The caller should delete the iterator when no longer needed.
         Iterator *MakeInputIterator(Compaction *c);
 
+        void AddCompactedInputs(Compaction *c, std::map<uint64_t, FileMetaData>* map);
+
         // Returns true iff some level needs a compaction.
         bool NeedsCompaction() const {
             Version *v = current_;

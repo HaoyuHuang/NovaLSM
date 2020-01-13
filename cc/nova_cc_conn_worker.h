@@ -13,7 +13,7 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
-#include <log/rdma_log_writer.h>
+#include <cc/nova_cc_log_writer.h>
 
 #include "cc/nova_cc_server.h"
 #include "nova/nova_msg_callback.h"

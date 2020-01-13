@@ -201,8 +201,6 @@ namespace nova {
     NovaCCServer::NovaCCServer(RdmaCtrl *rdma_ctrl,
                                char *rdmabuf, int nport)
             : nport_(nport) {
-        conn_workers = new NovaCCConnWorker *[NovaCCConfig::cc_config->num_conn_workers];
-        async_workers = new NovaRDMAComputeComponent *[NovaCCConfig::cc_config->num_async_workers];
         char *buf = rdmabuf;
         char *cache_buf = buf + nrdma_buf_cc();
         manager = new NovaMemManager(cache_buf);
@@ -216,7 +214,7 @@ namespace nova {
         int bg_thread_id = 0;
         for (int i = 0;
              i < NovaCCConfig::cc_config->num_compaction_workers; i++) {
-            bgs.push_back(new leveldb::PosixEnvBGThread);
+            bgs.push_back(new leveldb::NovaCCCompactionThread(rdma_ctrl));
         }
 
         leveldb::Cache *cache = nullptr;
@@ -230,7 +228,6 @@ namespace nova {
             bg_thread_id += 1;
             bg_thread_id %= bgs.size();
         }
-
         NovaAsyncCompleteQueue **async_cq = new NovaAsyncCompleteQueue *[NovaCCConfig::cc_config->num_conn_workers];
         for (int worker_id = 0;
              worker_id <
@@ -255,8 +252,7 @@ namespace nova {
                  i < NovaDCConfig::dc_config->dc_servers.size(); i++) {
                 QPEndPoint qp;
                 qp.host = NovaDCConfig::dc_config->dc_servers[i];
-                qp.thread_id =
-                        worker_id % NovaDCConfig::dc_config->num_dc_workers;
+                qp.thread_id = worker_id;
                 qp.server_id = NovaCCConfig::cc_config->cc_servers.size() + i;
                 endpoints.push_back(qp);
             }
@@ -298,16 +294,23 @@ namespace nova {
                 store = new NovaRDMANoopStore();
             }
 
+            uint32_t scid = manager->slabclassid(
+                    NovaConfig::config->log_buf_size);
+            char *rnic_buf = manager->ItemAlloc(scid);
+
             leveldb::DCClient *dc_client = new leveldb::NovaDCClient(store,
                                                                      manager,
                                                                      new leveldb::log::RDMALogWriter(
                                                                              store,
-                                                                             manager,
-                                                                             log_manager));
+                                                                             rnic_buf));
             bgs[i]->mem_manager_ = manager;
             bgs[i]->dc_client_ = dc_client;
+            bgs[i]->rdma_store_ = store;
             worker_id++;
+            buf += nrdma_buf_unit();
         }
+
+        RDMA_ASSERT(buf == cache_buf);
 
         // Assign async workers to conn workers.
         if (NovaCCConfig::cc_config->num_conn_workers <
@@ -340,20 +343,38 @@ namespace nova {
         // Start the threads.
         for (int worker_id = 0;
              worker_id <
-             NovaCCConfig::cc_config->num_conn_workers; worker_id++) {
-            conn_worker_threads.emplace_back(start, conn_workers[worker_id]);
-        }
-        for (int worker_id = 0;
-             worker_id <
              NovaCCConfig::cc_config->num_async_workers; worker_id++) {
             cc_workers.emplace_back(&NovaRDMAComputeComponent::Start,
                                     async_workers[worker_id]);
         }
         for (int i = 0;
              i < NovaCCConfig::cc_config->num_compaction_workers; i++) {
-            compaction_workers.emplace_back(&leveldb::PosixEnvBGThread::Start,
-                                            bgs[i]);
+            compaction_workers.emplace_back(
+                    &leveldb::NovaCCCompactionThread::Start,
+                    bgs[i]);
         }
+
+        // Wait for all RDMA connections to setup.
+        bool all_initialized = false;
+        while (!all_initialized) {
+            all_initialized = true;
+            for (const auto &worker : async_workers) {
+                if (!worker->IsInitialized()) {
+                    all_initialized = false;
+                    break;
+                }
+            }
+            if (all_initialized) {
+                for (const auto &worker : bgs) {
+                    if (!worker->IsInitialized()) {
+                        all_initialized = false;
+                        break;
+                    }
+                }
+            }
+            usleep(10000);
+        }
+
 
         if (NovaConfig::config->enable_load_data) {
             LoadData();
@@ -361,6 +382,13 @@ namespace nova {
 
         for (auto db : dbs_) {
             db->StartTracing();
+        }
+
+        // Start connection threads in the end after we have loaded all data.
+        for (int worker_id = 0;
+             worker_id <
+             NovaCCConfig::cc_config->num_conn_workers; worker_id++) {
+            conn_worker_threads.emplace_back(start, conn_workers[worker_id]);
         }
 
 //    int cores[] = {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31};

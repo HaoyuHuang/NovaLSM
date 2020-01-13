@@ -31,6 +31,17 @@ namespace leveldb {
         }
     }
 
+    void NovaDiskComponent::DeleteTable(const std::string &dbname,
+                                        uint64_t file_number) {
+        char buf[4 + dbname.size() + 4];
+        char *ptr = buf;
+        ptr += EncodeStr(ptr, dbname);
+        EncodeFixed64(ptr, file_number);
+        Slice key(buf, sizeof(buf));
+        cache_->Erase(key);
+        env_->DeleteFile(TableFileName(dbname, file_number));
+    }
+
     Status
     NovaDiskComponent::FindTable(const std::string &dbname,
                                  uint64_t file_number,

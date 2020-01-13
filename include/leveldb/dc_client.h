@@ -42,6 +42,18 @@ namespace leveldb {
                                               const FileMetaData &meta,
                                               char *backing_mem) = 0;
 
+        virtual uint32_t
+        InitiateDeleteFiles(const std::string &dbname,
+                            const std::vector<FileMetaData> &filenames) = 0;
+
+        virtual uint32_t
+        InitiateReplicateLogRecords(const std::string &log_file_name,
+                                    const Slice &slice) = 0;
+
+
+        virtual uint32_t
+        InitiateCloseLogFile(const std::string &log_file_name) = 0;
+
         virtual void OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                             int remote_server_id, char *buf,
                             uint32_t imm_data) = 0;

@@ -14,7 +14,7 @@
 #include "nova/nova_common.h"
 #include "nova_dc.h"
 #include "nova/nova_rdma_rc_store.h"
-#include "log/rdma_log_writer.h"
+#include "cc/nova_cc_log_writer.h"
 
 namespace leveldb {
 
@@ -28,6 +28,7 @@ namespace leveldb {
         DC_ALLOCATE_LOG_BUFFER_SUCC = 'A',
         DC_DELETE_LOG_FILE = 'd',
         DC_DELETE_LOG_FILE_SUCC = 'D',
+        DC_DELETE_TABLES = 't'
     };
 
     struct DCRequestContext {
@@ -67,6 +68,19 @@ namespace leveldb {
                                       uint64_t file_number,
                                       const FileMetaData &meta,
                                       char *backing_mem) override;
+
+        uint32_t
+        InitiateDeleteFiles(const std::string &dbname,
+                            const std::vector<FileMetaData> &filenames) override;
+
+
+        uint32_t
+        InitiateReplicateLogRecords(const std::string &log_file_name,
+                                    const Slice &slice) override;
+
+
+        uint32_t
+        InitiateCloseLogFile(const std::string &log_file_name) override;
 
         void OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                     int remote_server_id, char *buf,

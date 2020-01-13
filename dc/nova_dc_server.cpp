@@ -16,8 +16,6 @@ namespace nova {
     NovaDCServer::NovaDCServer(rdmaio::RdmaCtrl *rdma_ctrl,
                                char *rdmabuf,
                                std::map<uint32_t, std::set<uint32_t >> &dbs) {
-        NovaRDMARCStore *rdma_store;
-
         char *buf = rdmabuf;
         char *cache_buf = buf + nrdma_buf_dc();
 

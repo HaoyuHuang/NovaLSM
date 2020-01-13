@@ -28,8 +28,6 @@ namespace nova {
         leveldb::WriteOptions option;
         option.sync = true;
         option.local_write = false;
-        option.writer = nullptr;
-
         Fragment *frag = NovaCCConfig::home_fragment(hv);
         leveldb::DB *db = dbs_[frag->db_ids[0]];
         if (!option.local_write) {
@@ -82,7 +80,6 @@ namespace nova {
         }
         std::list<NovaAsyncTask> queue(queue_.begin(), queue_.end());
         mutex_.Unlock();
-
 
         for (const NovaAsyncTask &task : queue) {
             switch (task.type) {

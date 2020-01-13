@@ -80,6 +80,53 @@ namespace leveldb {
         return InitiateReadBlocks(dbname, file_number, meta, handles, result);
     }
 
+    uint32_t NovaDCClient::InitiateDeleteFiles(const std::string &dbname,
+                                               const std::vector<FileMetaData> &filenames) {
+        std::map<uint32_t, std::vector<uint64_t>> dc_files;
+        for (const auto &file : filenames) {
+            uint32_t dc_id = HomeDCNode(file);
+            dc_files[dc_id].push_back(file.number);
+        }
+
+        for (auto it = dc_files.begin(); it != dc_files.end(); it++) {
+            char *sendbuf = rdma_store_->GetSendBuf(it->first);
+            uint32_t msg_size = 0;
+            msg_size += leveldb::EncodeStr(sendbuf, dbname);
+            leveldb::EncodeFixed32(sendbuf + msg_size, it->second.size());
+            msg_size += 4;
+            for (int i = 0; i < it->second.size(); i++) {
+                leveldb::EncodeFixed64(sendbuf + msg_size, it->second[i]);
+                msg_size += 8;
+            }
+            rdma_store_->PostSend(sendbuf, msg_size, it->first,
+                                  current_req_id_);
+        }
+        current_req_id_ += 1;
+        return 0;
+    }
+
+    uint32_t NovaDCClient::InitiateReplicateLogRecords(
+            const std::string &log_file_name, const leveldb::Slice &slice) {
+        rdma_log_writer_->AddRecord(log_file_name, slice);
+        DCRequestContext context = {};
+        uint32_t req_id = current_req_id_;
+        context.done = false;
+        request_context_[current_req_id_] = context;
+        current_req_id_++;
+        return req_id;
+    }
+
+    uint32_t
+    NovaDCClient::InitiateCloseLogFile(const std::string &log_file_name) {
+        rdma_log_writer_->CloseLogFile(log_file_name);
+        DCRequestContext context = {};
+        uint32_t req_id = current_req_id_;
+        context.done = false;
+        request_context_[current_req_id_] = context;
+        current_req_id_++;
+        return req_id;
+    }
+
     uint32_t NovaDCClient::InitiateReadBlocks(const std::string &dbname,
                                               uint64_t file_number,
                                               const leveldb::FileMetaData &meta,
@@ -142,20 +189,8 @@ namespace leveldb {
                 break;
             case IBV_WC_RECV:
             case IBV_WC_RECV_RDMA_WITH_IMM:
-                if (buf[0] == DCRequestType::DC_ALLOCATE_LOG_BUFFER) {
-                    uint32_t size = leveldb::DecodeFixed32(buf + 1);
-                    std::string log_file(buf + 5, size);
-                    char *buf = rdma_log_writer_->AllocateLogBuf(log_file);
-                    char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
-                    send_buf[0] = DCRequestType::DC_ALLOCATE_LOG_BUFFER_SUCC;
-                    leveldb::EncodeFixed64(send_buf + 1, (uint64_t) buf);
-                    leveldb::EncodeFixed64(send_buf + 9,
-                                           nova::NovaConfig::config->log_buf_size);
-                    rdma_store_->PostSend(send_buf, 1 + 8 + 8, remote_server_id,
-                                          0);
-                    rdma_store_->FlushPendingSends(remote_server_id);
-                } else if (buf[0] ==
-                           DCRequestType::DC_ALLOCATE_LOG_BUFFER_SUCC) {
+                if (buf[0] ==
+                    DCRequestType::DC_ALLOCATE_LOG_BUFFER_SUCC) {
                     uint64_t base = leveldb::DecodeFixed64(buf + 1);
                     uint64_t size = leveldb::DecodeFixed64(buf + 9);
                     rdma_log_writer_->AckAllocLogBuf(remote_server_id, base,

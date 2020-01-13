@@ -12,18 +12,18 @@ namespace nova {
 #define RDMA_POLL_MAX_TIMEOUT_US 10000
 
     NovaRDMADiskComponent::NovaRDMADiskComponent(rdmaio::RdmaCtrl *rdma_ctrl,
-                                         NovaMemManager *mem_manager,
-                                         leveldb::NovaDiskComponent *dc,
-                                         LogFileManager *log_manager)
+                                                 NovaMemManager *mem_manager,
+                                                 leveldb::NovaDiskComponent *dc,
+                                                 LogFileManager *log_manager)
             : rdma_ctrl_(rdma_ctrl),
               mem_manager_(mem_manager), dc_(dc),
               log_manager_(log_manager) {
-
     }
 
-    void NovaRDMADiskComponent::ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id,
-                                          int remote_server_id, char *buf,
-                                          uint32_t imm_data) {
+    void
+    NovaRDMADiskComponent::ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id,
+                                         int remote_server_id, char *buf,
+                                         uint32_t imm_data) {
         switch (type) {
             case IBV_WC_SEND:
                 break;
@@ -64,23 +64,21 @@ namespace nova {
                     break;
                 }
 
-// Inspect the buf.
+                // Inspect the buf.
                 if (buf[0] == leveldb::DCRequestType::DC_ALLOCATE_LOG_BUFFER) {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);
                     std::string log_file(buf + 5, size);
-                    char *buf = rdma_log_writer_->AllocateLogBuf(log_file);
+                    uint32_t slabclassid = mem_manager_->slabclassid(
+                            nova::NovaConfig::config->log_buf_size);
+                    char *buf = mem_manager_->ItemAlloc(slabclassid);
+                    log_manager_->Add(log_file, buf);
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     send_buf[0] = RequestType::ALLOCATE_LOG_BUFFER_SUCC;
                     leveldb::EncodeFixed64(send_buf + 1, (uint64_t) buf);
                     leveldb::EncodeFixed64(send_buf + 9,
                                            NovaConfig::config->log_buf_size);
-                    rdma_store_->PostSend(nullptr, 1 + 8 + 8, remote_server_id,
+                    rdma_store_->PostSend(send_buf, 1 + 8 + 8, remote_server_id,
                                           0);
-                } else if (buf[0] == RequestType::ALLOCATE_LOG_BUFFER_SUCC) {
-                    uint64_t base = leveldb::DecodeFixed64(buf + 1);
-                    uint64_t size = leveldb::DecodeFixed64(buf + 9);
-                    rdma_log_writer_->AckAllocLogBuf(remote_server_id, base,
-                                                     size);
                 } else if (buf[0] == RequestType::DELETE_LOG_FILE) {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);
                     std::string log_file(buf + 5, size);
@@ -88,21 +86,36 @@ namespace nova {
                 } else if (buf[0] ==
                            leveldb::DCRequestType::DC_DELETE_LOG_FILE_SUCC) {
 
+                } else if (buf[0] == leveldb::DCRequestType::DC_DELETE_TABLES) {
+                    char *input = buf + 1;
+                    std::string dbname;
+                    uint32_t read_index = 0;
+                    read_index += leveldb::DecodeStr(input, &dbname);
+                    uint32_t nfiles = leveldb::DecodeFixed32(
+                            input + read_index);
+
+                    for (int i = 0; i < nfiles; i++) {
+                        uint64_t tableid = leveldb::DecodeFixed64(
+                                input + read_index);
+                        read_index += 8;
+                        dc_->DeleteTable(dbname, tableid);
+                    }
                 } else if (buf[0] == leveldb::DCRequestType::DC_FLUSH_SSTABLE) {
                     // The request contains dbname, file number, and sstable size.
                     // Return the allocated buffer offset.
-                    leveldb::Slice input(buf + 1);
-                    leveldb::Slice dbname;
-                    RDMA_ASSERT(
-                            leveldb::GetLengthPrefixedSlice(&input, &dbname));
-                    uint32_t file_number = leveldb::DecodeFixed32(input.data());
+                    char *input = buf + 1;
+                    std::string dbname;
+                    uint32_t read_index = 0;
+                    read_index += leveldb::DecodeStr(input, &dbname);
+                    uint32_t file_number = leveldb::DecodeFixed32(
+                            input + read_index);
+                    read_index += 4;
                     uint32_t sstable_size = leveldb::DecodeFixed32(
-                            input.data() + 4);
+                            input + read_index);
 
                     uint32_t scid = mem_manager_->slabclassid(sstable_size);
                     char *buf = mem_manager_->ItemAlloc(scid);
                     RDMA_ASSERT(buf != nullptr);
-
 
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     RDMA_ASSERT(send_buf != nullptr);
@@ -111,7 +124,7 @@ namespace nova {
 
                     RequestContext context = {
                             .request_type = leveldb::DCRequestType::DC_FLUSH_SSTABLE,
-                            .db_name = dbname.ToString(),
+                            .db_name = dbname,
                             .file_number = file_number,
                             .buf = buf,
                             .sstable_size = sstable_size
@@ -201,10 +214,6 @@ namespace nova {
         if (NovaConfig::config->enable_rdma) {
             rdma_store_->Init(rdma_ctrl_);
         }
-
-        rdma_log_writer_ = new leveldb::log::RDMALogWriter(rdma_store_,
-                                                           mem_manager_,
-                                                           log_manager_);
         bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         uint32_t n = 0;

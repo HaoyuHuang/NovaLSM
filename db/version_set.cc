@@ -1292,6 +1292,19 @@ namespace leveldb {
         GetRange(all, smallest, largest);
     }
 
+    void VersionSet::AddCompactedInputs(leveldb::Compaction *c,
+                                        std::map<uint64_t, leveldb::FileMetaData> *map) {
+        int num = 0;
+        for (int which = 0; which < 2; which++) {
+            if (!c->inputs_[which].empty()) {
+                const std::vector<FileMetaData *> &files = c->inputs_[which];
+                for (size_t i = 0; i < files.size(); i++) {
+                    (*map)[files[i]->number] = *files[i];
+                }
+            }
+        }
+    }
+
     Iterator *VersionSet::MakeInputIterator(Compaction *c) {
         ReadOptions options;
         options.verify_checksums = options_->paranoid_checks;

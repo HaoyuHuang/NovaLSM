@@ -291,7 +291,12 @@ namespace leveldb {
                 }
             }
         }
-
+        std::vector<FileMetaData> files;
+        for (auto it = compacted_tables_.begin();
+             it != compacted_tables_.end(); it++) {
+            files.push_back(it->second);
+        }
+        compacted_tables_.clear();
         // While deleting all files unblock other threads. All files being deleted
         // have unique names which will not collide with newly created files and
         // are therefore safe to delete while allowing other threads to proceed.
@@ -299,6 +304,8 @@ namespace leveldb {
         for (const std::string &filename : files_to_delete) {
             env_->DeleteFile(dbname_ + "/" + filename);
         }
+        options_.bg_thread->dc_client()->InitiateDeleteFiles(dbname_,
+                                                             files);
         mutex_.Lock();
     }
 
@@ -838,6 +845,7 @@ namespace leveldb {
         } else {
             assert(compact->outfile == nullptr);
         }
+        delete compact->outfile->mem_file();
         delete compact->outfile;
         for (size_t i = 0; i < compact->outputs.size(); i++) {
             const CompactionState::Output &out = compact->outputs[i];
@@ -861,13 +869,14 @@ namespace leveldb {
             compact->outputs.push_back(out);
             mutex_.Unlock();
         }
-        // TODO:
         // Make the output file
         std::string fname = TableFileName(dbname_, file_number);
         MemManager *mem_manager = options_.bg_thread->mem_manager();
         uint32_t scid = mem_manager->slabclassid(options_.max_file_size);
         char *buf = options_.bg_thread->mem_manager()->ItemAlloc(scid);
-        NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(mem_manager,
+        NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(options_.env,
+                                                               fname,
+                                                               mem_manager,
                                                                options_.bg_thread->dc_client(),
                                                                dbname_, buf,
                                                                options_.max_file_size);
@@ -915,7 +924,8 @@ namespace leveldb {
             s = compact->outfile->Close();
         }
 
-        // TODO: RDMA Write the output file to DC.
+        delete mem_file;
+        mem_file = nullptr;
         delete compact->outfile;
         compact->outfile = nullptr;
 
@@ -1051,7 +1061,6 @@ namespace leveldb {
                     // Therefore this deletion marker is obsolete and can be dropped.
                     drop = true;
                 }
-
                 last_sequence_for_key = ikey.sequence;
             }
 #if 0
@@ -1144,13 +1153,13 @@ namespace leveldb {
             db_profiler_->Trace(compaction);
         }
 
-
         if (status.ok()) {
             status = InstallCompactionResults(compact);
         }
         if (!status.ok()) {
             RecordBackgroundError(status);
         }
+        versions_->AddCompactedInputs(compact->compaction, &compacted_tables_);
         VersionSet::LevelSummaryStorage tmp;
         Log(options_.info_log, "compacted to: %s",
             versions_->LevelSummary(&tmp));
@@ -1161,9 +1170,12 @@ namespace leveldb {
 
         struct IterState {
             port::Mutex *const mu;
-            Version *const version GUARDED_BY(mu);
-            MemTable *const mem GUARDED_BY(mu);
-            MemTable *const imm GUARDED_BY(mu);
+            Version *const version
+            GUARDED_BY(mu);
+            MemTable *const mem
+            GUARDED_BY(mu);
+            MemTable *const imm
+            GUARDED_BY(mu);
 
             IterState(port::Mutex *mutex, MemTable *mem, MemTable *imm,
                       Version *version)
@@ -1342,10 +1354,15 @@ namespace leveldb {
                                             closed_log_files_.end());
         closed_log_files_.clear();
         mutex_.Unlock();
-        options.writer->AddRecord(logfile,
-                                  WriteBatchInternal::Contents(updates));
+        uint32_t req_id = options.dc_client->InitiateReplicateLogRecords(
+                logfile, WriteBatchInternal::Contents(updates));
+
+        while (!options.dc_client->IsDone(req_id)) {
+            // Wait until replication completes.
+        }
+
         for (const auto &file : closed_files) {
-            options.writer->CloseLogFile(file);
+            options.dc_client->InitiateCloseLogFile(file);
         }
         return Status::OK();
     }

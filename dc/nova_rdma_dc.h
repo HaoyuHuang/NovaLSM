@@ -10,7 +10,6 @@
 #include "nova/nova_rdma_rc_store.h"
 #include "mc/nova_mem_manager.h"
 #include "nova_dc.h"
-#include "log/rdma_log_writer.h"
 #include "nova_dc_client.h"
 
 namespace nova {
@@ -26,9 +25,9 @@ namespace nova {
     class NovaRDMADiskComponent : public NovaMsgCallback {
     public:
         NovaRDMADiskComponent(rdmaio::RdmaCtrl *rdma_ctrl,
-                          NovaMemManager *mem_manager,
-                          leveldb::NovaDiskComponent *dc,
-                          LogFileManager *log_manager);
+                              NovaMemManager *mem_manager,
+                              leveldb::NovaDiskComponent *dc,
+                              LogFileManager *log_manager);
 
         void Start();
 
@@ -44,7 +43,6 @@ namespace nova {
         rdmaio::RdmaCtrl *rdma_ctrl_;
         leveldb::NovaDiskComponent *dc_;
         NovaMemManager *mem_manager_;
-        leveldb::log::RDMALogWriter *rdma_log_writer_;
         LogFileManager *log_manager_;
         std::map<uint32_t, RequestContext> request_context_map_;
     };

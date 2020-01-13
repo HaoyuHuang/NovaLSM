@@ -18,7 +18,7 @@
 #include <list>
 #include <dc/nova_dc_client.h>
 #include "log/nova_log.h"
-#include "log/rdma_log_writer.h"
+#include "nova_cc_log_writer.h"
 
 namespace nova {
 
