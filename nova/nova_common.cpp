@@ -199,14 +199,23 @@ namespace nova {
         return result.str();
     }
 
-    std::string DBName(const std::string &dbname, uint64_t index) {
-        return dbname + "/" + std::to_string(index);
+    std::string DBName(const std::string &dbname, uint32_t sid, uint32_t index) {
+        return dbname + "/" + std::to_string(sid) + "/" + std::to_string(index);
     }
 
-    void ParseDBName(const std::string &logname, uint64_t *index) {
-        int end = logname.find_last_of('/') - 1;
-        int start = logname.find_last_of('/', end) + 1;
-        str_to_int(logname.data() + start, index, end - start + 1);
+    void ParseDBName(const std::string &logname, uint32_t *sid, uint32_t *index) {
+        int iend = logname.find_last_of('/') - 1;
+        int istart = logname.find_last_of('/', iend) + 1;
+        int send = istart - 2;
+        int sstart = logname.find_last_of('/', send) + 1;
+
+        uint64_t i64;
+        uint64_t s64;
+        str_to_int(logname.data() + istart, &i64, iend - istart + 1);
+        str_to_int(logname.data() + sstart, &s64, send - sstart + 1);
+
+        *sid = s64;
+        *index = i64;
     }
 
     std::string ibv_wr_opcode_str(ibv_wr_opcode code) {

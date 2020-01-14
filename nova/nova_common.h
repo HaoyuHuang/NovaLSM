@@ -109,9 +109,10 @@ namespace nova {
 
     std::string ToString(const std::vector<uint32_t> &x);
 
-    std::string DBName(const std::string& dbname, uint64_t index);
+    std::string DBName(const std::string &dbname, uint32_t sid, uint32_t index);
 
-    void ParseDBName(const std::string& logname, uint64_t* index);
+    void
+    ParseDBName(const std::string &logname, uint32_t *sid, uint32_t *index);
 
     enum ResponseType : char {
         GETR = 'G',

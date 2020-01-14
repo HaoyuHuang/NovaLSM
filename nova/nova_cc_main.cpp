@@ -111,7 +111,26 @@ void start(NovaMemServer *server) {
     server->Start();
 }
 
-leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
+static void _mkdir(const char *dir) {
+    char tmp[1024];
+    char *p = NULL;
+    size_t len;
+
+    snprintf(tmp, sizeof(tmp), "%s", dir);
+    len = strlen(tmp);
+    if (tmp[len - 1] == '/')
+        tmp[len - 1] = 0;
+    for (p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            mkdir(tmp, 0777);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0777);
+}
+
+leveldb::DB *CreateDatabase(int sid, int db_index, leveldb::Cache *cache,
                             const std::vector<leveldb::EnvBGThread *> &bg_threads) {
     leveldb::EnvOptions env_option;
     if (FLAGS_sstable_mode == "disk") {
@@ -142,8 +161,8 @@ leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
     }
     options.comparator = new YCSBKeyComparator();
     leveldb::Logger *log = nullptr;
-    std::string db_path = DBName(NovaConfig::config->db_path, db_index);
-    mkdir(db_path.c_str(), 0777);
+    std::string db_path = DBName(NovaConfig::config->db_path, sid, db_index);
+    _mkdir(db_path.c_str());
 
     RDMA_ASSERT(env->NewLogger(
             db_path + "/LOG-" + std::to_string(db_index), &log).ok());
@@ -151,10 +170,12 @@ leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
     leveldb::Status status = leveldb::DB::Open(options, db_path, &db);
     RDMA_ASSERT(status.ok()) << "Open leveldb failed " << status.ToString();
 
-    uint64_t index = 0;
+    uint32_t index = 0;
+    uint32_t dbsid = 0;
     std::string logname = leveldb::LogFileName(db_path, 1111);
-    ParseDBName(logname, &index);
+    ParseDBName(logname, &dbsid, &index);
     RDMA_ASSERT(index == db_index);
+    RDMA_ASSERT(dbsid == sid) << dbsid << "," << sid;
     return db;
 }
 
@@ -278,7 +299,8 @@ int main(int argc, char *argv[]) {
     for (int db_index = 0; db_index < ndbs; db_index++) {
         std::vector<leveldb::EnvBGThread *> bg_threads;
         bg_threads.push_back(bgs[bg_thread_id]);
-        dbs.push_back(CreateDatabase(db_index, cache, bg_threads));
+        dbs.push_back(CreateDatabase(NovaConfig::config->my_server_id, db_index,
+                                     cache, bg_threads));
         bg_thread_id += 1;
         bg_thread_id %= bgs.size();
     }

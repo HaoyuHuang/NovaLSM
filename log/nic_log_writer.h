@@ -31,7 +31,6 @@ namespace leveldb {
             // "*dest" must be initially empty.
             // "*dest" must remain live while this Writer is in use.
             NICLogWriter(std::vector<nova::NovaClientSock *> *sockets,
-                         nova::NovaMemManager *mem_manager,
                          nova::LogFileManager *log_manager
             );
 
@@ -49,20 +48,9 @@ namespace leveldb {
 
             Status CloseLogFile(const std::string &log_file_name) override;
 
-            char *AllocateLogBuf(const std::string &log_file);
-
         private:
-
-            struct LogFileBuf {
-                char *base;
-                uint32_t size;
-                uint32_t offset;
-            };
-
             std::vector<nova::NovaClientSock *> *sockets_;
-            nova::NovaMemManager *mem_manager_;
             nova::LogFileManager *log_manager_;
-            std::map<std::string, LogFileBuf> logfile_last_buf_;
             std::mutex mutex_;
         };
 

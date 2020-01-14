@@ -104,8 +104,9 @@ namespace leveldb {
         Status
         RDMALogWriter::AddRecord(const std::string &log_file_name,
                                  const Slice &slice) {
-            uint64_t db_index;
-            nova::ParseDBName(log_file_name, &db_index);
+            uint32_t db_sid;
+            uint32_t db_index;
+            nova::ParseDBName(log_file_name, &db_sid, &db_index);
             nova::Fragment *frag = nova::NovaConfig::config->db_fragment[db_index];
 
             current_log_file_ = log_file_name;
@@ -217,8 +218,9 @@ namespace leveldb {
         }
 
         Status RDMALogWriter::CloseLogFile(const std::string &log_file_name) {
-            uint64_t db_index;
-            nova::ParseDBName(log_file_name, &db_index);
+            uint32_t db_sid;
+            uint32_t db_index;
+            nova::ParseDBName(log_file_name, &db_sid, &db_index);
             nova::Fragment *frag = nova::NovaConfig::config->db_fragment[db_index];
 
             delete logfile_last_buf_[log_file_name];

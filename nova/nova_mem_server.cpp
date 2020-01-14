@@ -234,8 +234,7 @@ namespace nova {
 
             // Log writers.
             async_workers[worker_id]->nic_log_writer_ = new leveldb::log::NICLogWriter(
-                    &async_workers[worker_id]->socks_, manager,
-                    log_manager);
+                    &async_workers[worker_id]->socks_, log_manager);
             async_workers[worker_id]->rdma_log_writer_ = new leveldb::log::RDMALogWriter(
                     store, manager, log_manager);
             async_workers[worker_id]->log_manager_ = log_manager;
@@ -269,6 +268,8 @@ namespace nova {
             }
         }
 
+        RDMA_LOG(INFO) << "Number of worker thread per conn thread "
+                       << conn_workers[0]->async_workers_.size();
 
         // Start the threads.
         for (int worker_id = 0;

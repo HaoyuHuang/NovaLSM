@@ -198,6 +198,8 @@ namespace nova {
             rdma_store_->Init();
         }
 
+        RDMA_LOG(INFO) << "Async worker connected to other servers";
+
         mutex_.Lock();
         is_running_ = true;
         mutex_.Unlock();

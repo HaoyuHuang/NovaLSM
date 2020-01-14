@@ -36,55 +36,26 @@ namespace leveldb {
 // "*dest" must be initially empty.
 // "*dest" must remain live while this Writer is in use.
         NICLogWriter::NICLogWriter(std::vector<nova::NovaClientSock *> *sockets,
-                                   nova::NovaMemManager *mem_manager,
                                    nova::LogFileManager *log_manager)
-                : sockets_(sockets), mem_manager_(mem_manager),
-                  log_manager_(log_manager), Writer(nullptr) {
+                : sockets_(sockets), log_manager_(log_manager),
+                  Writer(nullptr) {
         }
 
         NICLogWriter::NICLogWriter(WritableFile *dest, uint64_t dest_length)
                 : Writer(dest, dest_length) {}
 
-        char *NICLogWriter::AllocateLogBuf(const std::string &log_file) {
-            uint32_t slabclassid = mem_manager_->slabclassid(
-                    nova::NovaConfig::config->log_buf_size);
-            char *buf = mem_manager_->ItemAlloc(slabclassid);
-            RDMA_ASSERT(buf != nullptr);
-            logfile_last_buf_[log_file] = {
-                    .base = buf,
-                    .size = nova::NovaConfig::config->log_buf_size,
-                    .offset = 0
-            };
-            log_manager_->Add(log_file, buf);
-            return buf;
-        }
-
         char *NICLogWriter::AddLocalRecord(const std::string &log_file_name,
                                            const Slice &slice) {
-            mutex_.lock();
-            auto it = logfile_last_buf_.find(log_file_name);
-            if (it == logfile_last_buf_.end()) {
-                AllocateLogBuf(log_file_name);
-                it = logfile_last_buf_.find(log_file_name);
-            }
-            RDMA_ASSERT(it != logfile_last_buf_.end());
-            LogFileBuf &buf = it->second;
-            uint32_t log_record_size = LogRecordSize(log_file_name, slice);
-            if (buf.offset + log_record_size > buf.size) {
-                AllocateLogBuf(log_file_name);
-                buf = logfile_last_buf_[log_file_name];
-            }
-            PrepareLogRecord(buf.base + buf.offset, log_file_name, slice);
-            buf.offset += log_record_size;
-            mutex_.unlock();
+            log_manager_->AddLogRecord(log_file_name, slice);
             return nullptr;
         }
 
         Status
         NICLogWriter::AddRecord(const std::string &log_file_name,
                                 const Slice &slice) {
-            uint64_t db_index;
-            nova::ParseDBName(log_file_name, &db_index);
+            uint32_t db_sid;
+            uint32_t db_index;
+            nova::ParseDBName(log_file_name, &db_sid, &db_index);
             nova::Fragment *frag = nova::NovaConfig::config->db_fragment[db_index];
 
             RDMA_LOG(rdmaio::DEBUG) << "NIC Replicate Log record of "
@@ -125,10 +96,10 @@ namespace leveldb {
         }
 
         Status NICLogWriter::CloseLogFile(const std::string &log_file_name) {
-            uint64_t db_index;
-            nova::ParseDBName(log_file_name, &db_index);
+            uint32_t db_sid;
+            uint32_t db_index;
+            nova::ParseDBName(log_file_name, &db_sid, &db_index);
             nova::Fragment *frag = nova::NovaConfig::config->db_fragment[db_index];
-            logfile_last_buf_.erase(log_file_name);
             log_manager_->DeleteLogBuf(log_file_name);
 
             RDMA_LOG(rdmaio::INFO) << "NIC close log file "
