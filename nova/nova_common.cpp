@@ -199,11 +199,13 @@ namespace nova {
         return result.str();
     }
 
-    std::string DBName(const std::string &dbname, uint32_t sid, uint32_t index) {
+    std::string
+    DBName(const std::string &dbname, uint32_t sid, uint32_t index) {
         return dbname + "/" + std::to_string(sid) + "/" + std::to_string(index);
     }
 
-    void ParseDBName(const std::string &logname, uint32_t *sid, uint32_t *index) {
+    void
+    ParseDBName(const std::string &logname, uint32_t *sid, uint32_t *index) {
         int iend = logname.find_last_of('/') - 1;
         int istart = logname.find_last_of('/', iend) + 1;
         int send = istart - 2;
@@ -216,6 +218,14 @@ namespace nova {
 
         *sid = s64;
         *index = i64;
+    }
+
+    uint64_t LogFileHash(const std::string &logname) {
+        uint32_t sid;
+        uint32_t index;
+        ParseDBName(logname, &sid, &index);
+        uint64_t hash = ((uint64_t) sid) << 32;
+        return hash + index;
     }
 
     std::string ibv_wr_opcode_str(ibv_wr_opcode code) {

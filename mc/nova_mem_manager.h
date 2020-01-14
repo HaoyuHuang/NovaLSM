@@ -13,6 +13,8 @@
 #include "nova/linked_list.h"
 #include "nova/nova_mem_config.h"
 
+#define NOVA_MEM_PARTITIONS 64
+
 namespace nova {
     class Slab {
     public:
@@ -51,38 +53,15 @@ namespace nova {
         }
     };
 
-    class NovaMemManager {
+    class NovaPartitionedMemManager {
     public:
-        NovaMemManager(char *buf);
-
-        GetResult
-        LocalGet(char *key, uint32_t nkey, bool increment_ref_count = true);
-
-        PutResult
-        LocalPut(char *key, uint32_t nkey, char *val, uint32_t nval,
-                 bool acquire_ht_lock, bool delete_old_item);
-
-        PutResult Delete(char *key, uint32_t nkey, bool acquire_ht_lock);
-
-        void PrintHashTable() {
-            local_ht_->PrintTable();
-        };
-
-        IndexEntry RemoteGet(char *key, uint32_t nkey);
-
-        PutResult RemotePut(const IndexEntry &entry);
-
-        void
-        FreeDataEntry(const IndexEntry &index_entry,
-                      const DataEntry &data_entry);
+        NovaPartitionedMemManager(char *buf, uint64_t data_size);
 
         char *ItemAlloc(uint32_t scid);
 
         void FreeItem(char *buf, uint32_t scid);
 
         void FreeItems(const std::vector<char *> &items, uint32_t scid);
-
-        char *ItemEvict(uint32_t scid);
 
         uint32_t slabclassid(uint32_t size);
 
@@ -93,9 +72,23 @@ namespace nova {
         pthread_mutex_t free_slabs_mutex_;
         Slab **free_slabs_ = nullptr;
         uint64_t free_slab_index_ = 0;
+    };
 
-        ChainedHashTable *local_ht_ = nullptr;
-        ChainedHashTable *location_cache_ = nullptr;
+    class NovaMemManager {
+    public:
+        NovaMemManager(char *buf);
+
+        char *ItemAlloc(uint64_t key, uint32_t scid);
+
+        void FreeItem(uint64_t key, char *buf, uint32_t scid);
+
+        void FreeItems(uint64_t key, const std::vector<char *> &items,
+                       uint32_t scid);
+
+        uint32_t slabclassid(uint64_t key, uint32_t size);
+
+    private:
+        std::vector<NovaPartitionedMemManager *> partitioned_mem_managers_;
     };
 }
 

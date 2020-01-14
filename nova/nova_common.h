@@ -114,6 +114,8 @@ namespace nova {
     void
     ParseDBName(const std::string &logname, uint32_t *sid, uint32_t *index);
 
+    uint64_t LogFileHash(const std::string &logname);
+
     enum ResponseType : char {
         GETR = 'G',
         PUTR,

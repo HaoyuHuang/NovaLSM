@@ -43,10 +43,11 @@ namespace leveldb {
         }
 
         char *RDMALogWriter::AllocateLogBuf(const std::string &log_file) {
-            uint32_t slabclassid = mem_manager_->slabclassid(
-                    nova::NovaConfig::config->log_buf_size);
+            uint64_t hash = nova::LogFileHash(log_file);
+            uint32_t slabclassid = mem_manager_->slabclassid(hash,
+                                                             nova::NovaConfig::config->log_buf_size);
             int server_id = nova::NovaConfig::config->my_server_id;
-            char *buf = mem_manager_->ItemAlloc(slabclassid);
+            char *buf = mem_manager_->ItemAlloc(hash, slabclassid);
             Init(log_file);
             logfile_last_buf_[log_file][server_id] = {
                     .base = (uint64_t) buf,

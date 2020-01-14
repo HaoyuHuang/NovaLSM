@@ -106,57 +106,6 @@ namespace nova {
 //        }
     }
 
-    void NovaMemServer::LoadDataWithHashPartition() {
-        char key[1024];
-        char value[NovaConfig::config->load_default_value_size];
-        // load data.
-        timeval start{};
-        gettimeofday(&start, nullptr);
-        int loaded_keys = 0;
-        for (uint64_t record_id = 0;
-             record_id < NovaConfig::config->recordcount; record_id++) {
-            Fragment *frag = NovaConfig::home_fragment(record_id);
-            if (frag->server_ids[0] == NovaConfig::config->my_server_id) {
-                uint32_t nkey = int_to_str(key, record_id) - 1;
-                auto v = static_cast<char>((record_id % 26) + 'a');
-                memset(value, v, NovaConfig::config->load_default_value_size);
-                RDMA_LOG(DEBUG) << "Insert " << record_id;
-                RDMA_ASSERT(manager->LocalPut(key, nkey, value,
-                                              NovaConfig::config->load_default_value_size,
-                                              true, false).success);
-                loaded_keys++;
-                if (loaded_keys % 100000 == 0) {
-                    timeval now{};
-                    gettimeofday(&now, nullptr);
-                    RDMA_LOG(INFO) << "Load " << loaded_keys << " entries took "
-                                   << now.tv_sec - start.tv_sec;
-                }
-            }
-        }
-
-        RDMA_LOG(INFO) << "Completed loading data " << loaded_keys;
-        // Assert the loaded data is valid.
-        for (uint64_t record_id = 0;
-             record_id < NovaConfig::config->recordcount; record_id++) {
-            Fragment *frag = NovaConfig::home_fragment(record_id);
-            if (frag->server_ids[0] == NovaConfig::config->my_server_id) {
-                uint32_t nkey = int_to_str(key, record_id) - 1;
-                auto v = static_cast<char>((record_id % 26) + 'a');
-                memset(value, v, NovaConfig::config->load_default_value_size);
-                GetResult result = manager->LocalGet(key, nkey);
-                DataEntry it = result.data_entry;
-                RDMA_ASSERT(it.stale == 0);
-                RDMA_ASSERT(it.nkey == nkey) << key << " " << it.nkey;
-                RDMA_ASSERT(
-                        it.nval == NovaConfig::config->load_default_value_size)
-                    << key;
-                RDMA_ASSERT(memcmp(it.user_key(), key, nkey) == 0) << key;
-                RDMA_ASSERT(
-                        memcmp(it.user_value(), value, it.nval) ==
-                        0) << key;
-            }
-        }
-    }
 
     void NovaMemServer::LoadData() {
         if (NovaConfig::config->partition_mode == NovaRDMAPartitionMode::HASH) {
@@ -164,9 +113,6 @@ namespace nova {
         } else if (NovaConfig::config->partition_mode ==
                    NovaRDMAPartitionMode::RANGE) {
             LoadDataWithRangePartition();
-        }
-        if (RDMA_LOG_LEVEL == DEBUG) {
-            manager->PrintHashTable();
         }
         for (int i = 0; i < dbs_.size(); i++) {
             RDMA_LOG(INFO) << "Database " << i;

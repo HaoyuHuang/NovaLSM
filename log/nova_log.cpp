@@ -50,7 +50,7 @@ namespace nova {
 
 
     LogFileManager::LogFileManager(
-            nova::NovaMemManager *mem_manager) {
+            nova::NovaMemManager *mem_manager) : mem_manager_(mem_manager) {
         server_db_log_files_ = new DBLogFiles **[NovaConfig::config->servers.size()];
         uint32_t nranges = NovaConfig::config->nfragments /
                            NovaConfig::config->servers.size();
@@ -104,34 +104,31 @@ namespace nova {
         }
         db->mutex_.Unlock();
 
+        char *lb_buf = nullptr;
+        uint32_t index = 0;
         records->mu.lock();
-        memcpy(records->buf, log_record.data(), log_record.size());
+        if (records->backing_mems.empty() ||
+            records->index + log_record.size() > lb) {
+            uint64_t hash = nova::LogFileHash(log_file);
+            uint32_t slabclassid = mem_manager_->slabclassid(
+                    hash, nova::NovaConfig::config->log_buf_size);
+            char *buf = mem_manager_->ItemAlloc(hash, slabclassid);
+            RDMA_ASSERT(buf != nullptr);
+            records->backing_mems.push_back(buf);
+            records->index = 0;
+        }
+        lb_buf = records->backing_mems[records->backing_mems.size() - 1];
+        index = records->index;
+        records->index += log_record.size();
         records->mu.unlock();
 
-//        char *lb_buf = nullptr;
-//        uint32_t index = 0;
-//        records->mu.lock();
-//        if (records->backing_mems.empty() ||
-//            records->index + log_record.size() > lb) {
-//            uint32_t slabclassid = mem_manager_->slabclassid(
-//                    nova::NovaConfig::config->log_buf_size);
-//            char *buf = mem_manager_->ItemAlloc(slabclassid);
-//            RDMA_ASSERT(buf != nullptr);
-//            records->backing_mems.push_back(buf);
-//            records->index = 0;
-//        }
-//
-//        lb_buf = records->backing_mems[records->backing_mems.size() - 1];
-//        index = records->index;
-//        records->index += log_record.size();
-//        records->mu.unlock();
-//        memcpy(lb_buf + index, log_record.data(), log_record.size());
-
+        memcpy(lb_buf + index, log_record.data(), log_record.size());
     }
 
     void LogFileManager::DeleteLogBuf(const std::string &log_file) {
-        uint32_t slabclassid = mem_manager_->slabclassid(
-                nova::NovaConfig::config->log_buf_size);
+        uint64_t hash = nova::LogFileHash(log_file);
+        uint32_t slabclassid = mem_manager_->slabclassid(hash,
+                                                         nova::NovaConfig::config->log_buf_size);
         uint32_t sid;
         uint32_t db_index;
         ParseDBName(log_file, &sid, &db_index);
@@ -151,7 +148,7 @@ namespace nova {
         db->mutex_.Unlock();
 
         if (!items.empty()) {
-            mem_manager_->FreeItems(items, slabclassid);
+            mem_manager_->FreeItems(hash, items, slabclassid);
         }
     }
 }

@@ -74,72 +74,73 @@ namespace nova {
     }
 
     char *MemoryComponent::AllocateBuf(uint32_t size) {
-        uint32_t scid = mem_manager_->slabclassid(size);
-        if (scid == MAX_NUMBER_OF_SLAB_CLASSES) {
-            return {};
-        }
-        char *buf = mem_manager_->ItemAlloc(scid);
-        if (buf == nullptr) {
-            RDMA_ASSERT(false) << "Evict not supported";
-        }
-        return buf;
+//        uint32_t scid = mem_manager_->slabclassid(size);
+//        if (scid == MAX_NUMBER_OF_SLAB_CLASSES) {
+//            return {};
+//        }
+//        char *buf = mem_manager_->ItemAlloc(scid);
+//        if (buf == nullptr) {
+//            RDMA_ASSERT(false) << "Evict not supported";
+//        }
+//        return buf;
+return nullptr;
     }
 
     void MemoryComponent::FreeBuf(char *buf, uint32_t size) {
-        uint32_t scid = mem_manager_->slabclassid(size);
-        if (scid == MAX_NUMBER_OF_SLAB_CLASSES) {
-            return;
-        }
-        mem_manager_->FreeItem(buf, scid);
+//        uint32_t scid = mem_manager_->slabclassid(size);
+//        if (scid == MAX_NUMBER_OF_SLAB_CLASSES) {
+//            return;
+//        }
+//        mem_manager_->FreeItem(buf, scid);
     }
 
     leveldb::Status
     MemoryComponent::Get(GlobalBlockHandle *handles, GetResult *results,
                          int size) {
-        int nkey = GlobalBlockHandle::CacheKeySize();
-        char cache_key[nkey];
-        for (int i = 0; i < size; i++) {
-            handles[i].CacheKey(cache_key);
-            nova::GetResult result = mem_manager_->LocalGet(cache_key, nkey,
-                                                            true);
-            if (!result.index_entry.empty()) {
-                results[i].hit = true;
-                results[i].index = result.index_entry;
-                results[i].data = result.data_entry;
-            } else {
-                // Cache miss.
-                sstable_mutex_.Lock();
-                auto it = sstables_l0_.find(handles[i].table_handle);
-                sstable_mutex_.Unlock();
-                if (it != sstables_l0_.end()) {
-                    // Found.
-                    results[i].hit = true;
-                    it->second->mutex.Lock();
-//                    leveldb::ReadBlock(it->second->table->backing_file(), {},
-//                                       handles[i].block_handle,
-//                                       &(results[i].block));
-                    // Insert the block into the cache.
-                    mem_manager_->LocalPut(cache_key, nkey,
-                                           (char *) results[i].block.data.data(),
-                                           results[i].block.data.size(), true,
-                                           true);
-                    it->second->mutex.Unlock();
-                }
-            }
-        }
+//        int nkey = GlobalBlockHandle::CacheKeySize();
+//        char cache_key[nkey];
+//        for (int i = 0; i < size; i++) {
+//            handles[i].CacheKey(cache_key);
+//            nova::GetResult result = mem_manager_->LocalGet(cache_key, nkey,
+//                                                            true);
+//            if (!result.index_entry.empty()) {
+//                results[i].hit = true;
+//                results[i].index = result.index_entry;
+//                results[i].data = result.data_entry;
+//            } else {
+//                // Cache miss.
+//                sstable_mutex_.Lock();
+//                auto it = sstables_l0_.find(handles[i].table_handle);
+//                sstable_mutex_.Unlock();
+//                if (it != sstables_l0_.end()) {
+//                    // Found.
+//                    results[i].hit = true;
+//                    it->second->mutex.Lock();
+////                    leveldb::ReadBlock(it->second->table->backing_file(), {},
+////                                       handles[i].block_handle,
+////                                       &(results[i].block));
+//                    // Insert the block into the cache.
+//                    mem_manager_->LocalPut(cache_key, nkey,
+//                                           (char *) results[i].block.data.data(),
+//                                           results[i].block.data.size(), true,
+//                                           true);
+//                    it->second->mutex.Unlock();
+//                }
+//            }
+//        }
     }
 
     leveldb::Status
     MemoryComponent::Insert(GlobalBlockHandle *handles, char **blocks,
                             int size) {
-        int nkey = GlobalBlockHandle::CacheKeySize();
-        char cache_key[nkey];
-        for (int i = 0; i < size; i++) {
-            handles[i].CacheKey(cache_key);
-            mem_manager_->LocalPut(cache_key, nkey,
-                                   blocks[i],
-                                   handles[i].block_handle.size(), true, true);
-        }
+//        int nkey = GlobalBlockHandle::CacheKeySize();
+//        char cache_key[nkey];
+//        for (int i = 0; i < size; i++) {
+//            handles[i].CacheKey(cache_key);
+//            mem_manager_->LocalPut(cache_key, nkey,
+//                                   blocks[i],
+//                                   handles[i].block_handle.size(), true, true);
+//        }
     }
 
     leveldb::Status

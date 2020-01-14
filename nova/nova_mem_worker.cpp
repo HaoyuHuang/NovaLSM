@@ -617,9 +617,13 @@ namespace nova {
 //}
 
     void NovaConnWorker::AddTask(const nova::NovaAsyncTask &task) {
-        async_workers_[current_async_worker_id_]->AddTask(task);
-        current_async_worker_id_ += 1;
-        current_async_worker_id_ %= async_workers_.size();
+        uint64_t hv = NovaConfig::keyhash(task.key.data(),
+                                          task.key.size());
+        Fragment *frag = NovaConfig::home_fragment(hv);
+        uint32_t dbid = frag->db_ids[0];
+        async_workers_[dbid % async_workers_.size()]->AddTask(task);
+//        current_async_worker_id_ += 1;
+//        current_async_worker_id_ %= async_workers_.size();
     }
 
     void NovaConnWorker::Start() {

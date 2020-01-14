@@ -30,8 +30,6 @@ namespace nova {
 
         void LoadDataWithRangePartition();
 
-        void LoadDataWithHashPartition();
-
         int nport_;
         int listen_fd_ = -1;            /* listener descriptor      */
 
