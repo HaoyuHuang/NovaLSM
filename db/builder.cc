@@ -64,9 +64,6 @@ namespace leveldb {
                 s = file->Close();
             }
 
-            delete cc_file;
-            cc_file = nullptr;
-
             delete file;
             file = nullptr;
 

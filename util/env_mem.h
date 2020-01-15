@@ -64,20 +64,20 @@ namespace leveldb {
 
         void Unref();
 
-        uint64_t Size() const { return size_; }
+        virtual uint64_t Size() const { return size_; }
 
-        Status
+        virtual Status
         Read(uint64_t offset, size_t n, Slice *result, char *scratch);
 
-        Status Write(uint64_t offset, const Slice &data);
+        virtual Status Write(uint64_t offset, const Slice &data);
 
-        Status Append(const Slice &data);
+        virtual Status Append(const Slice &data);
 
-        Status Fsync();
+        virtual Status Fsync();
 
         uint64_t ModifiedTime() const { return modified_time_; }
 
-        const char *backing_mem() { return data_.data(); }
+        virtual const char *backing_mem() { return data_.data(); }
 
     private:
         uint64_t Now();

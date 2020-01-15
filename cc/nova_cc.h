@@ -19,22 +19,23 @@ namespace leveldb {
                             MemManager *mem_manager,
                             DCClient *dc_client,
                             const std::string &dbname,
-                            char *backing_mem, uint64_t thread_id, uint64_t allocated_size);
+                            char *backing_mem, uint64_t thread_id,
+                            uint64_t allocated_size);
 
         ~NovaCCRemoteMemFile();
 
-        uint64_t Size() const { return used_size_; }
+        uint64_t Size() const override { return used_size_; }
 
         Status
-        Read(uint64_t offset, size_t n, Slice *result, char *scratch);
+        Read(uint64_t offset, size_t n, Slice *result, char *scratch) override;
 
-        Status Write(uint64_t offset, const Slice &data);
+        Status Write(uint64_t offset, const Slice &data) override;
 
-        Status Append(const Slice &data);
+        Status Append(const Slice &data) override;
 
-        Status Fsync();
+        Status Fsync() override;
 
-        const char *backing_mem() { return backing_mem_; }
+        const char *backing_mem() override { return backing_mem_; }
 
         void set_meta(const FileMetaData &meta) { meta_ = meta; }
 

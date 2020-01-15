@@ -70,9 +70,8 @@ namespace nova {
 
         int size();
 
-        void set_rdma_store(NovaRDMAStore *rdma_store) {
-            rdma_store_ = rdma_store;
-        };
+        NovaRDMAStore *rdma_store_ = nullptr;
+        leveldb::DCClient *dc_client_ = nullptr;
 
         uint64_t thread_id_;
 
@@ -85,8 +84,6 @@ namespace nova {
 
         RdmaCtrl *rdma_ctrl_ = nullptr;
         NovaMemManager *mem_manager_ = nullptr;
-        NovaRDMAStore *rdma_store_ = nullptr;
-        leveldb::NovaDCClient *dc_client_ = nullptr;
         bool is_running_ = false;
         std::vector<leveldb::DB *> dbs_;
         leveldb::port::Mutex mutex_;

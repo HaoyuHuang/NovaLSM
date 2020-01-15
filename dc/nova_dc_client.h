@@ -32,19 +32,23 @@ namespace leveldb {
     };
 
     struct DCRequestContext {
+        DCRequestType req_type;
+        uint32_t remote_server_id;
         std::string dbname;
         uint64_t file_number;
-        FileMetaData meta;
-        char *sstable_backing_mem;
+//        FileMetaData meta;
+        char *backing_mem;
+        uint32_t size;
         bool done;
     };
 
     class NovaDCClient : public DCClient {
     public:
-        NovaDCClient(nova::NovaRDMAStore *rdma_store,
+        NovaDCClient(uint32_t dc_client_id, nova::NovaRDMAStore *rdma_store,
                      nova::NovaMemManager *mem_manager,
                      leveldb::log::RDMALogWriter *rdma_log_writer)
-                : rdma_store_(rdma_store), mem_manager_(mem_manager),
+                : dc_client_id_(dc_client_id), rdma_store_(rdma_store),
+                  mem_manager_(mem_manager),
                   rdma_log_writer_(rdma_log_writer) {}
 
         uint32_t
@@ -86,12 +90,15 @@ namespace leveldb {
                     int remote_server_id, char *buf,
                     uint32_t imm_data) override;
 
+        void ProcessPendingRequests();
+
 
         bool IsDone(uint32_t req_id) override;
 
         void IncrementReqId();
 
     private:
+        uint32_t dc_client_id_ = 0;
         nova::NovaRDMAStore *rdma_store_;
         nova::NovaMemManager *mem_manager_;
         leveldb::log::RDMALogWriter *rdma_log_writer_ = nullptr;

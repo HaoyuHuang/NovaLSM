@@ -58,7 +58,7 @@ namespace nova {
 
     class NovaPartitionedMemManager {
     public:
-        NovaPartitionedMemManager(char *buf, uint64_t data_size);
+        NovaPartitionedMemManager(int pid, char *buf, uint64_t data_size);
 
         char *ItemAlloc(uint32_t scid) ;
 

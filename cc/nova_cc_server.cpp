@@ -244,10 +244,11 @@ namespace nova {
         for (worker_id = 0;
              worker_id <
              NovaCCConfig::cc_config->num_async_workers; worker_id++) {
-            NovaRDMAComputeComponent *cc = new NovaRDMAComputeComponent(rdma_ctrl,
-                                         manager,
-                                         dbs_,
-                                         async_cq);
+            NovaRDMAComputeComponent *cc = new NovaRDMAComputeComponent(
+                    rdma_ctrl,
+                    manager,
+                    dbs_,
+                    async_cq);
             async_workers.push_back(cc);
             cc->thread_id_ = worker_id;
 
@@ -270,7 +271,19 @@ namespace nova {
             }
 
             // Log writers.
-            async_workers[worker_id]->set_rdma_store(store);
+            uint32_t scid = manager->slabclassid(worker_id,
+                                                 NovaConfig::config->log_buf_size);
+            char *rnic_buf = manager->ItemAlloc(worker_id, scid);
+            leveldb::DCClient *dc_client = new leveldb::NovaDCClient(worker_id,
+                                                                     store,
+                                                                     manager,
+                                                                     new leveldb::log::RDMALogWriter(
+                                                                             store,
+                                                                             rnic_buf));
+            cc->rdma_store_ = store;
+            cc->thread_id_ = worker_id;
+            cc->dc_client_ = dc_client;
+
             buf += nrdma_buf_unit() *
                    NovaDCConfig::dc_config->dc_servers.size();
         }
@@ -302,14 +315,18 @@ namespace nova {
             }
 
             uint32_t scid = manager->slabclassid(worker_id,
-                    NovaConfig::config->log_buf_size);
+                                                 NovaConfig::config->log_buf_size);
             char *rnic_buf = manager->ItemAlloc(worker_id, scid);
-
-            leveldb::DCClient *dc_client = new leveldb::NovaDCClient(store,
+            leveldb::DCClient *dc_client = new leveldb::NovaDCClient(worker_id,
+                                                                     store,
                                                                      manager,
                                                                      new leveldb::log::RDMALogWriter(
                                                                              store,
                                                                              rnic_buf));
+            cc->rdma_store_ = store;
+            cc->thread_id_ = worker_id;
+            cc->dc_client_ = dc_client;
+
             bgs[i]->mem_manager_ = manager;
             bgs[i]->dc_client_ = dc_client;
             bgs[i]->rdma_store_ = store;

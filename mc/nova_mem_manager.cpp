@@ -57,20 +57,24 @@ namespace nova {
         slabs.push_back(slab);
     }
 
-    NovaPartitionedMemManager::NovaPartitionedMemManager(char *buf,
+    NovaPartitionedMemManager::NovaPartitionedMemManager(int pid, char *buf,
                                                          uint64_t data_size) {
         uint64_t slab_size = SLAB_SIZE_MB * 1024 * 1024;
         uint64_t size = 1024;
         for (int i = 0; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) {
             slab_classes_[i].size = size;
             slab_classes_[i].nitems_per_slab = slab_size / size;
-            RDMA_LOG(INFO) << "slab class " << i << " size:" << size
-                           << " nitems:"
-                           << slab_size / size;
+            if (pid == 0) {
+                RDMA_LOG(INFO) << "slab class " << i << " size:" << size
+                               << " nitems:"
+                               << slab_size / size;
+            }
             size *= SLAB_SIZE_FACTOR;
         }
         uint64_t ndataslabs = data_size / slab_size;
-        RDMA_LOG(INFO) << " nslabs: " << ndataslabs;
+        if (pid == 0) {
+            RDMA_LOG(INFO) << " nslabs: " << ndataslabs;
+        }
         free_slabs_ = (Slab **) malloc(ndataslabs * sizeof(Slab *));
         free_slab_index_ = ndataslabs - 1;
         char *slab_buf = buf;
@@ -155,7 +159,7 @@ namespace nova {
         char *base = buf;
         for (int i = 0; i < NOVA_MEM_PARTITIONS; i++) {
             partitioned_mem_managers_.push_back(
-                    new NovaPartitionedMemManager(base, partition_size));
+                    new NovaPartitionedMemManager(i, base, partition_size));
             base += partition_size;
         }
     }

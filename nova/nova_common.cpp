@@ -8,6 +8,7 @@
 #include "nova_common.h"
 
 namespace nova {
+
 // random vector from http://home.comcast.net/~bretm/hash/10.html
     static const uint32_t sbox[] =
             {

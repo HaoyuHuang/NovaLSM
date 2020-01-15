@@ -1710,8 +1710,8 @@ namespace leveldb {
             s = impl->versions_->LogAndApply(&edit, &impl->mutex_);
         }
         if (s.ok()) {
-            impl->DeleteObsoleteFiles();
-            impl->MaybeScheduleCompaction();
+//            impl->DeleteObsoleteFiles();
+//            impl->MaybeScheduleCompaction();
         }
         impl->mutex_.Unlock();
         if (s.ok()) {

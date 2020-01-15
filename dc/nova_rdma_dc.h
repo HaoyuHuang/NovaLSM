@@ -16,6 +16,7 @@ namespace nova {
 
     struct RequestContext {
         leveldb::DCRequestType request_type;
+        uint32_t remote_server_id;
         std::string db_name;
         uint32_t file_number;
         char *buf;
@@ -30,6 +31,8 @@ namespace nova {
                               LogFileManager *log_manager);
 
         void Start();
+
+        int ProcessPendingRequests();
 
         void
         ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,

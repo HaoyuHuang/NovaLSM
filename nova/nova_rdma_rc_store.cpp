@@ -5,6 +5,7 @@
 //
 
 #include <malloc.h>
+#include <fmt/core.h>
 #include "nova_rdma_rc_store.h"
 
 namespace nova {
@@ -144,13 +145,11 @@ namespace nova {
         psend_index_[qp_idx]++;
         npending_send_[qp_idx]++;
         send_sge_index_[qp_idx]++;
-        RDMA_LOG(DEBUG) << "rdma-rc[" << thread_id_ << "]: "
-                        << "SQ: rdma " << ibv_wr_opcode_str(opcode)
-                        << " request to " << qp_idx
-                        << " roffset:"
-                        << remote_addr << " offset:" << is_offset << " p:"
-                        << psend_index_[qp_idx] << ":"
-                        << npending_send_[qp_idx] << " buf:" << sendbuf;
+        RDMA_LOG(DEBUG) << fmt::format(
+                    "rdma-rc[{}]: SQ: rdma {} request to server {} imm:{} roffset:{} isoff:{} size:{} p:{}:{} buf:{}",
+                    thread_id_, ibv_wr_opcode_str(opcode), server_id, imm_data,
+                    remote_addr, is_offset, size, psend_index_[qp_idx],
+                    npending_send_[qp_idx], sendbuf);
         if (send_sge_index_[qp_idx] == doorbell_batch_size_) {
             // post send a batch of requests.
             send_sge_index_[qp_idx] = 0;

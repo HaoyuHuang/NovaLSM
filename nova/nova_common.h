@@ -25,6 +25,7 @@
 #include "rdma_ctrl.hpp"
 #include "table/format.h"
 #include "util/coding.h"
+#include <stdexcept>
 
 namespace nova {
     using namespace std;
@@ -53,7 +54,7 @@ namespace nova {
     uint64_t keyhash(const char *key, uint64_t nkey);
 
     Fragment *
-    homefragment(const std::vector<Fragment *>& fragments, uint64_t key);
+    homefragment(const std::vector<Fragment *> &fragments, uint64_t key);
 
     enum ConnState {
         READ, WRITE
@@ -135,9 +136,11 @@ namespace nova {
 
     std::string ToString(const std::vector<uint32_t> &x);
 
-    std::string DBName(const std::string &dbname, uint32_t server_id, uint32_t index);
+    std::string
+    DBName(const std::string &dbname, uint32_t server_id, uint32_t index);
 
-    void ParseDBName(const std::string &logname, uint32_t *server_id, uint32_t *index);
+    void ParseDBName(const std::string &logname, uint32_t *server_id,
+                     uint32_t *index);
 
     uint64_t LogFileHash(const std::string &logname);
 

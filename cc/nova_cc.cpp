@@ -77,7 +77,6 @@ namespace leveldb {
     }
 
     Status NovaCCRemoteMemFile::Fsync() {
-        // NOOP.
         uint32_t req_id = dc_client_->InitiateFlushSSTable(dbname_,
                                                            meta_.number, meta_,
                                                            backing_mem_);
@@ -86,6 +85,7 @@ namespace leveldb {
         }
         local_writable_file_->Sync();
         local_writable_file_->Close();
+        return Status::OK();
     }
 
 
@@ -162,6 +162,7 @@ namespace leveldb {
         } else {
             *result = Slice(ptr, n);
         }
+        return Status::OK();
     }
 
     Status NovaCCRemoteRandomAccessFile::ReadAll() {
@@ -173,6 +174,7 @@ namespace leveldb {
         while (!dc_client_->IsDone(req_id)) {
 
         }
+        return Status::OK();
     }
 
     NovaCCCompactionThread::NovaCCCompactionThread(rdmaio::RdmaCtrl *rdma_ctrl)
