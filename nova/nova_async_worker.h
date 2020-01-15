@@ -22,7 +22,7 @@
 
 namespace nova {
 
-#define RDMA_POLL_MIN_TIMEOUT_US 1
+#define RDMA_POLL_MIN_TIMEOUT_US 100
 #define RDMA_POLL_MAX_TIMEOUT_US 10000
 
     struct NovaAsyncTask {

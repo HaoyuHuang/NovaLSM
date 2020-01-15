@@ -218,10 +218,10 @@ namespace nova {
                 int n = ProcessQueue();
                 if (n == 0) {
                     should_sleep = true;
-//                    timeout *= 2;
-//                    if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
-//                        timeout = RDMA_POLL_MAX_TIMEOUT_US;
-//                    }
+                    timeout *= 2;
+                    if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
+                        timeout = RDMA_POLL_MAX_TIMEOUT_US;
+                    }
                 } else {
                     should_sleep = false;
                     timeout = RDMA_POLL_MIN_TIMEOUT_US;
