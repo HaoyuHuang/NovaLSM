@@ -381,7 +381,7 @@ namespace nova {
                         << " delete log file fd:"
                         << fd << ": log:" << logfile << " nlog:"
                         << logfilename_size << " buf:" << conn->request_buf;
-        worker->log_manager_->DeleteLogBuf(logfile);
+        worker->log_manager_->DeleteLogBuf(worker->thread_id_, logfile);
 
         char *response_buf = conn->buf;
         leveldb::EncodeFixed32(response_buf, 1);
@@ -576,9 +576,11 @@ namespace nova {
 //}
 
     void NovaCCConnWorker::AddTask(const nova::NovaAsyncTask &task) {
-        async_workers_[current_async_worker_id_]->AddTask(task);
-        current_async_worker_id_ += 1;
-        current_async_worker_id_ %= async_workers_.size();
+        uint64_t hv = keyhash(task.key.data(),
+                              task.key.size());
+        Fragment *frag = NovaCCConfig::home_fragment(hv);
+        uint32_t dbid = frag->db_ids[0];
+        async_workers_[dbid % async_workers_.size()]->AddTask(task);
     }
 
     void NovaCCConnWorker::Start() {

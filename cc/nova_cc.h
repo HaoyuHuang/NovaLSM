@@ -15,10 +15,11 @@ namespace leveldb {
 
     class NovaCCRemoteMemFile : public MemFile {
     public:
-        NovaCCRemoteMemFile(Env* env, const std::string& fname, MemManager *mem_manager,
+        NovaCCRemoteMemFile(Env *env, const std::string &fname,
+                            MemManager *mem_manager,
                             DCClient *dc_client,
                             const std::string &dbname,
-                            char *backing_mem, uint64_t allocated_size);
+                            char *backing_mem, uint64_t thread_id, uint64_t allocated_size);
 
         ~NovaCCRemoteMemFile();
 
@@ -38,13 +39,14 @@ namespace leveldb {
         void set_meta(const FileMetaData &meta) { meta_ = meta; }
 
     private:
-        Env* env_;
+        Env *env_;
         std::string fname_;
         WritableFile *local_writable_file_;
         MemManager *mem_manager_;
         DCClient *dc_client_;
         std::string dbname_;
         FileMetaData meta_;
+        uint64_t thread_id_;
 
         char *backing_mem_;
         uint32_t allocated_size_ = 0;
@@ -58,6 +60,7 @@ namespace leveldb {
                                      const FileMetaData &meta,
                                      DCClient *dc_client,
                                      MemManager *mem_manager,
+                                     uint64_t thread_id,
                                      bool cache_all);
 
         ~NovaCCRemoteRandomAccessFile() override;
@@ -77,6 +80,7 @@ namespace leveldb {
         char *backing_mem_table_ = nullptr;
         char *backing_mem_block_ = nullptr;
         MemManager *mem_manager_;
+        uint64_t thread_id_;
         DCClient *dc_client_;
     };
 
@@ -95,11 +99,14 @@ namespace leveldb {
 
         MemManager *mem_manager() override { return mem_manager_; }
 
+        uint64_t thread_id() override { return thread_id_; }
+
         bool IsInitialized();
 
         void Start();
 
         nova::NovaRDMAStore *rdma_store_;
+        uint64_t thread_id_ = 0;
 
     private:
         // Stores the work item data in a Schedule() call.

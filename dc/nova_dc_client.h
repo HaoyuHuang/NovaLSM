@@ -89,6 +89,8 @@ namespace leveldb {
 
         bool IsDone(uint32_t req_id) override;
 
+        void IncrementReqId();
+
     private:
         nova::NovaRDMAStore *rdma_store_;
         nova::NovaMemManager *mem_manager_;
@@ -96,7 +98,7 @@ namespace leveldb {
 
         uint32_t HomeDCNode(const FileMetaData &meta);
 
-        uint32_t current_req_id_ = 0;
+        uint32_t current_req_id_ = 1;
         std::map<uint32_t, DCRequestContext> request_context_;
     };
 }

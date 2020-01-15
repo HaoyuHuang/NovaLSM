@@ -80,14 +80,14 @@ namespace leveldb {
 
     class LEVELDB_EXPORT MemManager {
     public:
-        virtual char *ItemAlloc(uint32_t scid) = 0;
+        virtual char *ItemAlloc(uint64_t key, uint32_t scid) = 0;
 
-        virtual void FreeItem(char *buf, uint32_t scid) = 0;
+        virtual void FreeItem(uint64_t key, char *buf, uint32_t scid) = 0;
 
         virtual void
-        FreeItems(const std::vector<char *> &items, uint32_t scid) = 0;
+        FreeItems(uint64_t key, const std::vector<char *> &items, uint32_t scid) = 0;
 
-        virtual uint32_t slabclassid(uint32_t size) = 0;
+        virtual uint32_t slabclassid(uint64_t key, uint32_t size) = 0;
     };
 }
 

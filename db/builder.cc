@@ -26,13 +26,16 @@ namespace leveldb {
         std::string fname = TableFileName(dbname, meta->number);
         if (iter->Valid()) {
             MemManager *mem_manager = options.bg_thread->mem_manager();
-            uint32_t scid = mem_manager->slabclassid(
-                    options.write_buffer_size + options.table_appendum_size);
-            char *buf = options.bg_thread->mem_manager()->ItemAlloc(scid);
+            uint64_t key = options.bg_thread->thread_id();
+            uint32_t scid = mem_manager->slabclassid(key,
+                                                     options.write_buffer_size +
+                                                     options.table_appendum_size);
+            char *buf = options.bg_thread->mem_manager()->ItemAlloc(key, scid);
             NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(env, fname,
                                                                    mem_manager,
                                                                    options.bg_thread->dc_client(),
                                                                    dbname, buf,
+                                                                   options.bg_thread->thread_id(),
                                                                    options.write_buffer_size +
                                                                    options.table_appendum_size);
             WritableFile *file = new MemWritableFile(cc_file);

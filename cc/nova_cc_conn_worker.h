@@ -99,10 +99,10 @@ namespace nova {
 
     class NovaCCConnWorker {
     public:
-        NovaCCConnWorker(int thread_id, NovaCCServer *server,
+        NovaCCConnWorker(int thread_id,
                          NovaAsyncCompleteQueue *async_cq)
                 :
-                thread_id_(thread_id), mem_server_(server),
+                thread_id_(thread_id),
                 async_cq_(async_cq) {
             RDMA_LOG(INFO) << "memstore[" << thread_id << "]: "
                            << "create conn thread :" << thread_id;
@@ -127,8 +127,6 @@ namespace nova {
         int listen_fd_ = -1;            /* listener descriptor      */
         int epoll_fd_ = -1;      /* used for all notification*/
         std::mutex mutex_;
-
-        NovaCCServer *mem_server_ = nullptr;
 
         std::vector<leveldb::DB *> dbs_;
         struct event_base *base = nullptr;

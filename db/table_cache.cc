@@ -62,6 +62,7 @@ namespace leveldb {
             file = new NovaCCRemoteRandomAccessFile(dbname_, file_number, meta,
                                                     options.dc_client,
                                                     options.mem_manager,
+                                                    options.thread_id,
                                                     read_all);
             if (s.ok()) {
                 s = Table::Open(options_, file, file_size, level, file_number,

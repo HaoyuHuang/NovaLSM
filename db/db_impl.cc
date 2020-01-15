@@ -872,13 +872,16 @@ namespace leveldb {
         // Make the output file
         std::string fname = TableFileName(dbname_, file_number);
         MemManager *mem_manager = options_.bg_thread->mem_manager();
-        uint32_t scid = mem_manager->slabclassid(options_.max_file_size);
-        char *buf = options_.bg_thread->mem_manager()->ItemAlloc(scid);
+        uint32_t scid = mem_manager->slabclassid(
+                options_.bg_thread->thread_id(), options_.max_file_size);
+        char *buf = options_.bg_thread->mem_manager()->ItemAlloc(
+                options_.bg_thread->thread_id(), scid);
         NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(options_.env,
                                                                fname,
                                                                mem_manager,
                                                                options_.bg_thread->dc_client(),
                                                                dbname_, buf,
+                                                               options_.bg_thread->thread_id(),
                                                                options_.max_file_size);
         compact->outfile = new MemWritableFile(cc_file);
         compact->builder = new TableBuilder(options_, compact->outfile);
@@ -1354,12 +1357,9 @@ namespace leveldb {
                                             closed_log_files_.end());
         closed_log_files_.clear();
         mutex_.Unlock();
+        // Synchronous replication.
         uint32_t req_id = options.dc_client->InitiateReplicateLogRecords(
                 logfile, WriteBatchInternal::Contents(updates));
-
-        while (!options.dc_client->IsDone(req_id)) {
-            // Wait until replication completes.
-        }
 
         for (const auto &file : closed_files) {
             options.dc_client->InitiateCloseLogFile(file);

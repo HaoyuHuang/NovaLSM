@@ -33,7 +33,13 @@ namespace leveldb {
 
     void NovaDiskComponent::DeleteTable(const std::string &dbname,
                                         uint64_t file_number) {
-        char buf[4 + dbname.size() + 4];
+        DCTables *dc_tables = db_tables_[dbname];
+        std::string tablename = TableFileName(dbname, file_number);
+        dc_tables->mutex.lock();
+        dc_tables->tables.erase(tablename);
+        dc_tables->mutex.unlock();
+
+        char buf[4 + dbname.size() + 8];
         char *ptr = buf;
         ptr += EncodeStr(ptr, dbname);
         EncodeFixed64(ptr, file_number);
@@ -47,7 +53,7 @@ namespace leveldb {
                                  uint64_t file_number,
                                  leveldb::Cache::Handle **handle) {
         Status s;
-        char buf[4 + dbname.size() + 4];
+        char buf[4 + dbname.size() + 8];
         char *ptr = buf;
         ptr += EncodeStr(ptr, dbname);
         EncodeFixed64(ptr, file_number);
@@ -57,27 +63,15 @@ namespace leveldb {
             std::string fname = TableFileName(dbname, file_number);
             RandomAccessFile *file = nullptr;
             s = env_->NewRandomAccessFile(fname, &file);
-            if (!s.ok()) {
-                std::string old_fname = SSTTableFileName(dbname, file_number);
-                if (env_->NewRandomAccessFile(old_fname, &file).ok()) {
-                    s = Status::OK();
-                }
-            }
-
-            if (!s.ok()) {
-                delete file;
-                // We do not cache error results so that if the error is transient,
-                // or somebody repairs the file, we recover automatically.
-            } else {
-                *handle = cache_->Insert(key, file, 1, &DeleteEntry);
-            }
+            RDMA_ASSERT(s.ok());
+            *handle = cache_->Insert(key, file, 1, &DeleteEntry);
         }
         return s;
     }
 
     uint64_t NovaDiskComponent::ReadBlocks(const std::string &dbname,
                                            uint64_t file_number,
-                                           const std::vector<leveldb::DCBlockHandle> &block_handls,
+                                           const std::vector<leveldb::DCBlockHandle> &block_handles,
                                            char *buf) {
         char *result_buf = buf;
         Cache::Handle *handle = nullptr;
@@ -86,7 +80,7 @@ namespace leveldb {
         RandomAccessFile *table = reinterpret_cast<RandomAccessFile *>(cache_->Value(
                 handle));
         uint64_t ts = 0;
-        for (const auto &handle : block_handls) {
+        for (const auto &handle : block_handles) {
             Slice result;
             RDMA_ASSERT(table->Read(handle.offset, handle.size, &result,
                                     result_buf).ok());
@@ -109,6 +103,8 @@ namespace leveldb {
         RDMA_ASSERT(env_->NewWritableFile(TableFileName(dbname, file_number),
                                           {.level = 0}, &file).ok());
         RDMA_ASSERT(file->Append(Slice(buf, table_size)).ok());
+        file->Flush();
+        file->Sync();
         file->Close();
         delete file;
     }

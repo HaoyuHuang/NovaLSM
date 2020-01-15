@@ -36,6 +36,7 @@ namespace nova {
                       char *buf, uint32_t imm_data) override;
 
         NovaRDMAStore *rdma_store_;
+        uint64_t thread_id_;
 
     private:
         bool is_running_ = true;
@@ -44,7 +45,7 @@ namespace nova {
         leveldb::NovaDiskComponent *dc_;
         NovaMemManager *mem_manager_;
         LogFileManager *log_manager_;
-        std::map<uint32_t, RequestContext> request_context_map_;
+        std::map<uint64_t, RequestContext> request_context_map_;
     };
 }
 

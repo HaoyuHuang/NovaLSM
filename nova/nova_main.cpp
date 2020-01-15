@@ -154,6 +154,7 @@ int main(int argc, char *argv[]) {
 
     NovaCCConfig::cc_config->block_cache_mb = FLAGS_cc_block_cache_mb;
     NovaCCConfig::cc_config->write_buffer_size_mb = FLAGS_cc_write_buffer_size_mb;
+    NovaCCConfig::cc_config->my_cc_server_id = FLAGS_server_id;
 
     NovaConfig::config->db_path = FLAGS_db_path;
 
@@ -187,6 +188,7 @@ int main(int argc, char *argv[]) {
                               &NovaDCConfig::dc_config->fragments);
     NovaConfig::config->log_buf_size = FLAGS_dc_log_buf_size;
     NovaDCConfig::dc_config->num_dc_workers = FLAGS_dc_workers;
+    NovaDCConfig::dc_config->my_dc_server_id = FLAGS_server_id;
 
     RDMA_ASSERT(FLAGS_cc_num_compaction_workers + FLAGS_cc_num_async_workers ==
                 FLAGS_dc_workers);

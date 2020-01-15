@@ -6,6 +6,7 @@
 
 #include "nova_dc_server.h"
 
+#include "nova/nova_common.h"
 #include "util/env_posix.h"
 #include <netinet/tcp.h>
 #include <signal.h>
@@ -30,14 +31,20 @@ namespace nova {
             }
         }
 
+        for (auto& dbname : dbnames) {
+            mkdirs(dbname.c_str());
+        }
+
         leveldb::NovaDiskComponent *dc = new leveldb::NovaDiskComponent(
                 new leveldb::PosixEnv, cache, dbnames);
 
         for (int worker_id = 0;
              worker_id < NovaDCConfig::dc_config->num_dc_workers; worker_id++) {
-            NovaRDMADiskComponent *rdma_dc = new NovaRDMADiskComponent(rdma_ctrl,
-                                                               mem_manager, dc,
-                                                               logFileManager);
+            NovaRDMADiskComponent *rdma_dc = new NovaRDMADiskComponent(
+                    rdma_ctrl,
+                    mem_manager, dc,
+                    logFileManager);
+            rdma_dc->thread_id_ = worker_id;
             NovaRDMAStore *store = nullptr;
             std::vector<QPEndPoint> endpoints;
             for (int i = 0;
@@ -56,8 +63,8 @@ namespace nova {
             }
             rdma_dc->rdma_store_ = store;
             dcs_.push_back(rdma_dc);
-            worker_threads.emplace_back(
-                    std::thread(&NovaRDMADiskComponent::Start, rdma_dc));
+            buf += nrdma_buf_unit() *
+                   NovaCCConfig::cc_config->cc_servers.size();
         }
 
 
@@ -66,8 +73,8 @@ namespace nova {
     void NovaDCServer::Start() {
         for (int worker_id = 0;
              worker_id < NovaDCConfig::dc_config->num_dc_workers; worker_id++) {
-            worker_threads.emplace_back(
-                    std::thread(&NovaRDMADiskComponent::Start, dcs_[worker_id]));
+            worker_threads.emplace_back(&NovaRDMADiskComponent::Start,
+                                        dcs_[worker_id]);
         }
         for (auto &t : worker_threads) {
             t.join();

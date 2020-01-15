@@ -74,23 +74,23 @@ namespace nova {
     }
 
     char *MemoryComponent::AllocateBuf(uint32_t size) {
-        uint32_t scid = mem_manager_->slabclassid(size);
-        if (scid == MAX_NUMBER_OF_SLAB_CLASSES) {
-            return {};
-        }
-        char *buf = mem_manager_->ItemAlloc(scid);
-        if (buf == nullptr) {
-            RDMA_ASSERT(false) << "Evict not supported";
-        }
-        return buf;
+//        uint32_t scid = mem_manager_->slabclassid(size);
+//        if (scid == MAX_NUMBER_OF_SLAB_CLASSES) {
+//            return {};
+//        }
+//        char *buf = mem_manager_->ItemAlloc(scid);
+//        if (buf == nullptr) {
+//            RDMA_ASSERT(false) << "Evict not supported";
+//        }
+//        return buf;
     }
 
     void MemoryComponent::FreeBuf(char *buf, uint32_t size) {
-        uint32_t scid = mem_manager_->slabclassid(size);
-        if (scid == MAX_NUMBER_OF_SLAB_CLASSES) {
-            return;
-        }
-        mem_manager_->FreeItem(buf, scid);
+//        uint32_t scid = mem_manager_->slabclassid(size);
+//        if (scid == MAX_NUMBER_OF_SLAB_CLASSES) {
+//            return;
+//        }
+//        mem_manager_->FreeItem(buf, scid);
     }
 
     leveldb::Status

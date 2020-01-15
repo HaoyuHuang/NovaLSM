@@ -74,6 +74,8 @@ namespace nova {
             rdma_store_ = rdma_store;
         };
 
+        uint64_t thread_id_;
+
     private:
         void ProcessGet(const NovaAsyncTask &task);
 

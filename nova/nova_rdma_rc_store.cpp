@@ -45,9 +45,6 @@ namespace nova {
                        << my_memory_id;
         for (int peer_id = 0; peer_id < num_servers; peer_id++) {
             QPEndPoint peer_store = end_points_[peer_id];
-            if (peer_store.server_id == my_server_id) {
-                continue;
-            }
             QPIdx my_rc_key = create_rc_idx(my_server_id, thread_id_,
                                             peer_store.server_id);
             QPIdx peer_rc_key = create_rc_idx(peer_store.server_id,
@@ -55,10 +52,14 @@ namespace nova {
                                               my_server_id);
             uint64_t peer_memory_id = static_cast<uint64_t >(peer_store.server_id);
             RDMA_LOG(INFO) << "rdma-rc[" << thread_id_
-                           << "]: get server memory id "
-                           << peer_memory_id << " from "
-                           << peer_store.host.ip << ":" << peer_store.host.port
-                           << ":" << peer_store.thread_id;
+                           << "]: my rc key " << my_rc_key.node_id << ":"
+                           << my_rc_key.worker_id << ":" << my_rc_key.index;
+
+            RDMA_LOG(INFO) << "rdma-rc[" << thread_id_
+                           << "]: connecting to peer rc key "
+                           << peer_store.host.ip << ":" << peer_rc_key.node_id
+                           << ":" << peer_rc_key.worker_id << ":"
+                           << peer_rc_key.index;
             MemoryAttr local_mr = rdma_ctrl->get_local_mr(
                     my_memory_id);
             ibv_cq *cq = rdma_ctrl->create_cq(
@@ -93,7 +94,7 @@ namespace nova {
                            << ":" << peer_store.thread_id;
 
             for (int i = 0; i < max_num_sends; i++) {
-                PostRecv(peer_id, i);
+                PostRecv(peer_store.server_id, i);
             }
         }
         RDMA_LOG(INFO) << "RDMA client thread " << thread_id_ << " initialized";
@@ -312,6 +313,9 @@ namespace nova {
             // Post another receive event.
             PostRecv(server_id, wr_id);
         }
+
+        // Flush all pending send requests.
+        FlushPendingSends(server_id);
         return n;
     }
 
@@ -329,8 +333,9 @@ namespace nova {
     }
 
     char *NovaRDMARCStore::GetSendBuf(int server_id) {
+        uint32_t qp_idx = to_qp_idx(server_id);
         int max_msg_size_ = NovaConfig::config->max_msg_size;
-        return rdma_send_buf_[server_id] +
-               psend_index_[server_id] * max_msg_size_;
+        return rdma_send_buf_[qp_idx] +
+               psend_index_[qp_idx] * max_msg_size_;
     }
 }

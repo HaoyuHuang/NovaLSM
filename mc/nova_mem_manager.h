@@ -17,7 +17,7 @@ namespace nova {
 
 #define MAX_NUMBER_OF_SLAB_CLASSES 64
 #define SLAB_SIZE_FACTOR 1.25
-
+#define NOVA_MEM_PARTITIONS 64
 
     class Slab {
     public:
@@ -56,18 +56,18 @@ namespace nova {
         }
     };
 
-    class NovaMemManager : public leveldb::MemManager {
+    class NovaPartitionedMemManager {
     public:
-        NovaMemManager(char *buf);
+        NovaPartitionedMemManager(char *buf, uint64_t data_size);
 
-        char *ItemAlloc(uint32_t scid) override;
+        char *ItemAlloc(uint32_t scid) ;
 
-        void FreeItem(char *buf, uint32_t scid) override;
+        void FreeItem(char *buf, uint32_t scid) ;
 
         void
-        FreeItems(const std::vector<char *> &items, uint32_t scid) override;
+        FreeItems(const std::vector<char *> &items, uint32_t scid) ;
 
-        uint32_t slabclassid(uint32_t size) override;
+        uint32_t slabclassid(uint32_t size) ;
 
     private:
         pthread_mutex_t slab_class_mutex_[MAX_NUMBER_OF_SLAB_CLASSES];
@@ -76,6 +76,23 @@ namespace nova {
         pthread_mutex_t free_slabs_mutex_;
         Slab **free_slabs_ = nullptr;
         uint64_t free_slab_index_ = 0;
+    };
+
+    class NovaMemManager : public leveldb::MemManager {
+    public:
+        NovaMemManager(char *buf);
+
+        char *ItemAlloc(uint64_t key, uint32_t scid) override;
+
+        void FreeItem(uint64_t key, char *buf, uint32_t scid) override;
+
+        void
+        FreeItems(uint64_t key, const std::vector<char *> &items, uint32_t scid) override;
+
+        uint32_t slabclassid(uint64_t key, uint32_t size) override;
+
+    private:
+        std::vector<NovaPartitionedMemManager *> partitioned_mem_managers_;
     };
 }
 

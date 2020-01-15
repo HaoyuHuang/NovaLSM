@@ -86,6 +86,8 @@ namespace leveldb {
         virtual DCClient *dc_client() = 0;
 
         virtual MemManager *mem_manager() = 0;
+
+        virtual uint64_t thread_id() = 0;
     };
 
     class LEVELDB_EXPORT Env {

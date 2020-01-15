@@ -55,6 +55,7 @@ namespace nova {
         leveldb::ReadOptions read_options;
         read_options.dc_client = dc_client_;
         read_options.mem_manager = mem_manager_;
+        read_options.thread_id = thread_id_;
 
         leveldb::Status s = db->Get(read_options, task.key, &value);
         RDMA_ASSERT(s.ok());

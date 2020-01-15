@@ -184,6 +184,8 @@ namespace leveldb {
         // Callers may wish to set this field to false for bulk scans.
         bool fill_cache = true;
 
+        uint64_t thread_id;
+
         MemManager *mem_manager = nullptr;
 
         DCClient *dc_client = nullptr;

@@ -55,18 +55,26 @@ namespace nova {
 
     class LogFileManager {
     public:
-        LogFileManager(NovaMemManager *mem_manager) : mem_manager_(
-                mem_manager) {
-
-        }
+        LogFileManager(NovaMemManager *mem_manager);
 
         void Add(const std::string &log_file, char *buf);
 
-        void DeleteLogBuf(const std::string &log_file);
+        void DeleteLogBuf(uint64_t thread_id, const std::string &log_file);
 
     private:
+        struct LogRecords {
+            std::vector<char *> backing_mems;
+            std::mutex mu;
+        };
+
+        struct DBLogFiles {
+            std::map<std::string, LogRecords *> logfiles_;
+            leveldb::port::Mutex mutex_;
+        };
+
         NovaMemManager *mem_manager_;
-        std::map<std::string, std::vector<char *>> logfiles_;
+
+        DBLogFiles ***server_db_log_files_;
         leveldb::port::Mutex mutex_;
     };
 }

@@ -14,11 +14,13 @@ namespace leveldb {
                                              DCClient *dc_client,
                                              const std::string &dbname,
                                              char *backing_mem,
+                                             uint64_t thread_id,
                                              uint64_t allocated_size)
             : env_(env), fname_(fname), mem_manager_(mem_manager),
               dc_client_(dc_client),
               dbname_(dbname),
-              backing_mem_(backing_mem), allocated_size_(allocated_size),
+              backing_mem_(backing_mem), thread_id_(thread_id),
+              allocated_size_(allocated_size),
               MemFile(nullptr, "", false) {
         EnvFileMetadata env_meta;
         env_meta.level = 0;
@@ -28,8 +30,11 @@ namespace leveldb {
     }
 
     NovaCCRemoteMemFile::~NovaCCRemoteMemFile() {
-        uint32_t scid = mem_manager_->slabclassid(allocated_size_);
-        mem_manager_->FreeItem(backing_mem_, scid);
+        if (backing_mem_) {
+            uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                      meta_.file_size);
+            mem_manager_->FreeItem(thread_id_, backing_mem_, scid);
+        }
         delete local_writable_file_;
     }
 
@@ -87,20 +92,24 @@ namespace leveldb {
     NovaCCRemoteRandomAccessFile::NovaCCRemoteRandomAccessFile(
             const std::string &dbname, uint64_t file_number,
             const leveldb::FileMetaData &meta, leveldb::DCClient *dc_client,
-            leveldb::MemManager *mem_manager, bool cache_all) : dbname_(
+            leveldb::MemManager *mem_manager, uint64_t thread_id,
+            bool cache_all) : dbname_(
             dbname), file_number_(file_number), meta_(meta), dc_client_(
-            dc_client), mem_manager_(mem_manager), prefetch_all_(cache_all) {
+            dc_client), mem_manager_(mem_manager), thread_id_(thread_id),
+                              prefetch_all_(cache_all) {
 
     }
 
     NovaCCRemoteRandomAccessFile::~NovaCCRemoteRandomAccessFile() {
         if (backing_mem_table_) {
-            uint32_t scid = mem_manager_->slabclassid(meta_.file_size);
-            mem_manager_->FreeItem(backing_mem_table_, scid);
+            uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                      meta_.file_size);
+            mem_manager_->FreeItem(thread_id_, backing_mem_table_, scid);
         }
         if (backing_mem_block_) {
-            uint32_t scid = mem_manager_->slabclassid(MAX_BLOCK_SIZE);
-            mem_manager_->FreeItem(backing_mem_block_, scid);
+            uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                      MAX_BLOCK_SIZE);
+            mem_manager_->FreeItem(thread_id_, backing_mem_block_, scid);
         }
     }
 
@@ -109,8 +118,9 @@ namespace leveldb {
                                               char *scratch) {
         RDMA_ASSERT(scratch);
         if (!prefetch_all_ && backing_mem_block_ == nullptr) {
-            uint32_t scid = mem_manager_->slabclassid(MAX_BLOCK_SIZE);
-            backing_mem_block_ = mem_manager_->ItemAlloc(scid);
+            uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                      MAX_BLOCK_SIZE);
+            backing_mem_block_ = mem_manager_->ItemAlloc(thread_id_, scid);
         }
 
         const uint64_t available =
@@ -155,8 +165,8 @@ namespace leveldb {
     }
 
     Status NovaCCRemoteRandomAccessFile::ReadAll() {
-        uint32_t scid = mem_manager_->slabclassid(meta_.file_size);
-        backing_mem_table_ = mem_manager_->ItemAlloc(scid);
+        uint32_t scid = mem_manager_->slabclassid(thread_id_, meta_.file_size);
+        backing_mem_table_ = mem_manager_->ItemAlloc(thread_id_, scid);
         uint32_t req_id = dc_client_->InitiateReadSSTable(dbname_, file_number_,
                                                           meta_,
                                                           backing_mem_table_);
