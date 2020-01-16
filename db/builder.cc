@@ -14,6 +14,8 @@
 #include "leveldb/iterator.h"
 #include "cc/nova_cc.h"
 
+#include <fmt/core.h>
+
 namespace leveldb {
 
     Status
@@ -27,17 +29,19 @@ namespace leveldb {
         if (iter->Valid()) {
             MemManager *mem_manager = options.bg_thread->mem_manager();
             uint64_t key = options.bg_thread->thread_id();
-            uint32_t scid = mem_manager->slabclassid(key,
-                                                     options.write_buffer_size +
-                                                     options.table_appendum_size);
+            uint32_t alloc_size = options.write_buffer_size +
+                                  options.table_appendum_size;
+            uint32_t scid = mem_manager->slabclassid(key, alloc_size);
             char *buf = options.bg_thread->mem_manager()->ItemAlloc(key, scid);
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("CompactMemTable tid:{} scid:{} alloc_size:{}", key, scid,
+                               alloc_size);
             NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(env, fname,
                                                                    mem_manager,
                                                                    options.bg_thread->dc_client(),
                                                                    dbname, buf,
                                                                    options.bg_thread->thread_id(),
-                                                                   options.write_buffer_size +
-                                                                   options.table_appendum_size);
+                                                                   alloc_size);
             WritableFile *file = new MemWritableFile(cc_file);
             TableBuilder *builder = new TableBuilder(options, file);
             meta->smallest.DecodeFrom(iter->key());

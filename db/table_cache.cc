@@ -46,8 +46,13 @@ namespace leveldb {
                           uint64_t file_size, int level,
                           Cache::Handle **handle) {
         Status s;
-        char buf[sizeof(file_number)];
-        EncodeFixed64(buf, file_number);
+        char buf[1 + sizeof(file_number)];
+        if (caller == AccessCaller::kCompaction) {
+            buf[0] = 'c';
+        } else {
+            buf[0] = 'u';
+        }
+        EncodeFixed64(buf + 1, file_number);
         Slice key(buf, sizeof(buf));
         *handle = cache_->Lookup(key);
 

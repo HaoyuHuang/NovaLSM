@@ -1309,6 +1309,9 @@ namespace leveldb {
         ReadOptions options;
         options.verify_checksums = options_->paranoid_checks;
         options.fill_cache = false;
+        options.thread_id = options_->bg_thread->thread_id();
+        options.mem_manager = options_->bg_thread->mem_manager();
+        options.dc_client = options_->bg_thread->dc_client();
 
         // Level-0 files have to be merged together.  For other levels,
         // we will make a concatenating iterator per level.

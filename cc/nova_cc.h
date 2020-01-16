@@ -49,7 +49,7 @@ namespace leveldb {
         FileMetaData meta_;
         uint64_t thread_id_;
 
-        char *backing_mem_;
+        char *backing_mem_ = nullptr;
         uint32_t allocated_size_ = 0;
         uint32_t used_size_ = 0;
     };

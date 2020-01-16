@@ -91,17 +91,12 @@ namespace nova {
     }
 
     uint32_t NovaPartitionedMemManager::slabclassid(uint32_t size) {
+        RDMA_ASSERT(size > 0 && size < SLAB_SIZE_MB * 1024 * 1024) << size;
         uint32_t res = 0;
-        if (size == 0 || size > SLAB_SIZE_MB * 1024 * 1024)
-            return 0;
         while (size > slab_classes_[res].size) {
             res++;
-            if (res == MAX_NUMBER_OF_SLAB_CLASSES) {
-                /* won't fit in the biggest slab */
-                RDMA_LOG(WARNING) << "item larger than 2MB " << size;
-                return MAX_NUMBER_OF_SLAB_CLASSES;
-            }
         }
+        RDMA_ASSERT(res < MAX_NUMBER_OF_SLAB_CLASSES) << size;
         return res;
     }
 
@@ -127,7 +122,6 @@ namespace nova {
         free_slab_index_--;
         pthread_mutex_unlock(&free_slabs_mutex_);
 
-        //
         slab->Init(static_cast<uint32_t>(slab_classes_[scid].size));
         pthread_mutex_lock(&slab_class_mutex_[scid]);
         slab_classes_[scid].AddSlab(slab);

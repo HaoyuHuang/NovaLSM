@@ -60,8 +60,9 @@ namespace leveldb {
     }
 
     Status NovaCCRemoteMemFile::Append(const leveldb::Slice &data) {
+        char *buf = backing_mem_ + used_size_;
         assert(used_size_ + data.size() < allocated_size_);
-        memcpy(backing_mem_ + used_size_, data.data(), data.size());
+        memcpy(buf, data.data(), data.size());
         used_size_ += data.size();
         return Status::OK();
     }
@@ -77,6 +78,8 @@ namespace leveldb {
     }
 
     Status NovaCCRemoteMemFile::Fsync() {
+        RDMA_ASSERT(used_size_ == meta_.file_size) << used_size_ << ":"
+                                                   << meta_.file_size;
         uint32_t req_id = dc_client_->InitiateFlushSSTable(dbname_,
                                                            meta_.number, meta_,
                                                            backing_mem_);
@@ -93,10 +96,14 @@ namespace leveldb {
             const std::string &dbname, uint64_t file_number,
             const leveldb::FileMetaData &meta, leveldb::DCClient *dc_client,
             leveldb::MemManager *mem_manager, uint64_t thread_id,
-            bool cache_all) : dbname_(
-            dbname), file_number_(file_number), meta_(meta), dc_client_(
-            dc_client), mem_manager_(mem_manager), thread_id_(thread_id),
+            bool cache_all) : dbname_(dbname), file_number_(file_number),
+                              meta_(meta), dc_client_(
+                    dc_client), mem_manager_(mem_manager),
+                              thread_id_(thread_id),
                               prefetch_all_(cache_all) {
+        RDMA_ASSERT(mem_manager_);
+        RDMA_ASSERT(dc_client_);
+        prefetch_all_ = false;
 
     }
 

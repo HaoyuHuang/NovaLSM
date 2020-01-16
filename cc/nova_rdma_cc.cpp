@@ -58,7 +58,7 @@ namespace nova {
         read_options.thread_id = thread_id_;
 
         leveldb::Status s = db->Get(read_options, task.key, &value);
-        RDMA_ASSERT(s.ok());
+        RDMA_ASSERT(s.ok()) << s.ToString();
         task.conn->response_buf = task.conn->buf;
         char *response_buf = task.conn->response_buf;
         task.conn->response_size =

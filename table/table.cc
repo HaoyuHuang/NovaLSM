@@ -47,7 +47,7 @@ namespace leveldb {
             return Status::Corruption("file is too short to be an sstable");
         }
 
-        char footer_space[Footer::kEncodedLength];
+        char footer_space[Footer::kEncodedLength + 1];
         Slice footer_input;
         Status s = file->Read(size - Footer::kEncodedLength,
                               Footer::kEncodedLength,
@@ -352,7 +352,7 @@ namespace leveldb {
         // Read the block contents as well as the type/crc footer.
         // See table_builder.cc for the code that built this structure.
         size_t n = static_cast<size_t>(handle.size());
-        char *buf = new char[n + kBlockTrailerSize];
+        char *buf = new char[n + kBlockTrailerSize + 1];
         Slice contents;
         Status s = file->Read(handle.offset(), n + kBlockTrailerSize, &contents,
                               buf);

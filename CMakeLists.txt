@@ -547,5 +547,7 @@ endif (LEVELDB_INSTALL)
 
 
 add_executable(nova_main "nova/nova_main.cpp")
-
 target_link_libraries(nova_main -lgflags leveldb)
+
+add_executable(table_main "table/table_main.cc")
+target_link_libraries(table_main -lgflags leveldb)

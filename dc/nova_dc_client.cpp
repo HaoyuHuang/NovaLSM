@@ -38,6 +38,13 @@ namespace leveldb {
         uint32_t msg_size = 1 + 4 + dbname.size() + 4 + 4;
         rdma_store_->PostSend(sendbuf, msg_size, dc_id, req_id);
 
+        Slice footer_input(
+                backing_mem + meta.file_size - Footer::kEncodedLength,
+                Footer::kEncodedLength);
+        Footer footer;
+        Status s = footer.DecodeFrom(&footer_input);
+        RDMA_ASSERT(s.ok()) << s.ToString();
+
         DCRequestContext context = {};
         context.req_type = DCRequestType::DC_FLUSH_SSTABLE;
         context.done = false;
@@ -291,6 +298,15 @@ namespace leveldb {
                     const DCRequestContext &context = context_it->second;
 
                     context.backing_mem[context.size] = END_OF_COMPLETE_RDMA_WRITE_MARKER;
+
+                    Slice footer_input(
+                            context.backing_mem + context.size -
+                            Footer::kEncodedLength,
+                            Footer::kEncodedLength);
+                    Footer footer;
+                    Status s = footer.DecodeFrom(&footer_input);
+                    RDMA_ASSERT(s.ok()) << s.ToString();
+
                     rdma_store_->PostWrite(
                             context.backing_mem,
                             context.size + 1,

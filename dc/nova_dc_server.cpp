@@ -31,12 +31,18 @@ namespace nova {
             }
         }
 
-        for (auto& dbname : dbnames) {
+        for (auto &dbname : dbnames) {
             mkdirs(dbname.c_str());
         }
 
-        leveldb::NovaDiskComponent *dc = new leveldb::NovaDiskComponent(
-                new leveldb::PosixEnv, cache, dbnames);
+        leveldb::EnvOptions env_option;
+        env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
+        leveldb::PosixEnv *env = new leveldb::PosixEnv;
+        env->set_env_option(env_option);
+
+        leveldb::NovaDiskComponent *dc = new leveldb::NovaDiskComponent(env,
+                                                                        cache,
+                                                                        dbnames);
 
         for (int worker_id = 0;
              worker_id < NovaDCConfig::dc_config->num_dc_workers; worker_id++) {
@@ -66,8 +72,7 @@ namespace nova {
             buf += nrdma_buf_unit() *
                    NovaCCConfig::cc_config->cc_servers.size();
         }
-
-
+        RDMA_ASSERT(buf == cache_buf);
     }
 
     void NovaDCServer::Start() {

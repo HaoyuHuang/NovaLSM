@@ -252,7 +252,7 @@ namespace nova {
 #define NOVA_LIST_BACK_ARRAY_SIZE 32
 #define NOVA_MAX_CONN 1000000
 
-#define SLAB_SIZE_MB 2
+#define SLAB_SIZE_MB 8
 #define CUCKOO_SEGMENT_SIZE_MB 1
 
 #define CHUNK_ALIGN_BYTES 8
