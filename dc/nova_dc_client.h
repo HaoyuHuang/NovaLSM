@@ -90,9 +90,6 @@ namespace leveldb {
                     int remote_server_id, char *buf,
                     uint32_t imm_data) override;
 
-        void ProcessPendingRequests();
-
-
         bool IsDone(uint32_t req_id) override;
 
         void IncrementReqId();

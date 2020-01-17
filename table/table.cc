@@ -2,8 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-#include <util/crc32c.h>
+#include "util/crc32c.h"
+#include <fmt/core.h>
 #include "leveldb/table.h"
+
+#include "nova/logging.hpp"
 
 #include "leveldb/cache.h"
 #include "leveldb/comparator.h"
@@ -47,7 +50,7 @@ namespace leveldb {
             return Status::Corruption("file is too short to be an sstable");
         }
 
-        char footer_space[Footer::kEncodedLength + 1];
+        char footer_space[Footer::kEncodedLength];
         Slice footer_input;
         Status s = file->Read(size - Footer::kEncodedLength,
                               Footer::kEncodedLength,
@@ -90,8 +93,11 @@ namespace leveldb {
             (*table)->rep_ = rep;
             (*table)->ReadMeta(footer);
             (*table)->db_profiler_ = db_profiler;
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("cache id {} fn:{} cc:{}", rep->cache_id,
+                               file_number,
+                               options.block_cache->TotalCapacity());
         }
-
         return s;
     }
 
@@ -183,7 +189,8 @@ namespace leveldb {
         Status s = handle.DecodeFrom(&input);
         // We intentionally allow extra stuff in index_value so that we
         // can add more features in the future.
-
+        bool cache_hit = false;
+        bool insert = false;
         if (s.ok()) {
             BlockContents contents;
             if (block_cache != nullptr) {
@@ -195,6 +202,7 @@ namespace leveldb {
                 if (cache_handle != nullptr) {
                     block = reinterpret_cast<Block *>(block_cache->Value(
                             cache_handle));
+                    cache_hit = true;
                 } else {
                     s = table->ReadBlock(table->rep_->file, options, handle,
                                          &contents);
@@ -205,6 +213,7 @@ namespace leveldb {
                             cache_handle = block_cache->Insert(key, block,
                                                                block->size(),
                                                                &DeleteCachedBlock);
+                            insert = true;
                         }
                     }
                 }
@@ -216,7 +225,17 @@ namespace leveldb {
                                       handle.offset());
                 }
             }
-            if (block != nullptr && table->db_profiler_ != nullptr) {
+
+            RDMA_ASSERT(cache_handle);
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format(
+                        "Cache hit {} Insert {} cs:{} cc:{} bs:{} off:{}",
+                        cache_hit,
+                        insert, block_cache->TotalCharge(),
+                        block_cache->TotalCapacity(),
+                        block->size(), handle.offset());
+
+            if (table->db_profiler_ != nullptr) {
                 Access access = {
                         .trace_type = TraceType::DATA_BLOCK,
                         .access_caller = context.caller,
@@ -352,7 +371,7 @@ namespace leveldb {
         // Read the block contents as well as the type/crc footer.
         // See table_builder.cc for the code that built this structure.
         size_t n = static_cast<size_t>(handle.size());
-        char *buf = new char[n + kBlockTrailerSize + 1];
+        char *buf = new char[n + kBlockTrailerSize];
         Slice contents;
         Status s = file->Read(handle.offset(), n + kBlockTrailerSize, &contents,
                               buf);

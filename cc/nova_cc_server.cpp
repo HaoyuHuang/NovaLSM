@@ -6,6 +6,7 @@
 
 #include <netinet/tcp.h>
 #include <signal.h>
+#include <fmt/core.h>
 #include "leveldb/write_batch.h"
 #include "db/filename.h"
 #include "nova_cc_server.h"
@@ -57,8 +58,8 @@ namespace nova {
             options.block_cache = cache;
             if (NovaCCConfig::cc_config->write_buffer_size_mb > 0) {
                 options.write_buffer_size =
-                        NovaCCConfig::cc_config->write_buffer_size_mb * 1024 *
-                        1024;
+                        (uint64_t) (NovaCCConfig::cc_config->write_buffer_size_mb) *
+                        1024 * 1024;
             }
             options.env = env;
             options.create_if_missing = true;
@@ -221,9 +222,15 @@ namespace nova {
 
         leveldb::Cache *cache = nullptr;
         if (NovaCCConfig::cc_config->block_cache_mb > 0) {
-            cache = leveldb::NewLRUCache(
-                    NovaCCConfig::cc_config->block_cache_mb * 1024 * 1024);
+            uint64_t cache_size =
+                    (uint64_t) (NovaCCConfig::cc_config->block_cache_mb) *
+                    1024 * 1024;
+            cache = leveldb::NewLRUCache(cache_size);
         }
+        RDMA_LOG(INFO)
+            << fmt::format("Block cache size {}. Configured size {} MB",
+                           cache->TotalCapacity(),
+                           NovaCCConfig::cc_config->block_cache_mb);
 
         for (int db_index = 0; db_index < ndbs; db_index++) {
             dbs_.push_back(CreateDatabase(db_index, cache, bgs[bg_thread_id]));

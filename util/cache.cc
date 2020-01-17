@@ -160,6 +160,10 @@ namespace leveldb {
             // Separate from constructor so caller can easily make an array of LRUCache
             void SetCapacity(size_t capacity) { capacity_ = capacity; }
 
+            size_t GetCapacity() const {
+                return capacity_;
+            }
+
             // Like Cache methods, but with an extra "hash" parameter.
             Cache::Handle *Insert(const Slice &key, uint32_t hash, void *value,
                                   size_t charge,
@@ -317,7 +321,6 @@ namespace leveldb {
                     assert(erased);
                 }
             }
-
             return reinterpret_cast<Cache::Handle *>(e);
         }
 
@@ -421,6 +424,14 @@ namespace leveldb {
                 size_t total = 0;
                 for (int s = 0; s < kNumShards; s++) {
                     total += shard_[s].TotalCharge();
+                }
+                return total;
+            }
+
+            size_t TotalCapacity() const override {
+                size_t total = 0;
+                for (int s = 0; s < kNumShards; s++) {
+                    total += shard_[s].GetCapacity();
                 }
                 return total;
             }

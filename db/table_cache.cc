@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include <fmt/core.h>
 #include "db/table_cache.h"
 
 #include "cc/nova_cc.h"
@@ -47,32 +48,37 @@ namespace leveldb {
                           Cache::Handle **handle) {
         Status s;
         char buf[1 + sizeof(file_number)];
+
         if (caller == AccessCaller::kCompaction) {
-            buf[0] = 'c';
+            buf[0] = 'a';
         } else {
-            buf[0] = 'u';
+            buf[0] = 'b';
         }
         EncodeFixed64(buf + 1, file_number);
-        Slice key(buf, sizeof(buf));
+        Slice key(buf, 1 + sizeof(file_number));
         *handle = cache_->Lookup(key);
 
+        bool cache_hit = true;
         if (*handle == nullptr) {
+            cache_hit = false;
             std::string fname = TableFileName(dbname_, file_number);
             RandomAccessFile *file = nullptr;
             Table *table = nullptr;
-            bool read_all = false;
+            bool prefetch_all = false;
             if (caller == AccessCaller::kCompaction) {
-                read_all = true;
+                prefetch_all = true;
             }
             file = new NovaCCRemoteRandomAccessFile(dbname_, file_number, meta,
                                                     options.dc_client,
                                                     options.mem_manager,
                                                     options.thread_id,
-                                                    read_all);
+                                                    prefetch_all);
             if (s.ok()) {
                 s = Table::Open(options_, file, file_size, level, file_number,
                                 &table, db_profiler_);
             }
+
+            RDMA_ASSERT(s.ok()) << s.ToString();
 
             if (!s.ok()) {
                 assert(table == nullptr);
@@ -86,6 +92,11 @@ namespace leveldb {
                 *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
             }
         }
+
+        RDMA_LOG(rdmaio::DEBUG)
+            << fmt::format("table cache hit {} fn:{} cs:{} cc:{}", cache_hit,
+                           file_number, cache_->TotalCharge(),
+                           cache_->TotalCapacity());
         return s;
     }
 
@@ -134,9 +145,13 @@ namespace leveldb {
     }
 
     void TableCache::Evict(uint64_t file_number) {
-        char buf[sizeof(file_number)];
-        EncodeFixed64(buf, file_number);
-        cache_->Erase(Slice(buf, sizeof(buf)));
+        char buf[1 + sizeof(file_number)];
+        buf[0] = 'a';
+        EncodeFixed64(buf + 1, file_number);
+        cache_->Erase(Slice(buf, 1 + sizeof(file_number)));
+
+        buf[0] = 'b';
+        cache_->Erase(Slice(buf, 1 + sizeof(file_number)));
     }
 
 }  // namespace leveldb

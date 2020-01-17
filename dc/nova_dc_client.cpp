@@ -58,14 +58,13 @@ namespace leveldb {
         rdma_store_->FlushPendingSends(dc_id);
 
         RDMA_LOG(DEBUG) << fmt::format(
-                    "dcclient[{}]: req:{} Flush SSTable db:{} fn:{} smallest key:{} largest key:{} size:{} to DC node {}. Buf: {}",
+                    "dcclient[{}]: req:{} Flush SSTable db:{} fn:{} smallest key:{} largest key:{} size:{} to DC node {}.",
                     dc_client_id_, req_id, dbname,
                     file_number,
                     meta.smallest.user_key().ToString(),
                     meta.largest.user_key().ToString(),
                     meta.file_size,
-                    dc_id,
-                    std::string(sendbuf, msg_size));
+                    dc_id);
         return req_id;
     }
 
@@ -93,7 +92,6 @@ namespace leveldb {
         msg_size += 4;
         leveldb::EncodeFixed64(sendbuf + msg_size, (uint64_t) result);
         msg_size += 8;
-        result[meta.file_size] = INIT_RDMA_WRITE_MARKER;
         rdma_store_->PostSend(sendbuf, msg_size, dc_id, req_id);
 
         DCRequestContext context = {};
@@ -109,9 +107,8 @@ namespace leveldb {
         rdma_store_->FlushPendingSends(dc_id);
 
         RDMA_LOG(DEBUG) << fmt::format(
-                    "dcclient[{}]: req:{} Read SSTable db:{} fn:{} from DC node {}. Buf: {}",
-                    dc_client_id_, req_id, dbname, file_number, dc_id,
-                    std::string(sendbuf, msg_size));
+                    "dcclient[{}]: req:{} Read SSTable db:{} fn:{} from DC node {}.",
+                    dc_client_id_, req_id, dbname, file_number, dc_id);
         return req_id;
     }
 
@@ -152,9 +149,8 @@ namespace leveldb {
             rdma_store_->PostSend(sendbuf, msg_size, it->first,
                                   req_id);
             RDMA_LOG(DEBUG) << fmt::format(
-                        "dcclient[{}]: req:{} Delete files db:{} files {} at DC node {}. Buf: {}",
-                        dc_client_id_, req_id, dbname, delete_fns, it->first,
-                        std::string(sendbuf, msg_size));
+                        "dcclient[{}]: req:{} Delete files db:{} files {} at DC node {}.",
+                        dc_client_id_, req_id, dbname, delete_fns, it->first);
             IncrementReqId();
 
         }
@@ -207,7 +203,6 @@ namespace leveldb {
         leveldb::EncodeFixed64(sendbuf + msg_size, (uint64_t) result);
         msg_size += 8;
 
-        result[size] = INIT_RDMA_WRITE_MARKER;
         rdma_store_->PostSend(sendbuf, msg_size, dc_id, req_id);
         DCRequestContext context = {};
         context.req_type = DCRequestType::DC_READ_BLOCKS;
@@ -229,33 +224,10 @@ namespace leveldb {
         return req_id;
     }
 
-    void NovaDCClient::ProcessPendingRequests() {
-        if (request_context_.empty()) {
-            return;
-        }
-
-        for (auto &it : request_context_) {
-            auto &context = it.second;
-            if (context.req_type == DCRequestType::DC_READ_BLOCKS) {
-                if (context.backing_mem[context.size] ==
-                    END_OF_COMPLETE_RDMA_WRITE_MARKER) {
-                    context.done = true;
-                }
-            } else if (context.req_type == DCRequestType::DC_READ_SSTABLE) {
-                if (context.backing_mem[context.size] ==
-                    END_OF_COMPLETE_RDMA_WRITE_MARKER) {
-                    context.done = true;
-                }
-            }
-        }
-    }
-
     bool NovaDCClient::IsDone(uint32_t req_id) {
         // Poll both queues.
         rdma_store_->PollRQ();
         rdma_store_->PollSQ();
-
-        ProcessPendingRequests();
 
         auto context_it = request_context_.find(req_id);
         RDMA_ASSERT(context_it != request_context_.end());
@@ -285,42 +257,51 @@ namespace leveldb {
                 RDMA_LOG(DEBUG)
                     << fmt::format("dcclient[{}]: received from {} imm:{}",
                                    dc_client_id_, remote_server_id, imm_data);
+                auto context_it = request_context_.find(req_id);
+                if (context_it != request_context_.end()) {
+                    // I sent this request a while ago and now it is complete.
+                    auto &context = context_it->second;
+                    if (context.req_type == DCRequestType::DC_READ_BLOCKS ||
+                        context.req_type ==
+                        DCRequestType::DC_READ_SSTABLE ||
+                        buf[0] == DCRequestType::DC_FLUSH_SSTABLE_SUCC) {
+                        context.done = true;
+                    } else if (buf[0] == DCRequestType::DC_FLUSH_SSTABLE_BUF) {
+                        uint64_t remote_dc_offset = leveldb::DecodeFixed64(
+                                buf + 1);
+                        // Verify the footer is correct.
+                        Slice footer_input(
+                                context.backing_mem + context.size -
+                                Footer::kEncodedLength,
+                                Footer::kEncodedLength);
+                        Footer footer;
+                        Status s = footer.DecodeFrom(&footer_input);
+                        RDMA_ASSERT(s.ok()) << s.ToString();
+
+                        rdma_store_->PostWrite(
+                                context.backing_mem,
+                                context.size,
+                                remote_server_id, remote_dc_offset,
+                                false, req_id);
+                    } else {
+                        RDMA_ASSERT(false)
+                            << fmt::format("Unknown request context {}.",
+                                           context.req_type);
+                    }
+                    return;
+                }
+
                 if (buf[0] ==
                     DCRequestType::DC_ALLOCATE_LOG_BUFFER_SUCC) {
                     uint64_t base = leveldb::DecodeFixed64(buf + 1);
                     uint64_t size = leveldb::DecodeFixed64(buf + 9);
                     rdma_log_writer_->AckAllocLogBuf(remote_server_id, base,
                                                      size);
-                } else if (buf[0] == DCRequestType::DC_FLUSH_SSTABLE_BUF) {
-                    uint64_t remote_dc_offset = leveldb::DecodeFixed64(buf + 1);
-                    auto context_it = request_context_.find(req_id);
-                    RDMA_ASSERT(context_it != request_context_.end());
-                    const DCRequestContext &context = context_it->second;
-
-                    context.backing_mem[context.size] = END_OF_COMPLETE_RDMA_WRITE_MARKER;
-
-                    Slice footer_input(
-                            context.backing_mem + context.size -
-                            Footer::kEncodedLength,
-                            Footer::kEncodedLength);
-                    Footer footer;
-                    Status s = footer.DecodeFrom(&footer_input);
-                    RDMA_ASSERT(s.ok()) << s.ToString();
-
-                    rdma_store_->PostWrite(
-                            context.backing_mem,
-                            context.size + 1,
-                            remote_server_id, remote_dc_offset,
-                            false, req_id);
-                    rdma_store_->FlushPendingSends(remote_server_id);
-                } else if (buf[0] == DCRequestType::DC_FLUSH_SSTABLE_SUCC) {
-                    auto context_it = request_context_.find(req_id);
-                    RDMA_ASSERT(context_it != request_context_.end());
-                    context_it->second.done = true;
                 } else {
                     RDMA_ASSERT(false) << fmt::format(
                                 "dcclient[{}]: unknown recv from {} imm:{} buf:{} ",
-                                dc_client_id_, remote_server_id, imm_data, buf);
+                                dc_client_id_, remote_server_id, imm_data,
+                                buf[0]);
                 }
                 break;
         }

@@ -67,8 +67,6 @@ namespace nova {
 
     void async_complete_event_handler(int fd, short event, void *arg) {
         auto *worker = (NovaCCConnWorker *) arg;
-        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_
-                        << "]: read async complete queue";
         char buffer[1] = {0};
         RDMA_ASSERT(read(fd, buffer, 1) == 1);
         RDMA_ASSERT(buffer[0] == 'a');

@@ -104,7 +104,6 @@ namespace leveldb {
         RDMA_ASSERT(mem_manager_);
         RDMA_ASSERT(dc_client_);
         prefetch_all_ = false;
-
     }
 
     NovaCCRemoteRandomAccessFile::~NovaCCRemoteRandomAccessFile() {

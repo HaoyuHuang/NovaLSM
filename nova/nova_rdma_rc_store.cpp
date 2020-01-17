@@ -89,16 +89,19 @@ namespace nova {
                                          peer_rc_key) != SUCC) {
                 usleep(CONN_SLEEP);
             }
-            RDMA_LOG(INFO) << "rdma-rc[" << thread_id_
-                           << "]: connected to server "
-                           << peer_store.host.ip << ":" << peer_store.host.port
-                           << ":" << peer_store.thread_id;
+            RDMA_LOG(INFO)
+                << fmt::format(
+                        "rdma-rc[{}]: connected to server {}:{}:{}. Posting {} recvs.",
+                        thread_id_, peer_store.host.ip,
+                        peer_store.host.port, peer_store.thread_id,
+                        max_num_sends);
 
             for (int i = 0; i < max_num_sends; i++) {
                 PostRecv(peer_store.server_id, i);
             }
         }
-        RDMA_LOG(INFO) << "RDMA client thread " << thread_id_ << " initialized";
+        RDMA_LOG(INFO)
+            << fmt::format("RDMA client thread {} initialized", thread_id_);
     }
 
     uint64_t
@@ -146,10 +149,10 @@ namespace nova {
         npending_send_[qp_idx]++;
         send_sge_index_[qp_idx]++;
         RDMA_LOG(DEBUG) << fmt::format(
-                    "rdma-rc[{}]: SQ: rdma {} request to server {} imm:{} roffset:{} isoff:{} size:{} p:{}:{} buf:{}",
+                    "rdma-rc[{}]: SQ: rdma {} request to server {} imm:{} roffset:{} isoff:{} size:{} p:{}:{}",
                     thread_id_, ibv_wr_opcode_str(opcode), server_id, imm_data,
                     remote_addr, is_offset, size, psend_index_[qp_idx],
-                    npending_send_[qp_idx], sendbuf);
+                    npending_send_[qp_idx]);
         if (send_sge_index_[qp_idx] == doorbell_batch_size_) {
             // post send a batch of requests.
             send_sge_index_[qp_idx] = 0;
@@ -253,10 +256,10 @@ namespace nova {
                 << wcs_[i].status << " str:"
                 << ibv_wc_status_str(wcs_[i].status);
 
-            RDMA_LOG(DEBUG) << "rdma-rc[" << thread_id_ << "]: "
-                            << "SQ: poll complete from " << server_id
-                            << " wr:" << wcs_[i].wr_id << " op:"
-                            << ibv_wc_opcode_str(wcs_[i].opcode);
+            RDMA_LOG(DEBUG) << fmt::format(
+                        "rdma-rc[{}]: SQ: poll complete from server {} wr:{} op:{}",
+                        thread_id_, server_id, wcs_[i].wr_id,
+                        ibv_wc_opcode_str(wcs_[i].opcode));
             char *buf = rdma_send_buf_[qp_idx] +
                         wcs_[i].wr_id * NovaConfig::config->max_msg_size;
             callback_->ProcessRDMAWC(wcs_[i].opcode, wcs_[i].wr_id, qp_idx,
@@ -293,22 +296,17 @@ namespace nova {
         int n = ibv_poll_cq(qp_[qp_idx]->recv_cq_, max_num_wrs, wcs_);
         for (int i = 0; i < n; i++) {
             uint64_t wr_id = wcs_[i].wr_id;
-            if (wcs_[i].opcode != IBV_WC_RECV) {
-                continue;
-            }
-            RDMA_LOG(DEBUG) << "rdma-rc[" << thread_id_ << "]: "
-                            << "RQ received from " << server_id
-                            << " wr:" << wr_id;
             RDMA_ASSERT(wr_id < max_num_wrs);
-            char *buf = rdma_recv_buf_[qp_idx] + max_msg_size_ * wr_id;
             RDMA_ASSERT(wcs_[i].status == IBV_WC_SUCCESS)
                 << "rdma-rc[" << thread_id_ << "]: " << "RQ error wc status "
                 << ibv_wc_status_str(wcs_[i].status);
-            RDMA_ASSERT(wcs_[i].opcode == IBV_WC_RECV)
-                << "rdma-rc[" << thread_id_ << "]: " << "RQ wrong op code "
-                << ibv_wc_opcode_str(wcs_[i].opcode);
-            callback_->ProcessRDMAWC(IBV_WC_RECV, wcs_[i].wr_id, server_id, buf,
-                                     wcs_[i].imm_data);
+
+            RDMA_LOG(DEBUG)
+                << fmt::format("rdma-rc[{}]: RQ: received from server {} wr:{}",
+                               thread_id_, server_id, wr_id);
+            char *buf = rdma_recv_buf_[qp_idx] + max_msg_size_ * wr_id;
+            callback_->ProcessRDMAWC(wcs_[i].opcode, wcs_[i].wr_id, server_id,
+                                     buf, wcs_[i].imm_data);
             // Post another receive event.
             PostRecv(server_id, wr_id);
         }

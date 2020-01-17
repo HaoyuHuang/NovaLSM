@@ -4,7 +4,7 @@
 // Copyright (c) 2020 University of Southern California. All rights reserved.
 //
 
-#include <table/format.h>
+#include "table/format.h"
 #include "nova_dc.h"
 #include "nova/logging.hpp"
 #include "util/coding.h"
@@ -76,28 +76,23 @@ namespace leveldb {
                                            const std::vector<leveldb::DCBlockHandle> &block_handles,
                                            char *buf) {
         char *result_buf = buf;
-//        Cache::Handle *handle = nullptr;
-//        Status s = FindTable(dbname, file_number, &handle);
-//        RDMA_ASSERT(s.ok());
-//        RandomAccessFile *table = reinterpret_cast<RandomAccessFile *>(cache_->Value(
-//                handle));
-        RandomAccessFile *table = nullptr;
-        Status s = env_->NewRandomAccessFile(TableFileName(dbname, file_number),
-                                             &table);
+        Cache::Handle *handle = nullptr;
+        Status s = FindTable(dbname, file_number, &handle);
         RDMA_ASSERT(s.ok());
-
+        RandomAccessFile *table = reinterpret_cast<RandomAccessFile *>(cache_->Value(
+                handle));
+        RDMA_ASSERT(s.ok());
         uint64_t ts = 0;
         for (const auto &bh : block_handles) {
             Slice result;
-            RDMA_ASSERT(table->Read(bh.offset, bh.size, &result,
-                                    result_buf).ok());
+            RDMA_ASSERT(table->Read(bh.offset, bh.size, &result, result_buf).ok());
             RDMA_LOG(rdmaio::DEBUG)
-                << fmt::format("read block off:{} size:{} read:{} from db:{} fn:{}",
-                               bh.offset, bh.size, result.size(), dbname, file_number);
+                << fmt::format(
+                        "read block off:{} size:{} read:{} from db:{} fn:{}",
+                        bh.offset, bh.size, result.size(), dbname, file_number);
             result_buf += result.size();
             ts += result.size();
         }
-        delete table;
         return ts;
     }
 
@@ -119,24 +114,22 @@ namespace leveldb {
         file->Close();
         delete file;
 
-        RandomAccessFile *read_file;
-        RDMA_ASSERT(env_->NewRandomAccessFile(tablename, &read_file).ok());
-
+        // Verify checksum.
         char footer_space[Footer::kEncodedLength];
-        Slice footer_input;
-        Status s = read_file->Read(table_size - Footer::kEncodedLength,
-                                   Footer::kEncodedLength,
-                                   &footer_input, footer_space);
+        std::vector<DCBlockHandle> bhs;
+        bhs.push_back({
+                              .offset = table_size - Footer::kEncodedLength,
+                              .size = Footer::kEncodedLength
+                      });
+        ReadBlocks(dbname, file_number, bhs, footer_space);
         Footer footer;
-        s = footer.DecodeFrom(&footer_input);
+        Slice footer_input(footer_space, Footer::kEncodedLength);
+        Status s = footer.DecodeFrom(&footer_input);
         RDMA_ASSERT(s.ok()) << s.ToString();
-
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format("footer is correct. fn:{} off:{} size:{}",
                            file_number, table_size - Footer::kEncodedLength,
                            Footer::kEncodedLength);
-
-        delete read_file;
     }
 
     uint64_t NovaDiskComponent::TableSize(const std::string &dbname,

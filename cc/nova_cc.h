@@ -72,9 +72,9 @@ namespace leveldb {
     private:
         Status ReadAll();
 
-        std::string dbname_;
+        const std::string& dbname_;
         uint64_t file_number_;
-        FileMetaData meta_;
+        const FileMetaData& meta_;
 
         bool prefetch_all_;
         bool done_prefetch_all_;

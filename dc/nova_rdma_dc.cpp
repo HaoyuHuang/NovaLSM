@@ -5,6 +5,7 @@
 //
 
 #include <fmt/core.h>
+
 #include "nova_rdma_dc.h"
 #include "nova_dc_client.h"
 
@@ -66,6 +67,53 @@ namespace nova {
                 uint32_t dc_req_id = imm_data;
                 uint64_t req_id = to_req_id(remote_server_id, dc_req_id);
 
+                auto context_it = request_context_map_.find(req_id);
+                if (context_it != request_context_map_.end()) {
+                    // I sent this request a while ago and now it is complete.
+                    auto &context = context_it->second;
+                    if (context.request_type ==
+                        leveldb::DCRequestType::DC_FLUSH_SSTABLE) {
+                        // CC has written the SSTable to the provided buffer.
+                        // NOW I can flush the buffer to disk and let CC know the SSTable if flushed.
+                        leveldb::Slice footer_input(
+                                context.buf + context.sstable_size -
+                                leveldb::Footer::kEncodedLength,
+                                leveldb::Footer::kEncodedLength);
+                        leveldb::Footer footer;
+                        leveldb::Status s = footer.DecodeFrom(&footer_input);
+                        RDMA_ASSERT(s.ok()) << s.ToString();
+
+
+                        dc_->FlushSSTable(context.db_name,
+                                          context.file_number,
+                                          context.buf,
+                                          context.sstable_size);
+
+                        uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                                  context.sstable_size);
+                        mem_manager_->FreeItem(thread_id_, context.buf, scid);
+                        char *sendbuf = rdma_store_->GetSendBuf(
+                                context.remote_server_id);
+                        sendbuf[0] = leveldb::DCRequestType::DC_FLUSH_SSTABLE_SUCC;
+                        rdma_store_->PostSend(sendbuf, 1,
+                                              context.remote_server_id,
+                                              dc_req_id);
+                        RDMA_LOG(DEBUG) << fmt::format(
+                                    "dc[{}]: imm:{} ### Flushed SSTable db:{} fn:{} size:{}.",
+                                    thread_id_,
+                                    dc_req_id,
+                                    context.db_name,
+                                    context.file_number,
+                                    context.sstable_size);
+                    } else {
+                        RDMA_ASSERT(false)
+                            << fmt::format("Unknown request context {}.",
+                                           context.request_type);
+                    }
+                    return;
+                }
+
+
                 // Inspect the buf.
                 if (buf[0] == leveldb::DCRequestType::DC_ALLOCATE_LOG_BUFFER) {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);
@@ -118,22 +166,20 @@ namespace nova {
 
                     uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                               sstable_size);
-                    char *buf = mem_manager_->ItemAlloc(thread_id_, scid);
-                    RDMA_ASSERT(buf != nullptr);
-                    // set buf to 0. CC is going to set it to ! when write completes.
-                    buf[sstable_size] = INIT_RDMA_WRITE_MARKER;
+                    char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, scid);
+                    RDMA_ASSERT(rdma_buf != nullptr);
 
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     RDMA_ASSERT(send_buf != nullptr);
                     send_buf[0] = leveldb::DCRequestType::DC_FLUSH_SSTABLE_BUF;
-                    leveldb::EncodeFixed64(send_buf + 1, (uint64_t) (buf));
+                    leveldb::EncodeFixed64(send_buf + 1, (uint64_t) (rdma_buf));
 
                     RequestContext context = {
                             .request_type = leveldb::DCRequestType::DC_FLUSH_SSTABLE,
                             .remote_server_id = (uint32_t) remote_server_id,
                             .db_name = dbname,
                             .file_number = file_number,
-                            .buf = buf,
+                            .buf = rdma_buf,
                             .sstable_size = sstable_size
                     };
                     request_context_map_[req_id] = context;
@@ -147,7 +193,6 @@ namespace nova {
                                 dbname,
                                 file_number,
                                 std::to_string((uint64_t) (buf)));
-
                 } else if (buf[0] == leveldb::DCRequestType::DC_READ_BLOCKS) {
                     // The request contains dbname, file number, block handles, and remote offset to accept the read blocks.
                     // It issues a WRITE_IMM to write the read blocks into the remote offset providing the request id.
@@ -184,15 +229,13 @@ namespace nova {
                     uint64_t remote_offset = leveldb::DecodeFixed64(
                             input + read_index);
 
-                    uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                              total_size + 1);
+                    uint32_t scid = mem_manager_->slabclassid(thread_id_, total_size);
                     char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, scid);
                     RDMA_ASSERT(rdma_buf != nullptr);
                     uint64_t read_size = dc_->ReadBlocks(dbname,
                                                          file_number, blocks,
                                                          rdma_buf);
                     RDMA_ASSERT(total_size == read_size);
-                    rdma_buf[total_size] = END_OF_COMPLETE_RDMA_WRITE_MARKER;
 
                     RDMA_LOG(DEBUG) << fmt::format(
                                 "dc[{}]: imm:{} Read {} blocks from SSTable db:{} fn:{} CCbuf:{} DCbuf:{}. Handles:{}. Size:{}.",
@@ -204,20 +247,12 @@ namespace nova {
                                 (uint64_t) (buf),
                                 handles, total_size);
 
-                    leveldb::Slice footer_input(
-                            rdma_buf, leveldb::Footer::kEncodedLength);
-                    leveldb::Footer footer;
-                    leveldb::Status s = footer.DecodeFrom(&footer_input);
-                    RDMA_ASSERT(s.ok())
-                        << fmt::format("{} size:{} footer:{}", s.ToString(),
-                                       total_size, std::string(rdma_buf, 48));
-
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     RDMA_ASSERT(send_buf != nullptr);
                     send_buf[0] = leveldb::DCRequestType::DC_READ_BLOCKS;
                     leveldb::EncodeFixed64(send_buf + 1, (uint64_t) (rdma_buf));
-                    leveldb::EncodeFixed64(send_buf + 1 + 8, total_size + 1);
-                    rdma_store_->PostWrite(rdma_buf, read_size + 1,
+                    leveldb::EncodeFixed64(send_buf + 1 + 8, total_size);
+                    rdma_store_->PostWrite(rdma_buf, total_size,
                                            remote_server_id,
                                            remote_offset, false, dc_req_id);
                 } else if (buf[0] == leveldb::DCRequestType::DC_READ_SSTABLE) {
@@ -236,19 +271,17 @@ namespace nova {
                     uint64_t tablesize = dc_->TableSize(dbname,
                                                         file_number);
 
-                    uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                              tablesize + 1);
+                    uint32_t scid = mem_manager_->slabclassid(thread_id_, tablesize);
                     char *buf = mem_manager_->ItemAlloc(thread_id_, scid);
                     RDMA_ASSERT(buf != nullptr);
                     dc_->ReadSSTable(dbname, file_number, buf, tablesize);
-                    buf[tablesize] = END_OF_COMPLETE_RDMA_WRITE_MARKER;
 
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     RDMA_ASSERT(send_buf != nullptr);
                     send_buf[0] = leveldb::DCRequestType::DC_READ_SSTABLE;
                     leveldb::EncodeFixed64(send_buf + 1, (uint64_t) (buf));
-                    leveldb::EncodeFixed64(send_buf + 1 + 8, tablesize + 1);
-                    rdma_store_->PostWrite(buf, tablesize + 1, remote_server_id,
+                    leveldb::EncodeFixed64(send_buf + 1 + 8, tablesize);
+                    rdma_store_->PostWrite(buf, tablesize, remote_server_id,
                                            remote_offset, false, dc_req_id);
 
                     RDMA_LOG(DEBUG) << fmt::format(
@@ -259,66 +292,6 @@ namespace nova {
                 }
                 break;
         }
-    }
-
-    int NovaRDMADiskComponent::ProcessPendingRequests() {
-        if (request_context_map_.empty()) {
-            return 0;
-        }
-        std::vector<uint64_t> processed_reqs;
-        for (const auto &it : request_context_map_) {
-            const auto &context = it.second;
-            uint32_t dc_req_id = to_dc_req_id(it.first);
-            if (context.request_type ==
-                leveldb::DCRequestType::DC_FLUSH_SSTABLE &&
-                context.buf[context.sstable_size] ==
-                END_OF_COMPLETE_RDMA_WRITE_MARKER) {
-                // CC has written the SSTable to the provided buffer.
-                // NOW I can flush the buffer to disk and let CC know the SSTable if flushed.
-
-                leveldb::Slice footer_input(
-                        context.buf + context.sstable_size -
-                        leveldb::Footer::kEncodedLength,
-                        leveldb::Footer::kEncodedLength);
-                leveldb::Footer footer;
-                leveldb::Status s = footer.DecodeFrom(&footer_input);
-                RDMA_ASSERT(s.ok()) << s.ToString();
-
-
-                dc_->FlushSSTable(context.db_name,
-                                  context.file_number,
-                                  context.buf,
-                                  context.sstable_size);
-
-                RDMA_LOG(DEBUG) << fmt::format("footer:{}", std::string(
-                            context.buf + context.sstable_size -
-                            leveldb::Footer::kEncodedLength,
-                            leveldb::Footer::kEncodedLength));
-
-                uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                          context.sstable_size);
-                mem_manager_->FreeItem(thread_id_, context.buf, scid);
-                char *sendbuf = rdma_store_->GetSendBuf(
-                        context.remote_server_id);
-                sendbuf[0] = leveldb::DCRequestType::DC_FLUSH_SSTABLE_SUCC;
-                rdma_store_->PostSend(sendbuf, 1, context.remote_server_id,
-                                      dc_req_id);
-                processed_reqs.push_back(it.first);
-
-                RDMA_LOG(DEBUG) << fmt::format(
-                            "dc[{}]: imm:{} ### Flushed SSTable db:{} fn:{} size:{}.",
-                            thread_id_,
-                            dc_req_id,
-                            context.db_name,
-                            context.file_number,
-                            context.sstable_size);
-            }
-        }
-
-        for (const auto &it : processed_reqs) {
-            request_context_map_.erase(it);
-        }
-        return request_context_map_.size();
     }
 
     void NovaRDMADiskComponent::Start() {
@@ -336,7 +309,6 @@ namespace nova {
             }
             n = rdma_store_->PollSQ();
             n += rdma_store_->PollRQ();
-            n += ProcessPendingRequests();
             if (n == 0) {
                 should_sleep = true;
                 timeout *= 2;

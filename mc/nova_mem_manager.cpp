@@ -34,14 +34,14 @@ namespace nova {
 
     char *SlabClass::AllocItem() {
         // check free list first.
-        if (free_list.size() > 0) {
+        if (!free_list.empty()) {
             char *ptr = free_list.front();
             RDMA_ASSERT(ptr != nullptr);
             free_list.pop();
             return ptr;
         }
 
-        if (slabs.size() == 0) {
+        if (slabs.empty()) {
             return nullptr;
         }
 

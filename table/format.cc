@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include <fmt/core.h>
 #include "table/format.h"
 
 #include "leveldb/env.h"
@@ -45,6 +46,7 @@ namespace leveldb {
         const uint32_t magic_hi = DecodeFixed32(magic_ptr + 4);
         const uint64_t magic = ((static_cast<uint64_t>(magic_hi) << 32) |
                                 (static_cast<uint64_t>(magic_lo)));
+
         if (magic != kTableMagicNumber) {
             return Status::Corruption("not an sstable (bad magic number)" +
                                       std::to_string(magic) + " expected " +

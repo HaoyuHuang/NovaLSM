@@ -14,6 +14,7 @@
 #include <vector>
 #include <list>
 #include <cc/nova_cc.h>
+#include <fmt/core.h>
 
 #include "db/builder.h"
 #include "db/db_iter.h"
@@ -122,6 +123,9 @@ namespace leveldb {
         if (result.block_cache == nullptr) {
             result.block_cache = NewLRUCache(8 << 20);
         }
+        RDMA_LOG(rdmaio::DEBUG)
+            << fmt::format("block cache {}",
+                           result.block_cache->TotalCapacity());
         return result;
     }
 
@@ -160,6 +164,9 @@ namespace leveldb {
               versions_(new VersionSet(dbname_, &options_, table_cache_,
                                        &internal_comparator_)),
               bg_thread_(raw_options.bg_thread) {
+        RDMA_LOG(rdmaio::INFO) << fmt::format("DB Cache capacity {}. {}",
+                                              options_.block_cache->TotalCapacity(),
+                                              raw_options.block_cache->TotalCapacity());
     }
 
     DBImpl::~DBImpl() {

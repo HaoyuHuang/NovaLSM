@@ -156,8 +156,12 @@ namespace leveldb {
             *result = Slice();
             return PosixError(filename_, EINVAL);
         }
-
-        *result = Slice(mmap_base_ + offset, n);
+        if (scratch) {
+            memcpy(scratch, mmap_base_ + offset, n);
+            *result = Slice(scratch, n);
+        } else {
+            *result = Slice(mmap_base_ + offset, n);
+        }
         return Status::OK();
     }
 

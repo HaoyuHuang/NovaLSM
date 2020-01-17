@@ -100,6 +100,8 @@ namespace leveldb {
         // cache.
         virtual size_t TotalCharge() const = 0;
 
+        virtual size_t TotalCapacity() const = 0;
+
     private:
         void LRU_Remove(Handle *e);
 

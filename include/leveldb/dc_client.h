@@ -12,9 +12,6 @@
 #include <infiniband/verbs.h>
 #include "db_types.h"
 
-#define INIT_RDMA_WRITE_MARKER '0'
-#define END_OF_COMPLETE_RDMA_WRITE_MARKER '!'
-
 namespace leveldb {
     struct DCBlockHandle {
         uint64_t offset;

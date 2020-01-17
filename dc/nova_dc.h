@@ -13,7 +13,7 @@
 
 #include "leveldb/dc_client.h"
 #include "mc/nova_mem_manager.h"
-#include "include/leveldb/cache.h"
+#include "leveldb/cache.h"
 
 namespace leveldb {
     struct DCTableMetadata {
