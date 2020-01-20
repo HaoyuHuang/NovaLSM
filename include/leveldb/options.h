@@ -98,9 +98,6 @@ namespace leveldb {
         // the next time the database is opened.
         size_t write_buffer_size = 4 * 1024 * 1024;
 
-        // Additional room to create readable/writable tables.
-        size_t table_appendum_size = 1024 * 1024;
-
         // Number of open files that can be used by the DB.  You may need to
         // increase this if your database has a large working set (budget
         // one open file per 2MB of working set).
@@ -137,6 +134,8 @@ namespace leveldb {
         // The maximum log file size a MC maintains.
         // When the log file is full, MC flushes the log to DC.
         size_t max_log_file_size = 4 * 1024 * 1024;
+
+        size_t max_dc_file_size = 4 * 1024 * 1024 + 1024 * 1024;
 
         // The number of sstables per group.
         // It creates a headroom to dedup.

@@ -61,7 +61,8 @@ namespace nova {
         }
     }
 
-    void LogFileManager::Add(const std::string &log_file, char *buf) {
+    void LogFileManager::Add(uint64_t thread_id, const std::string &log_file,
+                             char *buf) {
         uint32_t sid;
         uint32_t db_index;
         ParseDBName(log_file, &sid, &db_index);
@@ -79,13 +80,15 @@ namespace nova {
         db->mutex_.Unlock();
 
         records->mu.lock();
-        records->backing_mems.push_back(buf);
+        records->backing_mems[thread_id].push_back(buf);
         records->mu.unlock();
+
+        RDMA_LOG(DEBUG)
+            << fmt::format("Allocate log buf for file:{} from thread {}",
+                           log_file, thread_id);
     }
 
-    void LogFileManager::DeleteLogBuf(uint64_t thread_id, const std::string &log_file) {
-        uint32_t slabclassid = mem_manager_->slabclassid(thread_id,
-                nova::NovaConfig::config->log_buf_size);
+    void LogFileManager::DeleteLogBuf(const std::string &log_file) {
         uint32_t sid;
         uint32_t db_index;
         ParseDBName(log_file, &sid, &db_index);
@@ -99,13 +102,20 @@ namespace nova {
             return;
         }
         LogRecords *records = it->second;
-        // Make a copy.
-        std::vector<char *> items = records->backing_mems;
         db->logfiles_.erase(log_file);
         db->mutex_.Unlock();
 
-        if (!items.empty()) {
-            mem_manager_->FreeItems(thread_id, items, slabclassid);
+        for (const auto &it : records->backing_mems) {
+            const auto &items = it.second;
+            uint32_t scid = mem_manager_->slabclassid(it.first,
+                                                      NovaConfig::config->log_buf_size);
+            if (!items.empty()) {
+                mem_manager_->FreeItems(it.first, items, scid);
+            }
+
+            RDMA_LOG(DEBUG)
+                << fmt::format("Free {} log buf for file:{} from thread {}",
+                               items.size(), log_file, it.first);
         }
 
 

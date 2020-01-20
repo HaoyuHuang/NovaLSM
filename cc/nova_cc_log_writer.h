@@ -16,8 +16,6 @@
 
 namespace leveldb {
 
-    class WritableFile;
-
     namespace log {
 
         class RDMALogWriter {

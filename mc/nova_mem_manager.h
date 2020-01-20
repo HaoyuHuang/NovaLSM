@@ -11,13 +11,14 @@
 #include <cstring>
 #include <vector>
 #include <queue>
+#include <mutex>
 #include "leveldb/db_types.h"
 
 namespace nova {
 
 #define MAX_NUMBER_OF_SLAB_CLASSES 64
-#define SLAB_SIZE_FACTOR 1.25
-#define NOVA_MEM_PARTITIONS 1
+#define SLAB_SIZE_FACTOR 2
+#define NOVA_MEM_PARTITIONS 32
 
     class Slab {
     public:
@@ -70,10 +71,11 @@ namespace nova {
         uint32_t slabclassid(uint32_t size) ;
 
     private:
-        pthread_mutex_t slab_class_mutex_[MAX_NUMBER_OF_SLAB_CLASSES];
+        std::mutex slab_class_mutex_[MAX_NUMBER_OF_SLAB_CLASSES];
         SlabClass slab_classes_[MAX_NUMBER_OF_SLAB_CLASSES];
-
-        pthread_mutex_t free_slabs_mutex_;
+        std::mutex oom_lock;
+        bool print_class_oom = false;
+        std::mutex free_slabs_mutex_;
         Slab **free_slabs_ = nullptr;
         uint64_t free_slab_index_ = 0;
     };

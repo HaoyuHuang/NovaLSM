@@ -24,24 +24,20 @@ namespace leveldb {
         Status s;
         meta->file_size = 0;
         iter->SeekToFirst();
-
         std::string fname = TableFileName(dbname, meta->number);
         if (iter->Valid()) {
             MemManager *mem_manager = options.bg_thread->mem_manager();
             uint64_t key = options.bg_thread->thread_id();
-            uint32_t alloc_size = options.write_buffer_size +
-                                  options.table_appendum_size;
-            uint32_t scid = mem_manager->slabclassid(key, alloc_size);
-            char *buf = options.bg_thread->mem_manager()->ItemAlloc(key, scid);
             RDMA_LOG(rdmaio::DEBUG)
-                << fmt::format("CompactMemTable tid:{} scid:{} alloc_size:{}", key, scid,
-                               alloc_size);
-            NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(env, fname,
+                << fmt::format("CompactMemTable tid:{} alloc_size:{}",
+                               key, options.max_dc_file_size);
+            NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(env,
+                                                                   meta->number,
                                                                    mem_manager,
                                                                    options.bg_thread->dc_client(),
-                                                                   dbname, buf,
+                                                                   dbname,
                                                                    options.bg_thread->thread_id(),
-                                                                   alloc_size);
+                                                                   options.max_dc_file_size);
             WritableFile *file = new MemWritableFile(cc_file);
             TableBuilder *builder = new TableBuilder(options, file);
             meta->smallest.DecodeFrom(iter->key());
@@ -68,6 +64,8 @@ namespace leveldb {
                 s = file->Close();
             }
 
+            delete cc_file;
+            cc_file = nullptr;
             delete file;
             file = nullptr;
 

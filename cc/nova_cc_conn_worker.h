@@ -15,7 +15,6 @@
 #include <chrono>
 #include <cc/nova_cc_log_writer.h>
 
-#include "cc/nova_cc_server.h"
 #include "nova/nova_msg_callback.h"
 #include "nova/nova_rdma_store.h"
 #include "nova/nova_common.h"
@@ -27,8 +26,6 @@
 
 
 namespace nova {
-
-    class NovaCCServer;
 
     void event_handler(int fd, short which, void *arg);
 
@@ -97,6 +94,10 @@ namespace nova {
         }
     };
 
+    struct DBAsyncWorkers {
+        std::vector<NovaRDMAComputeComponent *> workers;
+    };
+
     class NovaCCConnWorker {
     public:
         NovaCCConnWorker(int thread_id,
@@ -131,8 +132,10 @@ namespace nova {
         std::vector<leveldb::DB *> dbs_;
         struct event_base *base = nullptr;
         LogFileManager *log_manager_ = nullptr;
-        int current_async_worker_id_ = 0;
-        std::vector<NovaRDMAComputeComponent *> async_workers_;
+
+        DBAsyncWorkers *db_async_workers_;
+        int *db_current_async_worker_id_;
+
         NovaAsyncCompleteQueue *async_cq_;
 
         int nconns = 0;

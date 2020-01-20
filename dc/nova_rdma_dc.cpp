@@ -54,6 +54,10 @@ namespace nova {
                     mem_manager_->FreeItem(thread_id_, allocated_buf, scid);
 
                     RDMA_LOG(DEBUG) << fmt::format(
+                                "Free memory for read block tid:{} size:{} scid:{}",
+                                thread_id_, size, scid);
+
+                    RDMA_LOG(DEBUG) << fmt::format(
                                 "dc[{}]: imm:{} type:{} allocated buf:{} size:{}.",
                                 thread_id_,
                                 imm_data,
@@ -75,14 +79,13 @@ namespace nova {
                         leveldb::DCRequestType::DC_FLUSH_SSTABLE) {
                         // CC has written the SSTable to the provided buffer.
                         // NOW I can flush the buffer to disk and let CC know the SSTable if flushed.
-                        leveldb::Slice footer_input(
-                                context.buf + context.sstable_size -
-                                leveldb::Footer::kEncodedLength,
-                                leveldb::Footer::kEncodedLength);
-                        leveldb::Footer footer;
-                        leveldb::Status s = footer.DecodeFrom(&footer_input);
-                        RDMA_ASSERT(s.ok()) << s.ToString();
-
+//                        leveldb::Slice footer_input(
+//                                context.buf + context.sstable_size -
+//                                leveldb::Footer::kEncodedLength,
+//                                leveldb::Footer::kEncodedLength);
+//                        leveldb::Footer footer;
+//                        leveldb::Status s = footer.DecodeFrom(&footer_input);
+//                        RDMA_ASSERT(s.ok()) << s.ToString();
 
                         dc_->FlushSSTable(context.db_name,
                                           context.file_number,
@@ -92,6 +95,11 @@ namespace nova {
                         uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                                   context.sstable_size);
                         mem_manager_->FreeItem(thread_id_, context.buf, scid);
+                        RDMA_LOG(DEBUG) << fmt::format(
+                                    "Free memory for tid:{} db:{} fn:{} size:{}",
+                                    thread_id_, context.db_name,
+                                    context.file_number, context.sstable_size);
+
                         char *sendbuf = rdma_store_->GetSendBuf(
                                 context.remote_server_id);
                         sendbuf[0] = leveldb::DCRequestType::DC_FLUSH_SSTABLE_SUCC;
@@ -113,7 +121,6 @@ namespace nova {
                     return;
                 }
 
-
                 // Inspect the buf.
                 if (buf[0] == leveldb::DCRequestType::DC_ALLOCATE_LOG_BUFFER) {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);
@@ -122,7 +129,8 @@ namespace nova {
                                                                      nova::NovaConfig::config->log_buf_size);
                     char *buf = mem_manager_->ItemAlloc(thread_id_,
                                                         slabclassid);
-                    log_manager_->Add(log_file, buf);
+                    RDMA_ASSERT(buf) << "Running out of memory";
+                    log_manager_->Add(thread_id_, log_file, buf);
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     send_buf[0] = RequestType::ALLOCATE_LOG_BUFFER_SUCC;
                     leveldb::EncodeFixed64(send_buf + 1, (uint64_t) buf);
@@ -130,18 +138,25 @@ namespace nova {
                                            NovaConfig::config->log_buf_size);
                     rdma_store_->PostSend(send_buf, 1 + 8 + 8, remote_server_id,
                                           0);
+                    RDMA_LOG(DEBUG) << fmt::format(
+                                "dc[{}]: Allocate log buffer for file {}.",
+                                thread_id_, log_file);
                 } else if (buf[0] == RequestType::DELETE_LOG_FILE) {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);
                     std::string log_file(buf + 5, size);
-                    log_manager_->DeleteLogBuf(thread_id_, log_file);
+                    log_manager_->DeleteLogBuf(log_file);
+                    RDMA_LOG(DEBUG) << fmt::format(
+                                "dc[{}]: Delete log buffer for file {}.",
+                                thread_id_, log_file);
                 } else if (buf[0] ==
                            leveldb::DCRequestType::DC_DELETE_LOG_FILE_SUCC) {
 
                 } else if (buf[0] == leveldb::DCRequestType::DC_DELETE_TABLES) {
-                    char *input = buf + 1;
+                    char *input = buf;
                     std::string dbname;
-                    uint32_t read_index = 0;
-                    read_index += leveldb::DecodeStr(input, &dbname);
+                    uint32_t read_index = 1;
+                    read_index += leveldb::DecodeStr(input + read_index,
+                                                     &dbname);
                     uint32_t nfiles = leveldb::DecodeFixed32(
                             input + read_index);
                     read_index += 4;
@@ -167,7 +182,10 @@ namespace nova {
                     uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                               sstable_size);
                     char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, scid);
-                    RDMA_ASSERT(rdma_buf != nullptr);
+                    RDMA_LOG(DEBUG) << fmt::format(
+                                "Allocating memory for tid:{} db:{} fn:{} size:{}",
+                                thread_id_, dbname, file_number, sstable_size);
+                    RDMA_ASSERT(rdma_buf) << "Running out of memory";
 
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     RDMA_ASSERT(send_buf != nullptr);
@@ -229,9 +247,16 @@ namespace nova {
                     uint64_t remote_offset = leveldb::DecodeFixed64(
                             input + read_index);
 
-                    uint32_t scid = mem_manager_->slabclassid(thread_id_, total_size);
+                    uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                              total_size);
                     char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, scid);
-                    RDMA_ASSERT(rdma_buf != nullptr);
+
+                    RDMA_LOG(DEBUG) << fmt::format(
+                                "Allocating memory for read block tid:{} db:{} fn:{} size:{}",
+                                thread_id_, dbname, file_number, total_size);
+
+                    RDMA_ASSERT(rdma_buf) << "Running out of memory";
+
                     uint64_t read_size = dc_->ReadBlocks(dbname,
                                                          file_number, blocks,
                                                          rdma_buf);
@@ -271,9 +296,10 @@ namespace nova {
                     uint64_t tablesize = dc_->TableSize(dbname,
                                                         file_number);
 
-                    uint32_t scid = mem_manager_->slabclassid(thread_id_, tablesize);
+                    uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                              tablesize);
                     char *buf = mem_manager_->ItemAlloc(thread_id_, scid);
-                    RDMA_ASSERT(buf != nullptr);
+                    RDMA_ASSERT(buf) << "Running out of memory";
                     dc_->ReadSSTable(dbname, file_number, buf, tablesize);
 
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
@@ -304,21 +330,21 @@ namespace nova {
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         uint32_t n = 0;
         while (is_running_) {
-            if (should_sleep) {
-                usleep(timeout);
-            }
+//            if (should_sleep) {
+//                usleep(timeout);
+//            }
             n = rdma_store_->PollSQ();
             n += rdma_store_->PollRQ();
-            if (n == 0) {
-                should_sleep = true;
-                timeout *= 2;
-                if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
-                    timeout = RDMA_POLL_MAX_TIMEOUT_US;
-                }
-            } else {
-                should_sleep = false;
-                timeout = RDMA_POLL_MIN_TIMEOUT_US;
-            }
+//            if (n == 0) {
+//                should_sleep = true;
+//                timeout *= 2;
+//                if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
+//                    timeout = RDMA_POLL_MAX_TIMEOUT_US;
+//                }
+//            } else {
+//                should_sleep = false;
+//                timeout = RDMA_POLL_MIN_TIMEOUT_US;
+//            }
         }
     }
 }

@@ -65,7 +65,9 @@ namespace leveldb {
             std::string fname = TableFileName(dbname, file_number);
             RandomAccessFile *file = nullptr;
             s = env_->NewRandomAccessFile(fname, &file);
-            RDMA_ASSERT(s.ok());
+            RDMA_ASSERT(s.ok())
+                << fmt::format("db{} fn:{} status:{}", dbname, file_number,
+                               s.ToString());
             *handle = cache_->Insert(key, file, 1, &DeleteEntry);
         }
         return s;
@@ -85,7 +87,8 @@ namespace leveldb {
         uint64_t ts = 0;
         for (const auto &bh : block_handles) {
             Slice result;
-            RDMA_ASSERT(table->Read(bh.offset, bh.size, &result, result_buf).ok());
+            RDMA_ASSERT(
+                    table->Read(bh.offset, bh.size, &result, result_buf).ok());
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format(
                         "read block off:{} size:{} read:{} from db:{} fn:{}",
@@ -115,17 +118,17 @@ namespace leveldb {
         delete file;
 
         // Verify checksum.
-        char footer_space[Footer::kEncodedLength];
-        std::vector<DCBlockHandle> bhs;
-        bhs.push_back({
-                              .offset = table_size - Footer::kEncodedLength,
-                              .size = Footer::kEncodedLength
-                      });
-        ReadBlocks(dbname, file_number, bhs, footer_space);
-        Footer footer;
-        Slice footer_input(footer_space, Footer::kEncodedLength);
-        Status s = footer.DecodeFrom(&footer_input);
-        RDMA_ASSERT(s.ok()) << s.ToString();
+//        char footer_space[Footer::kEncodedLength];
+//        std::vector<DCBlockHandle> bhs;
+//        bhs.push_back({
+//                              .offset = table_size - Footer::kEncodedLength,
+//                              .size = Footer::kEncodedLength
+//                      });
+//        ReadBlocks(dbname, file_number, bhs, footer_space);
+//        Footer footer;
+//        Slice footer_input(footer_space, Footer::kEncodedLength);
+//        Status s = footer.DecodeFrom(&footer_input);
+//        RDMA_ASSERT(s.ok()) << s.ToString();
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format("footer is correct. fn:{} off:{} size:{}",
                            file_number, table_size - Footer::kEncodedLength,

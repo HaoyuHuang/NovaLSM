@@ -4,36 +4,49 @@
 // Copyright (c) 2020 University of Southern California. All rights reserved.
 //
 
+#include "db/filename.h"
 #include "nova_cc.h"
 
 #define MAX_BLOCK_SIZE 102400
 
 namespace leveldb {
-    NovaCCRemoteMemFile::NovaCCRemoteMemFile(Env *env, const std::string &fname,
+    NovaCCRemoteMemFile::NovaCCRemoteMemFile(Env *env, uint64_t file_number,
                                              MemManager *mem_manager,
                                              DCClient *dc_client,
                                              const std::string &dbname,
-                                             char *backing_mem,
                                              uint64_t thread_id,
-                                             uint64_t allocated_size)
-            : env_(env), fname_(fname), mem_manager_(mem_manager),
+                                             uint64_t file_size)
+            : env_(env), file_number_(file_number),
+              fname_(TableFileName(dbname, file_number)),
+              mem_manager_(mem_manager),
               dc_client_(dc_client),
-              dbname_(dbname),
-              backing_mem_(backing_mem), thread_id_(thread_id),
-              allocated_size_(allocated_size),
+              dbname_(dbname), thread_id_(thread_id),
+              allocated_size_(file_size),
               MemFile(nullptr, "", false) {
+        uint32_t scid = mem_manager->slabclassid(thread_id, file_size);
+        backing_mem_ = mem_manager->ItemAlloc(thread_id, scid);
+        RDMA_ASSERT(backing_mem_) << "Running out of memory";
+
+        RDMA_LOG(rdmaio::DEBUG) << fmt::format(
+                    "Create remote memory file tid:{} fname:{} size:{}",
+                    thread_id, fname_, file_size);
+
         EnvFileMetadata env_meta;
         env_meta.level = 0;
         RDMA_ASSERT(
-                env_->NewWritableFile(fname, env_meta,
+                env_->NewWritableFile(fname_, env_meta,
                                       &local_writable_file_).ok());
     }
 
     NovaCCRemoteMemFile::~NovaCCRemoteMemFile() {
         if (backing_mem_) {
             uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                      meta_.file_size);
+                                                      allocated_size_);
             mem_manager_->FreeItem(thread_id_, backing_mem_, scid);
+
+            RDMA_LOG(rdmaio::DEBUG) << fmt::format(
+                        "Free remote memory file tid:{} fn:{} size:{}",
+                        thread_id_, fname_, allocated_size_);
         }
         delete local_writable_file_;
     }
@@ -61,7 +74,11 @@ namespace leveldb {
 
     Status NovaCCRemoteMemFile::Append(const leveldb::Slice &data) {
         char *buf = backing_mem_ + used_size_;
-        assert(used_size_ + data.size() < allocated_size_);
+        RDMA_ASSERT(used_size_ + data.size() < allocated_size_)
+            << fmt::format(
+                    "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{} data size:{}",
+                    thread_id_, fname_, dbname_, allocated_size_, used_size_,
+                    data.size());
         memcpy(buf, data.data(), data.size());
         used_size_ += data.size();
         return Status::OK();
@@ -78,8 +95,9 @@ namespace leveldb {
     }
 
     Status NovaCCRemoteMemFile::Fsync() {
-        RDMA_ASSERT(used_size_ == meta_.file_size) << used_size_ << ":"
-                                                   << meta_.file_size;
+        RDMA_ASSERT(used_size_ == meta_.file_size) << fmt::format(
+                    "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{}",
+                    thread_id_, fname_, dbname_, allocated_size_, used_size_);
         uint32_t req_id = dc_client_->InitiateFlushSSTable(dbname_,
                                                            meta_.number, meta_,
                                                            backing_mem_);
@@ -127,6 +145,7 @@ namespace leveldb {
             uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                       MAX_BLOCK_SIZE);
             backing_mem_block_ = mem_manager_->ItemAlloc(thread_id_, scid);
+            RDMA_ASSERT(backing_mem_block_) << "Running out of memory";
         }
 
         const uint64_t available =
@@ -174,6 +193,7 @@ namespace leveldb {
     Status NovaCCRemoteRandomAccessFile::ReadAll() {
         uint32_t scid = mem_manager_->slabclassid(thread_id_, meta_.file_size);
         backing_mem_table_ = mem_manager_->ItemAlloc(thread_id_, scid);
+        RDMA_ASSERT(backing_mem_table_) << "Running out of memory";
         uint32_t req_id = dc_client_->InitiateReadSSTable(dbname_, file_number_,
                                                           meta_,
                                                           backing_mem_table_);

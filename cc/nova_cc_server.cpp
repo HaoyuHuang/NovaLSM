@@ -70,7 +70,7 @@ namespace nova {
             options.comparator = new YCSBKeyComparator();
             leveldb::Logger *log = nullptr;
             std::string db_path = DBName(NovaConfig::config->db_path,
-                                         NovaCCConfig::cc_config->my_cc_server_id,
+                                         NovaConfig::config->my_server_id,
                                          db_index);
             mkdirs(db_path.c_str());
 
@@ -86,7 +86,7 @@ namespace nova {
             std::string logname = leveldb::LogFileName(db_path, 1111);
             ParseDBName(logname, &sid, &index);
             RDMA_ASSERT(index == db_index);
-            RDMA_ASSERT(NovaCCConfig::cc_config->my_cc_server_id == sid);
+            RDMA_ASSERT(NovaConfig::config->my_server_id == sid);
             return db;
         }
     }
@@ -101,26 +101,26 @@ namespace nova {
         timeval start{};
         gettimeofday(&start, nullptr);
         int loaded_keys = 0;
-        std::vector<Fragment *> &frags = NovaCCConfig::cc_config->fragments;
+        std::vector<CCFragment *> &frags = NovaCCConfig::cc_config->fragments;
         leveldb::WriteOptions option;
         option.sync = true;
 
         for (int i = 0; i < frags.size(); i++) {
-            if (frags[i]->server_ids[0] !=
-                NovaCCConfig::cc_config->my_cc_server_id) {
+            if (frags[i]->cc_server_id !=
+                NovaConfig::config->my_server_id) {
                 continue;
             }
             leveldb::WriteBatch batch;
             int bs = 0;
             // Insert cold keys first so that hot keys will be at the top level.
             std::vector<std::string *> pointers;
-            leveldb::DB *db = dbs_[frags[i]->db_ids[0]];
+            leveldb::DB *db = dbs_[frags[i]->dbid];
 
-            RDMA_LOG(INFO) << "Insert " << frags[i]->key_start << " to "
-                           << frags[i]->key_end;
+            RDMA_LOG(INFO) << "Insert " << frags[i]->range.key_start << " to "
+                           << frags[i]->range.key_end;
 
-            for (uint64_t j = frags[i]->key_end;
-                 j >= frags[i]->key_start; j--) {
+            for (uint64_t j = frags[i]->range.key_end;
+                 j >= frags[i]->range.key_start; j--) {
                 auto v = static_cast<char>((j % 10) + 'a');
 
                 std::string *key = new std::string(std::to_string(j));
@@ -149,7 +149,7 @@ namespace nova {
                                    << now.tv_sec - start.tv_sec;
                 }
 
-                if (j == frags[i]->key_start) {
+                if (j == frags[i]->range.key_start) {
                     break;
                 }
             }
@@ -209,10 +209,10 @@ namespace nova {
         manager = new NovaMemManager(cache_buf);
         log_manager = new LogFileManager(manager);
 
-        int ndbs = NovaConfig::ParseNumberOfDatabases(
+        int ndbs = NovaCCConfig::ParseNumberOfDatabases(
                 NovaCCConfig::cc_config->fragments,
                 &NovaCCConfig::cc_config->db_fragment,
-                NovaCCConfig::cc_config->my_cc_server_id);
+                NovaConfig::config->my_server_id);
 
         int bg_thread_id = 0;
         for (int i = 0;
@@ -281,6 +281,7 @@ namespace nova {
             uint32_t scid = manager->slabclassid(worker_id,
                                                  NovaConfig::config->log_buf_size);
             char *rnic_buf = manager->ItemAlloc(worker_id, scid);
+            RDMA_ASSERT(rnic_buf) << "Running out of memory";
             leveldb::DCClient *dc_client = new leveldb::NovaDCClient(worker_id,
                                                                      store,
                                                                      manager,
@@ -324,6 +325,7 @@ namespace nova {
             uint32_t scid = manager->slabclassid(worker_id,
                                                  NovaConfig::config->log_buf_size);
             char *rnic_buf = manager->ItemAlloc(worker_id, scid);
+            RDMA_ASSERT(rnic_buf) << "Running out of memory";
             leveldb::DCClient *dc_client = new leveldb::NovaDCClient(worker_id,
                                                                      store,
                                                                      manager,
@@ -345,32 +347,35 @@ namespace nova {
 
         RDMA_ASSERT(buf == cache_buf);
 
-        // Assign async workers to conn workers.
-        if (NovaCCConfig::cc_config->num_conn_workers <
-            NovaCCConfig::cc_config->num_async_workers) {
-            int conn_worker_id = 0;
-            for (int worker_id = 0;
-                 worker_id <
-                 NovaCCConfig::cc_config->num_async_workers; worker_id++) {
-                conn_workers[conn_worker_id]->async_workers_.push_back(
-                        async_workers[worker_id]);
-                conn_worker_id += 1;
-                conn_worker_id =
-                        conn_worker_id %
-                        NovaCCConfig::cc_config->num_conn_workers;
+        // Assign async workers to dbs.
+        DBAsyncWorkers *db_asyncs = new DBAsyncWorkers[NovaCCConfig::cc_config->db_fragment.size()];
+        int async_worker_id = 0;
+        bool assigned_all_workers = false;
+        bool assigned_all_dbs = false;
+        while (!assigned_all_dbs || !assigned_all_workers) {
+            for (int i = 0;
+                 i < NovaCCConfig::cc_config->db_fragment.size(); i++) {
+                db_asyncs[i].workers.push_back(async_workers[async_worker_id]);
+                async_worker_id++;
+                if (async_worker_id == async_workers.size()) {
+                    assigned_all_workers = true;
+                }
+                async_worker_id %= async_workers.size();
             }
-        } else {
-            int async_worker_id = 0;
-            for (int worker_id = 0;
-                 worker_id <
-                 NovaCCConfig::cc_config->num_conn_workers; worker_id++) {
-                conn_workers[worker_id]->async_workers_.push_back(
-                        async_workers[async_worker_id]);
-                async_worker_id += 1;
-                async_worker_id =
-                        async_worker_id %
-                        NovaCCConfig::cc_config->num_async_workers;
-            }
+            assigned_all_dbs = true;
+        }
+
+        for (int i = 0;
+             i < NovaCCConfig::cc_config->db_fragment.size(); i++) {
+            RDMA_LOG(INFO) << fmt::format("Assigned {} workers to db {}.",
+                                          db_asyncs[i].workers.size(), i);
+        }
+
+        for (int worker_id = 0;
+             worker_id <
+             NovaCCConfig::cc_config->num_conn_workers; worker_id++) {
+            conn_workers[worker_id]->db_async_workers_ = db_asyncs;
+            conn_workers[worker_id]->db_current_async_worker_id_ = new int[NovaCCConfig::cc_config->db_fragment.size()];
         }
 
         // Start the threads.

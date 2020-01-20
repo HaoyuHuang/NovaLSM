@@ -73,15 +73,16 @@ namespace leveldb {
         RDMALogWriter::AddRecord(const std::string &log_file_name,
                                  const Slice &slice) {
             int nreplicas = 0;
-            uint32_t db_index;
             uint32_t sid;
+            uint32_t db_index;
             nova::ParseDBName(log_file_name, &sid, &db_index);
-            nova::Fragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
+            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
 
+            Init(log_file_name);
             current_log_file_ = log_file_name;
             memcpy(rnic_buf_, slice.data(), slice.size());
-            for (int i = 0; i < frag->server_ids.size(); i++) {
-                uint32_t remote_server_id = frag->server_ids[i];
+            for (int i = 0; i < frag->dc_server_ids.size(); i++) {
+                uint32_t remote_server_id = frag->dc_server_ids[i];
                 nreplicas++;
 
                 auto &it = logfile_last_buf_[log_file_name];
@@ -90,17 +91,16 @@ namespace leveldb {
                      it[remote_server_id].size)) {
                     // Allocate a new buf.
                     char *send_buf = store_->GetSendBuf(remote_server_id);
-                    send_buf[0] = nova::RequestType::ALLOCATE_LOG_BUFFER;
-                    send_buf++;
-                    leveldb::EncodeFixed32(send_buf, log_file_name.size());
-                    send_buf += 4;
-                    memcpy(send_buf, log_file_name.data(),
-                           log_file_name.size());
+                    char *buf = send_buf;
+                    buf[0] = nova::RequestType::ALLOCATE_LOG_BUFFER;
+                    buf++;
+                    leveldb::EncodeFixed32(buf, log_file_name.size());
+                    buf += 4;
+                    memcpy(buf, log_file_name.data(), log_file_name.size());
                     write_result_[remote_server_id].result = WriteResult::WAIT_FOR_ALLOC;
-                    write_result_[remote_server_id].rdma_wr_id = store_->PostSend(
-                            nullptr, 1 + 4 + log_file_name.size(),
+                    store_->PostSend(
+                            send_buf, 1 + 4 + log_file_name.size(),
                             remote_server_id, 0);
-
                 } else {
                     // WRITE.
                     write_result_[remote_server_id].rdma_wr_id = store_->PostWrite(
@@ -127,30 +127,15 @@ namespace leveldb {
                 store_->PollRQ();
 
                 n++;
-                for (int i = 0; i < frag->server_ids.size(); i++) {
-                    uint32_t remote_server_id = frag->server_ids[i];
-                    if (n % 1000000 == 0) {
-                        if (write_result_[remote_server_id].result !=
-                            WriteResult::WRITE_SUCESS) {
-                            RDMA_LOG(rdmaio::DEBUG) << "rdma-rc["
-                                                    << store_->store_id()
-                                                    << "]: "
-                                                    << "RDMA log status s:"
-                                                    << remote_server_id << " w:"
-                                                    << write_result_str(
-                                                            write_result_[remote_server_id].result);
-                        }
-                    }
-
+                for (int i = 0; i < frag->dc_server_ids.size(); i++) {
+                    uint32_t remote_server_id = frag->dc_server_ids[i];
 
                     switch (write_result_[remote_server_id].result) {
                         case WriteResult::NONE:
                             break;
                         case WriteResult::WAIT_FOR_ALLOC:
-//                            store_->PollRQ(remote_server_id);
                             break;
                         case WriteResult::WAIT_FOR_WRITE:
-//                            store_->PollSQ(remote_server_id);
                             break;
                         case WriteResult::ALLOC_SUCCESS:
                             it = logfile_last_buf_[current_log_file_];
@@ -181,23 +166,21 @@ namespace leveldb {
         }
 
         Status RDMALogWriter::CloseLogFile(const std::string &log_file_name) {
-            uint32_t db_index;
             uint32_t sid;
+            uint32_t db_index;
             nova::ParseDBName(log_file_name, &sid, &db_index);
-            nova::Fragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
+            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
 
             delete logfile_last_buf_[log_file_name];
             logfile_last_buf_.erase(log_file_name);
-            for (int i = 0; i < frag->server_ids.size(); i++) {
-                uint32_t remote_server_id = frag->server_ids[i];
+            for (int i = 0; i < frag->dc_server_ids.size(); i++) {
+                uint32_t remote_server_id = frag->dc_server_ids[i];
                 char *send_buf = store_->GetSendBuf(remote_server_id);
-                send_buf[0] = nova::RequestType::DELETE_LOG_FILE;
-                send_buf++;
-                leveldb::EncodeFixed32(send_buf, log_file_name.size());
-                send_buf += 4;
-                memcpy(send_buf, log_file_name.data(),
-                       log_file_name.size());
-                store_->PostSend(nullptr, 1 + 4 + log_file_name.size(),
+                char *buf = send_buf;
+                buf[0] = nova::RequestType::DELETE_LOG_FILE;
+                buf++;
+                leveldb::EncodeStr(buf, log_file_name);
+                store_->PostSend(send_buf, 1 + 4 + log_file_name.size(),
                                  remote_server_id, 0);
             }
             return Status::OK();

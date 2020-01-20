@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <assert.h>
+#include <vector>
 #include "city_hash.h"
 
 #include <string>
@@ -43,18 +44,25 @@ namespace nova {
         LOG_NIC = 2
     };
 
-    struct Fragment {
-        // for range partition only.
+    struct RangePartition {
         uint64_t key_start;
         uint64_t key_end;
-        std::vector<uint32_t> server_ids;
-        std::vector<uint32_t> db_ids;
+    };
+
+    struct CCFragment {
+        // for range partition only.
+        RangePartition range;
+        uint32_t dbid;
+        uint32_t cc_server_id;
+        std::vector<uint32_t> dc_server_ids;
+    };
+
+    struct DCFragment {
+        RangePartition range;
+        uint32_t dc_server_id;
     };
 
     uint64_t keyhash(const char *key, uint64_t nkey);
-
-    Fragment *
-    homefragment(const std::vector<Fragment *> &fragments, uint64_t key);
 
     enum ConnState {
         READ, WRITE

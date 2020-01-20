@@ -104,6 +104,7 @@ namespace leveldb {
         result.comparator = icmp;
         result.filter_policy = (src.filter_policy != nullptr) ? ipolicy
                                                               : nullptr;
+        result.max_dc_file_size = result.write_buffer_size + 1024 * 1024;
         ClipToRange(&result.max_open_files, 64 + kNumNonTableCacheFiles, 50000);
         ClipToRange(&result.write_buffer_size, 64 << 10, 1 << 30);
         ClipToRange(&result.max_file_size, 1 << 20, 1 << 30);
@@ -852,7 +853,11 @@ namespace leveldb {
         } else {
             assert(compact->outfile == nullptr);
         }
-        delete compact->outfile->mem_file();
+        // Also delete its contained mem file.
+        if (compact->outfile) {
+            auto *mem_file = dynamic_cast<NovaCCRemoteMemFile *>(compact->outfile->mem_file());
+            delete mem_file;
+        }
         delete compact->outfile;
         for (size_t i = 0; i < compact->outputs.size(); i++) {
             const CompactionState::Output &out = compact->outputs[i];
@@ -877,19 +882,14 @@ namespace leveldb {
             mutex_.Unlock();
         }
         // Make the output file
-        std::string fname = TableFileName(dbname_, file_number);
         MemManager *mem_manager = options_.bg_thread->mem_manager();
-        uint32_t scid = mem_manager->slabclassid(
-                options_.bg_thread->thread_id(), options_.max_file_size);
-        char *buf = options_.bg_thread->mem_manager()->ItemAlloc(
-                options_.bg_thread->thread_id(), scid);
         NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(options_.env,
-                                                               fname,
+                                                               file_number,
                                                                mem_manager,
                                                                options_.bg_thread->dc_client(),
-                                                               dbname_, buf,
+                                                               dbname_,
                                                                options_.bg_thread->thread_id(),
-                                                               options_.max_file_size);
+                                                               options_.max_dc_file_size);
         compact->outfile = new MemWritableFile(cc_file);
         compact->builder = new TableBuilder(options_, compact->outfile);
         return Status::OK();
@@ -923,6 +923,7 @@ namespace leveldb {
         meta.file_size = current_bytes;
         meta.smallest = compact->current_output()->smallest;
         meta.largest = compact->current_output()->largest;
+        // Set meta in order to flush to the corresponding DC node.
         NovaCCRemoteMemFile *mem_file = static_cast<NovaCCRemoteMemFile *>(compact->outfile->mem_file());
         mem_file->set_meta(meta);
 
@@ -934,10 +935,12 @@ namespace leveldb {
             s = compact->outfile->Close();
         }
 
+        // Also delete its contained mem file.
         delete mem_file;
         mem_file = nullptr;
         delete compact->outfile;
         compact->outfile = nullptr;
+
 
         if (s.ok() && current_entries > 0) {
             // Verify that the table is usable
@@ -1106,7 +1109,6 @@ namespace leveldb {
                     }
                 }
             }
-
             input->Next();
         }
 
@@ -1365,7 +1367,7 @@ namespace leveldb {
         closed_log_files_.clear();
         mutex_.Unlock();
         // Synchronous replication.
-        uint32_t req_id = options.dc_client->InitiateReplicateLogRecords(
+        options.dc_client->InitiateReplicateLogRecords(
                 logfile, WriteBatchInternal::Contents(updates));
 
         for (const auto &file : closed_files) {

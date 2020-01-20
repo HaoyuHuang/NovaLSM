@@ -160,7 +160,7 @@ namespace leveldb {
 
     MemWritableFile::MemWritableFile(MemFile *file)
             : file_(file) {
-        file_->Ref();
+//        file_->Ref();
     }
 
     Status MemWritableFile::Append(const Slice &data) {

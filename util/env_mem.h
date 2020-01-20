@@ -142,7 +142,9 @@ namespace leveldb {
     public:
         MemWritableFile(MemFile *file);
 
-        ~MemWritableFile() override { file_->Unref(); }
+        ~MemWritableFile() override {
+//            file_->Unref();
+        }
 
         Status Append(const Slice &data) override;
 

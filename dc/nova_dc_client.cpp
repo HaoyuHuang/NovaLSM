@@ -21,6 +21,10 @@ namespace leveldb {
         }
     }
 
+    uint32_t NovaDCClient::GetCurrentReqId() {
+        return current_req_id_;
+    }
+
     uint32_t NovaDCClient::InitiateFlushSSTable(const std::string &dbname,
                                                 uint64_t file_number,
                                                 const leveldb::FileMetaData &meta,
@@ -38,12 +42,12 @@ namespace leveldb {
         uint32_t msg_size = 1 + 4 + dbname.size() + 4 + 4;
         rdma_store_->PostSend(sendbuf, msg_size, dc_id, req_id);
 
-        Slice footer_input(
-                backing_mem + meta.file_size - Footer::kEncodedLength,
-                Footer::kEncodedLength);
-        Footer footer;
-        Status s = footer.DecodeFrom(&footer_input);
-        RDMA_ASSERT(s.ok()) << s.ToString();
+//        Slice footer_input(
+//                backing_mem + meta.file_size - Footer::kEncodedLength,
+//                Footer::kEncodedLength);
+//        Footer footer;
+//        Status s = footer.DecodeFrom(&footer_input);
+//        RDMA_ASSERT(s.ok()) << s.ToString();
 
         DCRequestContext context = {};
         context.req_type = DCRequestType::DC_FLUSH_SSTABLE;
@@ -71,9 +75,9 @@ namespace leveldb {
     uint32_t NovaDCClient::HomeDCNode(const leveldb::FileMetaData &meta) {
         uint64_t key = nova::keyhash(meta.smallest.user_key().data(),
                                      meta.smallest.user_key().size());
-        nova::Fragment *frag = nova::NovaDCConfig::home_fragment(key);
+        nova::DCFragment *frag = nova::NovaDCConfig::home_fragment(key);
         RDMA_ASSERT(frag != nullptr);
-        return frag->server_ids[0];
+        return frag->dc_server_id;
     }
 
     uint32_t NovaDCClient::InitiateReadSSTable(const std::string &dbname,
@@ -124,7 +128,7 @@ namespace leveldb {
 
     uint32_t NovaDCClient::InitiateDeleteFiles(const std::string &dbname,
                                                const std::vector<FileMetaData> &filenames) {
-        // Does not need response.
+        // Does not wait for response.
         std::map<uint32_t, std::vector<uint64_t>> dc_files;
         for (const auto &file : filenames) {
             uint32_t dc_id = HomeDCNode(file);
@@ -152,7 +156,6 @@ namespace leveldb {
                         "dcclient[{}]: req:{} Delete files db:{} files {} at DC node {}.",
                         dc_client_id_, req_id, dbname, delete_fns, it->first);
             IncrementReqId();
-
         }
         return 0;
     }

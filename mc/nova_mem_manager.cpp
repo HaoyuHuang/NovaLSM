@@ -60,7 +60,7 @@ namespace nova {
     NovaPartitionedMemManager::NovaPartitionedMemManager(int pid, char *buf,
                                                          uint64_t data_size) {
         uint64_t slab_size = SLAB_SIZE_MB * 1024 * 1024;
-        uint64_t size = 1024;
+        uint64_t size = 1200;
         for (int i = 0; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) {
             slab_classes_[i].size = size;
             slab_classes_[i].nitems_per_slab = slab_size / size;
@@ -70,6 +70,9 @@ namespace nova {
                                << slab_size / size;
             }
             size *= SLAB_SIZE_FACTOR;
+            if (size > slab_size) {
+                size = slab_size;
+            }
         }
         uint64_t ndataslabs = data_size / slab_size;
         if (pid == 0) {
@@ -82,11 +85,6 @@ namespace nova {
             auto *slab = new Slab(slab_buf);
             free_slabs_[i] = slab;
             slab_buf += slab_size;
-        }
-
-        pthread_mutex_init(&free_slabs_mutex_, nullptr);
-        for (auto &i : slab_class_mutex_) {
-            pthread_mutex_init(&i, nullptr);
         }
     }
 
@@ -104,46 +102,63 @@ namespace nova {
         char *free_item = nullptr;
         Slab *slab = nullptr;
 
-        pthread_mutex_lock(&slab_class_mutex_[scid]);
+        slab_class_mutex_[scid].lock();
         free_item = slab_classes_[scid].AllocItem();
         if (free_item != nullptr) {
-            pthread_mutex_unlock(&slab_class_mutex_[scid]);
+            slab_class_mutex_[scid].unlock();
             return free_item;
         }
-        pthread_mutex_unlock(&slab_class_mutex_[scid]);
-
         // Grab a slab from the free list.
-        pthread_mutex_lock(&free_slabs_mutex_);
+        free_slabs_mutex_.lock();
         if (free_slab_index_ == -1) {
-            pthread_mutex_unlock(&free_slabs_mutex_);
+            free_slabs_mutex_.unlock();
+            slab_class_mutex_[scid].unlock();
+
+            oom_lock.lock();
+            if (!print_class_oom) {
+                RDMA_LOG(INFO) << "No free slabs: Print slab class usages.";
+                print_class_oom = true;
+                for (int i = 0; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) {
+                    slab_class_mutex_[scid].lock();
+                    RDMA_LOG(INFO) << fmt::format(
+                                "slab class {} size:{} nfreeitems:{} slabs:{}",
+                                i,
+                                slab_classes_[i].size,
+                                slab_classes_[i].free_list.size(),
+                                slab_classes_[i].slabs.size());
+                    slab_class_mutex_[scid].unlock();
+                }
+            }
+            oom_lock.unlock();
+            RDMA_ASSERT(false);
             return nullptr;
         }
         slab = free_slabs_[free_slab_index_];
         free_slab_index_--;
-        pthread_mutex_unlock(&free_slabs_mutex_);
+        free_slabs_mutex_.unlock();
 
         slab->Init(static_cast<uint32_t>(slab_classes_[scid].size));
-        pthread_mutex_lock(&slab_class_mutex_[scid]);
+
         slab_classes_[scid].AddSlab(slab);
         free_item = slab->AllocItem();
-        pthread_mutex_unlock(&slab_class_mutex_[scid]);
+        slab_class_mutex_[scid].unlock();
         return free_item;
     }
 
     void NovaPartitionedMemManager::FreeItem(char *buf, uint32_t scid) {
         memset(buf, 0, slab_classes_[scid].size);
-        pthread_mutex_lock(&slab_class_mutex_[scid]);
+        slab_class_mutex_[scid].lock();
         slab_classes_[scid].FreeItem(buf);
-        pthread_mutex_unlock(&slab_class_mutex_[scid]);
+        slab_class_mutex_[scid].unlock();
     }
 
     void NovaPartitionedMemManager::FreeItems(const std::vector<char *> &items,
                                               uint32_t scid) {
-        pthread_mutex_lock(&slab_class_mutex_[scid]);
+        slab_class_mutex_[scid].lock();
         for (auto buf : items) {
             slab_classes_[scid].FreeItem(buf);
         }
-        pthread_mutex_unlock(&slab_class_mutex_[scid]);
+        slab_class_mutex_[scid].unlock();
     }
 
     NovaMemManager::NovaMemManager(char *buf) {

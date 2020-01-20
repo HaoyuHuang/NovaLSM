@@ -47,7 +47,7 @@ namespace leveldb {
         InternalKey() {}  // Leave rep_ as empty to indicate it is invalid
         InternalKey(const Slice &user_key, SequenceNumber s, ValueType t);
 
-        bool DecodeFrom(const Slice &s);
+        bool DecodeFrom(const Slice &s, bool copy = false);
 
         Slice Encode() const {
             assert(!rep_.empty());
@@ -74,9 +74,10 @@ namespace leveldb {
         InternalKey largest;   // Largest internal key served by table
     };
 
-    uint32_t EncodeFileMetaData(const FileMetaData& meta, char*);
+    uint32_t
+    EncodeFileMetaData(const FileMetaData &meta, char *buf, uint32_t buf_size);
 
-    void DecodeFileMetaData(const Slice& s, FileMetaData* meta);
+    void DecodeFileMetaData(const Slice &s, FileMetaData *meta);
 
     class LEVELDB_EXPORT MemManager {
     public:
@@ -85,7 +86,8 @@ namespace leveldb {
         virtual void FreeItem(uint64_t key, char *buf, uint32_t scid) = 0;
 
         virtual void
-        FreeItems(uint64_t key, const std::vector<char *> &items, uint32_t scid) = 0;
+        FreeItems(uint64_t key, const std::vector<char *> &items,
+                  uint32_t scid) = 0;
 
         virtual uint32_t slabclassid(uint64_t key, uint32_t size) = 0;
     };

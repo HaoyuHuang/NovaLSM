@@ -149,8 +149,9 @@ namespace nova {
         npending_send_[qp_idx]++;
         send_sge_index_[qp_idx]++;
         RDMA_LOG(DEBUG) << fmt::format(
-                    "rdma-rc[{}]: SQ: rdma {} request to server {} imm:{} roffset:{} isoff:{} size:{} p:{}:{}",
-                    thread_id_, ibv_wr_opcode_str(opcode), server_id, imm_data,
+                    "rdma-rc[{}]: SQ: rdma {} request to server {} wr:{} imm:{} roffset:{} isoff:{} size:{} p:{}:{}",
+                    thread_id_, ibv_wr_opcode_str(opcode), server_id, wr_id,
+                    imm_data,
                     remote_addr, is_offset, size, psend_index_[qp_idx],
                     npending_send_[qp_idx]);
         if (send_sge_index_[qp_idx] == doorbell_batch_size_) {
@@ -262,7 +263,7 @@ namespace nova {
                         ibv_wc_opcode_str(wcs_[i].opcode));
             char *buf = rdma_send_buf_[qp_idx] +
                         wcs_[i].wr_id * NovaConfig::config->max_msg_size;
-            callback_->ProcessRDMAWC(wcs_[i].opcode, wcs_[i].wr_id, qp_idx,
+            callback_->ProcessRDMAWC(wcs_[i].opcode, wcs_[i].wr_id, server_id,
                                      buf, wcs_[i].imm_data);
             npending_send_[qp_idx] -= 1;
         }

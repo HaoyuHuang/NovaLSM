@@ -36,7 +36,6 @@ namespace leveldb {
         uint32_t remote_server_id;
         std::string dbname;
         uint64_t file_number;
-//        FileMetaData meta;
         char *backing_mem;
         uint32_t size;
         bool done;
@@ -91,6 +90,8 @@ namespace leveldb {
                     uint32_t imm_data) override;
 
         bool IsDone(uint32_t req_id) override;
+
+        uint32_t GetCurrentReqId();
 
         void IncrementReqId();
 

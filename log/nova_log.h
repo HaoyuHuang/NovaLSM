@@ -57,13 +57,13 @@ namespace nova {
     public:
         LogFileManager(NovaMemManager *mem_manager);
 
-        void Add(const std::string &log_file, char *buf);
+        void Add(uint64_t thread_id, const std::string &log_file, char *buf);
 
-        void DeleteLogBuf(uint64_t thread_id, const std::string &log_file);
+        void DeleteLogBuf(const std::string &log_file);
 
     private:
         struct LogRecords {
-            std::vector<char *> backing_mems;
+            std::map<uint64_t, std::vector<char *>> backing_mems;
             std::mutex mu;
         };
 

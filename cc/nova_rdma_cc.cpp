@@ -26,10 +26,11 @@ namespace nova {
     void NovaRDMAComputeComponent::ProcessPut(const nova::NovaAsyncTask &task) {
         uint64_t hv = keyhash(task.key.data(), task.key.size());
         leveldb::WriteOptions option;
+        option.dc_client = dc_client_;
         option.sync = true;
         option.local_write = false;
-        Fragment *frag = NovaCCConfig::home_fragment(hv);
-        leveldb::DB *db = dbs_[frag->db_ids[0]];
+        CCFragment *frag = NovaCCConfig::home_fragment(hv);
+        leveldb::DB *db = dbs_[frag->dbid];
         if (!option.local_write) {
             leveldb::WriteBatch batch;
             batch.Put(task.key, task.value);
@@ -49,8 +50,8 @@ namespace nova {
 
     void NovaRDMAComputeComponent::ProcessGet(const nova::NovaAsyncTask &task) {
         uint64_t hv = keyhash(task.key.data(), task.key.size());
-        Fragment *frag = NovaCCConfig::home_fragment(hv);
-        leveldb::DB *db = dbs_[frag->db_ids[0]];
+        CCFragment *frag = NovaCCConfig::home_fragment(hv);
+        leveldb::DB *db = dbs_[frag->dbid];
         std::string value;
         leveldb::ReadOptions read_options;
         read_options.dc_client = dc_client_;
@@ -147,31 +148,31 @@ namespace nova {
         bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
-            if (should_sleep) {
-                usleep(timeout);
-            }
+//            if (should_sleep) {
+//                usleep(timeout);
+//            }
             rdma_store_->PollSQ();
             rdma_store_->PollRQ();
 
             int n = ProcessQueue();
-            if (n == 0) {
-                should_sleep = true;
-                timeout *= 2;
-                if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
-                    timeout = RDMA_POLL_MAX_TIMEOUT_US;
-                }
-            } else {
-                should_sleep = false;
-                timeout = RDMA_POLL_MIN_TIMEOUT_US;
-            }
+//            if (n == 0) {
+//                should_sleep = true;
+//                timeout *= 2;
+//                if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
+//                    timeout = RDMA_POLL_MAX_TIMEOUT_US;
+//                }
+//            } else {
+//                should_sleep = false;
+//                timeout = RDMA_POLL_MIN_TIMEOUT_US;
+//            }
         }
     }
 
     void
     NovaRDMAComputeComponent::ProcessRDMAWC(ibv_wc_opcode opcode,
-                                        uint64_t wr_id,
-                                        int remote_server_id,
-                                        char *buf, uint32_t imm_data) {
+                                            uint64_t wr_id,
+                                            int remote_server_id,
+                                            char *buf, uint32_t imm_data) {
         dc_client_->OnRecv(opcode, wr_id, remote_server_id, buf, imm_data);
     }
 }

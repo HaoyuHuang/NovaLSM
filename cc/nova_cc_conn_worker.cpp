@@ -288,8 +288,8 @@ namespace nova {
                         << fd << " key:" << skey << " nkey:" << nkey
                         << " nrecords: " << nrecords;
         uint64_t hv = keyhash(startkey, nkey);
-        Fragment *frag = NovaCCConfig::home_fragment(hv);
-        leveldb::Iterator *iterator = worker->dbs_[frag->db_ids[0]]->NewIterator(
+        CCFragment *frag = NovaCCConfig::home_fragment(hv);
+        leveldb::Iterator *iterator = worker->dbs_[frag->dbid]->NewIterator(
                 leveldb::ReadOptions());
         iterator->Seek(startkey);
         int records = 0;
@@ -379,7 +379,7 @@ namespace nova {
                         << " delete log file fd:"
                         << fd << ": log:" << logfile << " nlog:"
                         << logfilename_size << " buf:" << conn->request_buf;
-        worker->log_manager_->DeleteLogBuf(worker->thread_id_, logfile);
+        worker->log_manager_->DeleteLogBuf(logfile);
 
         char *response_buf = conn->buf;
         leveldb::EncodeFixed32(response_buf, 1);
@@ -475,9 +475,12 @@ namespace nova {
         int asize = 0;
         int csize = 0;
         {
-            for (const auto &worker : store->async_workers_) {
-                asize += worker->size();
-            }
+//            for (int i = 0;
+//                 i < NovaCCConfig::cc_config->db_fragment.size(); i++) {
+//                for (const auto &worker : store->db_async_workers_[i].workers) {
+//                    asize += worker->size();
+//                }
+//            }
             store->async_cq_->mutex.Lock();
             csize = store->async_cq_->queue.size();
             store->async_cq_->mutex.Unlock();
@@ -576,9 +579,14 @@ namespace nova {
     void NovaCCConnWorker::AddTask(const nova::NovaAsyncTask &task) {
         uint64_t hv = keyhash(task.key.data(),
                               task.key.size());
-        Fragment *frag = NovaCCConfig::home_fragment(hv);
-        uint32_t dbid = frag->db_ids[0];
-        async_workers_[dbid % async_workers_.size()]->AddTask(task);
+        CCFragment *frag = NovaCCConfig::home_fragment(hv);
+        DBAsyncWorkers &async_workers = db_async_workers_[frag->dbid];
+        int worker_id = db_current_async_worker_id_[frag->dbid];
+        async_workers.workers[(thread_id_ + worker_id) %
+                              async_workers.workers.size()]->AddTask(task);
+        worker_id++;
+        worker_id %= async_workers.workers.size();
+        db_current_async_worker_id_[frag->dbid] = worker_id;
     }
 
     void NovaCCConnWorker::Start() {

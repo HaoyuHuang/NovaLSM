@@ -203,7 +203,8 @@ namespace leveldb {
 
         Slice value() const override {
             assert(Valid());
-            uint32_t size = EncodeFileMetaData(*(*flist_)[index_], value_buf_);
+            uint32_t size = EncodeFileMetaData(*(*flist_)[index_], value_buf_,
+                                               sizeof(value_buf_));
             return Slice(value_buf_, size);
         }
 
@@ -223,19 +224,20 @@ namespace leveldb {
                     const ReadOptions &options,
                     const Slice &file_value) {
         TableCache *cache = reinterpret_cast<TableCache *>(arg);
-        if (file_value.size() != 16) {
-            return NewErrorIterator(
-                    Status::Corruption(
-                            "FileReader invoked with unexpected value"));
-        } else {
-            Slice value(file_value);
-            FileMetaData meta;
-            DecodeFileMetaData(value, &meta);
-            return cache->NewIterator(context.caller, options, meta,
-                                      meta.number,
-                                      context.level,
-                                      meta.file_size);
-        }
+//        if (file_value.size() != 16) {
+//            return NewErrorIterator(
+//                    Status::Corruption(
+//                            "FileReader invoked with unexpected value"));
+//        } else {
+        Slice value(file_value);
+        // TODO: Instead of making copies, create a new file meta data.
+        FileMetaData meta;
+        DecodeFileMetaData(value, &meta);
+        return cache->NewIterator(context.caller, options, meta,
+                                  meta.number,
+                                  context.level,
+                                  meta.file_size);
+//        }
     }
 
     Iterator *Version::NewConcatenatingIterator(const ReadOptions &options,

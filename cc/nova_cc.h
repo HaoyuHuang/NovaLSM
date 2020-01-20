@@ -15,12 +15,12 @@ namespace leveldb {
 
     class NovaCCRemoteMemFile : public MemFile {
     public:
-        NovaCCRemoteMemFile(Env *env, const std::string &fname,
+        NovaCCRemoteMemFile(Env *env, uint64_t file_number,
                             MemManager *mem_manager,
                             DCClient *dc_client,
                             const std::string &dbname,
-                            char *backing_mem, uint64_t thread_id,
-                            uint64_t allocated_size);
+                            uint64_t thread_id,
+                            uint64_t file_size);
 
         ~NovaCCRemoteMemFile();
 
@@ -41,11 +41,12 @@ namespace leveldb {
 
     private:
         Env *env_;
-        std::string fname_;
+        uint64_t file_number_;
+        const std::string fname_;
         WritableFile *local_writable_file_;
         MemManager *mem_manager_;
         DCClient *dc_client_;
-        std::string dbname_;
+        const std::string &dbname_;
         FileMetaData meta_;
         uint64_t thread_id_;
 
@@ -72,9 +73,9 @@ namespace leveldb {
     private:
         Status ReadAll();
 
-        const std::string& dbname_;
+        const std::string &dbname_;
         uint64_t file_number_;
-        const FileMetaData& meta_;
+        FileMetaData meta_;
 
         bool prefetch_all_;
         bool done_prefetch_all_;

@@ -225,8 +225,6 @@ namespace leveldb {
                                       handle.offset());
                 }
             }
-
-            RDMA_ASSERT(cache_handle);
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format(
                         "Cache hit {} Insert {} cs:{} cc:{} bs:{} off:{}",

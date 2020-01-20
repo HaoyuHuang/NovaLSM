@@ -107,7 +107,7 @@ void InitializeDC() {
     NovaConfig::config->nnovabuf = ntotal;
     RDMA_ASSERT(buf != NULL) << "Not enough memory";
 
-    std::map<uint32_t, std::set<uint32_t >> dbs = NovaConfig::ReadDatabases(
+    std::map<uint32_t, std::set<uint32_t >> dbs = NovaCCConfig::ReadDatabases(
             NovaCCConfig::cc_config->fragments);
     for (auto sid : dbs) {
         for (auto dbid : sid.second) {
@@ -154,7 +154,6 @@ int main(int argc, char *argv[]) {
 
     NovaCCConfig::cc_config->block_cache_mb = FLAGS_cc_block_cache_mb;
     NovaCCConfig::cc_config->write_buffer_size_mb = FLAGS_cc_write_buffer_size_mb;
-    NovaCCConfig::cc_config->my_cc_server_id = FLAGS_server_id;
 
     NovaConfig::config->db_path = FLAGS_db_path;
 
@@ -178,17 +177,16 @@ int main(int argc, char *argv[]) {
                 FLAGS_server_id + NovaCCConfig::cc_config->cc_servers.size();
     }
 
-    NovaConfig::ReadFragments(FLAGS_cc_config_path,
-                              &NovaCCConfig::cc_config->fragments);
+    NovaCCConfig::ReadFragments(FLAGS_cc_config_path,
+                                &NovaCCConfig::cc_config->fragments);
     NovaCCConfig::cc_config->num_conn_workers = FLAGS_cc_num_conn_workers;
     NovaCCConfig::cc_config->num_async_workers = FLAGS_cc_num_async_workers;
     NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
 
-    NovaConfig::ReadFragments(FLAGS_dc_config_path,
-                              &NovaDCConfig::dc_config->fragments);
+    NovaDCConfig::ReadFragments(FLAGS_dc_config_path,
+                                &NovaDCConfig::dc_config->fragments);
     NovaConfig::config->log_buf_size = FLAGS_dc_log_buf_size;
     NovaDCConfig::dc_config->num_dc_workers = FLAGS_dc_workers;
-    NovaDCConfig::dc_config->my_dc_server_id = FLAGS_server_id;
 
     RDMA_ASSERT(FLAGS_cc_num_compaction_workers + FLAGS_cc_num_async_workers ==
                 FLAGS_dc_workers);

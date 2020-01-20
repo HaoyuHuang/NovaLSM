@@ -395,30 +395,4 @@ namespace nova {
         str_to_int(key, &hv, nkey);
         return hv;
     }
-
-    Fragment *
-    homefragment(const std::vector<Fragment *> &fragments, uint64_t key) {
-        Fragment *home = nullptr;
-        RDMA_ASSERT(
-                key <= fragments[fragments.size() - 1]->key_end);
-        uint32_t l = 0;
-        uint32_t r = fragments.size() - 1;
-
-        while (l <= r) {
-            uint32_t m = l + (r - l) / 2;
-            home = fragments[m];
-            // Check if x is present at mid
-            if (key >= home->key_start && key <= home->key_end) {
-                break;
-            }
-            // If x greater, ignore left half
-            if (home->key_end < key)
-                l = m + 1;
-                // If x is smaller, ignore right half
-            else
-                r = m - 1;
-        }
-        return home;
-    }
-
 }
