@@ -94,6 +94,8 @@ namespace leveldb {
         msg_size += leveldb::EncodeStr(sendbuf + msg_size, dbname);
         leveldb::EncodeFixed32(sendbuf + msg_size, file_number);
         msg_size += 4;
+        leveldb::EncodeFixed64(sendbuf + msg_size, meta.file_size);
+        msg_size += 8;
         leveldb::EncodeFixed64(sendbuf + msg_size, (uint64_t) result);
         msg_size += 8;
         rdma_store_->PostSend(sendbuf, msg_size, dc_id, req_id);
@@ -111,8 +113,9 @@ namespace leveldb {
         rdma_store_->FlushPendingSends(dc_id);
 
         RDMA_LOG(DEBUG) << fmt::format(
-                    "dcclient[{}]: req:{} Read SSTable db:{} fn:{} from DC node {}.",
-                    dc_client_id_, req_id, dbname, file_number, dc_id);
+                    "dcclient[{}]: req:{} Read SSTable db:{} fn:{} size:{} from DC node {}.",
+                    dc_client_id_, req_id, dbname, file_number, meta.file_size,
+                    dc_id);
         return req_id;
     }
 
@@ -273,13 +276,13 @@ namespace leveldb {
                         uint64_t remote_dc_offset = leveldb::DecodeFixed64(
                                 buf + 1);
                         // Verify the footer is correct.
-                        Slice footer_input(
-                                context.backing_mem + context.size -
-                                Footer::kEncodedLength,
-                                Footer::kEncodedLength);
-                        Footer footer;
-                        Status s = footer.DecodeFrom(&footer_input);
-                        RDMA_ASSERT(s.ok()) << s.ToString();
+//                        Slice footer_input(
+//                                context.backing_mem + context.size -
+//                                Footer::kEncodedLength,
+//                                Footer::kEncodedLength);
+//                        Footer footer;
+//                        Status s = footer.DecodeFrom(&footer_input);
+//                        RDMA_ASSERT(s.ok()) << s.ToString();
 
                         rdma_store_->PostWrite(
                                 context.backing_mem,

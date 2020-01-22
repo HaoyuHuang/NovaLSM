@@ -14,6 +14,10 @@ namespace nova {
         mutex_.Lock();
         queue_.push_back(task);
         mutex_.Unlock();
+
+        if (is_worker_thread_) {
+            sem_post(&sem_);
+        }
     }
 
     int NovaRDMAComputeComponent::size() {
@@ -145,6 +149,11 @@ namespace nova {
         is_running_ = true;
         mutex_.Unlock();
 
+
+        if (is_worker_thread_) {
+            sem_wait(&sem_);
+        }
+
         bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
@@ -155,16 +164,16 @@ namespace nova {
             rdma_store_->PollRQ();
 
             int n = ProcessQueue();
-//            if (n == 0) {
-//                should_sleep = true;
-//                timeout *= 2;
-//                if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
-//                    timeout = RDMA_POLL_MAX_TIMEOUT_US;
-//                }
-//            } else {
-//                should_sleep = false;
-//                timeout = RDMA_POLL_MIN_TIMEOUT_US;
-//            }
+            if (n == 0) {
+                should_sleep = true;
+                timeout *= 2;
+                if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
+                    timeout = RDMA_POLL_MAX_TIMEOUT_US;
+                }
+            } else {
+                should_sleep = false;
+                timeout = RDMA_POLL_MIN_TIMEOUT_US;
+            }
         }
     }
 

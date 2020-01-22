@@ -50,7 +50,7 @@ namespace nova {
         leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
                                     leveldb::EnvBGThread *bg_thread) {
             leveldb::EnvOptions env_option;
-            env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
+            env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_MEM;
             leveldb::PosixEnv *env = new leveldb::PosixEnv;
             env->set_env_option(env_option);
             leveldb::DB *db;
@@ -255,7 +255,7 @@ namespace nova {
                     rdma_ctrl,
                     manager,
                     dbs_,
-                    async_cq);
+                    async_cq, true);
             async_workers.push_back(cc);
             cc->thread_id_ = worker_id;
 
@@ -302,7 +302,7 @@ namespace nova {
                     rdma_ctrl,
                     manager,
                     dbs_,
-                    async_cq);
+                    async_cq, false);
             cc->thread_id_ = worker_id;
 
             NovaRDMAStore *store = nullptr;

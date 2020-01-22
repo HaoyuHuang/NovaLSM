@@ -10,9 +10,6 @@
 #include "nova_dc_client.h"
 
 namespace nova {
-#define RDMA_POLL_MIN_TIMEOUT_US 1000
-#define RDMA_POLL_MAX_TIMEOUT_US 10000
-
     namespace {
         uint64_t to_req_id(uint32_t remote_sid, uint32_t dc_req_id) {
             uint64_t req_id = 0;
@@ -79,14 +76,6 @@ namespace nova {
                         leveldb::DCRequestType::DC_FLUSH_SSTABLE) {
                         // CC has written the SSTable to the provided buffer.
                         // NOW I can flush the buffer to disk and let CC know the SSTable if flushed.
-//                        leveldb::Slice footer_input(
-//                                context.buf + context.sstable_size -
-//                                leveldb::Footer::kEncodedLength,
-//                                leveldb::Footer::kEncodedLength);
-//                        leveldb::Footer footer;
-//                        leveldb::Status s = footer.DecodeFrom(&footer_input);
-//                        RDMA_ASSERT(s.ok()) << s.ToString();
-
                         dc_->FlushSSTable(context.db_name,
                                           context.file_number,
                                           context.buf,
@@ -283,32 +272,55 @@ namespace nova {
                 } else if (buf[0] == leveldb::DCRequestType::DC_READ_SSTABLE) {
                     // The request contains dbname, file number, and remote offset to accept the read SSTable.
                     // It issues a WRITE_IMM to write the read SSTable into the remote offset providing the request id.
-                    char *input = buf + 1;
+                    char *input = buf;
                     std::string dbname;
-                    uint32_t read_index = 4;
-                    read_index += leveldb::DecodeStr(input, &dbname);
+                    uint32_t read_index = 1;
+                    read_index += leveldb::DecodeStr(input + read_index,
+                                                     &dbname);
                     uint32_t file_number = leveldb::DecodeFixed32(
                             input + read_index);
                     read_index += 4;
+                    uint64_t file_size = leveldb::DecodeFixed64(
+                            input + read_index);
+                    read_index += 8;
                     uint64_t remote_offset = leveldb::DecodeFixed64(
                             input + read_index);
                     read_index += 8;
                     uint64_t tablesize = dc_->TableSize(dbname,
                                                         file_number);
 
+                    RDMA_LOG(DEBUG) << fmt::format(
+                                "dc[{}]: Read SSTable db:{} fn:{} size:{} offset:{}",
+                                thread_id_, dbname, file_number, file_size,
+                                remote_offset);
+
+                    RDMA_ASSERT(tablesize == file_size) << fmt::format(
+                                "dc[{}]: Read SSTable size mismatch. db:{} fn:{} DC:{} CC:{}",
+                                thread_id_, dbname, file_number, tablesize,
+                                file_size);
+
                     uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                               tablesize);
-                    char *buf = mem_manager_->ItemAlloc(thread_id_, scid);
-                    RDMA_ASSERT(buf) << "Running out of memory";
-                    dc_->ReadSSTable(dbname, file_number, buf, tablesize);
+                    char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, scid);
+                    RDMA_ASSERT(rdma_buf) << "Running out of memory";
+                    dc_->ReadSSTable(dbname, file_number, rdma_buf, tablesize);
 
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     RDMA_ASSERT(send_buf != nullptr);
                     send_buf[0] = leveldb::DCRequestType::DC_READ_SSTABLE;
-                    leveldb::EncodeFixed64(send_buf + 1, (uint64_t) (buf));
+                    leveldb::EncodeFixed64(send_buf + 1, (uint64_t) (rdma_buf));
                     leveldb::EncodeFixed64(send_buf + 1 + 8, tablesize);
-                    rdma_store_->PostWrite(buf, tablesize, remote_server_id,
+                    rdma_store_->PostWrite(rdma_buf, tablesize,
+                                           remote_server_id,
                                            remote_offset, false, dc_req_id);
+
+//                    leveldb::Slice footer_input(
+//                            rdma_buf + tablesize -
+//                            leveldb::Footer::kEncodedLength,
+//                            leveldb::Footer::kEncodedLength);
+//                    leveldb::Footer footer;
+//                    leveldb::Status s = footer.DecodeFrom(&footer_input);
+//                    RDMA_ASSERT(s.ok()) << s.ToString();
 
                     RDMA_LOG(DEBUG) << fmt::format(
                                 "dc[{}]: imm:{} Read SSTable db:{} fn:{}.",
@@ -335,16 +347,16 @@ namespace nova {
 //            }
             n = rdma_store_->PollSQ();
             n += rdma_store_->PollRQ();
-//            if (n == 0) {
-//                should_sleep = true;
-//                timeout *= 2;
-//                if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
-//                    timeout = RDMA_POLL_MAX_TIMEOUT_US;
-//                }
-//            } else {
-//                should_sleep = false;
-//                timeout = RDMA_POLL_MIN_TIMEOUT_US;
-//            }
+            if (n == 0) {
+                should_sleep = true;
+                timeout *= 2;
+                if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
+                    timeout = RDMA_POLL_MAX_TIMEOUT_US;
+                }
+            } else {
+                should_sleep = false;
+                timeout = RDMA_POLL_MIN_TIMEOUT_US;
+            }
         }
     }
 }

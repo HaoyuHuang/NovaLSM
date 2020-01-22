@@ -112,8 +112,8 @@ namespace leveldb {
         RDMA_ASSERT(env_->NewWritableFile(TableFileName(dbname, file_number),
                                           {.level = 1}, &file).ok());
         RDMA_ASSERT(file->Append(Slice(buf, table_size)).ok());
-        file->Flush();
-        file->Sync();
+//        file->Flush();
+//        file->Sync();
         file->Close();
         delete file;
 
@@ -148,12 +148,24 @@ namespace leveldb {
     uint64_t NovaDiskComponent::ReadSSTable(const std::string &dbname,
                                             uint64_t file_number, char *buf,
                                             uint64_t size) {
-        SequentialFile *file;
-        RDMA_ASSERT(env_->NewSequentialFile(TableFileName(dbname, file_number),
-                                            &file).ok());
-        Slice s;
-        RDMA_ASSERT(file->Read(size, &s, buf).ok());
-        delete file;
+        char *result_buf = buf;
+        Cache::Handle *handle = nullptr;
+        Status s = FindTable(dbname, file_number, &handle);
+        RDMA_ASSERT(s.ok());
+        RandomAccessFile *table = reinterpret_cast<RandomAccessFile *>(cache_->Value(
+                handle));
+        RDMA_ASSERT(s.ok());
+        Slice result;
+        RDMA_ASSERT(
+                table->Read(0, size, &result, result_buf).ok());
+        RDMA_LOG(rdmaio::DEBUG)
+            << fmt::format(
+                    "read SSTable off:{} size:{} read:{} from db:{} fn:{}",
+                    0, size, result.size(), dbname, file_number);
+        RDMA_ASSERT(result.size() == size)
+            << fmt::format("Size mismatch db:{} fn:{} expected:{} actual:{}",
+                           dbname, file_number, size, result.size());
+        return result.size();
     }
 
 

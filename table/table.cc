@@ -227,10 +227,10 @@ namespace leveldb {
             }
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format(
-                        "Cache hit {} Insert {} cs:{} cc:{} bs:{} off:{}",
+                        "Cache hit {} Insert {} cs:{} cc:{} fn:{} bs:{} off:{}",
                         cache_hit,
                         insert, block_cache->TotalCharge(),
-                        block_cache->TotalCapacity(),
+                        block_cache->TotalCapacity(), table->rep_->file_number,
                         block->size(), handle.offset());
 
             if (table->db_profiler_ != nullptr) {

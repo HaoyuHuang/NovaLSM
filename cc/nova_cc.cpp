@@ -114,14 +114,13 @@ namespace leveldb {
             const std::string &dbname, uint64_t file_number,
             const leveldb::FileMetaData &meta, leveldb::DCClient *dc_client,
             leveldb::MemManager *mem_manager, uint64_t thread_id,
-            bool cache_all) : dbname_(dbname), file_number_(file_number),
+            bool prefetch_all) : dbname_(dbname), file_number_(file_number),
                               meta_(meta), dc_client_(
                     dc_client), mem_manager_(mem_manager),
                               thread_id_(thread_id),
-                              prefetch_all_(cache_all) {
+                              prefetch_all_(prefetch_all) {
         RDMA_ASSERT(mem_manager_);
         RDMA_ASSERT(dc_client_);
-        prefetch_all_ = false;
     }
 
     NovaCCRemoteRandomAccessFile::~NovaCCRemoteRandomAccessFile() {
@@ -129,11 +128,13 @@ namespace leveldb {
             uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                       meta_.file_size);
             mem_manager_->FreeItem(thread_id_, backing_mem_table_, scid);
+            backing_mem_table_ = nullptr;
         }
         if (backing_mem_block_) {
             uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                       MAX_BLOCK_SIZE);
             mem_manager_->FreeItem(thread_id_, backing_mem_block_, scid);
+            backing_mem_block_ = nullptr;
         }
     }
 
@@ -160,9 +161,8 @@ namespace leveldb {
 
         char *ptr = nullptr;
         if (prefetch_all_) {
-            if (!done_prefetch_all_) {
+            if (backing_mem_table_ == nullptr) {
                 RDMA_ASSERT(ReadAll().ok());
-                done_prefetch_all_ = true;
             }
             ptr = &backing_mem_table_[offset];
         } else {
@@ -179,7 +179,6 @@ namespace leveldb {
                 // Wait until the request is complete.
             }
         }
-
 
         if (scratch) {
             memcpy(scratch, ptr, n);
@@ -200,6 +199,15 @@ namespace leveldb {
         while (!dc_client_->IsDone(req_id)) {
 
         }
+//
+//        leveldb::Slice footer_input(
+//                backing_mem_table_ + meta_.file_size -
+//                leveldb::Footer::kEncodedLength,
+//                leveldb::Footer::kEncodedLength);
+//        leveldb::Footer footer;
+//        leveldb::Status s = footer.DecodeFrom(&footer_input);
+//        RDMA_ASSERT(s.ok()) << s.ToString();
+
         return Status::OK();
     }
 

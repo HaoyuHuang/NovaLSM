@@ -22,9 +22,6 @@
 
 namespace nova {
 
-#define RDMA_POLL_MIN_TIMEOUT_US 1000
-#define RDMA_POLL_MAX_TIMEOUT_US 10000
-
     struct NovaAsyncTask {
         RequestType type;
         int conn_worker_id;
@@ -52,10 +49,12 @@ namespace nova {
         NovaRDMAComputeComponent(RdmaCtrl *rdma_ctrl,
                                  NovaMemManager *mem_manager,
                                  const std::vector<leveldb::DB *> &dbs,
-                                 NovaAsyncCompleteQueue **cqs) :
+                                 NovaAsyncCompleteQueue **cqs,
+                                 bool is_worker_thread) :
                 rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager), dbs_(dbs),
-                cqs_(cqs) {
+                cqs_(cqs), is_worker_thread_(is_worker_thread) {
             conn_workers_ = new bool[NovaCCConfig::cc_config->num_conn_workers];
+            sem_init(&sem_, 0, 0);
         }
 
         bool IsInitialized();
@@ -90,6 +89,8 @@ namespace nova {
         std::list<NovaAsyncTask> queue_;
         NovaAsyncCompleteQueue **cqs_;
         bool *conn_workers_;
+        sem_t sem_;
+        bool is_worker_thread_;
     };
 }
 

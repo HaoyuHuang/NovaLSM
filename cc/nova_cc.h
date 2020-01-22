@@ -63,7 +63,7 @@ namespace leveldb {
                                      DCClient *dc_client,
                                      MemManager *mem_manager,
                                      uint64_t thread_id,
-                                     bool cache_all);
+                                     bool prefetch_all);
 
         ~NovaCCRemoteRandomAccessFile() override;
 
@@ -78,7 +78,6 @@ namespace leveldb {
         FileMetaData meta_;
 
         bool prefetch_all_;
-        bool done_prefetch_all_;
         char *backing_mem_table_ = nullptr;
         char *backing_mem_block_ = nullptr;
         MemManager *mem_manager_;

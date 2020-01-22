@@ -18,7 +18,7 @@ namespace nova {
 
 #define MAX_NUMBER_OF_SLAB_CLASSES 64
 #define SLAB_SIZE_FACTOR 2
-#define NOVA_MEM_PARTITIONS 32
+#define NOVA_MEM_PARTITIONS 64
 
     class Slab {
     public:

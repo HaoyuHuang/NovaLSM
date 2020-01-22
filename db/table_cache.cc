@@ -151,6 +151,7 @@ namespace leveldb {
         cache_->Erase(Slice(buf, 1 + sizeof(file_number)));
 
         buf[0] = 'b';
+        EncodeFixed64(buf + 1, file_number);
         cache_->Erase(Slice(buf, 1 + sizeof(file_number)));
     }
 
