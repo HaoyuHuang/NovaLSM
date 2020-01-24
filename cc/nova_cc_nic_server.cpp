@@ -52,7 +52,8 @@ namespace nova {
         };
 
         leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
-                                    leveldb::EnvBGThread *bg_thread) {
+                                    leveldb::EnvBGThread *bg_thread,
+                                    leveldb::SSTableManager *sstable_manager) {
             leveldb::EnvOptions env_option;
             env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
             leveldb::PosixEnv *env = new leveldb::PosixEnv;
@@ -71,6 +72,7 @@ namespace nova {
             options.filter_policy = leveldb::NewBloomFilterPolicy(10);
             options.bg_thread = bg_thread;
             options.enable_tracing = false;
+            options.sstable_manager = sstable_manager;
             options.comparator = new YCSBKeyComparator();
             leveldb::Logger *log = nullptr;
             std::string db_path = DBName(NovaConfig::config->db_path,
@@ -250,7 +252,8 @@ namespace nova {
                            NovaCCConfig::cc_config->block_cache_mb);
 
         for (int db_index = 0; db_index < ndbs; db_index++) {
-            dbs_.push_back(CreateDatabase(db_index, cache, bgs[bg_thread_id]));
+            dbs_.push_back(CreateDatabase(db_index, cache, bgs[bg_thread_id],
+                                          sstable_manager_));
             bg_thread_id += 1;
             bg_thread_id %= bgs.size();
         }
@@ -339,7 +342,7 @@ namespace nova {
             cc->cc_server_ = cc_server;
 
             buf += nrdma_buf_unit() *
-                    NovaCCConfig::cc_config->cc_servers.size();
+                   NovaCCConfig::cc_config->cc_servers.size();
         }
 
         for (int i = 0;
@@ -397,7 +400,7 @@ namespace nova {
             bgs[i]->thread_id_ = worker_id;
             worker_id++;
             buf += nrdma_buf_unit() *
-                    NovaCCConfig::cc_config->cc_servers.size();
+                   NovaCCConfig::cc_config->cc_servers.size();
         }
 
         int bgid = 0;

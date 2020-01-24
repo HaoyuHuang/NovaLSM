@@ -24,6 +24,7 @@ namespace leveldb {
 
             Status
             AddRecord(const std::string &log_file_name,
+                      uint64_t thread_id,
                       const Slice &slice);
 
             void AckAllocLogBuf(int remote_sid, uint64_t offset, uint64_t size);
@@ -39,7 +40,7 @@ namespace leveldb {
                 uint64_t size;
             };
 
-            void Init(const std::string &log_file_name);
+            char* Init(const std::string &log_file_name,uint64_t thread_id, const Slice &slice);
 
             nova::NovaRDMAStore *store_;
             std::map<std::string, LogFileBuf *> logfile_last_buf_;
@@ -58,6 +59,9 @@ namespace leveldb {
             };
 
             std::string write_result_str(WriteResult wr);
+
+            MemManager *mem_manager_;
+            nova::LogFileManager *log_manager_;
 
             char *rnic_buf_;
             uint32_t rnic_buf_size_;

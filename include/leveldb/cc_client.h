@@ -22,8 +22,12 @@ namespace leveldb {
         CC_READ_BLOCKS = 'r',
         CC_READ_SSTABLE = 's',
         CC_FLUSH_SSTABLE = 'f',
+        CC_WRITE_REPLICATE_SSTABLE = 'w',
         CC_FLUSH_SSTABLE_BUF = 'F',
         CC_FLUSH_SSTABLE_SUCC = 'S',
+        CC_ALLOCATE_SSTABLE_BUFFER = 'b',
+        CC_ALLOCATE_SSTABLE_BUFFER_SUCC = 'c',
+        CC_RELEASE_SSTABLE_BUFFER = 'B',
         CC_ALLOCATE_LOG_BUFFER = 'a',
         CC_ALLOCATE_LOG_BUFFER_SUCC = 'A',
         CC_DELETE_LOG_FILE = 'd',
@@ -39,6 +43,9 @@ namespace leveldb {
         char *backing_mem;
         uint32_t size;
         bool done;
+
+        uint64_t wr_id = 0;
+        uint64_t remote_sstable_buf = 0;
     };
 
     struct CCResponse {
@@ -94,6 +101,7 @@ namespace leveldb {
 
         virtual uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
+                                    uint64_t thread_id,
                                     const Slice &slice) = 0;
 
 

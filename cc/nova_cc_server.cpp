@@ -111,8 +111,61 @@ namespace nova {
                     return;
                 }
 
-                // Inspect the buf.
-                if (buf[0] == leveldb::CCRequestType::CC_ALLOCATE_LOG_BUFFER) {
+                if (buf[0] == leveldb::CCRequestType::CC_DELETE_TABLES) {
+                    std::string dbname;
+                    uint32_t msg_size = 1;
+                    msg_size += leveldb::DecodeStr(buf + msg_size, &dbname);
+                    uint32_t nfiles = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
+
+                    std::vector<uint64_t> files;
+                    for (int i = 0; i < nfiles; i++) {
+                        files.push_back(leveldb::DecodeFixed64(buf + msg_size));
+                        msg_size += 8;
+                    }
+                    sstable_manager_->RemoveSSTables(dbname, files);
+                } else if (buf[0] ==
+                           leveldb::CCRequestType::CC_RELEASE_SSTABLE_BUFFER) {
+                    std::string dbname;
+                    uint32_t msg_size = 1;
+                    msg_size += leveldb::DecodeStr(buf + msg_size, &dbname);
+                    uint64_t file_number = leveldb::DecodeFixed64(
+                            buf + msg_size);
+                    msg_size += 8;
+                    uint64_t file_size = leveldb::DecodeFixed64(buf + msg_size);
+                    msg_size += 8;
+                    sstable_manager_->RemoveSSTable(dbname, file_number);
+                } else if (buf[0] ==
+                           leveldb::CCRequestType::CC_ALLOCATE_SSTABLE_BUFFER) {
+                    std::string dbname;
+                    uint32_t msg_size = 1;
+                    msg_size += leveldb::DecodeStr(buf + msg_size, &dbname);
+                    uint64_t file_number = leveldb::DecodeFixed64(
+                            buf + msg_size);
+                    msg_size += 8;
+                    uint64_t file_size = leveldb::DecodeFixed64(buf + msg_size);
+                    msg_size += 8;
+                    uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                              file_size);
+                    char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, scid);
+                    uint64_t mr = 0;
+
+                    if (rdma_buf) {
+                        sstable_manager_->AddSSTable(dbname, file_number,
+                                                     thread_id_, rdma_buf,
+                                                     file_number, file_size,
+                                                     false);
+                        mr = (uint64_t) rdma_buf;
+                    }
+
+                    char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
+                    RDMA_ASSERT(send_buf != nullptr);
+                    send_buf[0] = leveldb::CCRequestType::CC_ALLOCATE_SSTABLE_BUFFER_SUCC;
+                    leveldb::EncodeFixed64(send_buf + 1, mr);
+                    rdma_store_->PostSend(send_buf, 1 + 8, remote_server_id, req_id);
+
+                } else if (buf[0] ==
+                           leveldb::CCRequestType::CC_ALLOCATE_LOG_BUFFER) {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);
                     std::string log_file(buf + 5, size);
                     uint32_t slabclassid = mem_manager_->slabclassid(thread_id_,
@@ -321,6 +374,8 @@ namespace nova {
                                 imm_data,
                                 dbname, file_number);
                 }
+
+                // Inspect the buf.
                 break;
         }
     }

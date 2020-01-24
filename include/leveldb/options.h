@@ -220,6 +220,8 @@ namespace leveldb {
 
         bool local_write = false;
 
+        uint64_t thread_id;
+
         CCClient *dc_client = nullptr;
     };
 

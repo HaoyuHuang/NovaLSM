@@ -25,7 +25,8 @@ namespace leveldb {
         mutex_.unlock();
 
         if (remaining_ref == 0 && deleted) {
-            uint32_t scid = mem_manager_->slabclassid(thread_id, allocated_size);
+            uint32_t scid = mem_manager_->slabclassid(thread_id,
+                                                      allocated_size);
             mem_manager_->FreeItem(thread_id, backing_mem, scid);
             delete_itself = true;
         }
@@ -48,7 +49,8 @@ namespace leveldb {
         mutex_.lock();
         deleted = true;
         if (refcount == 0) {
-            uint32_t scid = mem_manager_->slabclassid(thread_id, allocated_size);
+            uint32_t scid = mem_manager_->slabclassid(thread_id,
+                                                      allocated_size);
             mem_manager_->FreeItem(thread_id, backing_mem, scid);
             delete_itself = true;
         }
@@ -77,7 +79,8 @@ namespace leveldb {
     void NovaSSTableManager::AddSSTable(const std::string &dbname,
                                         uint64_t file_number,
                                         uint64_t thread_id,
-                                        char *backing_mem, uint64_t used_size, uint64_t allocated_size,
+                                        char *backing_mem, uint64_t used_size,
+                                        uint64_t allocated_size,
                                         bool async_flush) {
         uint32_t server_id;
         uint32_t db_indx;
@@ -137,5 +140,23 @@ namespace leveldb {
         tables->fn_table.erase(file_number);
         tables->mutex_.unlock();
         table->Delete();
+    }
+
+    void NovaSSTableManager::RemoveSSTables(const std::string &dbname,
+                                            const std::vector<uint64_t> &file_numbers) {
+        uint32_t server_id;
+        uint32_t db_indx;
+        nova::ParseDBName(dbname, &server_id, &db_indx);
+
+        DBSSTables *tables = server_db_sstables_[server_id][db_indx];
+        tables->mutex_.lock();
+        for (auto file_number : file_numbers) {
+            auto it = tables->fn_table.find(file_number);
+            RDMA_ASSERT(it != tables->fn_table.end());
+            WBTable *table = it->second;
+            tables->fn_table.erase(file_number);
+            table->Delete();
+        }
+        tables->mutex_.unlock();
     }
 }

@@ -22,7 +22,8 @@ namespace leveldb {
             }
         }
 
-        void RDMALogWriter::Init(const std::string &log_file_name) {
+        char *RDMALogWriter::Init(const std::string &log_file_name,
+                                  uint64_t thread_id, const Slice &slice) {
             auto it = logfile_last_buf_.find(log_file_name);
             if (it == logfile_last_buf_.end()) {
                 LogFileBuf *buf = new LogFileBuf[nova::NovaConfig::config->servers.size()];
@@ -37,6 +38,25 @@ namespace leveldb {
                     };
                 }
             }
+
+            // Add to local memory.
+            int myid = nova::NovaConfig::config->my_server_id;
+            LogFileBuf &buf = logfile_last_buf_[log_file_name][myid];
+            char *b = nullptr;
+            if (buf.base == 0 || buf.offset + slice.size() >= buf.size) {
+                uint32_t scid = mem_manager_->slabclassid(thread_id,
+                                                          nova::NovaConfig::config->log_buf_size);
+                b = mem_manager_->ItemAlloc(thread_id, scid);
+                log_manager_->Add(thread_id, log_file_name, b);
+                buf.base = (uint64_t) (b);
+                buf.offset = 0;
+                buf.size = nova::NovaConfig::config->log_buf_size;
+            } else {
+                b = (char *) buf.base + buf.offset;
+            }
+            memcpy(b, slice.data(), slice.size());
+            buf.offset += slice.size();
+            return b;
         }
 
         void RDMALogWriter::AckAllocLogBuf(int remote_sid, uint64_t offset,
@@ -71,6 +91,7 @@ namespace leveldb {
 
         Status
         RDMALogWriter::AddRecord(const std::string &log_file_name,
+                                 uint64_t thread_id,
                                  const Slice &slice) {
             int nreplicas = 0;
             uint32_t sid;
@@ -78,11 +99,17 @@ namespace leveldb {
             nova::ParseDBName(log_file_name, &sid, &db_index);
             nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
 
-            Init(log_file_name);
+            Init(log_file_name, thread_id, slice);
             current_log_file_ = log_file_name;
             memcpy(rnic_buf_, slice.data(), slice.size());
+
             for (int i = 0; i < frag->cc_server_ids.size(); i++) {
                 uint32_t remote_server_id = frag->cc_server_ids[i];
+                if (remote_server_id ==
+                    nova::NovaConfig::config->my_server_id) {
+                    continue;
+                }
+
                 nreplicas++;
 
                 auto &it = logfile_last_buf_[log_file_name];
@@ -173,8 +200,14 @@ namespace leveldb {
 
             delete logfile_last_buf_[log_file_name];
             logfile_last_buf_.erase(log_file_name);
+            log_manager_->DeleteLogBuf(log_file_name);
             for (int i = 0; i < frag->cc_server_ids.size(); i++) {
                 uint32_t remote_server_id = frag->cc_server_ids[i];
+                if (remote_server_id ==
+                    nova::NovaConfig::config->my_server_id) {
+                    continue;
+                }
+
                 char *send_buf = store_->GetSendBuf(remote_server_id);
                 char *buf = send_buf;
                 buf[0] = nova::RequestType::DELETE_LOG_FILE;

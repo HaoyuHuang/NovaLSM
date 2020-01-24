@@ -33,6 +33,7 @@ namespace nova {
         option.dc_client = cc_client_;
         option.sync = true;
         option.local_write = false;
+        option.thread_id = thread_id_;
         CCFragment *frag = NovaCCConfig::home_fragment(hv);
         leveldb::DB *db = dbs_[frag->dbid];
         if (!option.local_write) {

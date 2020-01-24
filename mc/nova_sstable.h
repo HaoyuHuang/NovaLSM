@@ -28,6 +28,9 @@ namespace leveldb {
         void
         RemoveSSTable(const std::string &dbname, uint64_t file_number) override;
 
+        void
+        RemoveSSTables(const std::string &dbname, const std::vector<uint64_t>& file_number) override;
+
     private:
         struct DBSSTables {
             std::map<uint64_t, WBTable *> fn_table;

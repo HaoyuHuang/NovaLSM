@@ -46,6 +46,7 @@ namespace nova {
         NovaMemManager *mem_manager_;
         leveldb::NovaDiskComponent *dc_;
         LogFileManager *log_manager_;
+        leveldb::SSTableManager *sstable_manager_;
         std::map<uint64_t, RequestContext> request_context_map_;
     };
 }

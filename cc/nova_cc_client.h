@@ -76,6 +76,7 @@ namespace leveldb {
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
+                                    uint64_t thread_id,
                                     const Slice &slice) override;
 
 

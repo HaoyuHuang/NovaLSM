@@ -130,6 +130,9 @@ namespace leveldb {
 
         virtual void
         RemoveSSTable(const std::string &dbname, uint64_t file_number) = 0;
+
+        virtual void
+        RemoveSSTables(const std::string &dbname, const std::vector<uint64_t>& file_number) = 0;
     };
 }
 

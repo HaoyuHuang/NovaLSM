@@ -27,25 +27,84 @@ namespace leveldb {
 
     uint32_t NovaCCClient::InitiateDeleteTables(const std::string &dbname,
                                                 const std::vector<uint64_t> &filenumbers) {
+        uint32_t sid;
+        uint32_t dbid;
+        nova::ParseDBName(dbname, &sid, &dbid);
+
+        nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid];
+        for (int replica_id : frag->cc_server_ids) {
+            if (replica_id == nova::NovaConfig::config->my_server_id) {
+                continue;
+            }
+
+            char *send_buf = rdma_store_->GetSendBuf(replica_id);
+            uint32_t msg_size = 1;
+            send_buf[0] = CCRequestType::CC_DELETE_TABLES;
+            msg_size += EncodeStr(send_buf + msg_size, dbname);
+            EncodeFixed32(send_buf + msg_size, filenumbers.size());
+            msg_size += 4;
+            for (uint64_t fn : filenumbers) {
+                EncodeFixed64(send_buf + msg_size, fn);
+                msg_size += 8;
+            }
+            rdma_store_->PostSend(send_buf, msg_size, replica_id, 0);
+        }
         return current_req_id_;
     }
 
     uint32_t NovaCCClient::InitiateWRITESSTableBuffer(uint32_t remote_server_id,
                                                       char *src, uint64_t dest,
                                                       uint64_t file_size) {
-        return 0;
+        uint32_t req_id = current_req_id_;
+        CCRequestContext context = {};
+        context.done = false;
+        char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
+        sendbuf[0] = CCRequestType::CC_WRITE_REPLICATE_SSTABLE;
+        EncodeFixed32(sendbuf + 1, req_id);
+        context.wr_id = rdma_store_->PostWrite(src, file_size, remote_server_id,
+                                               dest, false, 0);
+        request_context_[req_id] = context;
+        return req_id;
     }
 
     uint32_t NovaCCClient::InitiateAllocateSSTableBuffer(
             uint32_t remote_server_id, const std::string &dbname,
             uint64_t file_number, uint64_t file_size) {
-        return 0;
+        uint32_t req_id = current_req_id_;
+        CCRequestContext context = {};
+        context.done = false;
+        uint32_t msg_size = 0;
+        char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
+        sendbuf[0] = CCRequestType::CC_ALLOCATE_SSTABLE_BUFFER;
+        msg_size += EncodeStr(sendbuf + msg_size, dbname);
+        EncodeFixed64(sendbuf + msg_size, file_number);
+        msg_size += 8;
+        EncodeFixed64(sendbuf + msg_size, file_size);
+        msg_size += 8;
+
+        rdma_store_->PostSend(sendbuf, msg_size, remote_server_id, req_id);
+        request_context_[req_id] = context;
+        return req_id;
     }
 
     uint32_t NovaCCClient::InitiateReleaseSSTableBuffer(
             uint32_t remote_server_id, const std::string &dbname,
             uint64_t file_number, uint64_t file_size) {
-        return 0;
+        uint32_t req_id = current_req_id_;
+        CCRequestContext context = {};
+        context.done = false;
+        uint32_t msg_size = 0;
+        char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
+        sendbuf[0] = CCRequestType::CC_RELEASE_SSTABLE_BUFFER;
+        msg_size += EncodeStr(sendbuf + msg_size, dbname);
+        EncodeFixed64(sendbuf + msg_size, file_number);
+        msg_size += 8;
+        EncodeFixed64(sendbuf + msg_size, file_size);
+        msg_size += 8;
+
+        rdma_store_->PostSend(sendbuf, msg_size, remote_server_id, req_id);
+        request_context_[req_id] = context;
+        return req_id;
     }
 
     uint32_t NovaCCClient::InitiateFlushSSTable(const std::string &dbname,
@@ -64,13 +123,6 @@ namespace leveldb {
         leveldb::EncodeFixed32(buf, meta.file_size);
         uint32_t msg_size = 1 + 4 + dbname.size() + 4 + 4;
         rdma_store_->PostSend(sendbuf, msg_size, dc_id, req_id);
-
-//        Slice footer_input(
-//                backing_mem + meta.file_size - Footer::kEncodedLength,
-//                Footer::kEncodedLength);
-//        Footer footer;
-//        Status s = footer.DecodeFrom(&footer_input);
-//        RDMA_ASSERT(s.ok()) << s.ToString();
 
         CCRequestContext context = {};
         context.req_type = CCRequestType::CC_FLUSH_SSTABLE;
@@ -187,9 +239,10 @@ namespace leveldb {
     }
 
     uint32_t NovaCCClient::InitiateReplicateLogRecords(
-            const std::string &log_file_name, const leveldb::Slice &slice) {
+            const std::string &log_file_name, uint64_t thread_id,
+            const leveldb::Slice &slice) {
         // Synchronous replication.
-        rdma_log_writer_->AddRecord(log_file_name, slice);
+        rdma_log_writer_->AddRecord(log_file_name, thread_id, slice);
         return 0;
     }
 
@@ -261,6 +314,9 @@ namespace leveldb {
         auto context_it = request_context_.find(req_id);
         RDMA_ASSERT(context_it != request_context_.end());
         if (context_it->second.done) {
+            if (response) {
+                response->remote_sstable_buf = context_it->second.remote_sstable_buf;
+            }
             request_context_.erase(req_id);
             return true;
         }
@@ -304,6 +360,11 @@ namespace leveldb {
                                 context.size,
                                 remote_server_id, remote_dc_offset,
                                 false, req_id);
+                    } else if (buf[0] ==
+                               CCRequestType::CC_ALLOCATE_SSTABLE_BUFFER_SUCC) {
+                        uint64_t mr = leveldb::DecodeFixed64(buf + 1);
+                        context.remote_sstable_buf = mr;
+                        context.done = true;
                     } else {
                         RDMA_ASSERT(false)
                             << fmt::format("Unknown request context {}.",

@@ -306,7 +306,7 @@ namespace leveldb {
             }
         }
         std::vector<FileMetaData> files;
-        std::vector<uint64_t > fds;
+        std::vector<uint64_t> fds;
         for (auto it = compacted_tables_.begin();
              it != compacted_tables_.end(); it++) {
             files.push_back(it->second);
@@ -1395,7 +1395,8 @@ namespace leveldb {
         mutex_.Unlock();
         // Synchronous replication.
         options.dc_client->InitiateReplicateLogRecords(
-                logfile, WriteBatchInternal::Contents(updates));
+                logfile, options.thread_id,
+                WriteBatchInternal::Contents(updates));
 
         for (const auto &file : closed_files) {
             options.dc_client->InitiateCloseLogFile(file);
