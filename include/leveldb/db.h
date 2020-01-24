@@ -73,6 +73,8 @@ namespace leveldb {
         GenerateLogRecords(const WriteOptions &options,
                            WriteBatch *updates) = 0;
 
+        virtual void EvictFileFromCache(uint64_t file_number) = 0;
+
         // Remove the database entry (if any) for "key".  Returns OK on
         // success, and a non-OK status on error.  It is not an error if "key"
         // did not exist in the database.

@@ -85,6 +85,7 @@ namespace leveldb {
         // State kept for output being generated
         MemWritableFile *outfile;
         TableBuilder *builder;
+        std::vector<MemWritableFile *> output_files;
 
         uint64_t total_bytes;
     };
@@ -233,6 +234,10 @@ namespace leveldb {
         return s;
     }
 
+    void DBImpl::EvictFileFromCache(uint64_t file_number) {
+        table_cache_->Evict(file_number);
+    }
+
     void DBImpl::MaybeIgnoreError(Status *s) const {
         if (s->ok() || options_.paranoid_checks) {
             // No change needed
@@ -260,6 +265,7 @@ namespace leveldb {
         uint64_t number;
         FileType type;
         std::vector<std::string> files_to_delete;
+
         for (std::string &filename : filenames) {
             if (ParseFileName(filename, &number, &type)) {
                 bool keep = true;
@@ -300,9 +306,11 @@ namespace leveldb {
             }
         }
         std::vector<FileMetaData> files;
+        std::vector<uint64_t > fds;
         for (auto it = compacted_tables_.begin();
              it != compacted_tables_.end(); it++) {
             files.push_back(it->second);
+            fds.push_back(it->second.number);
         }
         compacted_tables_.clear();
         // While deleting all files unblock other threads. All files being deleted
@@ -312,8 +320,7 @@ namespace leveldb {
         for (const std::string &filename : files_to_delete) {
             env_->DeleteFile(dbname_ + "/" + filename);
         }
-        options_.bg_thread->dc_client()->InitiateDeleteFiles(dbname_,
-                                                             files);
+        options_.bg_thread->dc_client()->InitiateDeleteTables(dbname_, fds);
         mutex_.Lock();
     }
 
@@ -851,14 +858,29 @@ namespace leveldb {
             compact->builder->Abandon();
             delete compact->builder;
         } else {
-            assert(compact->outfile == nullptr);
+//            assert(compact->outfile == nullptr);
         }
+
         // Also delete its contained mem file.
-        if (compact->outfile) {
-            auto *mem_file = dynamic_cast<NovaCCRemoteMemFile *>(compact->outfile->mem_file());
+        // Delete everything now.
+        for (int i = 0; i < compact->output_files.size(); i++) {
+            MemWritableFile *out = compact->output_files[i];
+            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
+            mem_file->WaitForWRITEs();
+
+            if (mem_file->backing_mem()) {
+                options_.sstable_manager->AddSSTable(dbname_,
+                                                     mem_file->file_number(),
+                                                     mem_file->thread_id(),
+                                                     (char *) mem_file->backing_mem(),
+                                                     mem_file->used_size(),
+                                                     mem_file->allocated_size(),
+                        /*async_flush=*/true);
+            }
             delete mem_file;
+            delete out;
         }
-        delete compact->outfile;
+
         for (size_t i = 0; i < compact->outputs.size(); i++) {
             const CompactionState::Output &out = compact->outputs[i];
             pending_outputs_.erase(out.number);
@@ -883,15 +905,17 @@ namespace leveldb {
         }
         // Make the output file
         MemManager *mem_manager = options_.bg_thread->mem_manager();
-        NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(options_.env,
-                                                               file_number,
-                                                               mem_manager,
-                                                               options_.bg_thread->dc_client(),
-                                                               dbname_,
-                                                               options_.bg_thread->thread_id(),
-                                                               options_.max_dc_file_size);
+        NovaCCMemFile *cc_file = new NovaCCMemFile(options_.env,
+                                                   file_number,
+                                                   mem_manager,
+                                                   options_.sstable_manager,
+                                                   options_.bg_thread->dc_client(),
+                                                   dbname_,
+                                                   options_.bg_thread->thread_id(),
+                                                   options_.max_dc_file_size);
         compact->outfile = new MemWritableFile(cc_file);
         compact->builder = new TableBuilder(options_, compact->outfile);
+        compact->output_files.push_back(compact->outfile);
         return Status::OK();
     }
 
@@ -900,6 +924,7 @@ namespace leveldb {
         assert(compact != nullptr);
         assert(compact->outfile != nullptr);
         assert(compact->builder != nullptr);
+        assert(!compact->output_files.empty());
 
         const uint64_t output_number = compact->current_output()->number;
         assert(output_number != 0);
@@ -924,7 +949,7 @@ namespace leveldb {
         meta.smallest = compact->current_output()->smallest;
         meta.largest = compact->current_output()->largest;
         // Set meta in order to flush to the corresponding DC node.
-        NovaCCRemoteMemFile *mem_file = static_cast<NovaCCRemoteMemFile *>(compact->outfile->mem_file());
+        NovaCCMemFile *mem_file = static_cast<NovaCCMemFile *>(compact->outfile->mem_file());
         mem_file->set_meta(meta);
 
         // Finish and check for file errors
@@ -936,11 +961,11 @@ namespace leveldb {
         }
 
         // Also delete its contained mem file.
-        delete mem_file;
-        mem_file = nullptr;
-        delete compact->outfile;
-        compact->outfile = nullptr;
-
+        // Defer the deletion until compaction completes.
+//        delete mem_file;
+//        mem_file = nullptr;
+//        delete compact->outfile;
+//        compact->outfile = nullptr;
 
         if (s.ok() && current_entries > 0) {
             // Verify that the table is usable
@@ -998,6 +1023,8 @@ namespace leveldb {
         assert(versions_->NumLevelFiles(compact->compaction->level()) > 0);
         assert(compact->builder == nullptr);
         assert(compact->outfile == nullptr);
+        assert(compact->outputs.empty());
+
         if (snapshots_.empty()) {
             compact->smallest_snapshot = versions_->LastSequence();
         } else {

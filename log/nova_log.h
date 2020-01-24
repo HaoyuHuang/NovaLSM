@@ -75,7 +75,6 @@ namespace nova {
         NovaMemManager *mem_manager_;
 
         DBLogFiles ***server_db_log_files_;
-        leveldb::port::Mutex mutex_;
     };
 }
 

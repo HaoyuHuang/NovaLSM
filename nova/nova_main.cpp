@@ -9,7 +9,7 @@
 #include "nova_common.h"
 #include "nova_config.h"
 #include "nova_rdma_rc_store.h"
-#include "cc/nova_cc_server.h"
+#include "cc/nova_cc_nic_server.h"
 #include "leveldb/db.h"
 #include "leveldb/cache.h"
 #include "leveldb/filter_policy.h"
@@ -61,6 +61,8 @@ DEFINE_uint64(cc_num_conn_workers, 0, "Number of connection threads.");
 DEFINE_uint32(cc_num_async_workers, 0, "Number of async worker threads.");
 DEFINE_uint32(cc_num_compaction_workers, 0,
               "Number of compaction worker threads.");
+DEFINE_uint32(cc_num_wb_workers, 0,
+              "Number of compaction worker threads.");
 DEFINE_uint64(cc_block_cache_mb, 0, "leveldb block cache size in mb");
 DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
 
@@ -89,7 +91,7 @@ void InitializeCC() {
     NovaConfig::config->nnovabuf = ntotal;
     RDMA_ASSERT(buf != NULL) << "Not enough memory";
 
-    auto *mem_server = new NovaCCServer(rdma_ctrl, buf, port);
+    auto *mem_server = new NovaCCNICServer(rdma_ctrl, buf, port);
     mem_server->Start();
 }
 
@@ -182,6 +184,7 @@ int main(int argc, char *argv[]) {
     NovaCCConfig::cc_config->num_conn_workers = FLAGS_cc_num_conn_workers;
     NovaCCConfig::cc_config->num_async_workers = FLAGS_cc_num_async_workers;
     NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
+    NovaCCConfig::cc_config->num_wb_workers = FLAGS_cc_num_wb_workers;
 
     NovaDCConfig::ReadFragments(FLAGS_dc_config_path,
                                 &NovaDCConfig::dc_config->fragments);

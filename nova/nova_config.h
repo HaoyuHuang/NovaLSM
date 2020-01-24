@@ -95,7 +95,7 @@ namespace nova {
 
                 int nreplicas = (tokens.size() - 4);
                 for (int i = 0; i < nreplicas; i++) {
-                    frag->dc_server_ids.push_back(std::stoi(tokens[i + 4]));
+                    frag->cc_server_ids.push_back(std::stoi(tokens[i + 4]));
                 }
                 frags->push_back(frag);
             }
@@ -108,7 +108,7 @@ namespace nova {
                                                (*frags)[i]->cc_server_id,
                                                (*frags)[i]->dbid,
                                                ToString(
-                                                       (*frags)[i]->dc_server_ids));
+                                                       (*frags)[i]->cc_server_ids));
             }
         }
 
@@ -142,6 +142,7 @@ namespace nova {
         int num_conn_workers;
         int num_async_workers;
         int num_compaction_workers;
+        int num_wb_workers;
         int block_cache_mb;
         int write_buffer_size_mb;
         std::vector<CCFragment *> fragments;

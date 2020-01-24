@@ -51,6 +51,8 @@ namespace leveldb {
         GenerateLogRecords(const WriteOptions &options,
                            WriteBatch *updates) override;
 
+        void EvictFileFromCache(uint64_t file_number) override;
+
         Status Delete(const WriteOptions &, const Slice &key) override;
 
         Status Write(const WriteOptions &options, WriteBatch *updates) override;

@@ -7,22 +7,25 @@
 #ifndef LEVELDB_NOVA_CC_H
 #define LEVELDB_NOVA_CC_H
 
+#include <semaphore.h>
+
 #include "util/env_mem.h"
-#include "dc/nova_dc_client.h"
+#include "nova_cc_client.h"
 #include "leveldb/env.h"
 
 namespace leveldb {
 
-    class NovaCCRemoteMemFile : public MemFile {
+    class NovaCCMemFile : public MemFile {
     public:
-        NovaCCRemoteMemFile(Env *env, uint64_t file_number,
-                            MemManager *mem_manager,
-                            DCClient *dc_client,
-                            const std::string &dbname,
-                            uint64_t thread_id,
-                            uint64_t file_size);
+        NovaCCMemFile(Env *env, uint64_t file_number,
+                      MemManager *mem_manager,
+                      SSTableManager *sstable_manager,
+                      CCClient *cc_client,
+                      const std::string &dbname,
+                      uint64_t thread_id,
+                      uint64_t file_size);
 
-        ~NovaCCRemoteMemFile();
+        ~NovaCCMemFile();
 
         uint64_t Size() const override { return used_size_; }
 
@@ -39,36 +42,54 @@ namespace leveldb {
 
         void set_meta(const FileMetaData &meta) { meta_ = meta; }
 
+        uint64_t used_size() {return used_size_;}
+
+        uint64_t allocated_size() { return allocated_size_; }
+
+        uint64_t thread_id() { return thread_id_; }
+
+        uint64_t file_number() { return file_number_; }
+
+        void WaitForWRITEs();
+
     private:
         Env *env_;
         uint64_t file_number_;
         const std::string fname_;
         WritableFile *local_writable_file_;
+        SSTableManager *sstable_manager_;
         MemManager *mem_manager_;
-        DCClient *dc_client_;
+        CCClient *cc_client_;
         const std::string &dbname_;
         FileMetaData meta_;
         uint64_t thread_id_;
 
         char *backing_mem_ = nullptr;
-        uint32_t allocated_size_ = 0;
-        uint32_t used_size_ = 0;
+        uint64_t allocated_size_ = 0;
+        uint64_t used_size_ = 0;
+        std::map<uint32_t, uint64_t> remote_sstable_bufs_;
+        std::vector<uint32_t> WRITE_requests_;
     };
 
-    class NovaCCRemoteRandomAccessFile : public RandomAccessFile {
+    class NovaCCRandomAccessFile : public RandomAccessFile {
     public:
-        NovaCCRemoteRandomAccessFile(const std::string &dbname,
-                                     uint64_t file_number,
-                                     const FileMetaData &meta,
-                                     DCClient *dc_client,
-                                     MemManager *mem_manager,
-                                     uint64_t thread_id,
-                                     bool prefetch_all);
+        NovaCCRandomAccessFile(Env *env, const std::string &dbname,
+                               uint64_t file_number,
+                               const FileMetaData &meta,
+                               CCClient *dc_client,
+                               MemManager *mem_manager,
+                               SSTableManager *sstable_manager,
+                               uint64_t thread_id,
+                               bool prefetch_all);
 
-        ~NovaCCRemoteRandomAccessFile() override;
+        ~NovaCCRandomAccessFile() override;
 
         Status Read(uint64_t offset, size_t n, Slice *result,
                     char *scratch) override;
+
+        bool IsWBTableDeleted();
+
+        WBTable *wb_table() {return wb_table_;}
 
     private:
         Status ReadAll();
@@ -81,8 +102,18 @@ namespace leveldb {
         char *backing_mem_table_ = nullptr;
         char *backing_mem_block_ = nullptr;
         MemManager *mem_manager_;
+        SSTableManager *sstable_manager_;
         uint64_t thread_id_;
-        DCClient *dc_client_;
+        CCClient *dc_client_;
+
+        Env *env_;
+        WBTable *wb_table_;
+        RandomAccessFile *local_ra_file_;
+    };
+
+    struct DeleteTableRequest {
+        std::string dbname;
+        uint32_t file_number;
     };
 
     class NovaCCCompactionThread : public EnvBGThread {
@@ -93,10 +124,10 @@ namespace leveldb {
                 void (*background_work_function)(void *background_work_arg),
                 void *background_work_arg) override;
 
-        DCClient *dc_client_;
+        CCClient *dc_client_;
         MemManager *mem_manager_;
 
-        DCClient *dc_client() override { return dc_client_; }
+        CCClient *dc_client() override { return dc_client_; }
 
         MemManager *mem_manager() override { return mem_manager_; }
 
@@ -105,6 +136,10 @@ namespace leveldb {
         bool IsInitialized();
 
         void Start();
+
+        void DeleteMCSSTables();
+
+        void AddDeleteSSTables(const std::vector<DeleteTableRequest> &requests);
 
         nova::NovaRDMAStore *rdma_store_;
         uint64_t thread_id_ = 0;
@@ -128,12 +163,12 @@ namespace leveldb {
 
         rdmaio::RdmaCtrl *rdma_ctrl_;
         port::Mutex background_work_mutex_;
-        port::CondVar background_work_cv_ GUARDED_BY(
-                background_work_mutex_);
+        sem_t signal;
         std::queue<BackgroundWorkItem> background_work_queue_
         GUARDED_BY(background_work_mutex_);
 
         bool is_running_ = false;
+        std::vector<DeleteTableRequest> delete_table_requests_;
         leveldb::port::Mutex mutex_;
     };
 }

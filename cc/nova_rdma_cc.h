@@ -16,9 +16,10 @@
 #include "nova/nova_rdma_store.h"
 #include <semaphore.h>
 #include <list>
-#include <dc/nova_dc_client.h>
+#include <cc/nova_cc_client.h>
 #include "log/nova_log.h"
 #include "nova_cc_log_writer.h"
+#include "nova_cc_server.h"
 
 namespace nova {
 
@@ -70,7 +71,8 @@ namespace nova {
         int size();
 
         NovaRDMAStore *rdma_store_ = nullptr;
-        leveldb::DCClient *dc_client_ = nullptr;
+        leveldb::CCClient *cc_client_ = nullptr;
+        NovaCCServer *cc_server_ = nullptr;
 
         uint64_t thread_id_;
 

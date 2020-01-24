@@ -29,6 +29,14 @@ namespace leveldb {
         Cache *cache = reinterpret_cast<Cache *>(arg1);
         Cache::Handle *h = reinterpret_cast<Cache::Handle *>(arg2);
         cache->Release(h);
+
+        // Unref the table.
+        TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache->Value(
+                h));
+        NovaCCRandomAccessFile *file = dynamic_cast<NovaCCRandomAccessFile *>(tf->file);
+        if (file->wb_table()) {
+            file->wb_table()->Unref();
+        }
     }
 
     TableCache::TableCache(const std::string &dbname, const Options &options,
@@ -59,25 +67,38 @@ namespace leveldb {
         *handle = cache_->Lookup(key);
 
         bool cache_hit = true;
-        if (*handle == nullptr) {
+        NovaCCRandomAccessFile *file;
+
+        if (*handle) {
+            cache_hit = true;
+            // Check if the file is deleted.
+            TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache_->Value(
+                    *handle));
+            file = dynamic_cast<NovaCCRandomAccessFile *>(tf->file);
+            if (file->IsWBTableDeleted()) {
+                // Evict the table.
+                Evict(file_number);
+                cache_hit = false;
+            }
+        } else {
             cache_hit = false;
+        }
+
+        if (!cache_hit) {
             std::string fname = TableFileName(dbname_, file_number);
-            RandomAccessFile *file = nullptr;
             Table *table = nullptr;
             bool prefetch_all = false;
             if (caller == AccessCaller::kCompaction) {
                 prefetch_all = true;
             }
-            file = new NovaCCRemoteRandomAccessFile(dbname_, file_number, meta,
-                                                    options.dc_client,
-                                                    options.mem_manager,
-                                                    options.thread_id,
-                                                    prefetch_all);
-            if (s.ok()) {
-                s = Table::Open(options_, file, file_size, level, file_number,
-                                &table, db_profiler_);
-            }
-
+            file = new NovaCCRandomAccessFile(env_, dbname_, file_number, meta,
+                                              options.dc_client,
+                                              options.mem_manager,
+                                              options_.sstable_manager,
+                                              options.thread_id,
+                                              prefetch_all);
+            s = Table::Open(options_, file, file_size, level, file_number,
+                            &table, db_profiler_);
             RDMA_ASSERT(s.ok()) << s.ToString();
 
             if (!s.ok()) {
@@ -91,6 +112,11 @@ namespace leveldb {
                 tf->table = table;
                 *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
             }
+        }
+
+        // Reference the table.
+        if (file->wb_table()) {
+            file->wb_table()->Ref();
         }
 
         RDMA_LOG(rdmaio::DEBUG)
@@ -118,6 +144,8 @@ namespace leveldb {
         }
         Table *table = reinterpret_cast<TableAndFile *>(cache_->Value(
                 handle))->table;
+
+
         Iterator *result = table->NewIterator(caller, options);
         result->RegisterCleanup(&UnrefEntry, cache_, handle);
         if (tableptr != nullptr) {
@@ -136,8 +164,9 @@ namespace leveldb {
         Status s = FindTable(AccessCaller::kUserGet, options, meta, file_number,
                              file_size, level, &handle);
         if (s.ok()) {
-            Table *t = reinterpret_cast<TableAndFile *>(cache_->Value(
-                    handle))->table;
+            TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache_->Value(
+                    handle));
+            Table *t = tf->table;
             s = t->InternalGet(options, k, arg, handle_result);
             cache_->Release(handle);
         }

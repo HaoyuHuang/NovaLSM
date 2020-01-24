@@ -57,7 +57,7 @@ namespace nova {
         RangePartition range;
         uint32_t dbid;
         uint32_t cc_server_id;
-        std::vector<uint32_t> dc_server_ids;
+        std::vector<uint32_t> cc_server_ids;
     };
 
     struct DCFragment {

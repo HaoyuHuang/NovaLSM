@@ -9,7 +9,7 @@
 
 #include <thread>
 #include "nova/rdma_ctrl.hpp"
-#include "nova_rdma_dc.h"
+#include "cc/nova_cc_server.h"
 
 namespace nova {
     class NovaDCServer {
@@ -19,7 +19,7 @@ namespace nova {
 
         void Start();
     private:
-        std::vector<NovaRDMADiskComponent *> dcs_;
+        std::vector<NovaCCServer *> dcs_;
         std::vector<std::thread> worker_threads;
     };
 }

@@ -30,7 +30,7 @@ namespace nova {
     void NovaRDMAComputeComponent::ProcessPut(const nova::NovaAsyncTask &task) {
         uint64_t hv = keyhash(task.key.data(), task.key.size());
         leveldb::WriteOptions option;
-        option.dc_client = dc_client_;
+        option.dc_client = cc_client_;
         option.sync = true;
         option.local_write = false;
         CCFragment *frag = NovaCCConfig::home_fragment(hv);
@@ -58,7 +58,7 @@ namespace nova {
         leveldb::DB *db = dbs_[frag->dbid];
         std::string value;
         leveldb::ReadOptions read_options;
-        read_options.dc_client = dc_client_;
+        read_options.dc_client = cc_client_;
         read_options.mem_manager = mem_manager_;
         read_options.thread_id = thread_id_;
 
@@ -182,6 +182,8 @@ namespace nova {
                                             uint64_t wr_id,
                                             int remote_server_id,
                                             char *buf, uint32_t imm_data) {
-        dc_client_->OnRecv(opcode, wr_id, remote_server_id, buf, imm_data);
+        cc_client_->OnRecv(opcode, wr_id, remote_server_id, buf, imm_data);
+        cc_server_->ProcessRDMAWC(opcode, wr_id, remote_server_id, buf,
+                                  imm_data);
     }
 }

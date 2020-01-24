@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <string>
 #include <vector>
+#include <map>
+#include <mutex>
+
 #include "slice.h"
 
 namespace leveldb {
@@ -90,6 +93,43 @@ namespace leveldb {
                   uint32_t scid) = 0;
 
         virtual uint32_t slabclassid(uint64_t key, uint32_t size) = 0;
+    };
+
+    class WBTable {
+    public:
+        uint64_t thread_id;
+        char *backing_mem;
+        uint64_t used_size;
+        uint64_t allocated_size;
+
+        void Ref();
+
+        void Unref();
+
+        bool is_deleted();
+
+        void Delete();
+
+    private:
+        MemManager *mem_manager_;
+        int refcount = 0;
+        bool deleted = false;
+
+        std::mutex mutex_;
+    };
+
+    class SSTableManager {
+    public:
+        virtual void AddSSTable(const std::string &dbname, uint64_t file_number,
+                                uint64_t thread_id,
+                                char *backing_mem, uint64_t used_size,
+                                uint64_t allocated_size, bool async_flush) = 0;
+
+        virtual void GetSSTable(const std::string &dbname, uint64_t file_number,
+                                WBTable **table) = 0;
+
+        virtual void
+        RemoveSSTable(const std::string &dbname, uint64_t file_number) = 0;
     };
 }
 

@@ -21,7 +21,7 @@
 
 #include "leveldb/export.h"
 #include "leveldb/status.h"
-#include "leveldb/dc_client.h"
+#include "leveldb/cc_client.h"
 #include "leveldb/db_types.h"
 
 #if defined(_WIN32)
@@ -83,7 +83,7 @@ namespace leveldb {
         // serialized.
         virtual void Schedule(void (*function)(void *arg), void *arg) = 0;
 
-        virtual DCClient *dc_client() = 0;
+        virtual CCClient *dc_client() = 0;
 
         virtual MemManager *mem_manager() = 0;
 

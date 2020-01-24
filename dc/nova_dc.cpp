@@ -75,7 +75,7 @@ namespace leveldb {
 
     uint64_t NovaDiskComponent::ReadBlocks(const std::string &dbname,
                                            uint64_t file_number,
-                                           const std::vector<leveldb::DCBlockHandle> &block_handles,
+                                           const std::vector<leveldb::CCBlockHandle> &block_handles,
                                            char *buf) {
         char *result_buf = buf;
         Cache::Handle *handle = nullptr;

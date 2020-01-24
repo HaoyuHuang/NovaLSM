@@ -11,8 +11,7 @@
 #include <mutex>
 #include "leveldb/env.h"
 
-#include "leveldb/dc_client.h"
-#include "mc/nova_mem_manager.h"
+#include "leveldb/cc_client.h"
 #include "leveldb/cache.h"
 
 namespace leveldb {
@@ -35,7 +34,7 @@ namespace leveldb {
         // Read the blocks and return the total size.
         uint64_t
         ReadBlocks(const std::string &dbname, uint64_t file_number,
-                   const std::vector<DCBlockHandle> &block_handls, char *buf);
+                   const std::vector<CCBlockHandle> &block_handls, char *buf);
 
         // Read the SSTable and return the total size.
         uint64_t

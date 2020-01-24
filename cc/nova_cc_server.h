@@ -1,52 +1,54 @@
 
 //
-// Created by Haoyu Huang on 4/4/19.
-// Copyright (c) 2019 University of Southern California. All rights reserved.
+// Created by Haoyu Huang on 1/8/20.
+// Copyright (c) 2020 University of Southern California. All rights reserved.
 //
 
-#ifndef RLIB_NOVA_MEM_SERVER_H
-#define RLIB_NOVA_MEM_SERVER_H
+#ifndef LEVELDB_NOVA_CC_SERVER_H
+#define LEVELDB_NOVA_CC_SERVER_H
 
-#include "mc/nova_mem_manager.h"
-#include "nova_cc_conn_worker.h"
-#include "nova/nova_config.h"
-#include "nova/nova_rdma_store.h"
 #include "nova/nova_rdma_rc_store.h"
-#include "cc/nova_rdma_cc.h"
-#include "leveldb/db.h"
-#include "nova_cc.h"
+#include "mc/nova_mem_manager.h"
+#include "dc/nova_dc.h"
+#include "log/nova_log.h"
 
 namespace nova {
-    class NovaCCConnWorker;
 
-    class NovaCCServer {
+    struct RequestContext {
+        leveldb::CCRequestType request_type;
+        uint32_t remote_server_id;
+        std::string db_name;
+        uint32_t file_number;
+        char *buf;
+        uint32_t sstable_size;
+    };
+
+    class NovaCCServer : public NovaMsgCallback {
     public:
-        NovaCCServer(RdmaCtrl *rdma_ctrl, char *rdmabuf, int nport);
+        NovaCCServer(rdmaio::RdmaCtrl *rdma_ctrl,
+                     NovaMemManager *mem_manager,
+                     leveldb::NovaDiskComponent *dc,
+                     LogFileManager *log_manager);
 
         void Start();
 
-        void SetupListener();
+        void
+        ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
+                      char *buf, uint32_t imm_data) override;
 
-        void LoadData();
+        NovaRDMAStore *rdma_store_;
+        uint64_t thread_id_;
 
-        void LoadDataWithRangePartition();
+    private:
+        bool is_running_ = true;
 
-        int nport_;
-        int listen_fd_ = -1;            /* listener descriptor      */
-
-        std::vector<leveldb::DB *> dbs_;
-        NovaMemManager *manager;
-        LogFileManager *log_manager;
-        std::vector<NovaCCConnWorker*> conn_workers;
-        std::vector<NovaRDMAComputeComponent *> async_workers;
-        std::vector<leveldb::NovaCCCompactionThread *> bgs;
-
-        struct event_base *base;
-        int current_conn_worker_id_;
-        vector<thread> conn_worker_threads;
-        vector<thread> cc_workers;
-        vector<thread> compaction_workers;
+        rdmaio::RdmaCtrl *rdma_ctrl_;
+        NovaMemManager *mem_manager_;
+        leveldb::NovaDiskComponent *dc_;
+        LogFileManager *log_manager_;
+        std::map<uint64_t, RequestContext> request_context_map_;
     };
 }
 
-#endif //RLIB_NOVA_MEM_SERVER_H
+
+#endif //LEVELDB_NOVA_CC_SERVER_H

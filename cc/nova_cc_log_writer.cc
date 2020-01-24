@@ -81,8 +81,8 @@ namespace leveldb {
             Init(log_file_name);
             current_log_file_ = log_file_name;
             memcpy(rnic_buf_, slice.data(), slice.size());
-            for (int i = 0; i < frag->dc_server_ids.size(); i++) {
-                uint32_t remote_server_id = frag->dc_server_ids[i];
+            for (int i = 0; i < frag->cc_server_ids.size(); i++) {
+                uint32_t remote_server_id = frag->cc_server_ids[i];
                 nreplicas++;
 
                 auto &it = logfile_last_buf_[log_file_name];
@@ -127,8 +127,8 @@ namespace leveldb {
                 store_->PollRQ();
 
                 n++;
-                for (int i = 0; i < frag->dc_server_ids.size(); i++) {
-                    uint32_t remote_server_id = frag->dc_server_ids[i];
+                for (int i = 0; i < frag->cc_server_ids.size(); i++) {
+                    uint32_t remote_server_id = frag->cc_server_ids[i];
 
                     switch (write_result_[remote_server_id].result) {
                         case WriteResult::NONE:
@@ -173,8 +173,8 @@ namespace leveldb {
 
             delete logfile_last_buf_[log_file_name];
             logfile_last_buf_.erase(log_file_name);
-            for (int i = 0; i < frag->dc_server_ids.size(); i++) {
-                uint32_t remote_server_id = frag->dc_server_ids[i];
+            for (int i = 0; i < frag->cc_server_ids.size(); i++) {
+                uint32_t remote_server_id = frag->cc_server_ids[i];
                 char *send_buf = store_->GetSendBuf(remote_server_id);
                 char *buf = send_buf;
                 buf[0] = nova::RequestType::DELETE_LOG_FILE;

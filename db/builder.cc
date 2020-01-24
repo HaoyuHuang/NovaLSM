@@ -31,13 +31,14 @@ namespace leveldb {
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("CompactMemTable tid:{} alloc_size:{}",
                                key, options.max_dc_file_size);
-            NovaCCRemoteMemFile *cc_file = new NovaCCRemoteMemFile(env,
-                                                                   meta->number,
-                                                                   mem_manager,
-                                                                   options.bg_thread->dc_client(),
-                                                                   dbname,
-                                                                   options.bg_thread->thread_id(),
-                                                                   options.max_dc_file_size);
+            NovaCCMemFile *cc_file = new NovaCCMemFile(env,
+                                                       meta->number,
+                                                       mem_manager,
+                                                       options.sstable_manager,
+                                                       options.bg_thread->dc_client(),
+                                                       dbname,
+                                                       options.bg_thread->thread_id(),
+                                                       options.max_dc_file_size);
             WritableFile *file = new MemWritableFile(cc_file);
             TableBuilder *builder = new TableBuilder(options, file);
             meta->smallest.DecodeFrom(iter->key());
@@ -63,6 +64,9 @@ namespace leveldb {
             if (s.ok()) {
                 s = file->Close();
             }
+
+            // Wait for writes to complete.
+            cc_file->WaitForWRITEs();
 
             delete cc_file;
             cc_file = nullptr;
