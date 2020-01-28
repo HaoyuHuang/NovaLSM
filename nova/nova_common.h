@@ -150,8 +150,11 @@ namespace nova {
     std::string
     DBName(const std::string &dbname, uint32_t server_id, uint32_t index);
 
-    void ParseDBName(const std::string &logname, uint32_t *server_id,
-                     uint32_t *index);
+    void ParseDBIndexFromFile(const std::string &logname, uint32_t *server_id,
+                              uint32_t *index);
+
+    void ParseDBIndexFromDBName(const std::string &dbname, uint32_t *server_id,
+                                uint32_t *index);
 
     uint64_t LogFileHash(const std::string &logname);
 

@@ -65,7 +65,7 @@ namespace nova {
                              char *buf) {
         uint32_t sid;
         uint32_t db_index;
-        ParseDBName(log_file, &sid, &db_index);
+        ParseDBIndexFromFile(log_file, &sid, &db_index);
 
         DBLogFiles *db = server_db_log_files_[sid][db_index];
         db->mutex_.Lock();
@@ -91,7 +91,7 @@ namespace nova {
     void LogFileManager::DeleteLogBuf(const std::string &log_file) {
         uint32_t sid;
         uint32_t db_index;
-        ParseDBName(log_file, &sid, &db_index);
+        ParseDBIndexFromFile(log_file, &sid, &db_index);
 
         DBLogFiles *db = server_db_log_files_[sid][db_index];
 

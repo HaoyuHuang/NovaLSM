@@ -72,6 +72,7 @@ namespace nova {
                     memset(&send_sges_[i][j], 0, sizeof(struct ibv_sge));
                     memset(&send_wrs_[i][j], 0, sizeof(struct ibv_send_wr));
                 }
+                server_qp_idx_map[end_points[i].server_id] = i;
             }
             RDMA_LOG(INFO) << "rc[" << thread_id << "]: " << "created rdma";
         }
@@ -121,6 +122,7 @@ namespace nova {
                      uint64_t remote_addr, bool is_offset,
                      uint32_t imm_data);
 
+        std::map<uint32_t, int> server_qp_idx_map;
         std::vector<QPEndPoint> end_points_;
         int thread_id_;
         char *rdma_buf_;

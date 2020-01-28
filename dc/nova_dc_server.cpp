@@ -78,8 +78,8 @@ namespace nova {
     void NovaDCServer::Start() {
         for (int worker_id = 0;
              worker_id < NovaDCConfig::dc_config->num_dc_workers; worker_id++) {
-            worker_threads.emplace_back(&NovaCCServer::Start,
-                                        dcs_[worker_id]);
+//            worker_threads.emplace_back(&NovaCCServer::Start,
+//                                        dcs_[worker_id]);
         }
         for (auto &t : worker_threads) {
             t.join();

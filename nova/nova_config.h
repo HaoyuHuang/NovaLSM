@@ -20,6 +20,10 @@ namespace nova {
     using namespace std;
     using namespace rdmaio;
 
+    enum ScatterSSTablePolicy {
+        SCATTER_SSTABLE_RANDOM
+    };
+
     class NovaConfig {
     public:
         bool enable_load_data;
@@ -147,6 +151,9 @@ namespace nova {
         int write_buffer_size_mb;
         std::vector<CCFragment *> fragments;
         std::vector<CCFragment *> db_fragment;
+        ScatterSSTablePolicy scatter_sstable_policy;
+        int num_data_groups_in_group;
+
 
         static NovaCCConfig *cc_config;
     };

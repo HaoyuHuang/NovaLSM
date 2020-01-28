@@ -20,7 +20,8 @@ namespace leveldb {
 
         class RDMALogWriter {
         public:
-            RDMALogWriter(nova::NovaRDMAStore *store, char *rnic_buf);
+            RDMALogWriter(nova::NovaRDMAStore *store, char *rnic_buf, MemManager *mem_manager,
+            nova::LogFileManager *log_manager);
 
             Status
             AddRecord(const std::string &log_file_name,

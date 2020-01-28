@@ -35,85 +35,113 @@ namespace leveldb {
         RDMA_ASSERT(cc_client);
 
         // Only used for flushing SSTables.
-        uint32_t scid = mem_manager->slabclassid(thread_id, file_size);
-        backing_mem_ = mem_manager->ItemAlloc(thread_id, scid);
+        // Policy.
+
+        int server_id = 0;
+        switch (nova::NovaCCConfig::cc_config->scatter_sstable_policy) {
+            case nova::ScatterSSTablePolicy::SCATTER_SSTABLE_RANDOM:
+                server_id = rand() %
+                            nova::NovaCCConfig::cc_config->cc_servers.size();
+                break;
+        }
+
+
+        if (server_id != nova::NovaConfig::config->my_server_id) {
+            // local
+            uint32_t scid = mem_manager->slabclassid(thread_id, file_size);
+            backing_mem_ = mem_manager->ItemAlloc(thread_id, scid);
+            RDMA_ASSERT(backing_mem_) << "Running out of memory";
+
+            // remote
+            uint32_t req_id = cc_client->InitiateAllocateSSTableBuffer(
+                    server_id, dbname, file_number,
+                    file_size);
+            CCResponse response;
+            while (!cc_client->IsDone(req_id, &response)) {
+                remote_sstable_bufs_[server_id] = response.remote_sstable_buf;
+            }
+        }
 
         //  Allocate memory from other CCs in parallel. If fail, create a local linux file.
         //  A hash map in cc_client to remember the remote memory buffer for this file as well.
         //  Fsync: WRITE to the remote buffer. Record the request id.
         //  When compaction completes, wait for all WRITEs to complete.
-        if (backing_mem_) {
-            uint32_t sid;
-            uint32_t db_index;
-            nova::ParseDBName(dbname, &sid, &db_index);
-            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
-            int requests[frag->cc_server_ids.size()];
-            for (int i = 0; i < frag->cc_server_ids.size(); i++) {
-                int replica_id = frag->cc_server_ids[i];
-                if (replica_id == nova::NovaConfig::config->my_server_id) {
-                    continue;
-                }
-
-                uint32_t req_id = cc_client->InitiateAllocateSSTableBuffer(
-                        replica_id, dbname, file_number,
-                        file_size);
-                requests[i] = req_id;
-            }
-
-            // wait for them to complete.
-            for (int i = 0; i < frag->cc_server_ids.size(); i++) {
-                int replica_id = frag->cc_server_ids[i];
-                if (replica_id == nova::NovaConfig::config->my_server_id) {
-                    continue;
-                }
-
-                CCResponse response;
-                while (!cc_client->IsDone(requests[i], &response)) {
-                    if (response.remote_sstable_buf != 0) {
-                        remote_sstable_bufs_[replica_id] = response.remote_sstable_buf;
-                    }
-                }
-            }
-
-            // Check if I got all bufs.
-            if (remote_sstable_bufs_.size() == frag->cc_server_ids.size() - 1) {
-                // Nice.
-
-            } else {
-                // Release all bufs since one of them does not have memory.
-                for (auto &it : remote_sstable_bufs_) {
-                    cc_client->InitiateReleaseSSTableBuffer(it.first, dbname,
-                                                            file_number,
-                                                            file_size);
-                }
-                mem_manager->FreeItem(thread_id, backing_mem_, scid);
-                backing_mem_ = nullptr;
-                remote_sstable_bufs_.clear();
-            }
-        }
+//        if (backing_mem_) {
+//            uint32_t sid;
+//            uint32_t db_index;
+//            nova::ParseDBIndexFromDBName(dbname, &sid, &db_index);
+//            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
+//            int requests[frag->cc_server_ids.size()];
+//            for (int i = 0; i < frag->cc_server_ids.size(); i++) {
+//                int replica_id = frag->cc_server_ids[i];
+//                if (replica_id == nova::NovaConfig::config->my_server_id) {
+//                    continue;
+//                }
+//
+//                uint32_t req_id = cc_client->InitiateAllocateSSTableBuffer(
+//                        replica_id, dbname, file_number,
+//                        file_size);
+//                requests[i] = req_id;
+//            }
+//
+//            // wait for them to complete.
+//            for (int i = 0; i < frag->cc_server_ids.size(); i++) {
+//                int replica_id = frag->cc_server_ids[i];
+//                if (replica_id == nova::NovaConfig::config->my_server_id) {
+//                    continue;
+//                }
+//
+//                CCResponse response;
+//                while (!cc_client->IsDone(requests[i], &response)) {
+//                    if (response.remote_sstable_buf != 0) {
+//                        remote_sstable_bufs_[replica_id] = response.remote_sstable_buf;
+//                    }
+//                }
+//            }
+//
+//            // Check if I got all bufs.
+//            if (remote_sstable_bufs_.size() == frag->cc_server_ids.size() - 1) {
+//                // Nice.
+//
+//            } else {
+//                // Release all bufs since one of them does not have memory.
+//                for (auto &it : remote_sstable_bufs_) {
+//                    cc_client->InitiateReleaseSSTableBuffer(it.first, dbname,
+//                                                            file_number,
+//                                                            file_size);
+//                }
+//                mem_manager->FreeItem(thread_id, backing_mem_, scid);
+//                backing_mem_ = nullptr;
+//                remote_sstable_bufs_.clear();
+//            }
+//        }
 
         RDMA_LOG(rdmaio::DEBUG) << fmt::format(
                     "Create remote memory file tid:{} fname:{} size:{}",
                     thread_id, fname_, file_size);
 
-        EnvFileMetadata env_meta;
-        env_meta.level = 0;
-        RDMA_ASSERT(
-                env_->NewWritableFile(fname_, env_meta,
-                                      &local_writable_file_).ok());
+        if (!backing_mem_) {
+            EnvFileMetadata env_meta;
+            env_meta.level = 0;
+            RDMA_ASSERT(
+                    env_->NewWritableFile(fname_, env_meta,
+                                          &local_writable_file_).ok());
+        }
     }
 
     NovaCCMemFile::~NovaCCMemFile() {
-//        if (backing_mem_) {
-//            uint32_t scid = mem_manager_->slabclassid(thread_id_,
-//                                                      allocated_size_);
-//            mem_manager_->FreeItem(thread_id_, backing_mem_, scid);
-//
-//            RDMA_LOG(rdmaio::DEBUG) << fmt::format(
-//                        "Free remote memory file tid:{} fn:{} size:{}",
-//                        thread_id_, fname_, allocated_size_);
-//        }
-        delete local_writable_file_;
+        if (backing_mem_) {
+            uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                      allocated_size_);
+            mem_manager_->FreeItem(thread_id_, backing_mem_, scid);
+
+            RDMA_LOG(rdmaio::DEBUG) << fmt::format(
+                        "Free remote memory file tid:{} fn:{} size:{}",
+                        thread_id_, fname_, allocated_size_);
+        }
+        if (local_writable_file_) {
+            delete local_writable_file_;
+        }
     }
 
     Status
@@ -139,6 +167,7 @@ namespace leveldb {
 
     Status NovaCCMemFile::Append(const leveldb::Slice &data) {
         if (!backing_mem_) {
+            RDMA_ASSERT(local_writable_file_);
             return local_writable_file_->Append(data);
         }
 
@@ -167,14 +196,14 @@ namespace leveldb {
         RDMA_ASSERT(used_size_ == meta_.file_size) << fmt::format(
                     "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{}",
                     thread_id_, fname_, dbname_, allocated_size_, used_size_);
-        if (backing_mem_) {
-            for (auto &it : remote_sstable_bufs_) {
-                uint32_t reqid = cc_client_->InitiateWRITESSTableBuffer(
-                        it.first, backing_mem_,
-                        it.second, used_size_);
-                WRITE_requests_.push_back(reqid);
-            }
-        } else {
+        for (auto &it : remote_sstable_bufs_) {
+            uint32_t reqid = cc_client_->InitiateWRITESSTableBuffer(
+                    it.first, backing_mem_,
+                    it.second, used_size_);
+            WRITE_requests_.push_back(reqid);
+        }
+
+        if (!backing_mem_) {
             local_writable_file_->Sync();
         }
         return Status::OK();
@@ -208,7 +237,7 @@ namespace leveldb {
         RDMA_ASSERT(dc_client_);
         RDMA_ASSERT(sstable_manager);
 
-        // TODO: Look up SSTable Manager. If file is present, read it from the buffer.
+        // Look up SSTable Manager. If file is present, read it from the buffer.
         //  Otherwise, read the file from linux. When it's done, decrement the ref count of the buffered SSTable.
         sstable_manager_->GetSSTable(dbname, file_number, &wb_table_);
         if (!wb_table_) {
@@ -355,7 +384,6 @@ namespace leveldb {
             delete_table_requests_.push_back(req);
         }
         mutex_.Unlock();
-
         sem_post(&signal);
     }
 
@@ -376,11 +404,9 @@ namespace leveldb {
         for (auto &it : dbfiles) {
             uint32_t sid = 0;
             uint32_t index = 0;
-            nova::ParseDBName(it.first, &sid, &index);
-            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[index];
+            nova::ParseDBIndexFromDBName(it.first, &sid, &index);
             dc_client_->InitiateDeleteTables(it.first, it.second);
         }
-
     }
 
     void NovaCCCompactionThread::Start() {
@@ -391,22 +417,41 @@ namespace leveldb {
         mutex_.Unlock();
 
         std::cout << "BG thread started" << std::endl;
-        while (true) {
-            sem_wait(&signal);
+
+        bool should_sleep = true;
+        uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
+        while (is_running_) {
+            if (should_sleep) {
+                usleep(timeout);
+            }
+            int n = 0;
+            n += rdma_store_->PollSQ();
+            n += rdma_store_->PollRQ();
 
             DeleteMCSSTables();
 
             background_work_mutex_.Lock();
+            n += background_work_queue_.size();
             if (background_work_queue_.empty()) {
                 background_work_mutex_.Unlock();
-                continue;
+            } else {
+                auto background_work_function = background_work_queue_.front().function;
+                void *background_work_arg = background_work_queue_.front().arg;
+                background_work_queue_.pop();
+                background_work_mutex_.Unlock();
+                background_work_function(background_work_arg);
             }
 
-            auto background_work_function = background_work_queue_.front().function;
-            void *background_work_arg = background_work_queue_.front().arg;
-            background_work_queue_.pop();
-            background_work_mutex_.Unlock();
-            background_work_function(background_work_arg);
+            if (n == 0) {
+                should_sleep = true;
+                timeout *= 2;
+                if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
+                    timeout = RDMA_POLL_MAX_TIMEOUT_US;
+                }
+            } else {
+                should_sleep = false;
+                timeout = RDMA_POLL_MIN_TIMEOUT_US;
+            }
         }
     }
 

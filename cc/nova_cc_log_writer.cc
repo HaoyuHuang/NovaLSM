@@ -12,8 +12,11 @@ namespace leveldb {
         // Create a writer that will append data to "*dest".
 // "*dest" must be initially empty.
 // "*dest" must remain live while this Writer is in use.
-        RDMALogWriter::RDMALogWriter(nova::NovaRDMAStore *store, char *rnic_buf)
-                : store_(store), rnic_buf_(rnic_buf) {
+        RDMALogWriter::RDMALogWriter(nova::NovaRDMAStore *store, char *rnic_buf,
+                                     MemManager *mem_manager,
+                                     nova::LogFileManager *log_manager)
+                : store_(store), rnic_buf_(rnic_buf), mem_manager_(mem_manager),
+                  log_manager_(log_manager) {
             write_result_ = new WriteState[nova::NovaConfig::config->servers.size()];
             for (int i = 0;
                  i < nova::NovaConfig::config->servers.size(); i++) {
@@ -96,12 +99,11 @@ namespace leveldb {
             int nreplicas = 0;
             uint32_t sid;
             uint32_t db_index;
-            nova::ParseDBName(log_file_name, &sid, &db_index);
+            nova::ParseDBIndexFromFile(log_file_name, &sid, &db_index);
             nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
 
-            Init(log_file_name, thread_id, slice);
+            char *rnic_buf = Init(log_file_name, thread_id, slice);
             current_log_file_ = log_file_name;
-            memcpy(rnic_buf_, slice.data(), slice.size());
 
             for (int i = 0; i < frag->cc_server_ids.size(); i++) {
                 uint32_t remote_server_id = frag->cc_server_ids[i];
@@ -131,7 +133,7 @@ namespace leveldb {
                 } else {
                     // WRITE.
                     write_result_[remote_server_id].rdma_wr_id = store_->PostWrite(
-                            rnic_buf_, slice.size(), remote_server_id,
+                            rnic_buf, slice.size(), remote_server_id,
                             it[remote_server_id].base +
                             it[remote_server_id].offset,
                             false, 0);
@@ -156,6 +158,10 @@ namespace leveldb {
                 n++;
                 for (int i = 0; i < frag->cc_server_ids.size(); i++) {
                     uint32_t remote_server_id = frag->cc_server_ids[i];
+                    if (remote_server_id ==
+                        nova::NovaConfig::config->my_server_id) {
+                        continue;
+                    }
 
                     switch (write_result_[remote_server_id].result) {
                         case WriteResult::NONE:
@@ -167,7 +173,7 @@ namespace leveldb {
                         case WriteResult::ALLOC_SUCCESS:
                             it = logfile_last_buf_[current_log_file_];
                             write_result_[remote_server_id].rdma_wr_id = store_->PostWrite(
-                                    rnic_buf_, slice.size(),
+                                    rnic_buf, slice.size(),
                                     remote_server_id,
                                     it[remote_server_id].base +
                                     it[remote_server_id].offset, /*is_remote_offset=*/
@@ -195,7 +201,7 @@ namespace leveldb {
         Status RDMALogWriter::CloseLogFile(const std::string &log_file_name) {
             uint32_t sid;
             uint32_t db_index;
-            nova::ParseDBName(log_file_name, &sid, &db_index);
+            nova::ParseDBIndexFromFile(log_file_name, &sid, &db_index);
             nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
 
             delete logfile_last_buf_[log_file_name];

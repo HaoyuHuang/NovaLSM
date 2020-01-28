@@ -66,7 +66,7 @@ namespace nova {
 
             uint32_t sid = 0;
             uint32_t index = 0;
-            nova::ParseDBName(tablename, &sid, &index);
+            nova::ParseDBIndexFromDBName(req.dbname, &sid, &index);
             dbs_[index]->EvictFileFromCache(req.file_number);
 
             leveldb::DeleteTableRequest dtr;
@@ -75,7 +75,7 @@ namespace nova {
             requests.push_back(dtr);
         }
 
-        // Wake up.
+        // Wake up compaction thread to delete replicas of sstables.
         compact_thread_->AddDeleteSSTables(requests);
     }
 }

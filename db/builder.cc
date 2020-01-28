@@ -73,6 +73,16 @@ namespace leveldb {
             delete file;
             file = nullptr;
 
+            if (cc_file->backing_mem()) {
+                options.sstable_manager->AddSSTable(dbname,
+                                                    cc_file->file_number(),
+                                                    cc_file->thread_id(),
+                                                    (char *) cc_file->backing_mem(),
+                                                    cc_file->used_size(),
+                                                    cc_file->allocated_size(),
+                        /*async_flush=*/true);
+            }
+
             if (s.ok()) {
                 // Verify that the table is usable
 //                Iterator *it = table_cache->NewIterator(

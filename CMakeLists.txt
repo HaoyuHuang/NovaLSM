@@ -553,8 +553,11 @@ target_link_libraries(leveldbutil leveldb)
 #endif (LEVELDB_INSTALL)
 
 
-add_executable(nova_main "nova/nova_main.cpp")
-target_link_libraries(nova_main -lgflags leveldb)
+add_executable(nova_disaggregate_main "nova/nova_disaggregate_main.cpp")
+target_link_libraries(nova_disaggregate_main -lgflags leveldb)
+
+add_executable(nova_shared_main "nova/nova_shared_main.cpp")
+target_link_libraries(nova_shared_main -lgflags leveldb)
 
 add_executable(table_main "table/table_main.cc")
 target_link_libraries(table_main -lgflags leveldb)

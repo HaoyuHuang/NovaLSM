@@ -90,7 +90,7 @@ namespace nova {
             uint32_t index = 0;
             uint32_t sid = 0;
             std::string logname = leveldb::LogFileName(db_path, 1111);
-            ParseDBName(logname, &sid, &index);
+            ParseDBIndexFromFile(logname, &sid, &index);
             RDMA_ASSERT(index == db_index);
             RDMA_ASSERT(NovaConfig::config->my_server_id == sid);
             return db;
@@ -210,7 +210,6 @@ namespace nova {
     NovaCCNICServer::NovaCCNICServer(RdmaCtrl *rdma_ctrl,
                                      char *rdmabuf, int nport)
             : nport_(nport) {
-
         std::map<uint32_t, std::set<uint32_t >> dbids = NovaCCConfig::ReadDatabases(
                 NovaCCConfig::cc_config->fragments);
         for (auto sid : dbids) {
@@ -225,35 +224,34 @@ namespace nova {
         char *cache_buf = buf + nrdma_buf_cc();
         manager = new NovaMemManager(cache_buf);
         log_manager = new LogFileManager(manager);
-
         sstable_manager_ = new leveldb::NovaSSTableManager(manager, wb_workers);
 
         int ndbs = NovaCCConfig::ParseNumberOfDatabases(
                 NovaCCConfig::cc_config->fragments,
                 &NovaCCConfig::cc_config->db_fragment,
                 NovaConfig::config->my_server_id);
-
         int bg_thread_id = 0;
         for (int i = 0;
              i < NovaCCConfig::cc_config->num_compaction_workers; i++) {
             bgs.push_back(new leveldb::NovaCCCompactionThread(rdma_ctrl));
         }
 
-        leveldb::Cache *cache = nullptr;
+        leveldb::Cache *block_cache = nullptr;
         if (NovaCCConfig::cc_config->block_cache_mb > 0) {
             uint64_t cache_size =
                     (uint64_t) (NovaCCConfig::cc_config->block_cache_mb) *
                     1024 * 1024;
-            cache = leveldb::NewLRUCache(cache_size);
+            block_cache = leveldb::NewLRUCache(cache_size);
         }
         RDMA_LOG(INFO)
             << fmt::format("Block cache size {}. Configured size {} MB",
-                           cache->TotalCapacity(),
+                           block_cache->TotalCapacity(),
                            NovaCCConfig::cc_config->block_cache_mb);
 
         for (int db_index = 0; db_index < ndbs; db_index++) {
-            dbs_.push_back(CreateDatabase(db_index, cache, bgs[bg_thread_id],
-                                          sstable_manager_));
+            dbs_.push_back(
+                    CreateDatabase(db_index, block_cache, bgs[bg_thread_id],
+                                   sstable_manager_));
             bg_thread_id += 1;
             bg_thread_id %= bgs.size();
         }
@@ -331,11 +329,12 @@ namespace nova {
                                                                      manager,
                                                                      new leveldb::log::RDMALogWriter(
                                                                              store,
-                                                                             rnic_buf));
+                                                                             rnic_buf,
+                                                                             manager,
+                                                                             log_manager));
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
                                                                    manager, dc,
                                                                    log_manager);
-
             cc->rdma_store_ = store;
             cc->thread_id_ = worker_id;
             cc->cc_client_ = dc_client;
@@ -384,7 +383,9 @@ namespace nova {
                                                                      manager,
                                                                      new leveldb::log::RDMALogWriter(
                                                                              store,
-                                                                             rnic_buf));
+                                                                             rnic_buf,
+                                                                             manager,
+                                                                             log_manager));
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
                                                                    manager, dc,
                                                                    log_manager);

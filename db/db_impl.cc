@@ -960,6 +960,7 @@ namespace leveldb {
             s = compact->outfile->Close();
         }
 
+        // TODO: Construct RTables.
         // Also delete its contained mem file.
         // Defer the deletion until compaction completes.
 //        delete mem_file;

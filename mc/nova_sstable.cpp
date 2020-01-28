@@ -84,7 +84,7 @@ namespace leveldb {
                                         bool async_flush) {
         uint32_t server_id;
         uint32_t db_indx;
-        nova::ParseDBName(dbname, &server_id, &db_indx);
+        nova::ParseDBIndexFromDBName(dbname, &server_id, &db_indx);
 
         DBSSTables *tables = server_db_sstables_[server_id][db_indx];
         tables->mutex_.lock();
@@ -112,7 +112,7 @@ namespace leveldb {
         *table = nullptr;
         uint32_t server_id;
         uint32_t db_indx;
-        nova::ParseDBName(dbname, &server_id, &db_indx);
+        nova::ParseDBIndexFromDBName(dbname, &server_id, &db_indx);
 
         DBSSTables *tables = server_db_sstables_[server_id][db_indx];
         tables->mutex_.lock();
@@ -130,7 +130,7 @@ namespace leveldb {
                                            uint64_t file_number) {
         uint32_t server_id;
         uint32_t db_indx;
-        nova::ParseDBName(dbname, &server_id, &db_indx);
+        nova::ParseDBIndexFromDBName(dbname, &server_id, &db_indx);
 
         DBSSTables *tables = server_db_sstables_[server_id][db_indx];
         tables->mutex_.lock();
@@ -146,7 +146,7 @@ namespace leveldb {
                                             const std::vector<uint64_t> &file_numbers) {
         uint32_t server_id;
         uint32_t db_indx;
-        nova::ParseDBName(dbname, &server_id, &db_indx);
+        nova::ParseDBIndexFromDBName(dbname, &server_id, &db_indx);
 
         DBSSTables *tables = server_db_sstables_[server_id][db_indx];
         tables->mutex_.lock();

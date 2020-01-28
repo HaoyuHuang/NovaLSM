@@ -14,7 +14,7 @@ namespace nova {
     RNicHandler *device = nullptr;
 
     uint32_t NovaRDMARCStore::to_qp_idx(uint32_t server_id) {
-        return server_id - end_points_[0].server_id;
+        return server_qp_idx_map[server_id];
     }
 
     void NovaRDMARCStore::Init(RdmaCtrl *rdma_ctrl) {

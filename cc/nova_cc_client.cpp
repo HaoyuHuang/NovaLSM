@@ -29,7 +29,7 @@ namespace leveldb {
                                                 const std::vector<uint64_t> &filenumbers) {
         uint32_t sid;
         uint32_t dbid;
-        nova::ParseDBName(dbname, &sid, &dbid);
+        nova::ParseDBIndexFromDBName(dbname, &sid, &dbid);
 
         nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid];
         for (int replica_id : frag->cc_server_ids) {
@@ -62,7 +62,7 @@ namespace leveldb {
         sendbuf[0] = CCRequestType::CC_WRITE_REPLICATE_SSTABLE;
         EncodeFixed32(sendbuf + 1, req_id);
         context.wr_id = rdma_store_->PostWrite(src, file_size, remote_server_id,
-                                               dest, false, 0);
+                                               dest, false, req_id);
         request_context_[req_id] = context;
         return req_id;
     }
@@ -73,7 +73,7 @@ namespace leveldb {
         uint32_t req_id = current_req_id_;
         CCRequestContext context = {};
         context.done = false;
-        uint32_t msg_size = 0;
+        uint32_t msg_size = 1;
         char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
         sendbuf[0] = CCRequestType::CC_ALLOCATE_SSTABLE_BUFFER;
         msg_size += EncodeStr(sendbuf + msg_size, dbname);
@@ -93,7 +93,7 @@ namespace leveldb {
         uint32_t req_id = current_req_id_;
         CCRequestContext context = {};
         context.done = false;
-        uint32_t msg_size = 0;
+        uint32_t msg_size = 1;
         char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
         sendbuf[0] = CCRequestType::CC_RELEASE_SSTABLE_BUFFER;
         msg_size += EncodeStr(sendbuf + msg_size, dbname);
@@ -333,6 +333,10 @@ namespace leveldb {
             case IBV_WC_SEND:
                 break;
             case IBV_WC_RDMA_WRITE:
+                if (buf[0] == CCRequestType::CC_WRITE_REPLICATE_SSTABLE) {
+                    uint32_t req_id = leveldb::DecodeFixed32(buf + 1);
+                    request_context_[req_id].done = true;
+                }
                 rdma_log_writer_->AckWriteSuccess(remote_server_id, wr_id);
                 break;
             case IBV_WC_RDMA_READ:
@@ -346,31 +350,31 @@ namespace leveldb {
                 if (context_it != request_context_.end()) {
                     // I sent this request a while ago and now it is complete.
                     auto &context = context_it->second;
-                    if (context.req_type == CCRequestType::CC_READ_BLOCKS ||
-                        context.req_type ==
-                        CCRequestType::CC_READ_SSTABLE ||
-                        buf[0] == CCRequestType::CC_FLUSH_SSTABLE_SUCC) {
-                        context.done = true;
-                    } else if (buf[0] == CCRequestType::CC_FLUSH_SSTABLE_BUF) {
-                        uint64_t remote_dc_offset = leveldb::DecodeFixed64(
-                                buf + 1);
-
-                        rdma_store_->PostWrite(
-                                context.backing_mem,
-                                context.size,
-                                remote_server_id, remote_dc_offset,
-                                false, req_id);
-                    } else if (buf[0] ==
-                               CCRequestType::CC_ALLOCATE_SSTABLE_BUFFER_SUCC) {
+                    if (buf[0] ==
+                        CCRequestType::CC_ALLOCATE_SSTABLE_BUFFER_SUCC) {
                         uint64_t mr = leveldb::DecodeFixed64(buf + 1);
                         context.remote_sstable_buf = mr;
                         context.done = true;
-                    } else {
-                        RDMA_ASSERT(false)
-                            << fmt::format("Unknown request context {}.",
-                                           context.req_type);
                     }
-                    return;
+//                    else if (context.req_type == CCRequestType::CC_READ_BLOCKS ||
+//                               context.req_type ==
+//                               CCRequestType::CC_READ_SSTABLE ||
+//                               buf[0] == CCRequestType::CC_FLUSH_SSTABLE_SUCC) {
+//                        context.done = true;
+//                    } else if (buf[0] == CCRequestType::CC_FLUSH_SSTABLE_BUF) {
+//                        uint64_t remote_dc_offset = leveldb::DecodeFixed64(
+//                                buf + 1);
+//
+//                        rdma_store_->PostWrite(
+//                                context.backing_mem,
+//                                context.size,
+//                                remote_server_id, remote_dc_offset,
+//                                false, req_id);
+//                    } else {
+//                        RDMA_ASSERT(false)
+//                            << fmt::format("Unknown request context {}.",
+//                                           context.req_type);
+//                    }
                 }
 
                 if (buf[0] ==
@@ -379,12 +383,13 @@ namespace leveldb {
                     uint64_t size = leveldb::DecodeFixed64(buf + 9);
                     rdma_log_writer_->AckAllocLogBuf(remote_server_id, base,
                                                      size);
-                } else {
-                    RDMA_ASSERT(false) << fmt::format(
-                                "dcclient[{}]: unknown recv from {} imm:{} buf:{} ",
-                                cc_client_id_, remote_server_id, imm_data,
-                                buf[0]);
                 }
+//                else {
+//                    RDMA_ASSERT(false) << fmt::format(
+//                                "dcclient[{}]: unknown recv from {} imm:{} buf:{} ",
+//                                cc_client_id_, remote_server_id, imm_data,
+//                                buf[0]);
+//                }
                 break;
         }
     }

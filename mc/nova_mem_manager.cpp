@@ -114,23 +114,25 @@ namespace nova {
             free_slabs_mutex_.unlock();
             slab_class_mutex_[scid].unlock();
 
-            oom_lock.lock();
-            if (!print_class_oom) {
-                RDMA_LOG(INFO) << "No free slabs: Print slab class usages.";
-                print_class_oom = true;
-                for (int i = 0; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) {
-                    slab_class_mutex_[scid].lock();
-                    RDMA_LOG(INFO) << fmt::format(
-                                "slab class {} size:{} nfreeitems:{} slabs:{}",
-                                i,
-                                slab_classes_[i].size,
-                                slab_classes_[i].free_list.size(),
-                                slab_classes_[i].slabs.size());
-                    slab_class_mutex_[scid].unlock();
-                }
-            }
-            oom_lock.unlock();
-            RDMA_ASSERT(false);
+            RDMA_LOG(DEBUG) << "No free slabs.";
+            
+//            oom_lock.lock();
+//            if (!print_class_oom) {
+//                RDMA_LOG(DEBUG) << "No free slabs: Print slab class usages.";
+//                print_class_oom = true;
+//                for (int i = 0; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) {
+//                    slab_class_mutex_[scid].lock();
+//                    RDMA_LOG(DEBUG) << fmt::format(
+//                                "slab class {} size:{} nfreeitems:{} slabs:{}",
+//                                i,
+//                                slab_classes_[i].size,
+//                                slab_classes_[i].free_list.size(),
+//                                slab_classes_[i].slabs.size());
+//                    slab_class_mutex_[scid].unlock();
+//                }
+//            }
+//            oom_lock.unlock();
+//            RDMA_ASSERT(false);
             return nullptr;
         }
         slab = free_slabs_[free_slab_index_];

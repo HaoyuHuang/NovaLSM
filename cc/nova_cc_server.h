@@ -30,8 +30,6 @@ namespace nova {
                      leveldb::NovaDiskComponent *dc,
                      LogFileManager *log_manager);
 
-        void Start();
-
         void
         ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
                       char *buf, uint32_t imm_data) override;

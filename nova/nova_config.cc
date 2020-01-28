@@ -17,7 +17,7 @@ namespace nova {
         uint64_t nrdmatotal = nrdma_buf_unit() *
                               (NovaCCConfig::cc_config->num_async_workers +
                                NovaCCConfig::cc_config->num_compaction_workers) *
-                              NovaDCConfig::dc_config->dc_servers.size();
+                              NovaCCConfig::cc_config->cc_servers.size();
         return nrdmatotal;
     }
 
