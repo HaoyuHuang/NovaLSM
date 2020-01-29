@@ -61,6 +61,7 @@ namespace leveldb {
             uint64_t number;
             uint64_t file_size;
             InternalKey smallest, largest;
+            std::vector<RTableHandle> data_block_group_handles;
         };
 
         Output *current_output() { return &outputs[outputs.size() - 1]; }
@@ -307,8 +308,14 @@ namespace leveldb {
         }
         std::vector<FileMetaData> files;
         std::vector<uint64_t> fds;
+        std::set<uint32_t> server_ids;
         for (auto it = compacted_tables_.begin();
              it != compacted_tables_.end(); it++) {
+            for (int i = 0;
+                 i < it->second.data_block_group_handles.size(); i++) {
+                server_ids.insert(
+                        it->second.data_block_group_handles[i].server_id);
+            }
             files.push_back(it->second);
             fds.push_back(it->second.number);
         }
@@ -320,7 +327,10 @@ namespace leveldb {
         for (const std::string &filename : files_to_delete) {
             env_->DeleteFile(dbname_ + "/" + filename);
         }
-        options_.bg_thread->dc_client()->InitiateDeleteTables(dbname_, fds);
+        for (auto server_id : server_ids) {
+            options_.bg_thread->dc_client()->InitiateDeleteTables(server_id,
+                                                                  dbname_, fds);
+        }
         mutex_.Lock();
     }
 
@@ -580,7 +590,7 @@ namespace leveldb {
                                                          max_user_key);
             }
             edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
-                          meta.largest);
+                          meta.largest, meta.data_block_group_handles);
         }
 
         CompactionStats stats;
@@ -804,7 +814,7 @@ namespace leveldb {
             c->edit()->DeleteFile(c->level(), f->number);
             c->edit()->AddFile(c->level() + 1, f->number, f->file_size,
                                f->smallest,
-                               f->largest);
+                               f->largest, f->data_block_group_handles);
             status = versions_->LogAndApply(c->edit(), &mutex_);
             if (!status.ok()) {
                 RecordBackgroundError(status);
@@ -863,23 +873,8 @@ namespace leveldb {
 
         // Also delete its contained mem file.
         // Delete everything now.
-        for (int i = 0; i < compact->output_files.size(); i++) {
-            MemWritableFile *out = compact->output_files[i];
-            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
-            mem_file->WaitForWRITEs();
+        // TODO:
 
-            if (mem_file->backing_mem()) {
-                options_.sstable_manager->AddSSTable(dbname_,
-                                                     mem_file->file_number(),
-                                                     mem_file->thread_id(),
-                                                     (char *) mem_file->backing_mem(),
-                                                     mem_file->used_size(),
-                                                     mem_file->allocated_size(),
-                        /*async_flush=*/true);
-            }
-            delete mem_file;
-            delete out;
-        }
 
         for (size_t i = 0; i < compact->outputs.size(); i++) {
             const CompactionState::Output &out = compact->outputs[i];
@@ -906,9 +901,9 @@ namespace leveldb {
         // Make the output file
         MemManager *mem_manager = options_.bg_thread->mem_manager();
         NovaCCMemFile *cc_file = new NovaCCMemFile(options_.env,
+                                                   options_,
                                                    file_number,
                                                    mem_manager,
-                                                   options_.sstable_manager,
                                                    options_.bg_thread->dc_client(),
                                                    dbname_,
                                                    options_.bg_thread->thread_id(),
@@ -999,6 +994,82 @@ namespace leveldb {
             compact->compaction->level() + 1,
             static_cast<long long>(compact->total_bytes));
 
+        std::vector<SSTableRTablePair> pairs[nova::NovaConfig::config->servers.size()];
+        std::vector<RTableHandle> handles[nova::NovaConfig::config->servers.size()];
+        uint32_t persist_reqs[nova::NovaConfig::config->servers.size()];
+        for (int i = 0; i < compact->output_files.size(); i++) {
+            MemWritableFile *out = compact->output_files[i];
+            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
+
+            mem_file->PullWRITEDataBlockRequests(true);
+            auto server_ids = mem_file->rtable_server_ids();
+            auto rtable_ids = mem_file->rtable_ids();
+
+            for (int i = 0; i < server_ids.size(); i++) {
+                SSTableRTablePair pair;
+                pair.sstable_id = mem_file->sstable_id();
+                pair.rtable_id = rtable_ids[i];
+                pairs[server_ids[i]].push_back(pair);
+            }
+        }
+
+        for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
+            if (pairs[i].empty()) {
+                continue;
+            }
+            persist_reqs[i] = options_.bg_thread->dc_client()->InitiatePersist(
+                    i, pairs[i]);
+        }
+
+        for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
+            if (pairs[i].empty()) {
+                continue;
+            }
+            CCResponse response;
+            while (!options_.bg_thread->dc_client()->IsDone(persist_reqs[i],
+                                                            &response));
+
+            handles[i] = response.rtable_handles;
+        }
+
+        for (int i = 0; i < compact->output_files.size(); i++) {
+            CompactionState::Output &output = compact->outputs[i];
+            MemWritableFile *out = compact->output_files[i];
+            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
+
+            auto sstable_id = mem_file->sstable_id();
+            std::vector<RTableHandle> rtable_handles;
+            for (int j = 0; j < mem_file->rtable_server_ids().size(); j++) {
+                uint32_t server_id = mem_file->rtable_server_ids()[j];
+                uint32_t rtable_id = mem_file->rtable_ids()[j];
+                auto sr_pairs = pairs[server_id];
+
+                // Search for the correct RTableHandle for this SSTable.
+                for (int k = 0; k < sr_pairs.size(); k++) {
+                    if (sr_pairs[k].sstable_id == sstable_id &&
+                        sr_pairs[k].rtable_id == rtable_id) {
+                        rtable_handles.push_back(handles[server_id][k]);
+                        break;
+                    }
+                }
+            }
+            RDMA_ASSERT(rtable_handles.size() ==
+                        mem_file->rtable_server_ids().size());
+            mem_file->Finalize(rtable_handles);
+            output.data_block_group_handles = rtable_handles;
+        }
+
+        // Delete the files.
+        for (int i = 0; i < compact->output_files.size(); i++) {
+            MemWritableFile *out = compact->output_files[i];
+            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
+            delete mem_file;
+            delete out;
+
+            mem_file = nullptr;
+            out = nullptr;
+        }
+
         // Add compaction outputs
         compact->compaction->AddInputDeletions(compact->compaction->edit());
         const int level = compact->compaction->level();
@@ -1006,7 +1077,8 @@ namespace leveldb {
             const CompactionState::Output &out = compact->outputs[i];
             compact->compaction->edit()->AddFile(level + 1, out.number,
                                                  out.file_size,
-                                                 out.smallest, out.largest);
+                                                 out.smallest, out.largest,
+                                                 out.data_block_group_handles);
         }
         return versions_->LogAndApply(compact->compaction->edit(), &mutex_);
     }

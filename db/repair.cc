@@ -388,7 +388,7 @@ namespace leveldb {
                     const TableInfo &t = tables_[i];
                     edit_.AddFile(0, t.meta.number, t.meta.file_size,
                                   t.meta.smallest,
-                                  t.meta.largest);
+                                  t.meta.largest, {});
                 }
 
                 // fprintf(stderr, "NewDescriptor:\n%s\n", edit_.DebugString().c_str());

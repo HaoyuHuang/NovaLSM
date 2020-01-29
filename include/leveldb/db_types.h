@@ -17,6 +17,22 @@
 #include "slice.h"
 
 namespace leveldb {
+    class RTableHandle {
+    public:
+        uint32_t server_id;
+        uint32_t rtable_id;
+        uint64_t offset;
+        uint32_t size;
+
+        static int HandleSize() {
+            return 4 + 4 + 8 + 4;
+        }
+
+        void EncodeHandle(char *buf);
+
+        void DecodeHandle(const char *buf);
+    };
+
     typedef uint64_t SequenceNumber;
 
     // Value types encoded as the last component of internal keys.
@@ -73,8 +89,11 @@ namespace leveldb {
         int allowed_seeks;  // Seeks allowed until compaction
         uint64_t number;
         uint64_t file_size;    // File size in bytes
+        uint64_t actual_file_size;
         InternalKey smallest;  // Smallest internal key served by table
         InternalKey largest;   // Largest internal key served by table
+
+        std::vector<RTableHandle> data_block_group_handles;
     };
 
     uint32_t
@@ -132,7 +151,8 @@ namespace leveldb {
         RemoveSSTable(const std::string &dbname, uint64_t file_number) = 0;
 
         virtual void
-        RemoveSSTables(const std::string &dbname, const std::vector<uint64_t>& file_number) = 0;
+        RemoveSSTables(const std::string &dbname,
+                       const std::vector<uint64_t> &file_number) = 0;
     };
 }
 

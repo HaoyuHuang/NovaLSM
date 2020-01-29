@@ -42,6 +42,8 @@ namespace nova {
         int rdma_doorbell_batch_size;
 
         uint32_t log_buf_size;
+        uint32_t rtable_size;
+        std::string rtable_path;
 
         uint64_t mem_pool_size_gb;
         char *nova_buf;
@@ -152,7 +154,7 @@ namespace nova {
         std::vector<CCFragment *> fragments;
         std::vector<CCFragment *> db_fragment;
         ScatterSSTablePolicy scatter_sstable_policy;
-        int num_data_groups_in_group;
+        int num_rtable_num_servers_scatter_data_blocks;
 
 
         static NovaCCConfig *cc_config;

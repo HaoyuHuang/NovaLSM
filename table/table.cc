@@ -52,7 +52,8 @@ namespace leveldb {
 
         char footer_space[Footer::kEncodedLength];
         Slice footer_input;
-        Status s = file->Read(size - Footer::kEncodedLength,
+        RTableHandle h;
+        Status s = file->Read(h, size - Footer::kEncodedLength,
                               Footer::kEncodedLength,
                               &footer_input, footer_space);
         if (!s.ok()) return s;
@@ -69,7 +70,8 @@ namespace leveldb {
             if (options.paranoid_checks) {
                 opt.verify_checksums = true;
             }
-            s = (*table)->ReadBlock(file, opt, footer.index_handle(),
+            RTableHandle h;
+            s = (*table)->ReadBlock(file, opt, h, footer.index_handle(),
                                     &index_block_contents);
         }
 
@@ -113,7 +115,8 @@ namespace leveldb {
             opt.verify_checksums = true;
         }
         BlockContents contents;
-        if (!ReadBlock(rep_->file, opt, footer.metaindex_handle(),
+        RTableHandle h;
+        if (!ReadBlock(rep_->file, opt, h, footer.metaindex_handle(),
                        &contents).ok()) {
             // Do not propagate errors since meta info is not needed for operation
             return;
@@ -147,7 +150,8 @@ namespace leveldb {
             opt.verify_checksums = true;
         }
         BlockContents block;
-        if (!ReadBlock(rep_->file, opt, filter_handle, &block).ok()) {
+        RTableHandle h;
+        if (!ReadBlock(rep_->file, opt, h, filter_handle, &block).ok()) {
             return;
         }
         if (block.heap_allocated) {
@@ -176,74 +180,78 @@ namespace leveldb {
 
 // Convert an index iterator value (i.e., an encoded BlockHandle)
 // into an iterator over the contents of the corresponding block.
-    Iterator *Table::BlockReader(void *arg, BlockReadContext context,
-                                 const ReadOptions &options,
-                                 const Slice &index_value) {
+    Iterator *Table::DataBlockReader(void *arg, BlockReadContext context,
+                                     const ReadOptions &options,
+                                     const Slice &index_value) {
         Table *table = reinterpret_cast<Table *>(arg);
         Cache *block_cache = table->rep_->options.block_cache;
         Block *block = nullptr;
         Cache::Handle *cache_handle = nullptr;
 
-        BlockHandle handle;
+        // It is an RTableHandle.
+        // TODO
+        RTableHandle rtable_handle;
+        BlockHandle handle = {};
         Slice input = index_value;
-        Status s = handle.DecodeFrom(&input);
+        Status s;
+        rtable_handle.DecodeHandle(input.data());
         // We intentionally allow extra stuff in index_value so that we
         // can add more features in the future.
         bool cache_hit = false;
         bool insert = false;
-        if (s.ok()) {
-            BlockContents contents;
-            if (block_cache != nullptr) {
-                char cache_key_buffer[16];
-                EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
-                EncodeFixed64(cache_key_buffer + 8, handle.offset());
-                Slice key(cache_key_buffer, sizeof(cache_key_buffer));
-                cache_handle = block_cache->Lookup(key);
-                if (cache_handle != nullptr) {
-                    block = reinterpret_cast<Block *>(block_cache->Value(
-                            cache_handle));
-                    cache_hit = true;
-                } else {
-                    s = table->ReadBlock(table->rep_->file, options, handle,
-                                         &contents);
-                    if (s.ok()) {
-                        block = new Block(contents, table->rep_->file_number,
-                                          handle.offset());
-                        if (contents.cachable && options.fill_cache) {
-                            cache_handle = block_cache->Insert(key, block,
-                                                               block->size(),
-                                                               &DeleteCachedBlock);
-                            insert = true;
-                        }
-                    }
-                }
+        BlockContents contents;
+        if (block_cache != nullptr) {
+            char cache_key_buffer[8 + RTableHandle::HandleSize()];
+            EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
+            rtable_handle.EncodeHandle(cache_key_buffer + 8);
+            Slice key(cache_key_buffer, sizeof(cache_key_buffer));
+            cache_handle = block_cache->Lookup(key);
+            if (cache_handle != nullptr) {
+                block = reinterpret_cast<Block *>(block_cache->Value(
+                        cache_handle));
+                cache_hit = true;
             } else {
-                s = table->ReadBlock(table->rep_->file, options, handle,
+                s = table->ReadBlock(table->rep_->file, options, rtable_handle,
+                                     handle,
                                      &contents);
                 if (s.ok()) {
                     block = new Block(contents, table->rep_->file_number,
                                       handle.offset());
+                    if (contents.cachable && options.fill_cache) {
+                        cache_handle = block_cache->Insert(key, block,
+                                                           block->size(),
+                                                           &DeleteCachedBlock);
+                        insert = true;
+                    }
                 }
             }
-            RDMA_LOG(rdmaio::DEBUG)
-                << fmt::format(
-                        "Cache hit {} Insert {} cs:{} cc:{} fn:{} bs:{} off:{}",
-                        cache_hit,
-                        insert, block_cache->TotalCharge(),
-                        block_cache->TotalCapacity(), table->rep_->file_number,
-                        block->size(), handle.offset());
-
-            if (table->db_profiler_ != nullptr) {
-                Access access = {
-                        .trace_type = TraceType::DATA_BLOCK,
-                        .access_caller = context.caller,
-                        .block_id = block->block_id(),
-                        .sstable_id = block->file_number(),
-                        .level = table->rep_->level,
-                        .size = block->size()
-                };
-                table->db_profiler_->Trace(access);
+        } else {
+            s = table->ReadBlock(table->rep_->file, options, rtable_handle,
+                                 handle,
+                                 &contents);
+            if (s.ok()) {
+                block = new Block(contents, table->rep_->file_number,
+                                  handle.offset());
             }
+        }
+        RDMA_LOG(rdmaio::DEBUG)
+            << fmt::format(
+                    "Cache hit {} Insert {} cs:{} cc:{} fn:{} bs:{} off:{}",
+                    cache_hit,
+                    insert, block_cache->TotalCharge(),
+                    block_cache->TotalCapacity(), table->rep_->file_number,
+                    block->size(), handle.offset());
+
+        if (table->db_profiler_ != nullptr) {
+            Access access = {
+                    .trace_type = TraceType::DATA_BLOCK,
+                    .access_caller = context.caller,
+                    .block_id = block->block_id(),
+                    .sstable_id = block->file_number(),
+                    .level = table->rep_->level,
+                    .size = block->size()
+            };
+            table->db_profiler_->Trace(access);
         }
 
         Iterator *iter;
@@ -284,7 +292,7 @@ namespace leveldb {
         return NewTwoLevelIterator(
                 rep_->index_block->NewIterator(rep_->options.comparator),
                 context,
-                &Table::BlockReader, const_cast<Table *>(this), options);
+                &Table::DataBlockReader, const_cast<Table *>(this), options);
     }
 
     Status
@@ -339,9 +347,9 @@ namespace leveldb {
                         .file_number = rep_->file_number,
                         .level = rep_->level
                 };
-                Iterator *block_iter = BlockReader(this, context,
-                                                   options,
-                                                   iiter->value());
+                Iterator *block_iter = DataBlockReader(this, context,
+                                                       options,
+                                                       iiter->value());
                 block_iter->Seek(k);
                 if (block_iter->Valid()) {
                     (*handle_result)(arg, block_iter->key(),
@@ -358,29 +366,12 @@ namespace leveldb {
         return s;
     }
 
-    Status Table::ReadBlock(leveldb::RandomAccessFile *file,
-                            const leveldb::ReadOptions &options,
-                            const leveldb::BlockHandle &handle,
-                            leveldb::BlockContents *result) {
-        result->data = Slice();
-        result->cachable = false;
-        result->heap_allocated = false;
-
-        // Read the block contents as well as the type/crc footer.
-        // See table_builder.cc for the code that built this structure.
+    Status
+    Table::ReadBlock(const char *buf, const Slice &contents,
+                     const ReadOptions &options,
+                     const BlockHandle &handle, BlockContents *result) {
         size_t n = static_cast<size_t>(handle.size());
-        char *buf = new char[n + kBlockTrailerSize];
-        Slice contents;
-        Status s = file->Read(handle.offset(), n + kBlockTrailerSize, &contents,
-                              buf);
-        if (!s.ok()) {
-            delete[] buf;
-            return s;
-        }
-        if (contents.size() != n + kBlockTrailerSize) {
-            delete[] buf;
-            return Status::Corruption("truncated block read");
-        }
+        Status s;
 
         // Check the crc of the type and the block contents
         const char *data = contents.data();  // Pointer to where Read put the data
@@ -388,7 +379,6 @@ namespace leveldb {
             const uint32_t crc = crc32c::Unmask(DecodeFixed32(data + n + 1));
             const uint32_t actual = crc32c::Value(data, n + 1);
             if (actual != crc) {
-                delete[] buf;
                 s = Status::Corruption("block checksum mismatch");
                 return s;
             }
@@ -436,8 +426,35 @@ namespace leveldb {
                 delete[] buf;
                 return Status::Corruption("bad block type");
         }
-
         return Status::OK();
+    }
+
+    Status Table::ReadBlock(leveldb::RandomAccessFile *file,
+                            const leveldb::ReadOptions &options,
+                            const RTableHandle &rtable_handle,
+                            const leveldb::BlockHandle &handle,
+                            leveldb::BlockContents *result) {
+        result->data = Slice();
+        result->cachable = false;
+        result->heap_allocated = false;
+
+        // Read the block contents as well as the type/crc footer.
+        // See table_builder.cc for the code that built this structure.
+        size_t n = static_cast<size_t>(handle.size());
+        char *buf = new char[n + kBlockTrailerSize];
+        Slice contents;
+        Status s = file->Read(rtable_handle, handle.offset(),
+                              n + kBlockTrailerSize, &contents,
+                              buf);
+        if (!s.ok()) {
+            delete[] buf;
+            return s;
+        }
+        if (contents.size() != n + kBlockTrailerSize) {
+            delete[] buf;
+            return Status::Corruption("truncated block read");
+        }
+        return ReadBlock(buf, contents, options, handle, result);
     }
 
     uint64_t Table::ApproximateOffsetOf(const Slice &key) const {

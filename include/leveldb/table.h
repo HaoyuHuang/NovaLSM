@@ -75,15 +75,24 @@ namespace leveldb {
         // be close to the file length.
         uint64_t ApproximateOffsetOf(const Slice &key) const;
 
+        static Status
+        ReadBlock(RandomAccessFile *file, const ReadOptions &options,
+                  const RTableHandle &rtable_handle,
+                  const BlockHandle &handle, BlockContents *result);
+
+
+        static Status
+        ReadBlock(const char *buf, const Slice& content, const ReadOptions &options,
+                  const BlockHandle &handle, BlockContents *result);
+
     private:
-        Status ReadBlock(RandomAccessFile *file, const ReadOptions &options,
-                         const BlockHandle &handle, BlockContents *result);
 
         friend class TableCache;
 
         static Iterator *
-        BlockReader(void *, BlockReadContext, const ReadOptions &,
-                    const Slice &);
+        DataBlockReader(void *arg, BlockReadContext context,
+                        const ReadOptions &options,
+                        const Slice &index_value);
 
         explicit Table() {}
 

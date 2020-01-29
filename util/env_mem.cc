@@ -145,7 +145,8 @@ namespace leveldb {
             file) { file_->Ref(); }
 
 
-    Status MemRandomAccessFile::Read(uint64_t offset, size_t n, Slice *result,
+    Status MemRandomAccessFile::Read(const RTableHandle &rtable_handle,
+                                     uint64_t offset, size_t n, Slice *result,
                                      char *scratch) {
         return file_->Read(offset, n, result, scratch);
     }
@@ -153,8 +154,10 @@ namespace leveldb {
     MemRandomRWFile::MemRandomRWFile(MemFile *file) : file_(
             file) { file_->Ref(); }
 
-    Status MemRandomRWFile::Read(uint64_t offset, size_t n, Slice *result,
-                                 char *scratch) {
+    Status
+    MemRandomRWFile::Read(const RTableHandle &rtable_handle, uint64_t offset,
+                          size_t n, Slice *result,
+                          char *scratch) {
         return file_->Read(offset, n, result, scratch);
     }
 

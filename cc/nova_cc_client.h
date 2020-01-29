@@ -17,6 +17,7 @@
 #include "cc/nova_cc_log_writer.h"
 
 #include "log/nova_log.h"
+#include "nova_rtable.h"
 
 namespace leveldb {
 
@@ -24,55 +25,36 @@ namespace leveldb {
     public:
         NovaCCClient(uint32_t dc_client_id, nova::NovaRDMAStore *rdma_store,
                      nova::NovaMemManager *mem_manager,
+                     NovaRTableManager *rtable_manager,
                      leveldb::log::RDMALogWriter *rdma_log_writer)
                 : cc_client_id_(dc_client_id), rdma_store_(rdma_store),
-                  mem_manager_(mem_manager),
+                  mem_manager_(mem_manager), rtable_manager_(rtable_manager),
                   rdma_log_writer_(rdma_log_writer) {}
 
         uint32_t
-        InitiateReadBlocks(const std::string &dbname, uint64_t file_number,
-                           const FileMetaData &meta,
-                           const std::vector<CCBlockHandle> &block_handls,
-                           char *result) override;
+        InitiateDeleteTables(uint32_t server_id, const std::string &dbname,
+                             const std::vector<uint64_t> &filenumbers) override;
 
         uint32_t
-        InitiateReadBlock(const std::string &dbname, uint64_t file_number,
-                          const FileMetaData &meta,
-                          const CCBlockHandle &block_handle,
-                          char *result) override;
-
-        // Read the SSTable and return the total size.
-        uint32_t
-        InitiateReadSSTable(const std::string &dbname, uint64_t file_number,
-                            const FileMetaData &meta, char *result) override;
-
-        uint32_t InitiateFlushSSTable(const std::string &dbname,
-                                      uint64_t file_number,
-                                      const FileMetaData &meta,
-                                      char *backing_mem) override;
+        InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
+                                    char *result) override;
 
         uint32_t
-        InitiateAllocateSSTableBuffer(uint32_t remote_server_id,
+        InitiateRTableReadSSTableDataBlock(uint32_t server_id,
+                                           const std::string &dbname,
+                                           uint64_t file_number,
+                                           uint32_t size,
+                                           char *result) override;
+
+        uint32_t
+        InitiateRTableWriteDataBlocks(uint32_t server_id, uint32_t thread_id, uint32_t *rtable_id, char *buf,
                                       const std::string &dbname,
                                       uint64_t file_number,
-                                      uint64_t file_size) override;
+                                      uint32_t size) override;
 
         uint32_t
-        InitiateWRITESSTableBuffer(uint32_t remote_server_id, char *src,
-                                   uint64_t dest,
-                                   uint64_t file_size) override;
-
-        uint32_t InitiateReleaseSSTableBuffer(uint32_t remote_server_id,
-                                              const std::string &dbname,
-                                              uint64_t file_number,
-                                              uint64_t file_size) override;
-
-        uint32_t InitiateDeleteTables(const std::string &dbname,
-                                      const std::vector<uint64_t> &filenumbers) override;
-
-        uint32_t
-        InitiateDeleteFiles(const std::string &dbname,
-                            const std::vector<FileMetaData> &filenames) override;
+        InitiatePersist(uint32_t server_id,
+                        std::vector<SSTableRTablePair> rtable_ids) override;
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
@@ -94,9 +76,52 @@ namespace leveldb {
         void IncrementReqId();
 
     private:
+        uint32_t
+        InitiateReadBlocks(const std::string &dbname, uint64_t file_number,
+                           const FileMetaData &meta,
+                           const std::vector<CCBlockHandle> &block_handls,
+                           char *result);
+
+        uint32_t
+        InitiateReadBlock(const std::string &dbname, uint64_t file_number,
+                          const FileMetaData &meta,
+                          const CCBlockHandle &block_handle,
+                          char *result);
+
+        // Read the SSTable and return the total size.
+        uint32_t
+        InitiateReadSSTable(const std::string &dbname, uint64_t file_number,
+                            const FileMetaData &meta, char *result);
+
+        uint32_t InitiateFlushSSTable(const std::string &dbname,
+                                      uint64_t file_number,
+                                      const FileMetaData &meta,
+                                      char *backing_mem);
+
+        uint32_t
+        InitiateAllocateSSTableBuffer(uint32_t remote_server_id,
+                                      const std::string &dbname,
+                                      uint64_t file_number,
+                                      uint64_t file_size);
+
+        uint32_t
+        InitiateWRITESSTableBuffer(uint32_t remote_server_id, char *src,
+                                   uint64_t dest,
+                                   uint64_t file_size);
+
+        uint32_t InitiateReleaseSSTableBuffer(uint32_t remote_server_id,
+                                              const std::string &dbname,
+                                              uint64_t file_number,
+                                              uint64_t file_size);
+
+        uint32_t
+        InitiateDeleteFiles(const std::string &dbname,
+                            const std::vector<FileMetaData> &filenames);
+
         uint32_t cc_client_id_ = 0;
         nova::NovaRDMAStore *rdma_store_;
         nova::NovaMemManager *mem_manager_;
+        NovaRTableManager *rtable_manager_;
         leveldb::log::RDMALogWriter *rdma_log_writer_ = nullptr;
 
         leveldb::SSTableManager *sstable_manager_;

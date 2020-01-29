@@ -17,9 +17,10 @@ namespace leveldb {
 
     class NovaCCMemFile : public MemFile {
     public:
-        NovaCCMemFile(Env *env, uint64_t file_number,
+        NovaCCMemFile(Env *env,
+                      const Options &options,
+                      uint64_t file_number,
                       MemManager *mem_manager,
-                      SSTableManager *sstable_manager,
                       CCClient *cc_client,
                       const std::string &dbname,
                       uint64_t thread_id,
@@ -38,11 +39,31 @@ namespace leveldb {
 
         Status Fsync() override;
 
+        void Format();
+
+        void PullWRITEDataBlockRequests(bool block);
+
+        std::vector<RTableHandle> Persist();
+
+        void Finalize(const std::vector<RTableHandle> &rtable_handles);
+
+        const std::vector<uint32_t> &rtable_server_ids() {
+            return server_ids_;
+        }
+
+        const std::vector<uint32_t> &rtable_ids() {
+            return rtable_ids_;
+        }
+
+        const std::string& sstable_id() {
+            return fname_;
+        }
+
         const char *backing_mem() override { return backing_mem_; }
 
         void set_meta(const FileMetaData &meta) { meta_ = meta; }
 
-        uint64_t used_size() {return used_size_;}
+        uint64_t used_size() { return used_size_; }
 
         uint64_t allocated_size() { return allocated_size_; }
 
@@ -50,24 +71,32 @@ namespace leveldb {
 
         uint64_t file_number() { return file_number_; }
 
-        void WaitForWRITEs();
-
     private:
+        uint32_t WriteBlock(BlockBuilder *block, uint64_t offset);
+
+        uint32_t WriteRawBlock(const Slice &block_contents,
+                               CompressionType type,
+                               uint64_t offset);
+
         Env *env_;
         uint64_t file_number_;
         const std::string fname_;
-        WritableFile *local_writable_file_;
-        SSTableManager *sstable_manager_;
         MemManager *mem_manager_;
         CCClient *cc_client_;
         const std::string &dbname_;
         FileMetaData meta_;
         uint64_t thread_id_;
 
+        Block *index_block_;
+        int num_data_blocks_;
+        const Options &options_;
+
         char *backing_mem_ = nullptr;
         uint64_t allocated_size_ = 0;
         uint64_t used_size_ = 0;
-        std::map<uint32_t, uint64_t> remote_sstable_bufs_;
+
+        std::vector<uint32_t> server_ids_;
+        std::vector<uint32_t> rtable_ids_;
         std::vector<uint32_t> WRITE_requests_;
     };
 
@@ -78,20 +107,23 @@ namespace leveldb {
                                const FileMetaData &meta,
                                CCClient *dc_client,
                                MemManager *mem_manager,
-                               SSTableManager *sstable_manager,
+                               Options options,
                                uint64_t thread_id,
                                bool prefetch_all);
 
         ~NovaCCRandomAccessFile() override;
 
-        Status Read(uint64_t offset, size_t n, Slice *result,
-                    char *scratch) override;
-
-        bool IsWBTableDeleted();
-
-        WBTable *wb_table() {return wb_table_;}
+        Status
+        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
+             Slice *result, char *scratch) override;
 
     private:
+        struct DataBlockRTableLocalBuf {
+            uint32_t offset;
+            uint32_t size;
+            uint64_t local_offset;
+        };
+
         Status ReadAll();
 
         const std::string &dbname_;
@@ -101,13 +133,14 @@ namespace leveldb {
         bool prefetch_all_;
         char *backing_mem_table_ = nullptr;
         char *backing_mem_block_ = nullptr;
+
+        std::map<uint64_t, DataBlockRTableLocalBuf> rtable_local_offset_;
+
         MemManager *mem_manager_;
-        SSTableManager *sstable_manager_;
         uint64_t thread_id_;
         CCClient *dc_client_;
-
+        Options options_;
         Env *env_;
-        WBTable *wb_table_;
         RandomAccessFile *local_ra_file_;
     };
 
@@ -136,8 +169,6 @@ namespace leveldb {
         bool IsInitialized();
 
         void Start();
-
-        void DeleteMCSSTables();
 
         void AddDeleteSSTables(const std::vector<DeleteTableRequest> &requests);
 

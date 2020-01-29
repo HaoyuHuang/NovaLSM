@@ -6,6 +6,7 @@
 
 #include <fmt/core.h>
 
+#include "db/filename.h"
 #include "nova_cc_server.h"
 #include "cc/nova_cc_client.h"
 
@@ -24,12 +25,13 @@ namespace nova {
 
     NovaCCServer::NovaCCServer(rdmaio::RdmaCtrl *rdma_ctrl,
                                NovaMemManager *mem_manager,
-                               leveldb::NovaDiskComponent *dc,
+                               leveldb::NovaRTableManager *rtable_manager,
                                LogFileManager *log_manager)
             : rdma_ctrl_(rdma_ctrl),
               mem_manager_(mem_manager),
-              dc_(dc),
+              rtable_manager_(rtable_manager),
               log_manager_(log_manager) {
+        current_rtable_ = rtable_manager_->CreateNewRTable(thread_id_);
     }
 
     // No need to flush RDMA requests since Flush will be done after all requests are processed in a receive queue.
@@ -41,26 +43,25 @@ namespace nova {
             case IBV_WC_SEND:
                 break;
             case IBV_WC_RDMA_WRITE:
-//                if (buf[0] == leveldb::CCRequestType::CC_READ_BLOCKS ||
-//                    buf[0] == leveldb::CCRequestType::CC_READ_SSTABLE) {
-//                    uint64_t allocated_buf_int = leveldb::DecodeFixed64(
-//                            buf + 1);
-//                    char *allocated_buf = (char *) (allocated_buf_int);
-//                    uint64_t size = leveldb::DecodeFixed64(
-//                            buf + 1 + 8);
-//                    uint32_t scid = mem_manager_->slabclassid(thread_id_, size);
-//                    mem_manager_->FreeItem(thread_id_, allocated_buf, scid);
-//
-//                    RDMA_LOG(DEBUG) << fmt::format(
-//                                "Free memory for read block tid:{} size:{} scid:{}",
-//                                thread_id_, size, scid);
-//
-//                    RDMA_LOG(DEBUG) << fmt::format(
-//                                "dc[{}]: imm:{} type:{} allocated buf:{} size:{}.",
-//                                thread_id_,
-//                                imm_data,
-//                                buf[0], allocated_buf_int, size);
-//                }
+                if (buf[0] == leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS ||
+                    buf[0] == leveldb::CCRequestType::CC_RTABLE_READ_SSTABLE) {
+                    uint32_t size = leveldb::DecodeFixed32(buf + 1);
+                    uint64_t allocated_buf_int = leveldb::DecodeFixed64(
+                            buf + 5);
+                    char *allocated_buf = (char *) (allocated_buf_int);
+                    uint32_t scid = mem_manager_->slabclassid(thread_id_, size);
+                    mem_manager_->FreeItem(thread_id_, allocated_buf, scid);
+
+                    RDMA_LOG(DEBUG) << fmt::format(
+                                "Free memory for read block tid:{} size:{} scid:{}",
+                                thread_id_, size, scid);
+
+                    RDMA_LOG(DEBUG) << fmt::format(
+                                "dc[{}]: imm:{} type:{} allocated buf:{} size:{}.",
+                                thread_id_,
+                                imm_data,
+                                buf[0], allocated_buf_int, size);
+                }
                 break;
             case IBV_WC_RDMA_READ:
                 break;
@@ -69,8 +70,18 @@ namespace nova {
                 uint32_t dc_req_id = imm_data;
                 uint64_t req_id = to_req_id(remote_server_id, dc_req_id);
 
-//                auto context_it = request_context_map_.find(req_id);
-//                if (context_it != request_context_map_.end()) {
+                auto context_it = request_context_map_.find(req_id);
+                if (context_it != request_context_map_.end()) {
+                    auto &context = context_it->second;
+                    if (context.request_type ==
+                        leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
+                        context.rtable_id;
+                        context.rtable_offset;
+                        rtable_manager_->rtable(
+                                context.rtable_id)->MarkOffsetAsWritten(
+                                context.rtable_offset);
+                    }
+                }
 //                    // I sent this request a while ago and now it is complete.
 //                    auto &context = context_it->second;
 //                    if (context.request_type ==
@@ -111,6 +122,8 @@ namespace nova {
 //                    return;
 //                }
 
+
+
                 if (buf[0] == leveldb::CCRequestType::CC_DELETE_TABLES) {
                     std::string dbname;
                     uint32_t msg_size = 1;
@@ -123,61 +136,150 @@ namespace nova {
                         files.push_back(leveldb::DecodeFixed64(buf + msg_size));
                         msg_size += 8;
                     }
-                    sstable_manager_->RemoveSSTables(dbname, files);
+                    rtable_manager_->DeleteSSTable(dbname, files);
 
                     RDMA_LOG(DEBUG) << fmt::format(
                                 "dc[{}]: Allocate sstable buffer. db:{} fn:{}",
                                 thread_id_, dbname, nfiles);
-
                 } else if (buf[0] ==
-                           leveldb::CCRequestType::CC_RELEASE_SSTABLE_BUFFER) {
-                    std::string dbname;
+                           leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS) {
                     uint32_t msg_size = 1;
-                    msg_size += leveldb::DecodeStr(buf + msg_size, &dbname);
-                    uint64_t file_number = leveldb::DecodeFixed64(
-                            buf + msg_size);
-                    msg_size += 8;
-                    uint64_t file_size = leveldb::DecodeFixed64(buf + msg_size);
-                    msg_size += 8;
-                    sstable_manager_->RemoveSSTable(dbname, file_number);
+                    uint32_t rtable_id = 0;
+                    uint64_t offset = 0;
+                    uint32_t size = 0;
+                    uint64_t cc_mr_offset = 0;
 
-                    RDMA_LOG(DEBUG) << fmt::format(
-                                "dc[{}]: Release sstable buffer. db:{} fn:{} fs:{}",
-                                thread_id_, dbname, file_number, file_size);
+                    rtable_id = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
+                    offset = leveldb::DecodeFixed64(buf + msg_size);
+                    msg_size += 8;
+                    size = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
+                    cc_mr_offset = leveldb::DecodeFixed64(buf + msg_size);
+                    msg_size += 8;
 
-                } else if (buf[0] ==
-                           leveldb::CCRequestType::CC_ALLOCATE_SSTABLE_BUFFER) {
-                    std::string dbname;
-                    uint32_t msg_size = 1;
-                    msg_size += leveldb::DecodeStr(buf + msg_size, &dbname);
-                    uint64_t file_number = leveldb::DecodeFixed64(
-                            buf + msg_size);
-                    msg_size += 8;
-                    uint64_t file_size = leveldb::DecodeFixed64(buf + msg_size);
-                    msg_size += 8;
-                    uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                              file_size);
+                    leveldb::RTableHandle rtable_handle;
+                    rtable_handle.server_id = nova::NovaConfig::config->my_server_id;
+                    rtable_handle.rtable_id = rtable_id;
+                    rtable_handle.offset = offset;
+                    rtable_handle.size = size;
+                    uint32_t scid = mem_manager_->slabclassid(thread_id_, size);
                     char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, scid);
                     RDMA_ASSERT(rdma_buf);
-                    uint64_t mr = (uint64_t) rdma_buf;
-//                    if (rdma_buf) {
-//                        sstable_manager_->AddSSTable(dbname, file_number,
-//                                                     thread_id_, rdma_buf,
-//                                                     file_number, file_size,
-//                                                     false);
-//                        mr = (uint64_t) rdma_buf;
-//                    }
 
-                    RDMA_LOG(DEBUG) << fmt::format(
-                                "dc[{}]: Allocate sstable buffer. db:{} fn:{} fs:{} mr:{}",
-                                thread_id_, dbname, file_number, file_size, mr);
+                    rtable_manager_->ReadDataBlock(rtable_handle, rdma_buf);
 
-                    char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
-                    RDMA_ASSERT(send_buf != nullptr);
-                    send_buf[0] = leveldb::CCRequestType::CC_ALLOCATE_SSTABLE_BUFFER_SUCC;
-                    leveldb::EncodeFixed64(send_buf + 1, mr);
-                    rdma_store_->PostSend(send_buf, 1 + 8, remote_server_id,
-                                          req_id);
+                    char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
+                    sendbuf[0] = leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS;
+                    leveldb::EncodeFixed32(sendbuf + 1, size);
+                    leveldb::EncodeFixed64(sendbuf + 5, (uint64_t) (rdma_buf));
+                    rdma_store_->PostWrite(rdma_buf, size, remote_server_id,
+                                           cc_mr_offset, false, dc_req_id);
+                } else if (buf[0] ==
+                           leveldb::CCRequestType::CC_RTABLE_READ_SSTABLE) {
+                    uint32_t msg_size = 1;
+                    std::string dbname;
+                    uint64_t file_number;
+                    uint32_t size;
+                    uint64_t cc_mr_offset;
+
+                    msg_size += leveldb::DecodeStr(buf + msg_size, &dbname);
+                    file_number = leveldb::DecodeFixed64(buf + msg_size);
+                    msg_size += 8;
+                    size = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
+                    cc_mr_offset = leveldb::DecodeFixed64(buf + msg_size);
+                    msg_size += 8;
+
+                    uint32_t scid = mem_manager_->slabclassid(thread_id_, size);
+                    char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, scid);
+                    RDMA_ASSERT(rdma_buf);
+
+                    rtable_manager_->ReadDataBlocksOfSSTable(dbname,
+                                                             file_number,
+                                                             rdma_buf);
+                    char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
+                    sendbuf[0] = leveldb::CCRequestType::CC_RTABLE_READ_SSTABLE;
+                    leveldb::EncodeFixed32(sendbuf + 1, size);
+                    leveldb::EncodeFixed64(sendbuf + 5, (uint64_t) (rdma_buf));
+                    rdma_store_->PostWrite(rdma_buf, size, remote_server_id,
+                                           cc_mr_offset, false, dc_req_id);
+
+                } else if (buf[0] ==
+                           leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
+                    uint32_t msg_size = 1;
+                    std::string dbname;
+                    uint64_t file_number;
+                    uint32_t size;
+
+                    msg_size += leveldb::DecodeStr(buf + msg_size, &dbname);
+                    file_number = leveldb::DecodeFixed64(buf + msg_size);
+                    msg_size += 8;
+                    size = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
+                    std::string table_name = leveldb::TableFileName(dbname,
+                                                                    file_number);
+                    uint64_t rtable_off = current_rtable_->AllocateBuf(
+                            table_name, size);
+                    if (rtable_off == UINT64_MAX) {
+                        // overflow.
+                        // close.
+                        current_rtable_ = rtable_manager_->CreateNewRTable(
+                                thread_id_);
+                        rtable_off = current_rtable_->AllocateBuf(table_name,
+                                                                  size);
+                    }
+                    char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
+                    leveldb::EncodeFixed32(sendbuf,
+                                           current_rtable_->rtable_id());
+                    leveldb::EncodeFixed64(sendbuf + 4, rtable_off);
+                    rdma_store_->PostSend(sendbuf, 12, remote_server_id,
+                                          dc_req_id);
+
+                    RequestContext context = {};
+                    context.request_type = leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE;
+                    context.rtable_id = current_rtable_->rtable_id();
+                    context.rtable_offset = rtable_off;
+
+                    request_context_map_[req_id] = context;
+                } else if (buf[0] ==
+                           leveldb::CCRequestType::CC_RTABLE_PERSIST) {
+                    uint32_t msg_size = 1;
+                    uint32_t nrtables = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
+
+                    leveldb::RTableHandle rtable_handles[nrtables];
+                    for (int i = 0; i < nrtables; i++) {
+                        std::string sstable_id;
+                        msg_size += leveldb::DecodeStr(buf + msg_size,
+                                                       &sstable_id);
+                        uint32_t rtableid = leveldb::DecodeFixed32(
+                                buf + msg_size);
+                        msg_size += 4;
+                        leveldb::NovaRTable *rtable = rtable_manager_->rtable(
+                                rtableid);
+                        rtable->Persist();
+
+                        leveldb::BlockHandle &h = rtable->Handle(sstable_id);
+                        leveldb::RTableHandle rh;
+                        rh.server_id = NovaConfig::config->my_server_id;
+                        rh.rtable_id = rtableid;
+                        rh.offset = h.offset();
+                        rh.size = h.size();
+                        rtable_handles[i] = rh;
+                    }
+
+                    char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
+                    msg_size = 0;
+                    leveldb::EncodeFixed32(sendbuf + msg_size, nrtables);
+                    for (int i = 0; i < nrtables; i++) {
+                        rtable_handles[i].EncodeHandle(sendbuf + msg_size);
+                        msg_size += leveldb::RTableHandle::HandleSize();
+                    }
+
+                    rdma_store_->PostSend(sendbuf, msg_size, remote_server_id,
+                                          dc_req_id);
+
                 } else if (buf[0] ==
                            leveldb::CCRequestType::CC_ALLOCATE_LOG_BUFFER) {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);

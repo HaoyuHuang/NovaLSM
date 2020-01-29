@@ -36,6 +36,7 @@ NovaCCConfig *NovaCCConfig::cc_config;
 NovaDCConfig *NovaDCConfig::dc_config;
 
 DEFINE_string(db_path, "/tmp/nova", "level db path");
+DEFINE_string(rtable_path, "/tmp/rtables", "RTable path");
 
 DEFINE_string(cc_servers, "localhost:11211", "A list of cc servers");
 DEFINE_int64(server_id, -1, "Server id.");
@@ -59,8 +60,9 @@ DEFINE_uint64(cc_num_conn_workers, 0, "Number of connection threads.");
 DEFINE_uint32(cc_num_async_workers, 0, "Number of async worker threads.");
 DEFINE_uint32(cc_num_compaction_workers, 0,
               "Number of compaction worker threads.");
-DEFINE_uint32(cc_num_wb_workers, 0,
-              "Number of compaction worker threads.");
+DEFINE_uint32(cc_rtable_num_servers_scatter_data_blocks, 0,
+              "Number of servers to scatter data blocks ");
+
 DEFINE_uint64(cc_block_cache_mb, 0, "leveldb block cache size in mb");
 DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint32(cc_log_buf_size, 0, "log buffer size");
@@ -110,6 +112,7 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config = new NovaConfig;
     NovaCCConfig::cc_config = new NovaCCConfig;
+    NovaConfig::config->rtable_path = FLAGS_rtable_path;
 
     NovaConfig::config->mem_pool_size_gb = FLAGS_mem_pool_size_gb;
     NovaConfig::config->load_default_value_size = FLAGS_use_fixed_value_size;
@@ -138,7 +141,7 @@ int main(int argc, char *argv[]) {
     NovaCCConfig::cc_config->num_conn_workers = FLAGS_cc_num_conn_workers;
     NovaCCConfig::cc_config->num_async_workers = FLAGS_cc_num_async_workers;
     NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
-    NovaCCConfig::cc_config->num_wb_workers = FLAGS_cc_num_wb_workers;
+    NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks = FLAGS_cc_rtable_num_servers_scatter_data_blocks;
     NovaConfig::config->log_buf_size = FLAGS_cc_log_buf_size;
 
     InitializeCC();

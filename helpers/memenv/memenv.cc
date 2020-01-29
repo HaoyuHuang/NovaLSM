@@ -196,7 +196,7 @@ namespace leveldb {
 
             ~RandomAccessFileImpl() override { file_->Unref(); }
 
-            Status Read(uint64_t offset, size_t n, Slice *result,
+            Status Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n, Slice *result,
                         char *scratch) override {
                 return file_->Read(offset, n, result, scratch);
             }

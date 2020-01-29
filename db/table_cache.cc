@@ -30,13 +30,10 @@ namespace leveldb {
         Cache::Handle *h = reinterpret_cast<Cache::Handle *>(arg2);
         cache->Release(h);
 
-        // Unref the table.
-        TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache->Value(
-                h));
-        NovaCCRandomAccessFile *file = dynamic_cast<NovaCCRandomAccessFile *>(tf->file);
-        if (file->wb_table()) {
-            file->wb_table()->Unref();
-        }
+//        // Unref the table.
+//        TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache->Value(
+//                h));
+//        NovaCCRandomAccessFile *file = dynamic_cast<NovaCCRandomAccessFile *>(tf->file);
     }
 
     TableCache::TableCache(const std::string &dbname, const Options &options,
@@ -75,11 +72,6 @@ namespace leveldb {
             TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache_->Value(
                     *handle));
             file = dynamic_cast<NovaCCRandomAccessFile *>(tf->file);
-            if (file->IsWBTableDeleted()) {
-                // Evict the table.
-                Evict(file_number);
-                cache_hit = false;
-            }
         } else {
             cache_hit = false;
         }
@@ -94,7 +86,7 @@ namespace leveldb {
             file = new NovaCCRandomAccessFile(env_, dbname_, file_number, meta,
                                               options.dc_client,
                                               options.mem_manager,
-                                              options_.sstable_manager,
+                                              options_,
                                               options.thread_id,
                                               prefetch_all);
             s = Table::Open(options_, file, file_size, level, file_number,
@@ -113,12 +105,6 @@ namespace leveldb {
                 *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
             }
         }
-
-        // Reference the table.
-        if (file->wb_table()) {
-            file->wb_table()->Ref();
-        }
-
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format("table cache hit {} fn:{} cs:{} cc:{}", cache_hit,
                            file_number, cache_->TotalCharge(),

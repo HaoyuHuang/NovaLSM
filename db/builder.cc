@@ -32,9 +32,9 @@ namespace leveldb {
                 << fmt::format("CompactMemTable tid:{} alloc_size:{}",
                                key, options.max_dc_file_size);
             NovaCCMemFile *cc_file = new NovaCCMemFile(env,
+                                                       options,
                                                        meta->number,
                                                        mem_manager,
-                                                       options.sstable_manager,
                                                        options.bg_thread->dc_client(),
                                                        dbname,
                                                        options.bg_thread->thread_id(),
@@ -57,6 +57,9 @@ namespace leveldb {
             delete builder;
 
             cc_file->set_meta(*meta);
+
+
+
             // Finish and check for file errors
             if (s.ok()) {
                 s = file->Sync();
@@ -65,23 +68,24 @@ namespace leveldb {
                 s = file->Close();
             }
 
-            // Wait for writes to complete.
-            cc_file->WaitForWRITEs();
+            std::vector<RTableHandle> rhs = cc_file->Persist();
+            cc_file->Finalize(rhs);
+            meta->data_block_group_handles = rhs;
 
             delete cc_file;
             cc_file = nullptr;
             delete file;
             file = nullptr;
 
-            if (cc_file->backing_mem()) {
-                options.sstable_manager->AddSSTable(dbname,
-                                                    cc_file->file_number(),
-                                                    cc_file->thread_id(),
-                                                    (char *) cc_file->backing_mem(),
-                                                    cc_file->used_size(),
-                                                    cc_file->allocated_size(),
-                        /*async_flush=*/true);
-            }
+//            if (cc_file->backing_mem()) {
+//                options.sstable_manager->AddSSTable(dbname,
+//                                                    cc_file->file_number(),
+//                                                    cc_file->thread_id(),
+//                                                    (char *) cc_file->backing_mem(),
+//                                                    cc_file->used_size(),
+//                                                    cc_file->allocated_size(),
+//                        /*async_flush=*/true);
+//            }
 
             if (s.ok()) {
                 // Verify that the table is usable

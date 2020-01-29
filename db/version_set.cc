@@ -1157,7 +1157,7 @@ namespace leveldb {
             for (size_t i = 0; i < files.size(); i++) {
                 const FileMetaData *f = files[i];
                 edit.AddFile(level, f->number, f->file_size, f->smallest,
-                             f->largest);
+                             f->largest, f->data_block_group_handles);
             }
         }
 

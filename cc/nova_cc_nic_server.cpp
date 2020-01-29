@@ -52,8 +52,7 @@ namespace nova {
         };
 
         leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
-                                    leveldb::EnvBGThread *bg_thread,
-                                    leveldb::SSTableManager *sstable_manager) {
+                                    leveldb::EnvBGThread *bg_thread) {
             leveldb::EnvOptions env_option;
             env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
             leveldb::PosixEnv *env = new leveldb::PosixEnv;
@@ -72,7 +71,6 @@ namespace nova {
             options.filter_policy = leveldb::NewBloomFilterPolicy(10);
             options.bg_thread = bg_thread;
             options.enable_tracing = false;
-            options.sstable_manager = sstable_manager;
             options.comparator = new YCSBKeyComparator();
             leveldb::Logger *log = nullptr;
             std::string db_path = DBName(NovaConfig::config->db_path,
@@ -224,7 +222,6 @@ namespace nova {
         char *cache_buf = buf + nrdma_buf_cc();
         manager = new NovaMemManager(cache_buf);
         log_manager = new LogFileManager(manager);
-        sstable_manager_ = new leveldb::NovaSSTableManager(manager, wb_workers);
 
         int ndbs = NovaCCConfig::ParseNumberOfDatabases(
                 NovaCCConfig::cc_config->fragments,
@@ -250,8 +247,7 @@ namespace nova {
 
         for (int db_index = 0; db_index < ndbs; db_index++) {
             dbs_.push_back(
-                    CreateDatabase(db_index, block_cache, bgs[bg_thread_id],
-                                   sstable_manager_));
+                    CreateDatabase(db_index, block_cache, bgs[bg_thread_id]));
             bg_thread_id += 1;
             bg_thread_id %= bgs.size();
         }
@@ -266,7 +262,6 @@ namespace nova {
             conn_workers[worker_id]->log_manager_ = log_manager;
         }
 
-        leveldb::Cache *table_cache = leveldb::NewLRUCache(1024 * 1024 * 1024);
         leveldb::EnvOptions env_option;
         env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
         leveldb::PosixEnv *env = new leveldb::PosixEnv;
@@ -282,9 +277,13 @@ namespace nova {
         for (auto &dbname : dbnames) {
             mkdirs(dbname.c_str());
         }
-        leveldb::NovaDiskComponent *dc = new leveldb::NovaDiskComponent(env,
-                                                                        table_cache,
-                                                                        dbnames);
+
+        uint32_t nranges = NovaCCConfig::cc_config->fragments.size() /
+                           NovaCCConfig::cc_config->cc_servers.size();
+        leveldb::NovaRTableManager *rtable_manager = new leveldb::NovaRTableManager(
+                env, manager, NovaConfig::config->rtable_path,
+                NovaConfig::config->rtable_size,
+                NovaConfig::config->servers.size(), nranges);
         int worker_id = 0;
         for (worker_id = 0;
              worker_id <
@@ -327,13 +326,15 @@ namespace nova {
             leveldb::CCClient *dc_client = new leveldb::NovaCCClient(worker_id,
                                                                      store,
                                                                      manager,
+                                                                     rtable_manager,
                                                                      new leveldb::log::RDMALogWriter(
                                                                              store,
                                                                              rnic_buf,
                                                                              manager,
                                                                              log_manager));
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
-                                                                   manager, dc,
+                                                                   manager,
+                                                                   rtable_manager,
                                                                    log_manager);
             cc->rdma_store_ = store;
             cc->thread_id_ = worker_id;
@@ -381,13 +382,15 @@ namespace nova {
             leveldb::CCClient *dc_client = new leveldb::NovaCCClient(worker_id,
                                                                      store,
                                                                      manager,
+                                                                     rtable_manager,
                                                                      new leveldb::log::RDMALogWriter(
                                                                              store,
                                                                              rnic_buf,
                                                                              manager,
                                                                              log_manager));
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
-                                                                   manager, dc,
+                                                                   manager,
+                                                                   rtable_manager,
                                                                    log_manager);
 
             cc->rdma_store_ = store;
@@ -402,16 +405,6 @@ namespace nova {
             worker_id++;
             buf += nrdma_buf_unit() *
                    NovaCCConfig::cc_config->cc_servers.size();
-        }
-
-        int bgid = 0;
-        for (int i = 0; i < NovaCCConfig::cc_config->num_wb_workers; i++) {
-            wb_workers.push_back(
-                    new NovaMCWBWorker(dbs_, bgs[bgid], sstable_manager_, env));
-            wb_worker_threads.push_back(
-                    std::thread(&NovaMCWBWorker::Run, wb_workers[i]));
-            bgid += 1;
-            bgid %= bgs.size();
         }
 
         RDMA_ASSERT(buf == cache_buf);

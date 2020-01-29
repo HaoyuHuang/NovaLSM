@@ -108,7 +108,8 @@ namespace leveldb {
         }
     }
 
-    Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice *result,
+    Status PosixRandomAccessFile::Read(const RTableHandle &rtable_handle,
+                                       uint64_t offset, size_t n, Slice *result,
                                        char *scratch) {
         int fd = fd_;
         if (!has_permanent_fd_) {
@@ -150,7 +151,8 @@ namespace leveldb {
         mmap_limiter_->Release();
     }
 
-    Status PosixMmapReadableFile::Read(uint64_t offset, size_t n, Slice *result,
+    Status PosixMmapReadableFile::Read(const RTableHandle &rtable_handle,
+                                       uint64_t offset, size_t n, Slice *result,
                                        char *scratch) {
         if (offset + n > length_) {
             *result = Slice();

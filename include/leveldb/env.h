@@ -280,8 +280,12 @@ namespace leveldb {
         // status.
         //
         // Safe for concurrent use by multiple threads.
-        virtual Status Read(uint64_t offset, size_t n, Slice *result,
-                            char *scratch) = 0;
+        virtual Status
+        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
+             Slice *result,
+             char *scratch) = 0;
+
+
     };
 
 // A file abstraction for sequential writing.  The implementation
@@ -450,7 +454,7 @@ namespace leveldb {
                   length_(length),
                   filename_(std::move(filename)) {}
 
-        Status Read(uint64_t offset, size_t n, Slice *result,
+        Status Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n, Slice *result,
                     char *scratch) override {
             if (offset + n > length_) {
                 *result = Slice();

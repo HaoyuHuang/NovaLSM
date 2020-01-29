@@ -11,6 +11,7 @@
 #include "mc/nova_mem_manager.h"
 #include "dc/nova_dc.h"
 #include "log/nova_log.h"
+#include "nova_rtable.h"
 
 namespace nova {
 
@@ -21,13 +22,16 @@ namespace nova {
         uint32_t file_number;
         char *buf;
         uint32_t sstable_size;
+        uint32_t rtable_id;
+        uint64_t rtable_offset;
+        uint32_t size;
     };
 
     class NovaCCServer : public NovaMsgCallback {
     public:
         NovaCCServer(rdmaio::RdmaCtrl *rdma_ctrl,
                      NovaMemManager *mem_manager,
-                     leveldb::NovaDiskComponent *dc,
+                     leveldb::NovaRTableManager *rtable_manager,
                      LogFileManager *log_manager);
 
         void
@@ -42,9 +46,10 @@ namespace nova {
 
         rdmaio::RdmaCtrl *rdma_ctrl_;
         NovaMemManager *mem_manager_;
-        leveldb::NovaDiskComponent *dc_;
         LogFileManager *log_manager_;
-        leveldb::SSTableManager *sstable_manager_;
+        leveldb::NovaRTableManager *rtable_manager_;
+        leveldb::NovaRTable *current_rtable_ = nullptr;
+
         std::map<uint64_t, RequestContext> request_context_map_;
     };
 }

@@ -87,8 +87,9 @@ namespace leveldb {
         uint64_t ts = 0;
         for (const auto &bh : block_handles) {
             Slice result;
+            RTableHandle h;
             RDMA_ASSERT(
-                    table->Read(bh.offset, bh.size, &result, result_buf).ok());
+                    table->Read(h, bh.offset, bh.size, &result, result_buf).ok());
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format(
                         "read block off:{} size:{} read:{} from db:{} fn:{}",
@@ -156,8 +157,9 @@ namespace leveldb {
                 handle));
         RDMA_ASSERT(s.ok());
         Slice result;
+        RTableHandle h;
         RDMA_ASSERT(
-                table->Read(0, size, &result, result_buf).ok());
+                table->Read(h, 0, size, &result, result_buf).ok());
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format(
                     "read SSTable off:{} size:{} read:{} from db:{} fn:{}",

@@ -40,19 +40,16 @@ namespace nova {
         std::vector<leveldb::DB *> dbs_;
         NovaMemManager *manager;
         LogFileManager *log_manager;
-        leveldb::NovaSSTableManager *sstable_manager_;
 
         std::vector<NovaCCConnWorker*> conn_workers;
         std::vector<NovaRDMAComputeComponent *> async_workers;
         std::vector<leveldb::NovaCCCompactionThread *> bgs;
-        std::vector<NovaMCWBWorker*> wb_workers;
 
         struct event_base *base;
         int current_conn_worker_id_;
         vector<thread> conn_worker_threads;
         vector<thread> cc_workers;
         vector<thread> compaction_workers;
-        vector<thread> wb_worker_threads;
     };
 }
 

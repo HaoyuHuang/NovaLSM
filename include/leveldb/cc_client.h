@@ -19,20 +19,25 @@ namespace leveldb {
     };
 
     enum CCRequestType : char {
-        CC_READ_BLOCKS = 'r',
-        CC_READ_SSTABLE = 's',
-        CC_FLUSH_SSTABLE = 'f',
-        CC_WRITE_REPLICATE_SSTABLE = 'w',
-        CC_FLUSH_SSTABLE_BUF = 'F',
-        CC_FLUSH_SSTABLE_SUCC = 'S',
-        CC_ALLOCATE_SSTABLE_BUFFER = 'b',
-        CC_ALLOCATE_SSTABLE_BUFFER_SUCC = 'c',
-        CC_RELEASE_SSTABLE_BUFFER = 'B',
-        CC_ALLOCATE_LOG_BUFFER = 'a',
-        CC_ALLOCATE_LOG_BUFFER_SUCC = 'A',
-        CC_DELETE_LOG_FILE = 'd',
-        CC_DELETE_LOG_FILE_SUCC = 'D',
-        CC_DELETE_TABLES = 't'
+        CC_RTABLE_READ_BLOCKS = 'a',
+        CC_READ_BLOCKS = 'b',
+        CC_READ_SSTABLE = 'c',
+        CC_FLUSH_SSTABLE = 'd',
+        CC_WRITE_REPLICATE_SSTABLE = 'e',
+        CC_FLUSH_SSTABLE_BUF = 'f',
+        CC_FLUSH_SSTABLE_SUCC = 'g',
+        CC_ALLOCATE_SSTABLE_BUFFER = 'h',
+        CC_ALLOCATE_SSTABLE_BUFFER_SUCC = 'i',
+        CC_RELEASE_SSTABLE_BUFFER = 'j',
+        CC_ALLOCATE_LOG_BUFFER = 'k',
+        CC_ALLOCATE_LOG_BUFFER_SUCC = 'l',
+        CC_DELETE_LOG_FILE = 'm',
+        CC_DELETE_LOG_FILE_SUCC = 'n',
+        CC_DELETE_TABLES = 'o',
+        CC_RTABLE_READ_SSTABLE = 'p',
+        CC_RTABLE_WRITE_SSTABLE = 'q',
+        CC_RTABLE_PERSIST = 'r',
+        CC_RTABLE_WRITE_SSTABLE_RESPONSE = 's',
     };
 
     struct CCRequestContext {
@@ -45,59 +50,47 @@ namespace leveldb {
         bool done;
 
         uint64_t wr_id = 0;
-        uint64_t remote_sstable_buf = 0;
+        uint32_t rtable_id = 0;
+        std::vector<RTableHandle> rtable_handles;
     };
 
     struct CCResponse {
-        uint64_t remote_sstable_buf;
+        uint32_t rtable_id = 0;
+        std::vector<RTableHandle> rtable_handles;
+    };
+
+    struct SSTableRTablePair {
+        std::string sstable_id;
+        uint32_t rtable_id;
     };
 
     class LEVELDB_EXPORT CCClient {
     public:
         virtual uint32_t
-        InitiateReadBlocks(const std::string &dbname, uint64_t file_number,
-                           const FileMetaData &meta,
-                           const std::vector<CCBlockHandle> &block_handls,
-                           char *result) = 0;
+        InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
+                                    char *result) = 0;
 
         virtual uint32_t
-        InitiateReadBlock(const std::string &dbname, uint64_t file_number,
-                          const FileMetaData &meta,
-                          const CCBlockHandle &block_handle,
-                          char *result) = 0;
-
-        // Read the SSTable and return the total size.
-        virtual uint32_t
-        InitiateReadSSTable(const std::string &dbname, uint64_t file_number,
-                            const FileMetaData &meta, char *result) = 0;
-
-        virtual uint32_t InitiateFlushSSTable(const std::string &dbname,
-                                              uint64_t file_number,
-                                              const FileMetaData &meta,
-                                              char *backing_mem) = 0;
+        InitiateRTableReadSSTableDataBlock(uint32_t server_id,
+                                           const std::string &dbname,
+                                           uint64_t file_number,
+                                           uint32_t size,
+                                           char *result) = 0;
 
         virtual uint32_t
-        InitiateAllocateSSTableBuffer(uint32_t remote_server_id,
+        InitiateRTableWriteDataBlocks(uint32_t server_id, uint32_t thread_id, uint32_t *rtable_id,
+                                      char *buf,
                                       const std::string &dbname,
-                                      uint64_t file_number,
-                                      uint64_t file_size) = 0;
+                                      uint64_t file_number, uint32_t size) = 0;
 
         virtual uint32_t
-        InitiateWRITESSTableBuffer(uint32_t remote_server_id, char *src,
-                                   uint64_t dest,
-                                   uint64_t file_size) = 0;
+        InitiatePersist(uint32_t server_id,
+                        std::vector<SSTableRTablePair> rtable_ids) = 0;
 
-        virtual uint32_t InitiateReleaseSSTableBuffer(uint32_t remote_server_id,
-                                                      const std::string &dbname,
-                                                      uint64_t file_number,
-                                                      uint64_t file_size) = 0;
-
-        virtual uint32_t InitiateDeleteTables(const std::string &dbname,
-                                              const std::vector<uint64_t> &filenumbers) = 0;
 
         virtual uint32_t
-        InitiateDeleteFiles(const std::string &dbname,
-                            const std::vector<FileMetaData> &filenames) = 0;
+        InitiateDeleteTables(uint32_t server_id, const std::string &dbname,
+                             const std::vector<uint64_t> &filenumbers) = 0;
 
         virtual uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,

@@ -48,7 +48,7 @@ namespace nova {
              worker_id < NovaDCConfig::dc_config->num_dc_workers; worker_id++) {
             NovaCCServer *rdma_dc = new NovaCCServer(
                     rdma_ctrl,
-                    mem_manager, dc,
+                    mem_manager, nullptr,
                     logFileManager);
             rdma_dc->thread_id_ = worker_id;
             NovaRDMAStore *store = nullptr;
