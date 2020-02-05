@@ -122,6 +122,10 @@ namespace leveldb {
         // Return a human readable string that describes this version's contents.
         std::string DebugString() const;
 
+        TableCache *table_cache();
+
+        FileMetaData *file_meta(uint64_t fn);
+
     private:
         friend class Compaction;
 
@@ -163,6 +167,7 @@ namespace leveldb {
 
         // List of files per level
         std::vector<FileMetaData *> files_[config::kNumLevels];
+        std::map<uint64_t, FileMetaData *> fn_files_;
 
         // Next file to compact based on seek stats.
         FileMetaData *file_to_compact_;

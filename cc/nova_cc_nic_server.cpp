@@ -54,7 +54,7 @@ namespace nova {
         leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
                                     leveldb::EnvBGThread *bg_thread) {
             leveldb::EnvOptions env_option;
-            env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
+            env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_MEM;
             leveldb::PosixEnv *env = new leveldb::PosixEnv;
             env->set_env_option(env_option);
             leveldb::DB *db;
@@ -65,6 +65,13 @@ namespace nova {
                         (uint64_t) (NovaCCConfig::cc_config->write_buffer_size_mb) *
                         1024 * 1024;
             }
+            if (NovaConfig::config->sstable_size > 0) {
+                options.max_file_size = NovaConfig::config->sstable_size;
+            }
+
+            options.max_dc_file_size =
+                    std::max(options.write_buffer_size, options.max_file_size) +
+                    1024 * 1024;
             options.env = env;
             options.create_if_missing = true;
             options.compression = leveldb::kSnappyCompression;
@@ -135,7 +142,7 @@ namespace nova {
                 batch.Put(*key, *val);
                 bs += 1;
 
-                if (bs == 1000) {
+                if (bs == 1) {
                     leveldb::Status status = db->Write(option, &batch);
                     RDMA_ASSERT(status.ok()) << status.ToString();
                     batch.Clear();
@@ -165,35 +172,16 @@ namespace nova {
                 }
             }
         }
-
         RDMA_LOG(INFO) << "Completed loading data " << loaded_keys;
-        // Compact the database.
-        // db_->CompactRange(nullptr, nullptr);
-
-        // Assert the loaded data is valid.
-//        for (int i = 0; i < NovaConfig::config->nfragments; i++) {
-//            if (frags[i]->server_ids[0] != NovaConfig::config->my_server_id) {
-//                continue;
-//            }
-//            leveldb::DB *db = dbs_[frags[i]->db_ids[0]];
-//            for (uint64_t j = frags[i]->key_start;
-//                 j <= frags[i]->key_end; j++) {
-//                auto v = static_cast<char>((j % 10) + 'a');
-//                std::string key = std::to_string(j);
-//                std::string expected_val(
-//                        NovaConfig::config->load_default_value_size, v
-//                );
-//                std::string val;
-//                leveldb::Status status = db->Get(leveldb::ReadOptions(), key,
-//                                                 &val);
-//                RDMA_ASSERT(status.ok()) << status.ToString();
-//                RDMA_ASSERT(expected_val.compare(val) == 0) << val;
-//            }
-//        }
     }
 
     void NovaCCNICServer::LoadData() {
         LoadDataWithRangePartition();
+//        LoadDataWithRangePartition();
+//        NovaAsyncTask task = {};
+//        task.type = RequestType::VERIFY_LOAD;
+//        async_workers[0]->AddTask(task);
+
         for (int i = 0; i < dbs_.size(); i++) {
             RDMA_LOG(INFO) << "Database " << i;
             std::string value;
@@ -285,6 +273,18 @@ namespace nova {
                 NovaConfig::config->rtable_size,
                 NovaConfig::config->servers.size(), nranges);
         int worker_id = 0;
+
+        uint32_t max_req_id = UINT32_MAX - 1;
+        uint32_t range_per_server =
+                max_req_id / NovaCCConfig::cc_config->cc_servers.size();
+        uint32_t lower_client_req_id =
+                1 + (NovaConfig::config->my_server_id * range_per_server);
+        uint32 upper_client_req_id = lower_client_req_id + range_per_server;
+
+        RDMA_LOG(INFO)
+            << fmt::format("Request Id range {}:{}", lower_client_req_id,
+                           upper_client_req_id);
+
         for (worker_id = 0;
              worker_id <
              NovaCCConfig::cc_config->num_async_workers; worker_id++) {
@@ -331,13 +331,17 @@ namespace nova {
                                                                              store,
                                                                              rnic_buf,
                                                                              manager,
-                                                                             log_manager));
+                                                                             log_manager),
+                                                                     lower_client_req_id,
+                                                                     upper_client_req_id);
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
                                                                    manager,
                                                                    rtable_manager,
-                                                                   log_manager);
+                                                                   log_manager,
+                                                                   worker_id,
+                                                                   false);
+            cc_server->rdma_store_ = store;
             cc->rdma_store_ = store;
-            cc->thread_id_ = worker_id;
             cc->cc_client_ = dc_client;
             cc->cc_server_ = cc_server;
 
@@ -387,12 +391,16 @@ namespace nova {
                                                                              store,
                                                                              rnic_buf,
                                                                              manager,
-                                                                             log_manager));
+                                                                             log_manager),
+                                                                     lower_client_req_id,
+                                                                     upper_client_req_id);
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
                                                                    manager,
                                                                    rtable_manager,
-                                                                   log_manager);
-
+                                                                   log_manager,
+                                                                   worker_id,
+                                                                   true);
+            cc_server->rdma_store_ = store;
             cc->rdma_store_ = store;
             cc->thread_id_ = worker_id;
             cc->cc_client_ = dc_client;

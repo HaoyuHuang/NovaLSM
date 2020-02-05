@@ -45,7 +45,7 @@ namespace leveldb {
 
         std::vector<RTableHandle> Persist();
 
-        void Finalize(const std::vector<RTableHandle> &rtable_handles);
+        uint32_t Finalize(const std::vector<RTableHandle> &rtable_handles);
 
         const std::vector<uint32_t> &rtable_server_ids() {
             return server_ids_;
@@ -70,6 +70,10 @@ namespace leveldb {
         uint64_t thread_id() { return thread_id_; }
 
         uint64_t file_number() { return file_number_; }
+
+        void set_num_data_blocks(uint32_t num_data_blocks) {
+            num_data_blocks_ = num_data_blocks;
+        }
 
     private:
         uint32_t WriteBlock(BlockBuilder *block, uint64_t offset);
@@ -107,7 +111,7 @@ namespace leveldb {
                                const FileMetaData &meta,
                                CCClient *dc_client,
                                MemManager *mem_manager,
-                               Options options,
+                               const Options& options,
                                uint64_t thread_id,
                                bool prefetch_all);
 
@@ -119,7 +123,7 @@ namespace leveldb {
 
     private:
         struct DataBlockRTableLocalBuf {
-            uint32_t offset;
+            uint64_t offset;
             uint32_t size;
             uint64_t local_offset;
         };
@@ -130,18 +134,18 @@ namespace leveldb {
         uint64_t file_number_;
         FileMetaData meta_;
 
-        bool prefetch_all_;
+        bool prefetch_all_ = false;
         char *backing_mem_table_ = nullptr;
         char *backing_mem_block_ = nullptr;
 
         std::map<uint64_t, DataBlockRTableLocalBuf> rtable_local_offset_;
 
-        MemManager *mem_manager_;
-        uint64_t thread_id_;
-        CCClient *dc_client_;
-        Options options_;
-        Env *env_;
-        RandomAccessFile *local_ra_file_;
+        MemManager *mem_manager_ = nullptr;
+        uint64_t thread_id_ = 0;
+        CCClient *dc_client_ = nullptr;
+        const Options &options_;
+        Env *env_ = nullptr;
+        RandomAccessFile *local_ra_file_ = nullptr;
     };
 
     struct DeleteTableRequest {

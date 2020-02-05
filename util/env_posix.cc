@@ -167,6 +167,75 @@ namespace leveldb {
         return Status::OK();
     }
 
+    PosixReadWriteFile::PosixReadWriteFile(std::string filename, int fd)
+            : fd_(fd),
+              is_manifest_(false),
+              filename_(std::move(filename)),
+              dirname_(PosixWritableFile::Dirname(filename_)) {}
+
+    PosixReadWriteFile::~PosixReadWriteFile() {
+        if (fd_ >= 0) {
+            // Ignoring any potential errors
+            Close();
+        }
+    }
+
+    Status PosixReadWriteFile::Read(const RTableHandle &rtable_handle,
+                                    uint64_t offset, size_t n, Slice *result,
+                                    char *scratch) {
+        assert(fd_ != -1);
+
+        Status status;
+        ssize_t read_size = ::pread(fd_, scratch, n,
+                                    static_cast<off_t>(offset));
+        *result = Slice(scratch, (read_size < 0) ? 0 : read_size);
+        if (read_size < 0) {
+            // An error: return a non-ok status.
+            status = PosixError(filename_, errno);
+        }
+        return status;
+    }
+
+    Status PosixReadWriteFile::Append(const Slice &data) {
+        size_t write_size = data.size();
+        const char *write_data = data.data();
+        if (write_size == 0) {
+            return Status::OK();
+        }
+        return WriteUnbuffered(write_data, write_size);
+    }
+
+    Status PosixReadWriteFile::Close() {
+        Status status;
+        const int close_result = ::close(fd_);
+        if (close_result < 0 && status.ok()) {
+            status = PosixError(filename_, errno);
+        }
+        fd_ = -1;
+        return status;
+    }
+
+    Status PosixReadWriteFile::Flush() { return Status::OK(); }
+
+    Status PosixReadWriteFile::Sync() {
+        return PosixWritableFile::SyncFd(fd_, filename_);
+    }
+
+    Status PosixReadWriteFile::WriteUnbuffered(const char *data, size_t size) {
+        while (size > 0) {
+            ssize_t write_result = ::write(fd_, data, size);
+            if (write_result < 0) {
+                if (errno == EINTR) {
+                    continue;  // Retry
+                }
+                return PosixError(filename_, errno);
+            }
+            data += write_result;
+            size -= write_result;
+        }
+        return Status::OK();
+    }
+
     PosixWritableFile::PosixWritableFile(std::string filename, int fd)
             : pos_(0),
               fd_(fd),
@@ -524,6 +593,21 @@ namespace leveldb {
         }
 
         *result = new PosixWritableFile(filename, fd);
+        return Status::OK();
+    }
+
+    Status PosixEnv::NewReadWriteFile(const std::string &filename,
+                                      const EnvFileMetadata &metadata,
+                                      ReadWriteFile **result) {
+        int fd = ::open(filename.c_str(),
+                        O_TRUNC | O_RDWR | O_CREAT | kOpenBaseFlags,
+                        0644);
+        if (fd < 0) {
+            *result = nullptr;
+            return PosixError(filename, errno);
+        }
+
+        *result = new PosixReadWriteFile(filename, fd);
         return Status::OK();
     }
 

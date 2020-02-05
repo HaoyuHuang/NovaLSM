@@ -60,6 +60,7 @@ namespace leveldb {
         struct Output {
             uint64_t number;
             uint64_t file_size;
+            uint64_t converted_file_size;
             InternalKey smallest, largest;
             std::vector<RTableHandle> data_block_group_handles;
         };
@@ -106,7 +107,6 @@ namespace leveldb {
         result.comparator = icmp;
         result.filter_policy = (src.filter_policy != nullptr) ? ipolicy
                                                               : nullptr;
-        result.max_dc_file_size = result.write_buffer_size + 1024 * 1024;
         ClipToRange(&result.max_open_files, 64 + kNumNonTableCacheFiles, 50000);
         ClipToRange(&result.write_buffer_size, 64 << 10, 1 << 30);
         ClipToRange(&result.max_file_size, 1 << 20, 1 << 30);
@@ -306,20 +306,28 @@ namespace leveldb {
                 }
             }
         }
-        std::vector<FileMetaData> files;
-        std::vector<uint64_t> fds;
-        std::set<uint32_t> server_ids;
-        for (auto it = compacted_tables_.begin();
-             it != compacted_tables_.end(); it++) {
-            for (int i = 0;
-                 i < it->second.data_block_group_handles.size(); i++) {
-                server_ids.insert(
-                        it->second.data_block_group_handles[i].server_id);
+
+        std::map<uint32_t, std::vector<SSTableRTablePair>> server_pairs;
+        auto it = compacted_tables_.begin();
+        while (it != compacted_tables_.end()) {
+            uint64_t fn = it->first;
+            FileMetaData &meta = it->second;
+
+            if (live.find(fn) != live.end()) {
+                // Do not remove if it is still alive.
+                it++;
+                continue;
             }
-            files.push_back(it->second);
-            fds.push_back(it->second.number);
+
+            auto handles = meta.data_block_group_handles;
+            for (int i = 0; i < handles.size(); i++) {
+                SSTableRTablePair pair = {};
+                pair.sstable_id = TableFileName(dbname_, meta.number);
+                pair.rtable_id = handles[i].rtable_id;
+                server_pairs[handles[i].server_id].push_back(pair);
+            }
+            it = compacted_tables_.erase(it);
         }
-        compacted_tables_.clear();
         // While deleting all files unblock other threads. All files being deleted
         // have unique names which will not collide with newly created files and
         // are therefore safe to delete while allowing other threads to proceed.
@@ -327,9 +335,9 @@ namespace leveldb {
         for (const std::string &filename : files_to_delete) {
             env_->DeleteFile(dbname_ + "/" + filename);
         }
-        for (auto server_id : server_ids) {
-            options_.bg_thread->dc_client()->InitiateDeleteTables(server_id,
-                                                                  dbname_, fds);
+        for (auto it : server_pairs) {
+            options_.bg_thread->dc_client()->InitiateDeleteTables(it.first,
+                                                                  it.second);
         }
         mutex_.Lock();
     }
@@ -589,7 +597,8 @@ namespace leveldb {
                 level = base->PickLevelForMemTableOutput(min_user_key,
                                                          max_user_key);
             }
-            edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
+            edit->AddFile(level, meta.number, meta.file_size,
+                          meta.converted_file_size, meta.smallest,
                           meta.largest, meta.data_block_group_handles);
         }
 
@@ -766,6 +775,9 @@ namespace leveldb {
         } else if (!bg_error_.ok()) {
             // No more background work after a background error.
         } else {
+//            if (imm_ != nullptr) {
+//                CompactMemTable();
+//            }
             BackgroundCompaction();
         }
 
@@ -813,6 +825,7 @@ namespace leveldb {
             FileMetaData *f = c->input(0, 0);
             c->edit()->DeleteFile(c->level(), f->number);
             c->edit()->AddFile(c->level() + 1, f->number, f->file_size,
+                               f->converted_file_size,
                                f->smallest,
                                f->largest, f->data_block_group_handles);
             status = versions_->LogAndApply(c->edit(), &mutex_);
@@ -875,6 +888,18 @@ namespace leveldb {
         // Delete everything now.
         // TODO:
 
+        // Delete the files.
+        for (int i = 0; i < compact->output_files.size(); i++) {
+            MemWritableFile *out = compact->output_files[i];
+            if (out) {
+                auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
+                delete mem_file;
+                delete out;
+                mem_file = nullptr;
+                out = nullptr;
+            }
+        }
+
 
         for (size_t i = 0; i < compact->outputs.size(); i++) {
             const CompactionState::Output &out = compact->outputs[i];
@@ -926,12 +951,13 @@ namespace leveldb {
 
         // Check for iterator errors
         Status s = input->status();
-        const uint64_t current_entries = compact->builder->NumEntries();
         if (s.ok()) {
             s = compact->builder->Finish();
         } else {
             compact->builder->Abandon();
         }
+        const uint64_t current_entries = compact->builder->NumEntries();
+        const uint64_t current_data_blocks = compact->builder->NumDataBlocks();
         const uint64_t current_bytes = compact->builder->FileSize();
         compact->current_output()->file_size = current_bytes;
         compact->total_bytes += current_bytes;
@@ -946,6 +972,7 @@ namespace leveldb {
         // Set meta in order to flush to the corresponding DC node.
         NovaCCMemFile *mem_file = static_cast<NovaCCMemFile *>(compact->outfile->mem_file());
         mem_file->set_meta(meta);
+        mem_file->set_num_data_blocks(current_data_blocks);
 
         // Finish and check for file errors
         if (s.ok()) {
@@ -982,6 +1009,12 @@ namespace leveldb {
 //                    (unsigned long long) current_bytes);
 //            }
         }
+
+        for (int i = 0; i < compact->output_files.size(); i++) {
+            MemWritableFile *out = compact->output_files[i];
+            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
+            mem_file->PullWRITEDataBlockRequests(false);
+        }
         return s;
     }
 
@@ -1004,11 +1037,13 @@ namespace leveldb {
             mem_file->PullWRITEDataBlockRequests(true);
             auto server_ids = mem_file->rtable_server_ids();
             auto rtable_ids = mem_file->rtable_ids();
+            RDMA_ASSERT(server_ids.size() == rtable_ids.size());
 
             for (int i = 0; i < server_ids.size(); i++) {
                 SSTableRTablePair pair;
                 pair.sstable_id = mem_file->sstable_id();
                 pair.rtable_id = rtable_ids[i];
+                RDMA_ASSERT(pair.rtable_id != 0);
                 pairs[server_ids[i]].push_back(pair);
             }
         }
@@ -1030,6 +1065,7 @@ namespace leveldb {
                                                             &response));
 
             handles[i] = response.rtable_handles;
+            RDMA_ASSERT(handles[i].size() == pairs[i].size());
         }
 
         for (int i = 0; i < compact->output_files.size(); i++) {
@@ -1045,17 +1081,21 @@ namespace leveldb {
                 auto sr_pairs = pairs[server_id];
 
                 // Search for the correct RTableHandle for this SSTable.
+                // One SSTable can only be in one RTable.
                 for (int k = 0; k < sr_pairs.size(); k++) {
                     if (sr_pairs[k].sstable_id == sstable_id &&
                         sr_pairs[k].rtable_id == rtable_id) {
-                        rtable_handles.push_back(handles[server_id][k]);
+                        RTableHandle &handle = handles[server_id][k];
+                        RDMA_ASSERT(handle.server_id == server_id);
+                        RDMA_ASSERT(handle.rtable_id == rtable_id);
+                        rtable_handles.push_back(handle);
                         break;
                     }
                 }
             }
             RDMA_ASSERT(rtable_handles.size() ==
                         mem_file->rtable_server_ids().size());
-            mem_file->Finalize(rtable_handles);
+            output.converted_file_size = mem_file->Finalize(rtable_handles);
             output.data_block_group_handles = rtable_handles;
         }
 
@@ -1066,9 +1106,11 @@ namespace leveldb {
             delete mem_file;
             delete out;
 
+            compact->output_files[i] = nullptr;
             mem_file = nullptr;
             out = nullptr;
         }
+//        compact->output_files.clear();
 
         // Add compaction outputs
         compact->compaction->AddInputDeletions(compact->compaction->edit());
@@ -1077,6 +1119,7 @@ namespace leveldb {
             const CompactionState::Output &out = compact->outputs[i];
             compact->compaction->edit()->AddFile(level + 1, out.number,
                                                  out.file_size,
+                                                 out.converted_file_size,
                                                  out.smallest, out.largest,
                                                  out.data_block_group_handles);
         }
@@ -1105,7 +1148,6 @@ namespace leveldb {
         }
 
         Iterator *input = versions_->MakeInputIterator(compact->compaction);
-
         // Release mutex while we're actually doing the compaction work
         mutex_.Unlock();
 

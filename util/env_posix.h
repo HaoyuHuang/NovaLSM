@@ -140,14 +140,45 @@ namespace leveldb {
 
         ~PosixMmapReadableFile() override;
 
-        Status Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n, Slice *result,
-                    char *scratch) override;
+        Status
+        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
+             Slice *result,
+             char *scratch) override;
 
     private:
         char *const mmap_base_;
         const size_t length_;
         Limiter *const mmap_limiter_;
         const std::string filename_;
+    };
+
+    class PosixReadWriteFile final : public ReadWriteFile {
+    public:
+        PosixReadWriteFile(std::string filename, int fd);
+
+        ~PosixReadWriteFile();
+
+        Status
+        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
+             Slice *result,
+             char *scratch) override;
+
+        Status Append(const Slice &data) override;
+
+        Status Close() override;
+
+        Status Flush() override;
+
+        Status Sync() override;
+    private:
+        Status WriteUnbuffered(const char *data, size_t size);
+
+        // buf_[0, pos_ - 1] contains data to be written to fd_.
+        int fd_;
+
+        const bool is_manifest_ = false;  // True if the file's name starts with MANIFEST.
+        const std::string filename_;
+        const std::string dirname_;  // The directory of filename_.
     };
 
     class PosixWritableFile final : public WritableFile {
@@ -163,13 +194,6 @@ namespace leveldb {
         Status Flush() override;
 
         Status Sync() override;
-
-    private:
-        Status FlushBuffer();
-
-        Status WriteUnbuffered(const char *data, size_t size);
-
-        Status SyncDirIfManifest();
 
         // Ensures that all the caches associated with the given file descriptor's
         // data are flushed all the way to durable media, and can withstand power
@@ -192,6 +216,13 @@ namespace leveldb {
 
         // True if the given file is a manifest file.
         static bool IsManifest(const std::string &filename);
+
+    private:
+        Status FlushBuffer();
+
+        Status WriteUnbuffered(const char *data, size_t size);
+
+        Status SyncDirIfManifest();
 
         // buf_[0, pos_ - 1] contains data to be written to fd_.
         char buf_[kWritableFileBufferSize];
@@ -252,6 +283,10 @@ namespace leveldb {
         Status NewWritableFile(const std::string &filename,
                                const EnvFileMetadata &metadata,
                                WritableFile **result) override;
+
+        Status NewReadWriteFile(const std::string &fname,
+                                const EnvFileMetadata &metadata,
+                                ReadWriteFile **result) override;
 
         Status NewAppendableFile(const std::string &filename,
                                  WritableFile **result) override;

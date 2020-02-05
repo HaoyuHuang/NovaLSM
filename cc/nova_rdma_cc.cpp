@@ -27,6 +27,53 @@ namespace nova {
         return size;
     }
 
+    void NovaRDMAComputeComponent::ProcessVerify(
+            const nova::NovaAsyncTask &task) {
+        // Verify loaded data are correct.
+        // Assert the loaded data is valid.
+        leveldb::ReadOptions read_options = {};
+        read_options.mem_manager = mem_manager_;
+        read_options.dc_client = cc_client_;
+        read_options.thread_id = thread_id_;
+        read_options.verify_checksums = false;
+        std::vector<CCFragment *> &frags = NovaCCConfig::cc_config->fragments;
+        for (int i = 0; i < frags.size(); i++) {
+            if (frags[i]->cc_server_id !=
+                NovaConfig::config->my_server_id) {
+                continue;
+            }
+            leveldb::DB *db = dbs_[frags[i]->dbid];
+
+            RDMA_LOG(INFO) << "Verify range "
+                           << frags[i]->range.key_start
+                           << " to "
+                           << frags[i]->range.key_end;
+
+            for (uint64_t j = frags[i]->range.key_end;
+                 j >= frags[i]->range.key_start; j--) {
+                auto v = static_cast<char>((j % 10) + 'a');
+                std::string key = std::to_string(j);
+                std::string expected_val(
+                        NovaConfig::config->load_default_value_size, v
+                );
+                std::string val;
+                leveldb::Status status = db->Get(read_options, key, &val);
+                RDMA_ASSERT(status.ok())
+                    << fmt::format("key:{} status:{}", key, status.ToString());
+                RDMA_ASSERT(expected_val.compare(val) == 0) << val;
+
+                if (j == frags[i]->range.key_start) {
+                    break;
+                }
+            }
+
+            RDMA_LOG(INFO) << "Success: Verified range "
+                           << frags[i]->range.key_start
+                           << " to "
+                           << frags[i]->range.key_end;
+        }
+    }
+
     void NovaRDMAComputeComponent::ProcessPut(const nova::NovaAsyncTask &task) {
         uint64_t hv = keyhash(task.key.data(), task.key.size());
         leveldb::WriteOptions option;
@@ -92,12 +139,16 @@ namespace nova {
             switch (task.type) {
                 case RequestType::PUT:
                     ProcessPut(task);
+                    conn_workers_[task.conn_worker_id] = true;
                     break;
                 case RequestType::GET:
                     ProcessGet(task);
+                    conn_workers_[task.conn_worker_id] = true;
+                    break;
+                case RequestType::VERIFY_LOAD:
+                    ProcessVerify(task);
                     break;
             }
-            conn_workers_[task.conn_worker_id] = true;
         }
 
         mutex_.Lock();
@@ -150,7 +201,6 @@ namespace nova {
         is_running_ = true;
         mutex_.Unlock();
 
-
         if (is_worker_thread_) {
             sem_wait(&sem_);
         }
@@ -178,13 +228,23 @@ namespace nova {
         }
     }
 
-    void
+    bool
     NovaRDMAComputeComponent::ProcessRDMAWC(ibv_wc_opcode opcode,
                                             uint64_t wr_id,
                                             int remote_server_id,
                                             char *buf, uint32_t imm_data) {
-        cc_client_->OnRecv(opcode, wr_id, remote_server_id, buf, imm_data);
-        cc_server_->ProcessRDMAWC(opcode, wr_id, remote_server_id, buf,
-                                  imm_data);
+        if (opcode == IBV_WC_SEND || opcode == IBV_WC_RDMA_READ) {
+            return true;
+        }
+        bool processed_by_client = cc_client_->OnRecv(opcode, wr_id,
+                                                      remote_server_id, buf,
+                                                      imm_data);
+        bool processed_by_server = cc_server_->ProcessRDMAWC(opcode, wr_id,
+                                                             remote_server_id,
+                                                             buf,
+                                                             imm_data);
+        if (processed_by_client && processed_by_server) {
+            RDMA_ASSERT(false) << fmt::format("Processed by both client and server");
+        }
     }
 }

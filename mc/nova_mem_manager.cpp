@@ -28,7 +28,7 @@ namespace nova {
         char *buf = next_;
         next_ += item_size_;
         available_bytes_ -= item_size_;
-        memset(buf, 0, item_size_);
+//        memset(buf, 0, item_size_);
         return buf;
     }
 
@@ -130,7 +130,6 @@ namespace nova {
                 }
             }
             oom_lock.unlock();
-            RDMA_ASSERT(false);
             return nullptr;
         }
         slab = free_slabs_[free_slab_index_];
@@ -146,7 +145,7 @@ namespace nova {
     }
 
     void NovaPartitionedMemManager::FreeItem(char *buf, uint32_t scid) {
-        memset(buf, 0, slab_classes_[scid].size);
+//        memset(buf, 0, slab_classes_[scid].size);
         slab_class_mutex_[scid].lock();
         slab_classes_[scid].FreeItem(buf);
         slab_class_mutex_[scid].unlock();

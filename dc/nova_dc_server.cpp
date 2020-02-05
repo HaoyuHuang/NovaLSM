@@ -49,8 +49,7 @@ namespace nova {
             NovaCCServer *rdma_dc = new NovaCCServer(
                     rdma_ctrl,
                     mem_manager, nullptr,
-                    logFileManager);
-            rdma_dc->thread_id_ = worker_id;
+                    logFileManager, worker_id, true);
             NovaRDMAStore *store = nullptr;
             std::vector<QPEndPoint> endpoints;
             for (int i = 0;

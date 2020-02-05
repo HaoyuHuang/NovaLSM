@@ -32,18 +32,19 @@ namespace nova {
         NovaCCServer(rdmaio::RdmaCtrl *rdma_ctrl,
                      NovaMemManager *mem_manager,
                      leveldb::NovaRTableManager *rtable_manager,
-                     LogFileManager *log_manager);
+                     LogFileManager *log_manager,
+                     uint32_t thread_id, bool is_compaction_thread);
 
-        void
+        bool
         ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
                       char *buf, uint32_t imm_data) override;
 
         NovaRDMAStore *rdma_store_;
-        uint64_t thread_id_;
 
     private:
         bool is_running_ = true;
 
+        uint32_t thread_id_;
         rdmaio::RdmaCtrl *rdma_ctrl_;
         NovaMemManager *mem_manager_;
         LogFileManager *log_manager_;

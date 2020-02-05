@@ -75,6 +75,9 @@ namespace nova {
         INCOMPLETE, COMPLETE, CLOSED
     };
 
+    void MarkCharAsWaitingForRDMAWRITE(char *ptr, uint32_t size);
+
+    bool IsRDMAWRITEComplete(char *ptr, uint32_t size);
 
     class Connection {
     public:
@@ -114,13 +117,8 @@ namespace nova {
     enum RequestType : char {
         GET = 'g',
         PUT = 'p',
+        VERIFY_LOAD = 'v',
         REQ_RANGE = 'r',
-        ALLOCATE_LOG_BUFFER = 'a',
-        ALLOCATE_LOG_BUFFER_SUCC = 'A',
-        DELETE_LOG_FILE = 'd',
-        DELETE_LOG_FILE_SUCC = 'D',
-        REPLICATE_LOG_RECORD = 'l',
-        REPLICATE_LOG_RECORD_SUCC = 'L',
         REDIRECT = 'r',
         GET_INDEX = 'i',
         EXISTS = 'h',

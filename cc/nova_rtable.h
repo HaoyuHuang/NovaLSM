@@ -16,6 +16,7 @@
 
 namespace leveldb {
 
+
     class NovaRTable {
     public:
         NovaRTable(uint32_t rtable_id, Env *env, std::string rtable_name,
@@ -26,14 +27,14 @@ namespace leveldb {
 
         void Persist();
 
-        uint64_t AllocateBuf(const std::string &sstable, uint32_t size);
+        uint64_t AllocateBuf(const std::string &sstable_id,
+                             uint32_t size);
 
         void MarkOffsetAsWritten(uint64_t offset);
 
         BlockHandle &Handle(const std::string &sstable_id);
 
-        void DeleteSSTable(const std::string &dbname,
-                           uint64_t file_number);
+        void DeleteSSTable(const std::string &sstable_id);
 
         uint32_t rtable_id() {
             return rtable_id_;
@@ -50,24 +51,24 @@ namespace leveldb {
             bool persisted;
         };
 
-        Env *env_;
-        WritableFile *file_;
-        RandomAccessFile *readable_file_;
+        Env *env_ = nullptr;
+        ReadWriteFile *file_ = nullptr;
 
         std::map<std::string, BlockHandle> sstable_offset_;
         std::list<AllocatedBuf> allocated_bufs_;
+        bool is_full_ = false;
         bool sealed_ = false;
 
-        MemManager *mem_manager_;
+        MemManager *mem_manager_ = nullptr;
         std::string rtable_name_;
-        char *backing_mem_;
-        uint64_t current_disk_offset_;
-        uint64_t current_mem_offset_;
-        uint32_t file_size_;
-        uint32_t allocated_mem_size_;
-        uint32_t thread_id_;
-        uint32_t rtable_id_;
-        bool deleted_;
+        char *backing_mem_ = nullptr;
+        uint64_t current_disk_offset_ = 0;
+        uint64_t current_mem_offset_ = 0;
+        uint32_t file_size_ = 0;
+        uint32_t allocated_mem_size_ = 0;
+        uint32_t thread_id_ = 0;
+        uint32_t rtable_id_ = 0;
+        bool deleted_ = false;
         std::mutex mutex_;
     };
 
@@ -84,32 +85,17 @@ namespace leveldb {
 
         NovaRTable *CreateNewRTable(uint32_t thread_id);
 
-        // db -> sstable file number -> rtables.
-        void
-        ReadDataBlocksOfSSTable(const std::string &dbname,
-                                uint64_t file_number, char *scratch);
-
-        void ReadDataBlock(const RTableHandle &rtable_handle, char *scratch);
-
-        void DeleteSSTable(const std::string &dbname,
-                           uint64_t file_number);
-
-        void DeleteSSTable(const std::string &dbname,
-                           const std::vector<uint64_t> &file_number);
+        void ReadDataBlock(const RTableHandle &rtable_handle, uint64_t offset,
+                           uint32_t size, char *scratch);
 
     private:
-        struct DBSSTableRTableMapping {
-            std::map<uint64_t, NovaRTable *> fn_rtable;
-            std::mutex mutex_;
-        };
 
-        DBSSTableRTableMapping ***server_db_sstable_rtable_mapping_;
-
-        Env *env_;
-        MemManager *mem_manager_;
-        uint32_t rtable_size_;
+        Env *env_ = nullptr;
+        MemManager *mem_manager_ = nullptr;
+        uint32_t rtable_size_ = 0;
         std::string rtable_path_;
-        uint32_t current_rtable_id_ = 0;
+        // 0 is reserved so that read knows to fetch the block from a local file.
+        uint32_t current_rtable_id_ = 1;
         NovaRTable *active_rtables_[64];
         NovaRTable *rtables_[MAX_NUM_RTABLES];
         std::mutex mutex_;

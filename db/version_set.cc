@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include "nova/logging.hpp"
 
 #include "db/filename.h"
 #include "db/log_reader.h"
@@ -203,9 +204,9 @@ namespace leveldb {
 
         Slice value() const override {
             assert(Valid());
-            uint32_t size = EncodeFileMetaData(*(*flist_)[index_], value_buf_,
-                                               sizeof(value_buf_));
-            return Slice(value_buf_, size);
+            FileMetaData &meta = *(*flist_)[index_];
+            EncodeFixed64(value_buf_, meta.number);
+            return Slice(value_buf_, 8);
         }
 
         Status status() const override { return Status::OK(); }
@@ -216,28 +217,29 @@ namespace leveldb {
         uint32_t index_;
 
         // Backing store for value().  Holds the file number and size.
-        mutable char value_buf_[1024];
+        mutable char value_buf_[8];
     };
 
     static Iterator *
     GetFileIterator(void *arg, BlockReadContext context,
                     const ReadOptions &options,
                     const Slice &file_value) {
-        TableCache *cache = reinterpret_cast<TableCache *>(arg);
-//        if (file_value.size() != 16) {
-//            return NewErrorIterator(
-//                    Status::Corruption(
-//                            "FileReader invoked with unexpected value"));
-//        } else {
-        Slice value(file_value);
-        // TODO: Instead of making copies, create a new file meta data.
-        FileMetaData meta;
-        DecodeFileMetaData(value, &meta);
-        return cache->NewIterator(context.caller, options, meta,
-                                  meta.number,
-                                  context.level,
-                                  meta.file_size);
-//        }
+        Version *v = reinterpret_cast<Version *>(arg);
+        RDMA_ASSERT(file_value.size() == 8);
+        uint64_t fn = DecodeFixed64(file_value.data());
+        FileMetaData *meta = v->file_meta(fn);
+        return v->table_cache()->NewIterator(context.caller, options, *meta,
+                                             meta->number,
+                                             context.level,
+                                             meta->converted_file_size);
+    }
+
+    TableCache *Version::table_cache() {
+        return vset_->table_cache_;
+    }
+
+    FileMetaData *Version::file_meta(uint64_t fn) {
+        return fn_files_[fn];
     }
 
     Iterator *Version::NewConcatenatingIterator(const ReadOptions &options,
@@ -251,7 +253,7 @@ namespace leveldb {
                 new LevelFileNumIterator(vset_->icmp_, &files_[level]),
                 context,
                 &GetFileIterator,
-                vset_->table_cache_, options);
+                (void *) this, options);
     }
 
     void Version::AddIterators(const ReadOptions &options,
@@ -261,7 +263,7 @@ namespace leveldb {
             iters->push_back(vset_->table_cache_->NewIterator(
                     AccessCaller::kUserIterator,
                     options, *files_[0][i], files_[0][i]->number, 0,
-                    files_[0][i]->file_size));
+                    files_[0][i]->converted_file_size));
         }
 
         // For levels > 0, we can use a concatenating iterator that sequentially
@@ -385,7 +387,7 @@ namespace leveldb {
                 state->s = state->vset->table_cache_->Get(*state->options,
                                                           *f,
                                                           f->number,
-                                                          f->file_size,
+                                                          f->converted_file_size,
                                                           level,
                                                           state->ikey,
                                                           &state->saver,
@@ -789,6 +791,7 @@ namespace leveldb {
                 }
                 f->refs++;
                 files->push_back(f);
+                v->fn_files_[f->number] = f;
             }
         }
     };
@@ -1156,7 +1159,7 @@ namespace leveldb {
             const std::vector<FileMetaData *> &files = current_->files_[level];
             for (size_t i = 0; i < files.size(); i++) {
                 const FileMetaData *f = files[i];
-                edit.AddFile(level, f->number, f->file_size, f->smallest,
+                edit.AddFile(level, f->number, f->file_size, f->converted_file_size, f->smallest,
                              f->largest, f->data_block_group_handles);
             }
         }
@@ -1332,7 +1335,7 @@ namespace leveldb {
                                 files[i]->number,
                                 c->level() +
                                 which,
-                                files[i]->file_size);
+                                files[i]->converted_file_size);
                     }
                 } else {
                     // Create concatenating iterator for the files from this level
@@ -1345,7 +1348,7 @@ namespace leveldb {
                             new Version::LevelFileNumIterator(icmp_,
                                                               &c->inputs_[which]),
                             context,
-                            &GetFileIterator, table_cache_, options);
+                            &GetFileIterator, c->input_version_, options);
                 }
             }
         }

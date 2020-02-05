@@ -116,7 +116,7 @@ namespace leveldb {
         for (size_t i = 0; i < outputs_.size(); i++) {
             const CompactionState::Output &out = outputs_[i];
             compaction_->edit()->AddFile(level + 1, out.number,
-                                         out.file_size,
+                                         out.file_size, 0,
                                          out.smallest, out.largest, {});
         }
     }

@@ -56,11 +56,13 @@ namespace leveldb {
         // REQUIRES: This version has not been saved (see VersionSet::SaveTo)
         // REQUIRES: "smallest" and "largest" are smallest and largest keys in file
         void AddFile(int level, uint64_t file, uint64_t file_size,
+                     uint64_t converted_file_size,
                      const InternalKey &smallest, const InternalKey &largest,
                      const std::vector<RTableHandle> &data_block_group_handles) {
             FileMetaData f;
             f.number = file;
             f.file_size = file_size;
+            f.converted_file_size = converted_file_size;
             f.smallest = smallest;
             f.largest = largest;
             f.data_block_group_handles = data_block_group_handles;

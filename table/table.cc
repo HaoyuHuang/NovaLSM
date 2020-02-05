@@ -4,6 +4,8 @@
 
 #include "util/crc32c.h"
 #include <fmt/core.h>
+#include <db/dbformat.h>
+#include <nova/logging.hpp>
 #include "leveldb/table.h"
 
 #include "nova/logging.hpp"
@@ -52,7 +54,10 @@ namespace leveldb {
 
         char footer_space[Footer::kEncodedLength];
         Slice footer_input;
-        RTableHandle h;
+        RTableHandle h = {};
+        h.offset = size - Footer::kEncodedLength;
+        h.size = Footer::kEncodedLength;
+
         Status s = file->Read(h, size - Footer::kEncodedLength,
                               Footer::kEncodedLength,
                               &footer_input, footer_space);
@@ -70,9 +75,10 @@ namespace leveldb {
             if (options.paranoid_checks) {
                 opt.verify_checksums = true;
             }
-            RTableHandle h;
-            s = (*table)->ReadBlock(file, opt, h, footer.index_handle(),
-                                    &index_block_contents);
+            RTableHandle h = {};
+            h.offset = footer.index_handle().offset();
+            h.size = footer.index_handle().size();
+            s = (*table)->ReadBlock(file, opt, h, &index_block_contents);
         }
 
         if (s.ok()) {
@@ -95,10 +101,26 @@ namespace leveldb {
             (*table)->rep_ = rep;
             (*table)->ReadMeta(footer);
             (*table)->db_profiler_ = db_profiler;
-            RDMA_LOG(rdmaio::DEBUG)
-                << fmt::format("cache id {} fn:{} cc:{}", rep->cache_id,
-                               file_number,
-                               options.block_cache->TotalCapacity());
+
+//            auto it = index_block->NewIterator(options.comparator);
+//            it->SeekToFirst();
+//            while (it->Valid()) {
+//                Slice key = it->key();
+//                Slice value = it->value();
+//
+//                leveldb::ParsedInternalKey ikey;
+//                leveldb::ParseInternalKey(key, &ikey);
+//                RTableHandle handle;
+//                handle.DecodeHandle(value.data());
+//                RDMA_LOG(rdmaio::DEBUG)
+//                    << fmt::format("key:{} handle:{} {} {} {}",
+//                                   ikey.user_key.ToString(), handle.server_id,
+//                                   handle.rtable_id, handle.offset,
+//                                   handle.size);
+//                it->Next();
+//            }
+//            delete it;
+
         }
         return s;
     }
@@ -115,9 +137,10 @@ namespace leveldb {
             opt.verify_checksums = true;
         }
         BlockContents contents;
-        RTableHandle h;
-        if (!ReadBlock(rep_->file, opt, h, footer.metaindex_handle(),
-                       &contents).ok()) {
+        RTableHandle h = {};
+        h.offset = footer.metaindex_handle().offset();
+        h.size = footer.metaindex_handle().size();
+        if (!ReadBlock(rep_->file, opt, h, &contents).ok()) {
             // Do not propagate errors since meta info is not needed for operation
             return;
         }
@@ -150,8 +173,10 @@ namespace leveldb {
             opt.verify_checksums = true;
         }
         BlockContents block;
-        RTableHandle h;
-        if (!ReadBlock(rep_->file, opt, h, filter_handle, &block).ok()) {
+        RTableHandle h = {};
+        h.offset = filter_handle.offset();
+        h.size = filter_handle.size();
+        if (!ReadBlock(rep_->file, opt, h, &block).ok()) {
             return;
         }
         if (block.heap_allocated) {
@@ -189,9 +214,7 @@ namespace leveldb {
         Cache::Handle *cache_handle = nullptr;
 
         // It is an RTableHandle.
-        // TODO
-        RTableHandle rtable_handle;
-        BlockHandle handle = {};
+        RTableHandle rtable_handle = {};
         Slice input = index_value;
         Status s;
         rtable_handle.DecodeHandle(input.data());
@@ -212,11 +235,10 @@ namespace leveldb {
                 cache_hit = true;
             } else {
                 s = table->ReadBlock(table->rep_->file, options, rtable_handle,
-                                     handle,
                                      &contents);
                 if (s.ok()) {
                     block = new Block(contents, table->rep_->file_number,
-                                      handle.offset());
+                                      rtable_handle.offset);
                     if (contents.cachable && options.fill_cache) {
                         cache_handle = block_cache->Insert(key, block,
                                                            block->size(),
@@ -227,20 +249,23 @@ namespace leveldb {
             }
         } else {
             s = table->ReadBlock(table->rep_->file, options, rtable_handle,
-                                 handle,
                                  &contents);
             if (s.ok()) {
                 block = new Block(contents, table->rep_->file_number,
-                                  handle.offset());
+                                  rtable_handle.offset);
             }
         }
-        RDMA_LOG(rdmaio::DEBUG)
-            << fmt::format(
-                    "Cache hit {} Insert {} cs:{} cc:{} fn:{} bs:{} off:{}",
-                    cache_hit,
-                    insert, block_cache->TotalCharge(),
-                    block_cache->TotalCapacity(), table->rep_->file_number,
-                    block->size(), handle.offset());
+
+        RDMA_ASSERT(s.ok()) <<
+                            fmt::format(
+                                    "Cache hit {} Insert {} cs:{} cc:{} fn:{} rs:{} rr:{} roff:{} rsize:{}",
+                                    cache_hit,
+                                    insert, block_cache->TotalCharge(),
+                                    block_cache->TotalCapacity(),
+                                    table->rep_->file_number,
+                                    rtable_handle.server_id,
+                                    rtable_handle.rtable_id,
+                                    rtable_handle.offset, rtable_handle.size);
 
         if (table->db_profiler_ != nullptr) {
             Access access = {
@@ -299,7 +324,6 @@ namespace leveldb {
     Table::InternalGet(const ReadOptions &options, const Slice &k, void *arg,
                        void (*handle_result)(void *, const Slice &,
                                              const Slice &)) {
-
         // Access index block.
         if (db_profiler_ != nullptr) {
             Access access = {
@@ -322,25 +346,25 @@ namespace leveldb {
             FilterBlockReader *filter = rep_->filter;
             BlockHandle handle;
             bool found = true;
-
-            if (filter != nullptr && handle.DecodeFrom(&handle_value).ok()) {
-                // Not found
-                if (db_profiler_ != nullptr) {
-                    Access access = {
-                            .trace_type = TraceType::FILTER_BLOCK,
-                            .access_caller = AccessCaller::kUserGet,
-                            .block_id = 0,
-                            .sstable_id = rep_->file_number,
-                            .level = rep_->level,
-                            .size = rep_->filter->size()
-                    };
-                    db_profiler_->Trace(access);
-                }
-
-                if (!filter->KeyMayMatch(handle.offset(), k)) {
-                    found = false;
-                }
-            }
+            // TODO: Support filter block.
+//            if (filter != nullptr && handle.DecodeFrom(&handle_value).ok()) {
+//                // Not found
+//                if (db_profiler_ != nullptr) {
+//                    Access access = {
+//                            .trace_type = TraceType::FILTER_BLOCK,
+//                            .access_caller = AccessCaller::kUserGet,
+//                            .block_id = 0,
+//                            .sstable_id = rep_->file_number,
+//                            .level = rep_->level,
+//                            .size = rep_->filter->size()
+//                    };
+//                    db_profiler_->Trace(access);
+//                }
+//
+//                if (!filter->KeyMayMatch(handle.offset(), k)) {
+//                    found = false;
+//                }
+//            }
             if (found) {
                 BlockReadContext context{
                         .caller = AccessCaller::kUserGet,
@@ -369,8 +393,8 @@ namespace leveldb {
     Status
     Table::ReadBlock(const char *buf, const Slice &contents,
                      const ReadOptions &options,
-                     const BlockHandle &handle, BlockContents *result) {
-        size_t n = static_cast<size_t>(handle.size());
+                     const RTableHandle &handle, BlockContents *result) {
+        size_t n = static_cast<size_t>(handle.size);
         Status s;
 
         // Check the crc of the type and the block contents
@@ -432,7 +456,6 @@ namespace leveldb {
     Status Table::ReadBlock(leveldb::RandomAccessFile *file,
                             const leveldb::ReadOptions &options,
                             const RTableHandle &rtable_handle,
-                            const leveldb::BlockHandle &handle,
                             leveldb::BlockContents *result) {
         result->data = Slice();
         result->cachable = false;
@@ -440,10 +463,10 @@ namespace leveldb {
 
         // Read the block contents as well as the type/crc footer.
         // See table_builder.cc for the code that built this structure.
-        size_t n = static_cast<size_t>(handle.size());
+        size_t n = static_cast<size_t>(rtable_handle.size);
         char *buf = new char[n + kBlockTrailerSize];
         Slice contents;
-        Status s = file->Read(rtable_handle, handle.offset(),
+        Status s = file->Read(rtable_handle, rtable_handle.offset,
                               n + kBlockTrailerSize, &contents,
                               buf);
         if (!s.ok()) {
@@ -454,7 +477,7 @@ namespace leveldb {
             delete[] buf;
             return Status::Corruption("truncated block read");
         }
-        return ReadBlock(buf, contents, options, handle, result);
+        return ReadBlock(buf, contents, options, rtable_handle, result);
     }
 
     uint64_t Table::ApproximateOffsetOf(const Slice &key) const {

@@ -16,6 +16,7 @@
 #include "leveldb/comparator.h"
 #include "leveldb/env.h"
 
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <stdio.h>
 #include <string.h>
@@ -65,7 +66,9 @@ DEFINE_uint32(cc_rtable_num_servers_scatter_data_blocks, 0,
 
 DEFINE_uint64(cc_block_cache_mb, 0, "leveldb block cache size in mb");
 DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
+DEFINE_uint64(cc_sstable_size_mb, 0, "sstable size in mb");
 DEFINE_uint32(cc_log_buf_size, 0, "log buffer size");
+DEFINE_uint32(cc_rtable_size_mb, 0, "RTable size");
 
 
 void start(NovaCCNICServer *server) {
@@ -86,6 +89,12 @@ void InitializeCC() {
     NovaConfig::config->nova_buf = buf;
     NovaConfig::config->nnovabuf = ntotal;
     RDMA_ASSERT(buf != NULL) << "Not enough memory";
+    system(fmt::format("exec rm -rf {}/*", NovaConfig::config->db_path).data());
+    system(fmt::format("exec rm -rf {}/*",
+                       NovaConfig::config->rtable_path).data());
+
+    mkdirs(NovaConfig::config->rtable_path.data());
+    mkdirs(NovaConfig::config->db_path.data());
 
     auto *mem_server = new NovaCCNICServer(rdma_ctrl, buf, port);
     mem_server->Start();
@@ -143,7 +152,11 @@ int main(int argc, char *argv[]) {
     NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
     NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks = FLAGS_cc_rtable_num_servers_scatter_data_blocks;
     NovaConfig::config->log_buf_size = FLAGS_cc_log_buf_size;
+    NovaConfig::config->rtable_size = FLAGS_cc_rtable_size_mb * 1024 * 1024;
+    NovaConfig::config->sstable_size = FLAGS_cc_sstable_size_mb * 1024 * 1024;
 
+    RDMA_ASSERT(FLAGS_cc_rtable_size_mb > std::max(FLAGS_cc_sstable_size_mb,
+                                                   FLAGS_cc_write_buffer_size_mb));
     InitializeCC();
     return 0;
 }

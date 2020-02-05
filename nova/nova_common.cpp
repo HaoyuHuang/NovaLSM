@@ -144,6 +144,14 @@ namespace nova {
         return key % n;
     }
 
+    void MarkCharAsWaitingForRDMAWRITE(char *ptr, uint32_t size) {
+        ptr[size - 1] = 0;
+    }
+
+    bool IsRDMAWRITEComplete(char *ptr, uint32_t size) {
+        return ptr[size - 1] != 0;
+    }
+
     uint32_t str_to_int(const char *str, uint64_t *out, uint32_t nkey) {
         if (str[0] == MSG_TERMINATER_CHAR) {
             return 0;

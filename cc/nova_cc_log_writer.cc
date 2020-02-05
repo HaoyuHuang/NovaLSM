@@ -70,10 +70,14 @@ namespace leveldb {
             logfile_last_buf_[current_log_file_][remote_sid].offset = 0;
         }
 
-        void RDMALogWriter::AckWriteSuccess(int remote_sid, uint64_t wr_id) {
-            if (write_result_[remote_sid].rdma_wr_id == wr_id) {
-                write_result_[remote_sid].result = WriteResult::WRITE_SUCESS;
+        bool RDMALogWriter::AckWriteSuccess(int remote_sid, uint64_t wr_id) {
+            WriteState &state = write_result_[remote_sid];
+            if (state.rdma_wr_id == wr_id &&
+                state.result == WriteResult::WAIT_FOR_WRITE) {
+                state.result = WriteResult::WRITE_SUCESS;
+                return true;
             }
+            return false;
         }
 
         std::string RDMALogWriter::write_result_str(
@@ -121,7 +125,7 @@ namespace leveldb {
                     // Allocate a new buf.
                     char *send_buf = store_->GetSendBuf(remote_server_id);
                     char *buf = send_buf;
-                    buf[0] = nova::RequestType::ALLOCATE_LOG_BUFFER;
+                    buf[0] = CCRequestType::CC_ALLOCATE_LOG_BUFFER;
                     buf++;
                     leveldb::EncodeFixed32(buf, log_file_name.size());
                     buf += 4;
@@ -216,7 +220,7 @@ namespace leveldb {
 
                 char *send_buf = store_->GetSendBuf(remote_server_id);
                 char *buf = send_buf;
-                buf[0] = nova::RequestType::DELETE_LOG_FILE;
+                buf[0] = CCRequestType::CC_DELETE_LOG_FILE;
                 buf++;
                 leveldb::EncodeStr(buf, log_file_name);
                 store_->PostSend(send_buf, 1 + 4 + log_file_name.size(),

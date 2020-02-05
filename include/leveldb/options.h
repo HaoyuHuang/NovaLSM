@@ -219,8 +219,8 @@ namespace leveldb {
 
         bool local_write = false;
 
+        // For replicating log records.
         uint64_t thread_id;
-
         CCClient *dc_client = nullptr;
     };
 

@@ -5,6 +5,8 @@
 #include "leveldb/table_builder.h"
 
 #include <assert.h>
+#include <nova/logging.hpp>
+#include <fmt/core.h>
 
 #include "leveldb/comparator.h"
 #include "leveldb/env.h"
@@ -27,6 +29,7 @@ namespace leveldb {
                   data_block(&options),
                   index_block(&index_block_options),
                   num_entries(0),
+                  num_data_blocks(0),
                   closed(false),
                   filter_block(opt.filter_policy == nullptr
                                ? nullptr
@@ -44,6 +47,7 @@ namespace leveldb {
         BlockBuilder index_block;
         std::string last_key;
         int64_t num_entries;
+        uint64_t num_data_blocks;
         bool closed;  // Either Finish() or Abandon() has been called.
         FilterBlockBuilder *filter_block;
 
@@ -106,6 +110,7 @@ namespace leveldb {
             std::string handle_encoding;
             r->pending_handle.EncodeTo(&handle_encoding);
             r->index_block.Add(r->last_key, Slice(handle_encoding));
+            r->num_data_blocks += 1;
             r->pending_index_entry = false;
         }
 
@@ -190,6 +195,8 @@ namespace leveldb {
             crc = crc32c::Extend(crc, trailer,
                                  1);  // Extend crc to cover block type
             EncodeFixed32(trailer + 1, crc32c::Mask(crc));
+            // Make sure the last byte is not 0.
+            trailer[kBlockTrailerSize - 1] = '!';
             r->status = r->file->Append(Slice(trailer, kBlockTrailerSize));
             if (r->status.ok()) {
                 r->offset += block_contents.size() + kBlockTrailerSize;
@@ -211,6 +218,10 @@ namespace leveldb {
         if (ok() && r->filter_block != nullptr) {
             WriteRawBlock(r->filter_block->Finish(), kNoCompression,
                           &filter_block_handle);
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("filter handle off:{} size:{}",
+                               filter_block_handle.offset(),
+                               filter_block_handle.size());
         }
 
         // Write metaindex block
@@ -236,6 +247,7 @@ namespace leveldb {
                 std::string handle_encoding;
                 r->pending_handle.EncodeTo(&handle_encoding);
                 r->index_block.Add(r->last_key, Slice(handle_encoding));
+                r->num_data_blocks += 1;
                 r->pending_index_entry = false;
             }
             WriteBlock(&r->index_block, &index_block_handle);
@@ -263,6 +275,9 @@ namespace leveldb {
     }
 
     uint64_t TableBuilder::NumEntries() const { return rep_->num_entries; }
+
+    uint64_t
+    TableBuilder::NumDataBlocks() const { return rep_->num_data_blocks; }
 
     uint64_t TableBuilder::FileSize() const { return rep_->offset; }
 

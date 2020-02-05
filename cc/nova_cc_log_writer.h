@@ -30,7 +30,7 @@ namespace leveldb {
 
             void AckAllocLogBuf(int remote_sid, uint64_t offset, uint64_t size);
 
-            void AckWriteSuccess(int remote_sid, uint64_t rdma_wr_id);
+            bool AckWriteSuccess(int remote_sid, uint64_t rdma_wr_id);
 
             Status CloseLogFile(const std::string &log_file_name);
 

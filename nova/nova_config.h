@@ -43,6 +43,7 @@ namespace nova {
 
         uint32_t log_buf_size;
         uint32_t rtable_size;
+        uint32_t sstable_size;
         std::string rtable_path;
 
         uint64_t mem_pool_size_gb;

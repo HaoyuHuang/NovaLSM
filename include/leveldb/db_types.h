@@ -19,10 +19,10 @@
 namespace leveldb {
     class RTableHandle {
     public:
-        uint32_t server_id;
-        uint32_t rtable_id;
-        uint64_t offset;
-        uint32_t size;
+        uint32_t server_id = 0;
+        uint32_t rtable_id = 0;
+        uint64_t offset = 0;
+        uint32_t size = 0;
 
         static int HandleSize() {
             return 4 + 4 + 8 + 4;
@@ -31,6 +31,11 @@ namespace leveldb {
         void EncodeHandle(char *buf);
 
         void DecodeHandle(const char *buf);
+    };
+
+    struct SSTableRTablePair {
+        std::string sstable_id;
+        uint32_t rtable_id;
     };
 
     typedef uint64_t SequenceNumber;
@@ -83,13 +88,14 @@ namespace leveldb {
     };
 
     struct FileMetaData {
-        FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0) {}
+        FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0),
+                         converted_file_size(0) {}
 
         int refs;
         int allowed_seeks;  // Seeks allowed until compaction
         uint64_t number;
-        uint64_t file_size;    // File size in bytes
-        uint64_t actual_file_size;
+        uint64_t file_size;    // File size in bytes in original SSTable format.
+        uint64_t converted_file_size; // File size in bytes after converted to RTable.
         InternalKey smallest;  // Smallest internal key served by table
         InternalKey largest;   // Largest internal key served by table
 

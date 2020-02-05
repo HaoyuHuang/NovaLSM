@@ -77,13 +77,12 @@ namespace leveldb {
 
         static Status
         ReadBlock(RandomAccessFile *file, const ReadOptions &options,
-                  const RTableHandle &rtable_handle,
-                  const BlockHandle &handle, BlockContents *result);
+                  const RTableHandle &rtable_handle, BlockContents *result);
 
 
         static Status
         ReadBlock(const char *buf, const Slice& content, const ReadOptions &options,
-                  const BlockHandle &handle, BlockContents *result);
+                  const RTableHandle &handle, BlockContents *result);
 
     private:
 

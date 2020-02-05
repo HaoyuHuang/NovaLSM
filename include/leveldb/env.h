@@ -55,6 +55,8 @@ namespace leveldb {
 
     class SequentialFile;
 
+    class ReadWriteFile;
+
     class Slice;
 
     class WritableFile;
@@ -138,6 +140,10 @@ namespace leveldb {
         virtual Status NewWritableFile(const std::string &fname,
                                        const EnvFileMetadata &metadata,
                                        WritableFile **result) = 0;
+
+        virtual Status NewReadWriteFile(const std::string &fname,
+                                        const EnvFileMetadata &metadata,
+                                        ReadWriteFile **result) = 0;
 
         // Create an object that either appends to an existing file, or
         // writes to a new file (if the file does not exist to begin with).
@@ -260,7 +266,7 @@ namespace leveldb {
         virtual Status Skip(uint64_t n) = 0;
     };
 
-// A file abstraction for randomly reading the contents of a file.
+    // A file abstraction for randomly reading the contents of a file.
     class LEVELDB_EXPORT RandomAccessFile {
     public:
         RandomAccessFile() = default;
@@ -284,8 +290,38 @@ namespace leveldb {
         Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
              Slice *result,
              char *scratch) = 0;
+    };
 
+    // A file abstraction for randomly reading the contents of a file.
+    class LEVELDB_EXPORT ReadWriteFile {
+    public:
+        ReadWriteFile() = default;
 
+        ReadWriteFile(const ReadWriteFile &) = delete;
+
+        ReadWriteFile &operator=(const ReadWriteFile &) = delete;
+
+        // Read up to "n" bytes from the file starting at "offset".
+        // "scratch[0..n-1]" may be written by this routine.  Sets "*result"
+        // to the data that was read (including if fewer than "n" bytes were
+        // successfully read).  May set "*result" to point at data in
+        // "scratch[0..n-1]", so "scratch[0..n-1]" must be live when
+        // "*result" is used.  If an error was encountered, returns a non-OK
+        // status.
+        //
+        // Safe for concurrent use by multiple threads.
+        virtual Status
+        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
+             Slice *result,
+             char *scratch) = 0;
+
+        virtual Status Append(const Slice &data) = 0;
+
+        virtual Status Close() = 0;
+
+        virtual Status Flush() = 0;
+
+        virtual Status Sync() = 0;
     };
 
 // A file abstraction for sequential writing.  The implementation
@@ -376,6 +412,12 @@ namespace leveldb {
             return target_->NewRandomAccessFile(f, r);
         }
 
+        Status NewReadWriteFile(const std::string &fname,
+                                const EnvFileMetadata &metadata,
+                                ReadWriteFile **result) override {
+            return target_->NewReadWriteFile(fname, metadata, result);
+        }
+
         Status
         NewWritableFile(const std::string &f, const EnvFileMetadata &metadata,
                         WritableFile **r) override {
@@ -454,8 +496,10 @@ namespace leveldb {
                   length_(length),
                   filename_(std::move(filename)) {}
 
-        Status Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n, Slice *result,
-                    char *scratch) override {
+        Status
+        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
+             Slice *result,
+             char *scratch) override {
             if (offset + n > length_) {
                 *result = Slice();
                 return Status::InvalidArgument("");

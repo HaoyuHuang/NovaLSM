@@ -34,10 +34,10 @@ namespace leveldb {
         CC_DELETE_LOG_FILE = 'm',
         CC_DELETE_LOG_FILE_SUCC = 'n',
         CC_DELETE_TABLES = 'o',
-        CC_RTABLE_READ_SSTABLE = 'p',
         CC_RTABLE_WRITE_SSTABLE = 'q',
         CC_RTABLE_PERSIST = 'r',
         CC_RTABLE_WRITE_SSTABLE_RESPONSE = 's',
+        CC_RTABLE_PERSIST_RESPONSE = 't',
     };
 
     struct CCRequestContext {
@@ -59,23 +59,12 @@ namespace leveldb {
         std::vector<RTableHandle> rtable_handles;
     };
 
-    struct SSTableRTablePair {
-        std::string sstable_id;
-        uint32_t rtable_id;
-    };
-
     class LEVELDB_EXPORT CCClient {
     public:
         virtual uint32_t
         InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
+                                    uint64_t offset, uint32_t  size,
                                     char *result) = 0;
-
-        virtual uint32_t
-        InitiateRTableReadSSTableDataBlock(uint32_t server_id,
-                                           const std::string &dbname,
-                                           uint64_t file_number,
-                                           uint32_t size,
-                                           char *result) = 0;
 
         virtual uint32_t
         InitiateRTableWriteDataBlocks(uint32_t server_id, uint32_t thread_id, uint32_t *rtable_id,
@@ -85,12 +74,12 @@ namespace leveldb {
 
         virtual uint32_t
         InitiatePersist(uint32_t server_id,
-                        std::vector<SSTableRTablePair> rtable_ids) = 0;
+                        const std::vector<SSTableRTablePair>& rtable_ids) = 0;
 
 
         virtual uint32_t
-        InitiateDeleteTables(uint32_t server_id, const std::string &dbname,
-                             const std::vector<uint64_t> &filenumbers) = 0;
+        InitiateDeleteTables(uint32_t server_id,
+                             const std::vector<SSTableRTablePair>& rtable_ids) = 0;
 
         virtual uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
@@ -101,7 +90,7 @@ namespace leveldb {
         virtual uint32_t
         InitiateCloseLogFile(const std::string &log_file_name) = 0;
 
-        virtual void OnRecv(ibv_wc_opcode type, uint64_t wr_id,
+        virtual bool  OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                             int remote_server_id, char *buf,
                             uint32_t imm_data) = 0;
 

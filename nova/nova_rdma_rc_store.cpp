@@ -265,6 +265,8 @@ namespace nova {
                         wcs_[i].wr_id * NovaConfig::config->max_msg_size;
             callback_->ProcessRDMAWC(wcs_[i].opcode, wcs_[i].wr_id, server_id,
                                      buf, wcs_[i].imm_data);
+            // Send is complete.
+            buf[0] = '~';
             npending_send_[qp_idx] -= 1;
         }
         return n;
@@ -282,9 +284,9 @@ namespace nova {
     void NovaRDMARCStore::PostRecv(int server_id, int recv_buf_index) {
         int msg_size = NovaConfig::config->max_msg_size;
         uint32_t qp_idx = to_qp_idx(server_id);
-        auto ret = qp_[qp_idx]->post_recv(
-                rdma_recv_buf_[qp_idx] + msg_size * recv_buf_index, msg_size,
-                recv_buf_index);
+        char *local_buf = rdma_recv_buf_[qp_idx] + msg_size * recv_buf_index;
+        local_buf[0] = '~';
+        auto ret = qp_[qp_idx]->post_recv(local_buf, msg_size, recv_buf_index);
         RDMA_ASSERT(ret == SUCC) << ret;
     }
 
@@ -303,8 +305,9 @@ namespace nova {
                 << ibv_wc_status_str(wcs_[i].status);
 
             RDMA_LOG(DEBUG)
-                << fmt::format("rdma-rc[{}]: RQ: received from server {} wr:{}",
-                               thread_id_, server_id, wr_id);
+                << fmt::format(
+                        "rdma-rc[{}]: RQ: received from server {} wr:{} imm:{}",
+                        thread_id_, server_id, wr_id, wcs_[i].imm_data);
             char *buf = rdma_recv_buf_[qp_idx] + max_msg_size_ * wr_id;
             callback_->ProcessRDMAWC(wcs_[i].opcode, wcs_[i].wr_id, server_id,
                                      buf, wcs_[i].imm_data);

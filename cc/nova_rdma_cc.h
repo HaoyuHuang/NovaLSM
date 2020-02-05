@@ -60,7 +60,7 @@ namespace nova {
 
         bool IsInitialized();
 
-        void
+        bool
         ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
                       char *buf, uint32_t imm_data) override;
 
@@ -80,6 +80,8 @@ namespace nova {
         void ProcessGet(const NovaAsyncTask &task);
 
         void ProcessPut(const NovaAsyncTask &task);
+
+        void ProcessVerify(const NovaAsyncTask &task);
 
         int ProcessQueue();
 

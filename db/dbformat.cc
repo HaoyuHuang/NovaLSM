@@ -22,17 +22,27 @@ namespace leveldb {
         used_size += 8;
         EncodeFixed64(tmp + used_size, meta.file_size);
         used_size += 8;
+        EncodeFixed64(tmp + used_size, meta.converted_file_size);
+        used_size += 8;
+        EncodeFixed32(tmp + used_size, meta.data_block_group_handles.size());
+        used_size += 4;
+        for (auto handle : meta.data_block_group_handles) {
+
+        }
+
         Slice smallest = meta.smallest.Encode();
         Slice largest = meta.largest.Encode();
         EncodeFixed32(tmp + used_size, smallest.size());
         used_size += 4;
         EncodeFixed32(tmp + used_size, largest.size());
         used_size += 4;
-
         memcpy(tmp + used_size, smallest.data(), smallest.size());
         used_size += smallest.size();
         memcpy(tmp + used_size, largest.data(), largest.size());
         used_size += largest.size();
+
+
+
         RDMA_ASSERT(used_size < buf_size);
         return used_size;
     }

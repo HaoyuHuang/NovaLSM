@@ -367,27 +367,27 @@ namespace nova {
 
     bool process_socket_delete_log_file(int fd, Connection *conn) {
         // Stats.
-        NovaCCConnWorker *worker = (NovaCCConnWorker *) conn->worker;
-        worker->stats.nremove_log_records++;
-        char *buf = conn->request_buf;
-        RDMA_ASSERT(buf[0] == RequestType::DELETE_LOG_FILE) << buf;
-        buf++;
-        uint32_t logfilename_size = leveldb::DecodeFixed32(buf);
-        std::string logfile(buf + 4, logfilename_size);
-
-        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-                        << " delete log file fd:"
-                        << fd << ": log:" << logfile << " nlog:"
-                        << logfilename_size << " buf:" << conn->request_buf;
-        worker->log_manager_->DeleteLogBuf(logfile);
-
-        char *response_buf = conn->buf;
-        leveldb::EncodeFixed32(response_buf, 1);
-        response_buf += 4;
-        response_buf[0] = RequestType::DELETE_LOG_FILE_SUCC;
-        conn->response_buf = conn->buf;
-        conn->response_size = 5;
-        RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
+//        NovaCCConnWorker *worker = (NovaCCConnWorker *) conn->worker;
+//        worker->stats.nremove_log_records++;
+//        char *buf = conn->request_buf;
+//        RDMA_ASSERT(buf[0] == RequestType::DELETE_LOG_FILE) << buf;
+//        buf++;
+//        uint32_t logfilename_size = leveldb::DecodeFixed32(buf);
+//        std::string logfile(buf + 4, logfilename_size);
+//
+//        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
+//                        << " delete log file fd:"
+//                        << fd << ": log:" << logfile << " nlog:"
+//                        << logfilename_size << " buf:" << conn->request_buf;
+//        worker->log_manager_->DeleteLogBuf(logfile);
+//
+//        char *response_buf = conn->buf;
+//        leveldb::EncodeFixed32(response_buf, 1);
+//        response_buf += 4;
+//        response_buf[0] = RequestType::DELETE_LOG_FILE_SUCC;
+//        conn->response_buf = conn->buf;
+//        conn->response_size = 5;
+//        RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
         return true;
     }
 
@@ -405,9 +405,9 @@ namespace nova {
         if (buf[0] == RequestType::PUT) {
             return process_socket_put(fd, conn);
         }
-        if (buf[0] == RequestType::DELETE_LOG_FILE) {
-            return process_socket_delete_log_file(fd, conn);
-        }
+//        if (buf[0] == RequestType::DELETE_LOG_FILE) {
+//            return process_socket_delete_log_file(fd, conn);
+//        }
         RDMA_ASSERT(false) << buf[0];
         return false;
     }

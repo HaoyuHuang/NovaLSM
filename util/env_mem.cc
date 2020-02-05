@@ -170,7 +170,7 @@ namespace leveldb {
         return file_->Append(data);
     }
 
-    Status MemWritableFile::Close() { return file_->Fsync(); }
+    Status MemWritableFile::Close() { return Status::OK(); }
 
     Status MemWritableFile::Flush() { return Status::OK(); }
 
