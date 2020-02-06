@@ -39,6 +39,7 @@ DEFINE_bool(write_sync, false, "fsync write");
 DEFINE_string(persist_log_records_mode, "", "local/rdma/nic");
 DEFINE_uint64(write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint32(log_buf_size, 0, "log buffer size");
+DEFINE_uint32(sstable_size_mb, 0, "log buffer size");
 DEFINE_string(sstable_mode, "disk", "sstable mode");
 DEFINE_uint32(num_async_workers, 0, "Number of async worker threads.");
 DEFINE_uint32(num_compaction_workers, 0,
@@ -153,6 +154,7 @@ leveldb::DB *CreateDatabase(int sid, int db_index, leveldb::Cache *cache,
     options.compression = leveldb::kSnappyCompression;
     options.filter_policy = leveldb::NewBloomFilterPolicy(10);
     options.bg_threads = bg_threads;
+    options.max_file_size = 1024 * 1024 * FLAGS_sstable_size_mb;
     if (NovaConfig::config->profiler_file_path.empty()) {
         options.enable_tracing = false;
     } else {
