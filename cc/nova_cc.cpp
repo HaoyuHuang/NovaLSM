@@ -218,7 +218,9 @@ namespace leveldb {
 
         for (int i = 0; i < server_ids_.size(); i++) {
             CCResponse response;
-            while (!cc_client_->IsDone(reqs[i], &response));
+            while (!cc_client_->IsDone(reqs[i], &response)) {
+                usleep(1000);
+            }
 
             RDMA_ASSERT(response.rtable_handles.size() == 1);
             handles.push_back(response.rtable_handles[0]);
@@ -232,6 +234,7 @@ namespace leveldb {
             uint32_t req_id = WRITE_requests_[i];
             CCResponse response;
             while (block && !cc_client_->IsDone(req_id, &response)) {
+                usleep(100);
             }
             if (rtable_ids_[i] == 0) {
                 rtable_ids_[i] = response.rtable_id;
@@ -630,9 +633,9 @@ namespace leveldb {
         bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
-//            if (should_sleep) {
-//                usleep(timeout);
-//            }
+            if (should_sleep) {
+                usleep(timeout);
+            }
             int n = 0;
             n += rdma_store_->PollSQ();
             n += rdma_store_->PollRQ();
