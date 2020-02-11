@@ -63,9 +63,9 @@ namespace nova {
     }
 
     int NovaCCServer::PullAsyncCQ() {
-        if (!is_compaction_thread_) {
-            return 0;
-        }
+//        if (!is_compaction_thread_) {
+//            return 0;
+//        }
 
         int nworks = 0;
         mutex_.lock();
@@ -110,7 +110,9 @@ namespace nova {
                         task.request_type);
         }
         mutex_.unlock();
-        rdma_store_->FlushPendingSends();
+        if (nworks > 0) {
+            rdma_store_->FlushPendingSends();
+        }
         return nworks;
     }
 
@@ -407,8 +409,7 @@ namespace nova {
                         leveldb::NovaRTable *rtable = rtable_manager_->rtable(
                                 pair.rtable_id);
                         rtable->Persist();
-
-                        leveldb::BlockHandle &h = rtable->Handle(
+                        leveldb::BlockHandle h = rtable->Handle(
                                 pair.sstable_id);
                         leveldb::RTableHandle rh = {};
                         rh.server_id = NovaConfig::config->my_server_id;

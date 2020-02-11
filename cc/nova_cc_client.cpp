@@ -170,7 +170,7 @@ namespace leveldb {
                         rtable_ids[i].rtable_id);
                 rtable->Persist();
 
-                leveldb::BlockHandle &h = rtable->Handle(
+                leveldb::BlockHandle h = rtable->Handle(
                         rtable_ids[i].sstable_id);
                 leveldb::RTableHandle rh = {};
                 rh.server_id = nova::NovaConfig::config->my_server_id;

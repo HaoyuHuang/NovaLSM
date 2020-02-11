@@ -32,7 +32,7 @@ namespace leveldb {
 
         void MarkOffsetAsWritten(uint64_t offset);
 
-        BlockHandle &Handle(const std::string &sstable_id);
+        BlockHandle Handle(const std::string &sstable_id);
 
         void DeleteSSTable(const std::string &sstable_id);
 
@@ -51,10 +51,20 @@ namespace leveldb {
             bool persisted;
         };
 
+        struct SSTablePersistStatus {
+            BlockHandle disk_handle = {};
+            bool persisted = false;
+        };
+
+        struct BatchWrite {
+            BlockHandle mem_handle = {};
+            std::vector<std::string> sstables;
+        };
+
         Env *env_ = nullptr;
         ReadWriteFile *file_ = nullptr;
 
-        std::map<std::string, BlockHandle> sstable_offset_;
+        std::map<std::string, SSTablePersistStatus> sstable_offset_;
         std::list<AllocatedBuf> allocated_bufs_;
         bool is_full_ = false;
         bool sealed_ = false;
@@ -68,6 +78,7 @@ namespace leveldb {
         uint32_t allocated_mem_size_ = 0;
         uint32_t thread_id_ = 0;
         uint32_t rtable_id_ = 0;
+        uint32_t persisting_cnt = 0;
         bool deleted_ = false;
         std::mutex mutex_;
     };

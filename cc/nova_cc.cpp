@@ -488,6 +488,17 @@ namespace leveldb {
 
         Status s = env_->NewRandomAccessFile(TableFileName(dbname, file_number),
                                              &local_ra_file_);
+
+
+        if (!prefetch_all_) {
+            uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                      MAX_BLOCK_SIZE);
+            backing_mem_block_ = mem_manager_->ItemAlloc(thread_id_, scid);
+            RDMA_ASSERT(backing_mem_block_) << "Running out of memory";
+        } else {
+            RDMA_ASSERT(ReadAll().ok());
+        }
+
         RDMA_ASSERT(s.ok()) << s.ToString();
     }
 
@@ -522,18 +533,9 @@ namespace leveldb {
 
         // RTable handle. Read it.
         char *ptr = nullptr;
-        if (!prefetch_all_ && backing_mem_block_ == nullptr) {
-            uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                      MAX_BLOCK_SIZE);
-            backing_mem_block_ = mem_manager_->ItemAlloc(thread_id_, scid);
-            RDMA_ASSERT(backing_mem_block_) << "Running out of memory";
-        }
-
         uint64_t local_offset = 0;
         if (prefetch_all_) {
-            if (backing_mem_table_ == nullptr) {
-                RDMA_ASSERT(ReadAll().ok());
-            }
+            RDMA_ASSERT(backing_mem_table_);
             uint64_t id =
                     (((uint64_t) rtable_handle.server_id) << 32) |
                     rtable_handle.rtable_id;
@@ -542,6 +544,7 @@ namespace leveldb {
                     buf.local_offset + (offset - buf.offset);
             ptr = &backing_mem_table_[local_offset];
         } else {
+            RDMA_ASSERT(backing_mem_block_);
             uint32_t req_id = dc_client_->InitiateRTableReadDataBlock(
                     rtable_handle, offset, n, backing_mem_block_);
             while (!dc_client_->IsDone(req_id, nullptr));

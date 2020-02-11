@@ -91,7 +91,7 @@ namespace leveldb {
 
         RDMA_ASSERT(sstable_offset_.find(sstable) == sstable_offset_.end());
 
-        sstable_offset_[sstable] = handle;
+//        sstable_offset_[sstable] = handle;
         current_mem_offset_ += size;
         AllocatedBuf allocated_buf;
         allocated_buf.sstable_id = sstable;
@@ -115,49 +115,61 @@ namespace leveldb {
 
         // sequential IOs to disk.
         uint64_t disk_offset = current_disk_offset_;
-        std::vector<BlockHandle> written_mem_blocks;
+        std::vector<BatchWrite> written_mem_blocks;
+
         auto buf = allocated_bufs_.begin();
         while (buf != allocated_bufs_.end()) {
             if (!buf->persisted) {
                 buf++;
                 continue;
             }
-            sstable_offset_[buf->sstable_id].set_offset(disk_offset);
-            sstable_offset_[buf->sstable_id].set_size(buf->size);
+            SSTablePersistStatus &s = sstable_offset_[buf->sstable_id];
+            s.disk_handle.set_offset(disk_offset);
+            s.disk_handle.set_size(buf->size);
+            s.persisted = false;
+            persisting_cnt += 1;
+
             disk_offset += buf->size;
+            current_disk_offset_ += buf->size;
             if (!written_mem_blocks.empty()) {
-                BlockHandle &prev_handle = written_mem_blocks[
+                BatchWrite &bw = written_mem_blocks[
                         written_mem_blocks.size() - 1];
+                BlockHandle &prev_handle = bw.mem_handle;
                 if (prev_handle.offset() + prev_handle.size() == buf->offset) {
                     prev_handle.set_size(prev_handle.size() + buf->size);
+                    bw.sstables.push_back(buf->sstable_id);
                 } else {
-                    BlockHandle bh;
-                    bh.set_offset(buf->offset);
-                    bh.set_size(buf->size);
-                    written_mem_blocks.push_back(bh);
+                    BatchWrite new_bw = {};
+                    new_bw.mem_handle.set_offset(buf->offset);
+                    new_bw.mem_handle.set_size(buf->size);
+                    new_bw.sstables.push_back(buf->sstable_id);
+                    written_mem_blocks.push_back(new_bw);
                 }
             } else {
-                BlockHandle bh;
-                bh.set_offset(buf->offset);
-                bh.set_size(buf->size);
-                written_mem_blocks.push_back(bh);
+                BatchWrite bw = {};
+                bw.mem_handle.set_offset(buf->offset);
+                bw.mem_handle.set_size(buf->size);
+                bw.sstables.push_back(buf->sstable_id);
+                written_mem_blocks.push_back(bw);
             }
             buf = allocated_bufs_.erase(buf);
         }
-        uint64_t base_disk_offset = current_disk_offset_;
-        for (BlockHandle &mem_block_handle : written_mem_blocks) {
-            current_disk_offset_ += mem_block_handle.size();
-        }
         mutex_.unlock();
 
-        for (BlockHandle &mem_block_handle : written_mem_blocks) {
+        for (BatchWrite &bw : written_mem_blocks) {
             Status s = file_->Append(
-                    Slice(backing_mem_ + mem_block_handle.offset(),
-                          mem_block_handle.size()));
-            RDMA_ASSERT(s.ok());
+                    Slice(backing_mem_ + bw.mem_handle.offset(),
+                          bw.mem_handle.size()));
+            RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
             s = file_->Sync();
-            RDMA_ASSERT(s.ok());
-            base_disk_offset += mem_block_handle.size();
+            RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());;
+
+            mutex_.lock();
+            for (auto &table : bw.sstables) {
+                sstable_offset_[table].persisted = true;
+                persisting_cnt -= 1;
+            }
+            mutex_.unlock();
         }
 
         // Append 16 KB at a time.
@@ -202,7 +214,8 @@ namespace leveldb {
 
         mutex_.lock();
         sstable_offset_.erase(sstable_id);
-        if (sstable_offset_.empty()) {
+        if (sstable_offset_.empty() && is_full_ && allocated_bufs_.empty() &&
+            persisting_cnt == 0) {
             if (!deleted_) {
                 deleted_ = true;
                 delete_rtable = true;
@@ -218,8 +231,6 @@ namespace leveldb {
             return;
         }
 
-        is_full_ = true;
-        allocated_bufs_.clear();
         Seal();
 
         if (file_) {
@@ -239,12 +250,11 @@ namespace leveldb {
                 seal = true;
             }
         }
+        mutex_.unlock();
 
         if (!seal) {
-            mutex_.unlock();
             return;
         }
-        mutex_.unlock();
 
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format(
@@ -259,12 +269,21 @@ namespace leveldb {
         backing_mem_ = nullptr;
     }
 
-    BlockHandle &NovaRTable::Handle(const std::string &sstable_id) {
-        mutex_.lock();
-        auto it = sstable_offset_.find(sstable_id);
-        RDMA_ASSERT(it != sstable_offset_.end());
-        BlockHandle &handle = it->second;
-        mutex_.unlock();
+    BlockHandle NovaRTable::Handle(const std::string &sstable_id) {
+        BlockHandle handle = {};
+        while (true) {
+            mutex_.lock();
+            auto it = sstable_offset_.find(sstable_id);
+            RDMA_ASSERT(it != sstable_offset_.end());
+            SSTablePersistStatus s = it->second;
+            mutex_.unlock();
+
+            if (s.persisted) {
+                handle = s.disk_handle;
+                break;
+            }
+        }
+
         return handle;
     }
 

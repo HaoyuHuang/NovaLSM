@@ -201,18 +201,20 @@ namespace nova {
         is_running_ = true;
         mutex_.Unlock();
 
-        if (is_worker_thread_) {
-            sem_wait(&sem_);
-        }
+//        if (is_worker_thread_) {
+//            sem_wait(&sem_);
+//        }
 
         bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
-//            if (should_sleep) {
-//                usleep(timeout);
-//            }
+            if (should_sleep) {
+                usleep(timeout);
+            }
             rdma_store_->PollSQ();
             rdma_store_->PollRQ();
+
+            cc_server_->PullAsyncCQ();
 
             int n = ProcessQueue();
             if (n == 0) {
@@ -244,7 +246,8 @@ namespace nova {
                                                              buf,
                                                              imm_data);
         if (processed_by_client && processed_by_server) {
-            RDMA_ASSERT(false) << fmt::format("Processed by both client and server");
+            RDMA_ASSERT(false)
+                << fmt::format("Processed by both client and server");
         }
     }
 }
