@@ -227,6 +227,7 @@ namespace leveldb {
         // Poll both queues.
         rdma_store_->PollRQ();
         rdma_store_->PollSQ();
+        cc_server_->PullAsyncCQ();
 
         if (req_id == 0) {
             // local bypass.
@@ -338,16 +339,19 @@ namespace leveldb {
                         uint32_t msg_size = 1;
                         uint32_t rtable_handles = DecodeFixed32(buf + msg_size);
                         msg_size += 4;
+                        std::string rids;
                         for (int i = 0; i < rtable_handles; i++) {
                             RTableHandle rh = {};
                             rh.DecodeHandle(buf + msg_size);
                             context.rtable_handles.push_back(rh);
                             msg_size += RTableHandle::HandleSize();
+                            rids += fmt::format("{},", rh.rtable_id);
                         }
                         context.done = true;
                         RDMA_LOG(DEBUG) << fmt::format(
-                                    "dcclient[{}]: Persist RTable received handles:{} req:{}",
-                                    cc_client_id_, rtable_handles, req_id);
+                                    "dcclient[{}]: Persist RTable received handles:{} rids:{} req:{}",
+                                    cc_client_id_, rtable_handles, rids,
+                                    req_id);
                         processed = true;
                     }
                 }

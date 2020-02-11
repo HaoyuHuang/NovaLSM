@@ -73,7 +73,6 @@ namespace nova {
         NovaRDMAStore *rdma_store_ = nullptr;
         leveldb::CCClient *cc_client_ = nullptr;
         NovaCCServer *cc_server_ = nullptr;
-
         uint64_t thread_id_;
 
     private:

@@ -284,10 +284,10 @@ namespace nova {
         RDMA_LOG(INFO)
             << fmt::format("Request Id range {}:{}", lower_client_req_id,
                            upper_client_req_id);
-
+        std::vector<NovaCCServer *> cc_servers;
         for (worker_id = 0;
              worker_id <
-             NovaCCConfig::cc_config->num_async_workers; worker_id++) {
+             NovaCCConfig::cc_config->num_conn_async_workers; worker_id++) {
             NovaRDMAComputeComponent *cc = new NovaRDMAComputeComponent(
                     rdma_ctrl,
                     manager,
@@ -323,6 +323,12 @@ namespace nova {
                                                  NovaConfig::config->log_buf_size);
             char *rnic_buf = manager->ItemAlloc(worker_id, scid);
             RDMA_ASSERT(rnic_buf) << "Running out of memory";
+            nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
+                                                                   manager,
+                                                                   rtable_manager,
+                                                                   log_manager,
+                                                                   worker_id,
+                                                                   false);
             leveldb::CCClient *dc_client = new leveldb::NovaCCClient(worker_id,
                                                                      store,
                                                                      manager,
@@ -333,13 +339,10 @@ namespace nova {
                                                                              manager,
                                                                              log_manager),
                                                                      lower_client_req_id,
-                                                                     upper_client_req_id);
-            nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
-                                                                   manager,
-                                                                   rtable_manager,
-                                                                   log_manager,
-                                                                   worker_id,
-                                                                   false);
+                                                                     upper_client_req_id,
+                                                                     cc_server);
+
+            cc_servers.push_back(cc_server);
             cc_server->rdma_store_ = store;
             cc->rdma_store_ = store;
             cc->cc_client_ = dc_client;
@@ -383,6 +386,12 @@ namespace nova {
                                                  NovaConfig::config->log_buf_size);
             char *rnic_buf = manager->ItemAlloc(worker_id, scid);
             RDMA_ASSERT(rnic_buf) << "Running out of memory";
+            nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
+                                                                   manager,
+                                                                   rtable_manager,
+                                                                   log_manager,
+                                                                   worker_id,
+                                                                   true);
             leveldb::CCClient *dc_client = new leveldb::NovaCCClient(worker_id,
                                                                      store,
                                                                      manager,
@@ -393,13 +402,9 @@ namespace nova {
                                                                              manager,
                                                                              log_manager),
                                                                      lower_client_req_id,
-                                                                     upper_client_req_id);
-            nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
-                                                                   manager,
-                                                                   rtable_manager,
-                                                                   log_manager,
-                                                                   worker_id,
-                                                                   true);
+                                                                     upper_client_req_id,
+                                                                     cc_server);
+            cc_servers.push_back(cc_server);
             cc_server->rdma_store_ = store;
             cc->rdma_store_ = store;
             cc->thread_id_ = worker_id;
@@ -410,12 +415,25 @@ namespace nova {
             bgs[i]->dc_client_ = dc_client;
             bgs[i]->rdma_store_ = store;
             bgs[i]->thread_id_ = worker_id;
+            bgs[i]->cc_server_ = cc_server;
             worker_id++;
             buf += nrdma_buf_unit() *
                    NovaCCConfig::cc_config->cc_servers.size();
         }
 
         RDMA_ASSERT(buf == cache_buf);
+
+        for (int i = 0;
+             i < NovaCCConfig::cc_config->num_cc_server_workers; i++) {
+            NovaCCServerAsyncWorker *worker = new NovaCCServerAsyncWorker(
+                    rtable_manager, cc_servers);
+            cc_server_workers.push_back(worker);
+        }
+
+        // Assign workers to cc servers.
+        for (int i = 0; i < cc_servers.size(); i++) {
+            cc_servers[i]->async_workers_ = cc_server_workers;
+        }
 
         // Assign async workers to dbs.
         DBAsyncWorkers *db_asyncs = new DBAsyncWorkers[NovaCCConfig::cc_config->db_fragment.size()];
@@ -451,7 +469,7 @@ namespace nova {
         // Start the threads.
         for (int worker_id = 0;
              worker_id <
-             NovaCCConfig::cc_config->num_async_workers; worker_id++) {
+             NovaCCConfig::cc_config->num_conn_async_workers; worker_id++) {
             cc_workers.emplace_back(&NovaRDMAComputeComponent::Start,
                                     async_workers[worker_id]);
         }
@@ -460,6 +478,11 @@ namespace nova {
             compaction_workers.emplace_back(
                     &leveldb::NovaCCCompactionThread::Start,
                     bgs[i]);
+        }
+        for (int i = 0;
+             i < NovaCCConfig::cc_config->num_cc_server_workers; i++) {
+            cc_server_async_workers.emplace_back(
+                    &NovaCCServerAsyncWorker::Start, cc_server_workers[i]);
         }
 
         // Wait for all RDMA connections to setup.

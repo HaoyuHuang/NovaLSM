@@ -182,7 +182,7 @@ int main(int argc, char *argv[]) {
     NovaCCConfig::ReadFragments(FLAGS_cc_config_path,
                                 &NovaCCConfig::cc_config->fragments);
     NovaCCConfig::cc_config->num_conn_workers = FLAGS_cc_num_conn_workers;
-    NovaCCConfig::cc_config->num_async_workers = FLAGS_cc_num_async_workers;
+    NovaCCConfig::cc_config->num_conn_async_workers = FLAGS_cc_num_async_workers;
     NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
     NovaCCConfig::cc_config->num_wb_workers = FLAGS_cc_num_wb_workers;
 

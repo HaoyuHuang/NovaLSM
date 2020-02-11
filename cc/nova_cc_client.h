@@ -27,12 +27,13 @@ namespace leveldb {
                      nova::NovaMemManager *mem_manager,
                      NovaRTableManager *rtable_manager,
                      leveldb::log::RDMALogWriter *rdma_log_writer,
-                     uint32_t lower_req_id, uint32_t upper_req_id)
+                     uint32_t lower_req_id, uint32_t upper_req_id,
+                     CCServer *cc_server)
                 : cc_client_id_(dc_client_id), rdma_store_(rdma_store),
                   mem_manager_(mem_manager), rtable_manager_(rtable_manager),
                   rdma_log_writer_(rdma_log_writer),
                   lower_req_id_(lower_req_id), upper_req_id_(upper_req_id),
-                  current_req_id_(lower_req_id) {
+                  current_req_id_(lower_req_id), cc_server_(cc_server) {
         }
 
         uint32_t
@@ -123,6 +124,7 @@ namespace leveldb {
         nova::NovaRDMAStore *rdma_store_;
         nova::NovaMemManager *mem_manager_;
         NovaRTableManager *rtable_manager_;
+        CCServer *cc_server_;
         leveldb::log::RDMALogWriter *rdma_log_writer_ = nullptr;
 
         leveldb::SSTableManager *sstable_manager_;

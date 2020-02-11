@@ -41,8 +41,9 @@ namespace nova {
         NovaMemManager *manager;
         LogFileManager *log_manager;
 
-        std::vector<NovaCCConnWorker*> conn_workers;
+        std::vector<NovaCCConnWorker *> conn_workers;
         std::vector<NovaRDMAComputeComponent *> async_workers;
+        std::vector<NovaCCServerAsyncWorker *> cc_server_workers;
         std::vector<leveldb::NovaCCCompactionThread *> bgs;
 
         struct event_base *base;
@@ -50,6 +51,7 @@ namespace nova {
         vector<thread> conn_worker_threads;
         vector<thread> cc_workers;
         vector<thread> compaction_workers;
+        std::vector<std::thread> cc_server_async_workers;
     };
 }
 

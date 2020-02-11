@@ -258,7 +258,8 @@ namespace leveldb {
 
         RDMA_ASSERT(s.ok()) <<
                             fmt::format(
-                                    "Cache hit {} Insert {} cs:{} cc:{} fn:{} rs:{} rr:{} roff:{} rsize:{}",
+                                    "{} Cache hit {} Insert {} cs:{} cc:{} fn:{} rs:{} rr:{} roff:{} rsize:{}",
+                                    s.ToString(),
                                     cache_hit,
                                     insert, block_cache->TotalCharge(),
                                     block_cache->TotalCapacity(),

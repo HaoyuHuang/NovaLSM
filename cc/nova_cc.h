@@ -162,6 +162,7 @@ namespace leveldb {
                 void *background_work_arg) override;
 
         CCClient *dc_client_;
+        CCServer *cc_server_;
         MemManager *mem_manager_;
 
         CCClient *dc_client() override { return dc_client_; }

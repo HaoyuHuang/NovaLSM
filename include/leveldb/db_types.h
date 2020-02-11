@@ -120,6 +120,11 @@ namespace leveldb {
         virtual uint32_t slabclassid(uint64_t key, uint32_t size) = 0;
     };
 
+    class CCServer {
+    public:
+        virtual int PullAsyncCQ() = 0;
+    };
+
     class WBTable {
     public:
         uint64_t thread_id;

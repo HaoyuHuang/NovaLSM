@@ -144,6 +144,10 @@ namespace leveldb {
             }
             buf = allocated_bufs_.erase(buf);
         }
+        uint64_t base_disk_offset = current_disk_offset_;
+        for (BlockHandle &mem_block_handle : written_mem_blocks) {
+            current_disk_offset_ += mem_block_handle.size();
+        }
         mutex_.unlock();
 
         for (BlockHandle &mem_block_handle : written_mem_blocks) {
@@ -153,7 +157,7 @@ namespace leveldb {
             RDMA_ASSERT(s.ok());
             s = file_->Sync();
             RDMA_ASSERT(s.ok());
-            current_disk_offset_ += mem_block_handle.size();
+            base_disk_offset += mem_block_handle.size();
         }
 
         // Append 16 KB at a time.

@@ -7,6 +7,9 @@
 #ifndef LEVELDB_NOVA_CC_SERVER_H
 #define LEVELDB_NOVA_CC_SERVER_H
 
+#include <semaphore.h>
+
+#include "leveldb/db_types.h"
 #include "nova/nova_rdma_rc_store.h"
 #include "mc/nova_mem_manager.h"
 #include "dc/nova_dc.h"
@@ -14,6 +17,36 @@
 #include "nova_rtable.h"
 
 namespace nova {
+
+    struct NovaServerAsyncTask {
+        leveldb::CCRequestType request_type;
+        uint32_t cc_server_thread_id = 0;
+        uint32_t dc_req_id = 0;
+        uint32_t remote_server_id = 0;
+
+        // Read request
+        leveldb::RTableHandle rtable_handle = {};
+        char *rdma_buf = nullptr;
+        uint64_t cc_mr_offset = 0;
+
+        // Persist request
+        std::vector<leveldb::SSTableRTablePair> persist_pairs;
+    };
+
+    struct NovaServerCompleteTask {
+        leveldb::CCRequestType request_type;
+        uint32_t remote_server_id = 0;
+        uint32_t dc_req_id = 0;
+
+        // Read result.
+        char *rdma_buf = nullptr;
+        uint64_t cc_mr_offset = 0;
+        leveldb::RTableHandle rtable_handle = {};
+        // Persist result.
+        std::vector<leveldb::RTableHandle> rtable_handles = {};
+    };
+
+    class NovaCCServerAsyncWorker;
 
     struct RequestContext {
         leveldb::CCRequestType request_type;
@@ -27,7 +60,7 @@ namespace nova {
         uint32_t size;
     };
 
-    class NovaCCServer : public NovaMsgCallback {
+    class NovaCCServer : public NovaMsgCallback, public leveldb::CCServer {
     public:
         NovaCCServer(rdmaio::RdmaCtrl *rdma_ctrl,
                      NovaMemManager *mem_manager,
@@ -41,8 +74,19 @@ namespace nova {
 
         NovaRDMAStore *rdma_store_;
 
+        void AddCompleteTasks(const std::vector<NovaServerCompleteTask> &tasks);
+
+        void AddCompleteTask(const NovaServerCompleteTask &task);
+
+        int PullAsyncCQ() override;
+
+        std::vector<NovaCCServerAsyncWorker *> async_workers_;
+
     private:
         bool is_running_ = true;
+        bool is_compaction_thread_ = false;
+
+        void AddAsyncTask(const NovaServerAsyncTask &task);
 
         uint32_t thread_id_;
         rdmaio::RdmaCtrl *rdma_ctrl_;
@@ -51,7 +95,32 @@ namespace nova {
         leveldb::NovaRTableManager *rtable_manager_;
         leveldb::NovaRTable *current_rtable_ = nullptr;
 
+        std::mutex mutex_;
+        std::list<NovaServerCompleteTask> async_cq_;
+
+        uint32_t current_worker_id_ = 0;
+
         std::map<uint64_t, RequestContext> request_context_map_;
+    };
+
+
+    class NovaCCServerAsyncWorker {
+    public:
+        NovaCCServerAsyncWorker(leveldb::NovaRTableManager *rtable_manager,
+                                std::vector<NovaCCServer *> cc_servers);
+
+        void AddTask(const NovaServerAsyncTask &task);
+
+        void Start();
+
+    private:
+        leveldb::NovaRTableManager *rtable_manager_;
+        std::vector<NovaCCServer *> cc_servers_;
+
+        bool is_running_ = true;
+        std::mutex mutex_;
+        std::list<NovaServerAsyncTask> queue_;
+        sem_t sem_;
     };
 }
 

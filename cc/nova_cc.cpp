@@ -628,7 +628,7 @@ namespace leveldb {
         is_running_ = true;
         mutex_.Unlock();
 
-        std::cout << "BG thread started" << std::endl;
+        RDMA_LOG(rdmaio::INFO) << "BG thread started";
 
         bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
@@ -639,6 +639,7 @@ namespace leveldb {
             int n = 0;
             n += rdma_store_->PollSQ();
             n += rdma_store_->PollRQ();
+            n += cc_server_->PullAsyncCQ();
 
             background_work_mutex_.Lock();
             n += background_work_queue_.size();

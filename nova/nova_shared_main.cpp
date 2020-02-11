@@ -61,6 +61,8 @@ DEFINE_uint64(cc_num_conn_workers, 0, "Number of connection threads.");
 DEFINE_uint32(cc_num_async_workers, 0, "Number of async worker threads.");
 DEFINE_uint32(cc_num_compaction_workers, 0,
               "Number of compaction worker threads.");
+DEFINE_uint32(cc_num_cc_server_workers, 0,
+              "Number of compaction worker threads.");
 DEFINE_uint32(cc_rtable_num_servers_scatter_data_blocks, 0,
               "Number of servers to scatter data blocks ");
 
@@ -148,7 +150,8 @@ int main(int argc, char *argv[]) {
     NovaCCConfig::ReadFragments(FLAGS_cc_config_path,
                                 &NovaCCConfig::cc_config->fragments);
     NovaCCConfig::cc_config->num_conn_workers = FLAGS_cc_num_conn_workers;
-    NovaCCConfig::cc_config->num_async_workers = FLAGS_cc_num_async_workers;
+    NovaCCConfig::cc_config->num_conn_async_workers = FLAGS_cc_num_async_workers;
+    NovaCCConfig::cc_config->num_cc_server_workers = FLAGS_cc_num_cc_server_workers;
     NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
     NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks = FLAGS_cc_rtable_num_servers_scatter_data_blocks;
     NovaConfig::config->log_buf_size = FLAGS_cc_log_buf_size;

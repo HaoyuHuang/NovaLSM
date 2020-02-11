@@ -15,7 +15,7 @@ namespace nova {
     uint64_t nrdma_buf_cc() {
         // A CC async/bg thread connects to one thread at each DC.
         uint64_t nrdmatotal = nrdma_buf_unit() *
-                              (NovaCCConfig::cc_config->num_async_workers +
+                              (NovaCCConfig::cc_config->num_conn_async_workers +
                                NovaCCConfig::cc_config->num_compaction_workers) *
                               NovaCCConfig::cc_config->cc_servers.size();
         return nrdmatotal;

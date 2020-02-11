@@ -147,9 +147,11 @@ namespace nova {
 
         vector<Host> cc_servers;
         int num_conn_workers;
-        int num_async_workers;
+        int num_conn_async_workers;
         int num_compaction_workers;
         int num_wb_workers;
+        int num_cc_server_workers;
+
         int block_cache_mb;
         int write_buffer_size_mb;
         std::vector<CCFragment *> fragments;
