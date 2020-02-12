@@ -76,6 +76,18 @@ namespace leveldb {
         }
 
     private:
+
+        struct PersistStatus {
+            uint32_t remote_server_id = 0;
+            uint32_t remote_rtable_id = 0;
+            uint32_t WRITE_req_id = 0;
+            bool is_WRITE_done = false;
+            uint32_t persist_req_id = 0;
+            bool is_persist_done = false;
+
+            RTableHandle result_handle;
+        };
+
         uint32_t WriteBlock(BlockBuilder *block, uint64_t offset);
 
         uint32_t WriteRawBlock(const Slice &block_contents,
@@ -102,6 +114,8 @@ namespace leveldb {
         std::vector<uint32_t> server_ids_;
         std::vector<uint32_t> rtable_ids_;
         std::vector<uint32_t> WRITE_requests_;
+
+        std::vector<bool> written_in_mem_;
     };
 
     class NovaCCRandomAccessFile : public RandomAccessFile {

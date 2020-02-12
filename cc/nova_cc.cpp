@@ -187,6 +187,7 @@ namespace leveldb {
                 WRITE_requests_.push_back(req_id);
                 server_ids_.push_back(server_id);
                 rtable_ids_.push_back(rtable_id);
+                written_in_mem_.push_back(false);
                 n = 0;
                 offset = 0;
                 size = 0;
@@ -205,7 +206,9 @@ namespace leveldb {
 
     std::vector<RTableHandle> NovaCCMemFile::Persist() {
         std::vector<RTableHandle> handles;
+        handles.resize(server_ids_.size());
         uint32_t reqs[server_ids_.size()];
+        bool is_done[server_ids_.size()];
         for (int i = 0; i < server_ids_.size(); i++) {
             std::vector<SSTableRTablePair> pairs;
             SSTableRTablePair pair;
@@ -214,31 +217,70 @@ namespace leveldb {
             pair.sstable_id = fname_;
             pairs.push_back(pair);
             reqs[i] = cc_client_->InitiatePersist(server_ids_[i], pairs);
+            is_done[i] = false;
         }
 
-        for (int i = 0; i < server_ids_.size(); i++) {
-            CCResponse response;
-            while (!cc_client_->IsDone(reqs[i], &response)) {
-                usleep(1000);
-            }
+        int processed = 0;
+        bool sleep_once = true;
+        while (processed < server_ids_.size()) {
+            processed = 0;
+            for (int i = 0; i < server_ids_.size(); i++) {
+                if (is_done[i]) {
+                    processed++;
+                    continue;
+                }
 
-            RDMA_ASSERT(response.rtable_handles.size() == 1);
-            handles.push_back(response.rtable_handles[0]);
+                CCResponse response;
+                uint64_t timeout = 0;
+                if (cc_client_->IsDone(reqs[i], &response, &timeout)) {
+                    processed++;
+                    RDMA_ASSERT(response.rtable_handles.size() == 1);
+                    handles[i] = response.rtable_handles[0];
+                    is_done[i] = true;
+                }
+            }
+            if (sleep_once) {
+                usleep(10);
+            }
         }
         return handles;
     }
 
     void NovaCCMemFile::PullWRITEDataBlockRequests(bool block) {
         // Wait for all writes to complete.
-        for (int i = 0; i < WRITE_requests_.size(); i++) {
-            uint32_t req_id = WRITE_requests_[i];
-            CCResponse response;
-            while (block && !cc_client_->IsDone(req_id, &response)) {
-                usleep(100);
+        int processed = 0;
+        while (processed < WRITE_requests_.size()) {
+            processed = 0;
+            for (int i = 0; i < WRITE_requests_.size(); i++) {
+                if (written_in_mem_[i]) {
+                    processed++;
+                    continue;
+                }
+
+                uint32_t req_id = WRITE_requests_[i];
+                CCResponse response;
+                uint64_t timeout = 0;
+                if (cc_client_->IsDone(req_id, &response, &timeout)) {
+                    processed += 1;
+                    rtable_ids_[i] = response.rtable_id;
+                    written_in_mem_[i] = true;
+
+                    // TODO Issue persist immediately.
+                    std::vector<SSTableRTablePair> pairs;
+                    SSTableRTablePair pair;
+                    pair.rtable_id = rtable_ids_[i];
+                    RDMA_ASSERT(pair.rtable_id != 0);
+                    pair.sstable_id = fname_;
+                    pairs.push_back(pair);
+                    reqs[i] = cc_client_->InitiatePersist(server_ids_[i], pairs);
+
+                }
             }
-            if (rtable_ids_[i] == 0) {
-                rtable_ids_[i] = response.rtable_id;
+
+            if (!block) {
+                break;
             }
+            usleep(10);
         }
     }
 
@@ -547,7 +589,9 @@ namespace leveldb {
             RDMA_ASSERT(backing_mem_block_);
             uint32_t req_id = dc_client_->InitiateRTableReadDataBlock(
                     rtable_handle, offset, n, backing_mem_block_);
-            while (!dc_client_->IsDone(req_id, nullptr));
+            uint64_t timeout = 0;
+            while (!dc_client_->IsDone(req_id, nullptr, &timeout)) {
+            }
             ptr = backing_mem_block_;
         }
         memcpy(scratch, ptr, n);
@@ -583,8 +627,25 @@ namespace leveldb {
         }
 
         // Wait for all reads to complete.
+        int processed = 0;
+        bool is_done[meta_.data_block_group_handles.size()];
         for (int i = 0; i < meta_.data_block_group_handles.size(); i++) {
-            while (!dc_client_->IsDone(reqs[i], nullptr));
+            is_done[i] = false;
+        }
+
+        while (processed < meta_.data_block_group_handles.size()) {
+            processed = 0;
+            for (int i = 0; i < meta_.data_block_group_handles.size(); i++) {
+                if (is_done[i]) {
+                    processed++;
+                    continue;
+                }
+                uint64_t timeout = 0;
+                if (dc_client_->IsDone(reqs[i], nullptr, &timeout)) {
+                    processed++;
+                    is_done[i] = true;
+                }
+            }
         }
         return Status::OK();
     }

@@ -94,7 +94,7 @@ namespace leveldb {
                             int remote_server_id, char *buf,
                             uint32_t imm_data) = 0;
 
-        virtual bool IsDone(uint32_t req_id, CCResponse *response) = 0;
+        virtual bool IsDone(uint32_t req_id, CCResponse *response, uint64_t* timeout) = 0;
     };
 }
 

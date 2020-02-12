@@ -69,7 +69,7 @@ namespace leveldb {
                     int remote_server_id, char *buf,
                     uint32_t imm_data) override;
 
-        bool IsDone(uint32_t req_id, CCResponse *response) override;
+        bool IsDone(uint32_t req_id, CCResponse *response, uint64_t *timeout) override;
 
         uint32_t GetCurrentReqId();
 

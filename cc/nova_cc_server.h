@@ -23,6 +23,7 @@ namespace nova {
         uint32_t cc_server_thread_id = 0;
         uint32_t dc_req_id = 0;
         uint32_t remote_server_id = 0;
+        uint32_t rtable_id = 0;
 
         // Read request
         leveldb::RTableHandle rtable_handle = {};

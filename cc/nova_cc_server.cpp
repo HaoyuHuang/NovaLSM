@@ -57,9 +57,12 @@ namespace nova {
     }
 
     void NovaCCServer::AddAsyncTask(const nova::NovaServerAsyncTask &task) {
-        current_worker_id_ = current_worker_id_ % async_workers_.size();
-        async_workers_[current_worker_id_]->AddTask(task);
-        current_worker_id_ += 1;
+//        current_worker_id_ = current_worker_id_ % async_workers_.size();
+//        async_workers_[current_worker_id_]->AddTask(task);
+//        current_worker_id_ += 1;
+
+        async_workers_[task.rtable_id % async_workers_.size()]->AddTask(task);
+//        task.rtable_id % async_workers_.size();
     }
 
     int NovaCCServer::PullAsyncCQ() {
@@ -224,6 +227,7 @@ namespace nova {
                     task.cc_server_thread_id = thread_id_;
                     task.remote_server_id = remote_server_id;
                     task.request_type = leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS;
+                    task.rtable_id = rtable_id;
 
                     task.cc_mr_offset = cc_mr_offset;
                     task.rdma_buf = rdma_buf;
@@ -305,6 +309,7 @@ namespace nova {
                                                        &pair.sstable_id);
                         pair.rtable_id = leveldb::DecodeFixed32(
                                 buf + msg_size);
+                        task.rtable_id = pair.rtable_id;
                         msg_size += 4;
                         task.persist_pairs.push_back(pair);
                     }

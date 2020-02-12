@@ -177,6 +177,7 @@ namespace leveldb {
                 rh.rtable_id = rtable_ids[i].rtable_id;
                 rh.offset = h.offset();
                 rh.size = h.size();
+                context.size += h.size();
                 context.rtable_handles.push_back(rh);
             }
             request_context_[req_id] = context;
@@ -223,7 +224,8 @@ namespace leveldb {
         return 0;
     }
 
-    bool NovaCCClient::IsDone(uint32_t req_id, CCResponse *response) {
+    bool NovaCCClient::IsDone(uint32_t req_id, CCResponse *response,
+                              uint64_t *timeout) {
         // Poll both queues.
         rdma_store_->PollRQ();
         rdma_store_->PollSQ();
@@ -246,6 +248,20 @@ namespace leveldb {
             }
             request_context_.erase(req_id);
             return true;
+        }
+
+        if (timeout) {
+            *timeout = 0;
+            if (context_it->second.req_type ==
+                CCRequestType::CC_RTABLE_READ_BLOCKS) {
+                *timeout = context_it->second.size / 100;
+            } else if (context_it->second.req_type ==
+                       CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
+                *timeout = context_it->second.size / 7000;
+            } else if (context_it->second.req_type ==
+                       CCRequestType::CC_RTABLE_PERSIST) {
+                *timeout = context_it->second.size / 100;
+            }
         }
         return false;
     }
@@ -277,6 +293,7 @@ namespace leveldb {
                                         "dcclient[{}]: Write RTable complete req:{}",
                                         cc_client_id_, req_id);
                             processed = true;
+                            break;
                         }
                     }
                 } else {

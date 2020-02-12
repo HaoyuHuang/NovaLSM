@@ -1048,24 +1048,36 @@ namespace leveldb {
             }
         }
 
+        bool is_done[nova::NovaConfig::config->servers.size()];
         for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
             if (pairs[i].empty()) {
+                is_done[i] = true;
                 continue;
             }
             persist_reqs[i] = options_.bg_thread->dc_client()->InitiatePersist(
                     i, pairs[i]);
+            is_done[i] = false;
         }
 
-        for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
-            if (pairs[i].empty()) {
-                continue;
+        int processed = 0;
+        while (processed < nova::NovaConfig::config->servers.size()) {
+            processed = 0;
+            for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
+                if (is_done[i]) {
+                    processed++;
+                    continue;
+                }
+                CCResponse response;
+                uint64_t timeout = 0;
+                if (options_.bg_thread->dc_client()->IsDone(persist_reqs[i],
+                                                            &response,
+                                                            &timeout)) {
+                    is_done[i] = true;
+                    processed++;
+                    handles[i] = response.rtable_handles;
+                    RDMA_ASSERT(handles[i].size() == pairs[i].size());
+                };
             }
-            CCResponse response;
-            while (!options_.bg_thread->dc_client()->IsDone(persist_reqs[i],
-                                                            &response));
-
-            handles[i] = response.rtable_handles;
-            RDMA_ASSERT(handles[i].size() == pairs[i].size());
         }
 
         for (int i = 0; i < compact->output_files.size(); i++) {
