@@ -48,7 +48,7 @@ namespace leveldb {
             std::string sstable_id;
             uint64_t offset;
             uint32_t size;
-            bool persisted;
+            bool written_to_mem;
         };
 
         struct SSTablePersistStatus {
@@ -58,7 +58,7 @@ namespace leveldb {
 
         struct BatchWrite {
             BlockHandle mem_handle = {};
-            std::vector<std::string> sstables;
+            std::string sstable;
         };
 
         Env *env_ = nullptr;
@@ -81,6 +81,10 @@ namespace leveldb {
         uint32_t persisting_cnt = 0;
         bool deleted_ = false;
         std::mutex mutex_;
+
+        std::vector<BatchWrite> written_mem_blocks_;
+        std::mutex persist_mutex_;
+
     };
 
     class NovaRTableManager {

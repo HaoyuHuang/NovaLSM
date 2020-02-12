@@ -65,7 +65,7 @@ namespace leveldb {
         for (auto it = allocated_bufs_.rbegin();
              it != allocated_bufs_.rend(); it++) {
             if (it->offset == relative_off) {
-                it->persisted = true;
+                it->written_to_mem = true;
                 found = true;
                 break;
             }
@@ -79,8 +79,8 @@ namespace leveldb {
         mutex_.lock();
         if (is_full_ || current_mem_offset_ + size > allocated_mem_size_) {
             is_full_ = true;
-            mutex_.unlock();
             Seal();
+            mutex_.unlock();
             return UINT64_MAX;
         }
         RDMA_ASSERT(!sealed_);
@@ -91,13 +91,12 @@ namespace leveldb {
 
         RDMA_ASSERT(sstable_offset_.find(sstable) == sstable_offset_.end());
 
-//        sstable_offset_[sstable] = handle;
         current_mem_offset_ += size;
-        AllocatedBuf allocated_buf;
+        AllocatedBuf allocated_buf = {};
         allocated_buf.sstable_id = sstable;
         allocated_buf.offset = off;
         allocated_buf.size = size;
-        allocated_buf.persisted = false;
+        allocated_buf.written_to_mem = false;
         allocated_bufs_.push_back(allocated_buf);
         file_size_ += size;
         mutex_.unlock();
@@ -108,114 +107,126 @@ namespace leveldb {
     void NovaRTable::Persist() {
         mutex_.lock();
         if (allocated_bufs_.empty()) {
-            mutex_.unlock();
             Seal();
+            mutex_.unlock();
             return;
         }
 
         // sequential IOs to disk.
-        uint64_t disk_offset = current_disk_offset_;
-        std::vector<BatchWrite> written_mem_blocks;
-
         auto buf = allocated_bufs_.begin();
         while (buf != allocated_bufs_.end()) {
-            if (!buf->persisted) {
+            if (!buf->written_to_mem) {
                 buf++;
                 continue;
             }
+            RDMA_ASSERT(sstable_offset_.find(buf->sstable_id) ==
+                        sstable_offset_.end());
+
             SSTablePersistStatus &s = sstable_offset_[buf->sstable_id];
-            s.disk_handle.set_offset(disk_offset);
+            s.disk_handle.set_offset(current_disk_offset_);
             s.disk_handle.set_size(buf->size);
             s.persisted = false;
             persisting_cnt += 1;
-
-            disk_offset += buf->size;
             current_disk_offset_ += buf->size;
-            if (!written_mem_blocks.empty()) {
-                BatchWrite &bw = written_mem_blocks[
-                        written_mem_blocks.size() - 1];
-                BlockHandle &prev_handle = bw.mem_handle;
-                if (prev_handle.offset() + prev_handle.size() == buf->offset) {
-                    prev_handle.set_size(prev_handle.size() + buf->size);
-                    bw.sstables.push_back(buf->sstable_id);
-                } else {
-                    BatchWrite new_bw = {};
-                    new_bw.mem_handle.set_offset(buf->offset);
-                    new_bw.mem_handle.set_size(buf->size);
-                    new_bw.sstables.push_back(buf->sstable_id);
-                    written_mem_blocks.push_back(new_bw);
-                }
-            } else {
-                BatchWrite bw = {};
-                bw.mem_handle.set_offset(buf->offset);
-                bw.mem_handle.set_size(buf->size);
-                bw.sstables.push_back(buf->sstable_id);
-                written_mem_blocks.push_back(bw);
-            }
+
+            BatchWrite bw = {};
+            bw.mem_handle.set_offset(buf->offset);
+            bw.mem_handle.set_size(buf->size);
+            bw.sstable = buf->sstable_id;
+            written_mem_blocks_.push_back(bw);
             buf = allocated_bufs_.erase(buf);
+        }
+
+        RDMA_ASSERT(current_disk_offset_ <= file_size_);
+        mutex_.unlock();
+
+        persist_mutex_.lock();
+        // Make a copy of written_mem_blocks.
+        mutex_.lock();
+        std::vector<BatchWrite> writes;
+        for (int i = 0; i < written_mem_blocks_.size(); i++) {
+            writes.push_back(written_mem_blocks_[i]);
+        }
+        if (writes.empty()) {
+            Seal();
         }
         mutex_.unlock();
 
-        for (BatchWrite &bw : written_mem_blocks) {
-            Status s = file_->Append(
-                    Slice(backing_mem_ + bw.mem_handle.offset(),
-                          bw.mem_handle.size()));
+        if (writes.empty()) {
+            persist_mutex_.unlock();
+            return;
+        }
+
+
+        int i = 1;
+        int persisted_i = 0;
+        uint64_t offset = writes[0].mem_handle.offset();
+        uint64_t size = writes[0].mem_handle.size();
+        while (i < writes.size()) {
+            if (offset + size == writes[i].mem_handle.offset()) {
+                size += writes[i].mem_handle.size();
+                i++;
+                continue;
+            }
+
+            // persist offset -> size.
+            Status s = file_->Append(Slice(backing_mem_ + offset, size));
             RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
             s = file_->Sync();
             RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());;
-
             mutex_.lock();
-            for (auto &table : bw.sstables) {
-                sstable_offset_[table].persisted = true;
+            for (int j = persisted_i; j < i; j++) {
+                RDMA_ASSERT(
+                        sstable_offset_.find(writes[j].sstable) !=
+                        sstable_offset_.end());
+                sstable_offset_[writes[j].sstable].persisted = true;
                 persisting_cnt -= 1;
             }
             mutex_.unlock();
+            persisted_i = i;
+            offset = writes[i].mem_handle.offset();
+            size = writes[i].mem_handle.size();
+            i += 1;
         }
 
-        // Append 16 KB at a time.
-        // Sync at every 1 MB.
-//        uint64_t append_size = 1024 * 64;
-//        uint64_t sync_size = 2 * 1024 * 1024;
-//        for (BlockHandle &mem_block_handle : written_mem_blocks) {
-//            uint64_t off = mem_block_handle.offset();
-//            uint64_t written_size = 0;
-//            uint64_t synced_size = 0;
-//
-//            do {
-//                uint64_t size = std::min(append_size, mem_block_handle.size() -
-//                                                      written_size);
-//                Status s = file_->Append(
-//                        Slice(backing_mem_ + off,
-//                              size));
-//                RDMA_ASSERT(s.ok());
-//                off += size;
-//                written_size += size;
-//
-//                if (written_size - synced_size >= sync_size) {
-//                    s = file_->Sync();
-//                    RDMA_ASSERT(s.ok());
-//                    synced_size = written_size;
-//                }
-//            } while (written_size < mem_block_handle.size());
-//
-//            if (written_size - synced_size > 0) {
-//                Status s = file_->Sync();
-//                RDMA_ASSERT(s.ok());
-//            }
-//
-//            current_disk_offset_ += mem_block_handle.size();
-//        }
+        // Persist the last range.
+        Status s = file_->Append(Slice(backing_mem_ + offset, size));
+        RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
+        s = file_->Sync();
+        RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());;
+        mutex_.lock();
+        for (int j = persisted_i; j < writes.size(); j++) {
+            RDMA_ASSERT(
+                    sstable_offset_.find(writes[j].sstable) !=
+                    sstable_offset_.end());
+            sstable_offset_[writes[j].sstable].persisted = true;
+            persisting_cnt -= 1;
+        }
+        mutex_.unlock();
 
+
+        mutex_.lock();
+        written_mem_blocks_.erase(written_mem_blocks_.begin(),
+                                  written_mem_blocks_.begin() + writes.size());
         Seal();
+        mutex_.unlock();
+        persist_mutex_.unlock();
     }
 
     void NovaRTable::DeleteSSTable(const std::string &sstable_id) {
         bool delete_rtable = false;
 
         mutex_.lock();
-        sstable_offset_.erase(sstable_id);
+        Seal();
+        auto it = sstable_offset_.find(sstable_id);
+        RDMA_ASSERT(it != sstable_offset_.end());
+        RDMA_ASSERT(it->second.persisted);
+
+        int n = sstable_offset_.erase(sstable_id);
+        RDMA_ASSERT(n == 1);
+
         if (sstable_offset_.empty() && is_full_ && allocated_bufs_.empty() &&
-            persisting_cnt == 0) {
+            persisting_cnt == 0 && sealed_) {
             if (!deleted_) {
                 deleted_ = true;
                 delete_rtable = true;
@@ -225,32 +236,36 @@ namespace leveldb {
         RDMA_LOG(rdmaio::DEBUG) << fmt::format(
                     "Delete SSTable {} from RTable {}. Delete RTable: {}",
                     sstable_id, rtable_name_, delete_rtable);
+        if (delete_rtable) {
+            RDMA_ASSERT(current_disk_offset_ == file_size_);
+        }
         mutex_.unlock();
 
         if (!delete_rtable) {
             return;
         }
 
-        Seal();
+        RDMA_ASSERT(file_);
 
-        if (file_) {
-            file_->Close();
-            delete file_;
-            file_ = nullptr;
-        }
+        file_->Close();
+        delete file_;
+        file_ = nullptr;
         Status s = env_->DeleteFile(rtable_name_);
         RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
     }
 
     void NovaRTable::Seal() {
         bool seal = false;
-        mutex_.lock();
-        if (allocated_bufs_.empty() && is_full_) {
+        if (allocated_bufs_.empty() && is_full_ && persisting_cnt == 0) {
             if (!sealed_) {
                 seal = true;
+                sealed_ = true;
             }
         }
-        mutex_.unlock();
+
+        if (seal) {
+            RDMA_ASSERT(current_disk_offset_ == file_size_);
+        }
 
         if (!seal) {
             return;
@@ -261,11 +276,11 @@ namespace leveldb {
                     "Rtable {} closed with t:{} file size {} allocated size {}",
                     rtable_id_, thread_id_,
                     file_size_, allocated_mem_size_);
+        RDMA_ASSERT(backing_mem_);
 
         uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                   allocated_mem_size_);
         mem_manager_->FreeItem(thread_id_, backing_mem_, scid);
-        sealed_ = true;
         backing_mem_ = nullptr;
     }
 
@@ -275,15 +290,14 @@ namespace leveldb {
             mutex_.lock();
             auto it = sstable_offset_.find(sstable_id);
             RDMA_ASSERT(it != sstable_offset_.end());
-            SSTablePersistStatus s = it->second;
-            mutex_.unlock();
-
+            SSTablePersistStatus &s = it->second;
             if (s.persisted) {
                 handle = s.disk_handle;
+                mutex_.unlock();
                 break;
             }
+            mutex_.unlock();
         }
-
         return handle;
     }
 
@@ -295,9 +309,11 @@ namespace leveldb {
     }
 
     NovaRTable *NovaRTableManager::active_rtable(uint32_t thread_id) {
+        mutex_.lock();
         NovaRTable *rtable = active_rtables_[thread_id];
         RDMA_ASSERT(rtable)
             << fmt::format("Active RTable of thread {} is null.", thread_id);
+        mutex_.unlock();
         return rtable;
     }
 
@@ -316,8 +332,10 @@ namespace leveldb {
                                                         rtable_path_, id),
                                             mem_manager_,
                                             thread_id, rtable_size_);
+        mutex_.lock();
         rtables_[id] = rtable;
         active_rtables_[thread_id] = rtable;
+        mutex_.unlock();
         return rtable;
     }
 
