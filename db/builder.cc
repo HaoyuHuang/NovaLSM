@@ -74,9 +74,8 @@ namespace leveldb {
 
             // Make sure WRITEs are complete before we persist them.
             cc_file->PullWRITEDataBlockRequests(true);
-            std::vector<RTableHandle> rhs = cc_file->Persist();
-            uint32_t new_file_size = cc_file->Finalize(rhs);
-            meta->data_block_group_handles = rhs;
+            uint32_t new_file_size = cc_file->Finalize();
+            meta->data_block_group_handles = cc_file->rhs();
             meta->converted_file_size = new_file_size;
 
             delete cc_file;

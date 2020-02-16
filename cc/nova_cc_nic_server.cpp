@@ -62,7 +62,8 @@ namespace nova {
             options.block_cache = cache;
             if (NovaCCConfig::cc_config->write_buffer_size_mb > 0) {
                 options.write_buffer_size =
-                        (uint64_t) (NovaCCConfig::cc_config->write_buffer_size_mb) *
+                        (uint64_t)(
+                                NovaCCConfig::cc_config->write_buffer_size_mb) *
                         1024 * 1024;
             }
             if (NovaConfig::config->sstable_size > 0) {
@@ -208,7 +209,8 @@ namespace nova {
 
         char *buf = rdmabuf;
         char *cache_buf = buf + nrdma_buf_cc();
-        manager = new NovaMemManager(cache_buf);
+        manager = new NovaMemManager(cache_buf,
+                                     NovaConfig::config->mem_pool_size_gb);
         log_manager = new LogFileManager(manager);
 
         int ndbs = NovaCCConfig::ParseNumberOfDatabases(
@@ -222,12 +224,20 @@ namespace nova {
         }
 
         leveldb::Cache *block_cache = nullptr;
+        leveldb::Cache *row_cache = nullptr;
         if (NovaCCConfig::cc_config->block_cache_mb > 0) {
             uint64_t cache_size =
-                    (uint64_t) (NovaCCConfig::cc_config->block_cache_mb) *
+                    (uint64_t)(NovaCCConfig::cc_config->block_cache_mb) *
                     1024 * 1024;
             block_cache = leveldb::NewLRUCache(cache_size);
         }
+        if (NovaCCConfig::cc_config->row_cache_mb > 0) {
+            uint64_t row_cache_size =
+                    (uint64_t)(NovaCCConfig::cc_config->row_cache_mb) * 1024 *
+                    1024;
+            row_cache = leveldb::NewLRUCache(row_cache_size);
+        }
+
         RDMA_LOG(INFO)
             << fmt::format("Block cache size {}. Configured size {} MB",
                            block_cache->TotalCapacity(),
@@ -292,7 +302,7 @@ namespace nova {
                     rdma_ctrl,
                     manager,
                     dbs_,
-                    async_cq, true);
+                    async_cq, row_cache, true);
             async_workers.push_back(cc);
             cc->thread_id_ = worker_id;
 
@@ -313,6 +323,13 @@ namespace nova {
 
             if (NovaConfig::config->enable_rdma) {
                 store = new NovaRDMARCStore(buf, worker_id, endpoints,
+                                            NovaConfig::config->rdma_max_num_sends,
+                                            NovaConfig::config->max_msg_size,
+                                            NovaConfig::config->rdma_doorbell_batch_size,
+                                            NovaConfig::config->my_server_id,
+                                            NovaConfig::config->nova_buf,
+                                            NovaConfig::config->nnovabuf,
+                                            NovaConfig::config->rdma_port,
                                             async_workers[worker_id]);
             } else {
                 store = new NovaRDMANoopStore();
@@ -358,7 +375,7 @@ namespace nova {
                     rdma_ctrl,
                     manager,
                     dbs_,
-                    async_cq, false);
+                    async_cq, row_cache, false);
             cc->thread_id_ = worker_id;
 
             NovaRDMAStore *store = nullptr;
@@ -377,7 +394,15 @@ namespace nova {
             }
 
             if (NovaConfig::config->enable_rdma) {
-                store = new NovaRDMARCStore(buf, worker_id, endpoints, cc);
+                store = new NovaRDMARCStore(buf, worker_id, endpoints,
+                                            NovaConfig::config->rdma_max_num_sends,
+                                            NovaConfig::config->max_msg_size,
+                                            NovaConfig::config->rdma_doorbell_batch_size,
+                                            NovaConfig::config->my_server_id,
+                                            NovaConfig::config->nova_buf,
+                                            NovaConfig::config->nnovabuf,
+                                            NovaConfig::config->rdma_port,
+                                            cc);
             } else {
                 store = new NovaRDMANoopStore();
             }

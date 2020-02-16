@@ -153,6 +153,7 @@ namespace nova {
         int num_cc_server_workers;
 
         int block_cache_mb;
+        int row_cache_mb;
         int write_buffer_size_mb;
         std::vector<CCFragment *> fragments;
         std::vector<CCFragment *> db_fragment;

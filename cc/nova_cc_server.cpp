@@ -10,6 +10,7 @@
 #include "db/filename.h"
 #include "nova_cc_server.h"
 #include "cc/nova_cc_client.h"
+#include "nova/nova_config.h"
 
 namespace nova {
     namespace {

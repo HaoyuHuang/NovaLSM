@@ -7,10 +7,13 @@
 #ifndef RLIB_NOVA_RDMA_RC_STORE_H
 #define RLIB_NOVA_RDMA_RC_STORE_H
 
+#include <fmt/core.h>
+
 #include "rdma_ctrl.hpp"
 #include "nova_rdma_store.h"
-#include "nova_config.h"
 #include "nova_msg_callback.h"
+#include "nova_common.h"
+
 
 namespace nova {
 
@@ -21,17 +24,36 @@ namespace nova {
     public:
         NovaRDMARCStore(char *buf, int thread_id,
                         const std::vector<QPEndPoint> &end_points,
+                        uint32_t max_num_sends,
+                        uint32_t max_msg_size,
+                        uint32_t doorbell_batch_size,
+                        uint32_t my_server_id,
+                        char *mr_buf,
+                        uint64_t mr_size,
+                        uint64_t rdma_port,
                         NovaMsgCallback *callback) :
                 rdma_buf_(buf),
                 thread_id_(thread_id),
                 end_points_(end_points),
+                max_num_sends_(max_num_sends),
+                max_msg_size_(max_msg_size),
+                doorbell_batch_size_(doorbell_batch_size),
+                my_server_id_(my_server_id),
+                mr_buf_(mr_buf),
+                mr_size_(mr_size),
+                rdma_port_(rdma_port),
                 callback_(callback) {
-            RDMA_LOG(INFO) << "rc[" << thread_id << "]: " << "create rdma";
-            int max_num_sends = NovaConfig::config->rdma_max_num_sends;
+            RDMA_LOG(INFO)
+                << fmt::format("rc[{}]: create rdma {} {} {} {} {} {}.",
+                               thread_id_,
+                               max_num_sends_,
+                               max_msg_size_,
+                               doorbell_batch_size_,
+                               my_server_id_,
+                               mr_size_,
+                               rdma_port_);
             int max_num_wrs = max_num_sends;
-            int max_msg_size = NovaConfig::config->max_msg_size;
             int num_servers = end_points_.size();
-            int doorbell_batch_size = NovaConfig::config->rdma_doorbell_batch_size;
 
             wcs_ = (ibv_wc *) malloc(max_num_wrs * sizeof(ibv_wc));
             qp_ = (RCQP **) malloc(num_servers * sizeof(RCQP *));
@@ -122,10 +144,18 @@ namespace nova {
                      uint64_t remote_addr, bool is_offset,
                      uint32_t imm_data);
 
+        const uint32_t my_server_id_;
+        const char *mr_buf_;
+        const uint64_t mr_size_;
+        const uint64_t rdma_port_;
+        const uint32_t max_num_sends_;
+        const uint32_t max_msg_size_;
+        const uint32_t doorbell_batch_size_;
+
         std::map<uint32_t, int> server_qp_idx_map;
         std::vector<QPEndPoint> end_points_;
-        int thread_id_;
-        char *rdma_buf_;
+        const int thread_id_;
+        const char *rdma_buf_;
 
         // RDMA variables
         ibv_wc *wcs_;

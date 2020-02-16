@@ -43,19 +43,9 @@ namespace leveldb {
 
         void PullWRITEDataBlockRequests(bool block);
 
-        std::vector<RTableHandle> Persist();
+        uint32_t Finalize();
 
-        uint32_t Finalize(const std::vector<RTableHandle> &rtable_handles);
-
-        const std::vector<uint32_t> &rtable_server_ids() {
-            return server_ids_;
-        }
-
-        const std::vector<uint32_t> &rtable_ids() {
-            return rtable_ids_;
-        }
-
-        const std::string& sstable_id() {
+        const std::string &sstable_id() {
             return fname_;
         }
 
@@ -73,6 +63,14 @@ namespace leveldb {
 
         void set_num_data_blocks(uint32_t num_data_blocks) {
             num_data_blocks_ = num_data_blocks;
+        }
+
+        std::vector<RTableHandle> rhs() {
+            std::vector<RTableHandle> rhs;
+            for (int i = 0; i < status_.size(); i++) {
+                rhs.push_back(status_[i].result_handle);
+            }
+            return rhs;
         }
 
     private:
@@ -111,11 +109,7 @@ namespace leveldb {
         uint64_t allocated_size_ = 0;
         uint64_t used_size_ = 0;
 
-        std::vector<uint32_t> server_ids_;
-        std::vector<uint32_t> rtable_ids_;
-        std::vector<uint32_t> WRITE_requests_;
-
-        std::vector<bool> written_in_mem_;
+        std::vector<PersistStatus> status_;
     };
 
     class NovaCCRandomAccessFile : public RandomAccessFile {
@@ -125,7 +119,7 @@ namespace leveldb {
                                const FileMetaData &meta,
                                CCClient *dc_client,
                                MemManager *mem_manager,
-                               const Options& options,
+                               const Options &options,
                                uint64_t thread_id,
                                bool prefetch_all);
 

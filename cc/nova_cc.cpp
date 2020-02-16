@@ -39,7 +39,7 @@ namespace leveldb {
         // Policy.
         uint32_t scid = mem_manager->slabclassid(thread_id, file_size);
         backing_mem_ = mem_manager->ItemAlloc(thread_id, scid);
-        RDMA_ASSERT(backing_mem_) << "Running out of memory";
+        RDMA_ASSERT(backing_mem_) << "Running out of memory " << file_size;
 
         RDMA_LOG(rdmaio::DEBUG) << fmt::format(
                     "Create remote memory file tid:{} fname:{} size:{}",
@@ -184,10 +184,17 @@ namespace leveldb {
                         backing_mem_ + offset,
                         dbname_, file_number_,
                         size);
-                WRITE_requests_.push_back(req_id);
-                server_ids_.push_back(server_id);
-                rtable_ids_.push_back(rtable_id);
-                written_in_mem_.push_back(false);
+                PersistStatus status = {};
+                status.remote_server_id = server_id;
+                status.remote_rtable_id = rtable_id;
+                status.is_WRITE_done = false;
+                status.WRITE_req_id = req_id;
+                status.result_handle = {};
+                status.is_persist_done = false;
+                status.persist_req_id = 0;
+
+                status_.push_back(status);
+
                 n = 0;
                 offset = 0;
                 size = 0;
@@ -199,82 +206,79 @@ namespace leveldb {
         RDMA_ASSERT(n == 0)
             << fmt::format("Contain {} data blocks. Read {} data blocks",
                            num_data_blocks_, n);
-//        RDMA_ASSERT(group_id ==
-//                    nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks);
         delete it;
-    }
-
-    std::vector<RTableHandle> NovaCCMemFile::Persist() {
-        std::vector<RTableHandle> handles;
-        handles.resize(server_ids_.size());
-        uint32_t reqs[server_ids_.size()];
-        bool is_done[server_ids_.size()];
-        for (int i = 0; i < server_ids_.size(); i++) {
-            std::vector<SSTableRTablePair> pairs;
-            SSTableRTablePair pair;
-            pair.rtable_id = rtable_ids_[i];
-            RDMA_ASSERT(pair.rtable_id != 0);
-            pair.sstable_id = fname_;
-            pairs.push_back(pair);
-            reqs[i] = cc_client_->InitiatePersist(server_ids_[i], pairs);
-            is_done[i] = false;
-        }
-
-        int processed = 0;
-        bool sleep_once = true;
-        while (processed < server_ids_.size()) {
-            processed = 0;
-            for (int i = 0; i < server_ids_.size(); i++) {
-                if (is_done[i]) {
-                    processed++;
-                    continue;
-                }
-
-                CCResponse response;
-                uint64_t timeout = 0;
-                if (cc_client_->IsDone(reqs[i], &response, &timeout)) {
-                    processed++;
-                    RDMA_ASSERT(response.rtable_handles.size() == 1);
-                    handles[i] = response.rtable_handles[0];
-                    is_done[i] = true;
-                }
-            }
-            if (sleep_once) {
-                usleep(10);
-            }
-        }
-        return handles;
     }
 
     void NovaCCMemFile::PullWRITEDataBlockRequests(bool block) {
         // Wait for all writes to complete.
         int processed = 0;
-        while (processed < WRITE_requests_.size()) {
+        bool is_all_write_done = false;
+        while (processed < status_.size()) {
             processed = 0;
-            for (int i = 0; i < WRITE_requests_.size(); i++) {
-                if (written_in_mem_[i]) {
+            for (int i = 0; i < status_.size(); i++) {
+                if (status_[i].is_WRITE_done) {
                     processed++;
                     continue;
                 }
 
-                uint32_t req_id = WRITE_requests_[i];
+                uint32_t req_id = status_[i].WRITE_req_id;
                 CCResponse response;
                 uint64_t timeout = 0;
                 if (cc_client_->IsDone(req_id, &response, &timeout)) {
                     processed += 1;
-                    rtable_ids_[i] = response.rtable_id;
-                    written_in_mem_[i] = true;
+                    status_[i].remote_rtable_id = response.rtable_id;
+                    status_[i].is_WRITE_done = true;
 
-                    // TODO Issue persist immediately.
                     std::vector<SSTableRTablePair> pairs;
                     SSTableRTablePair pair;
-                    pair.rtable_id = rtable_ids_[i];
+                    pair.rtable_id = response.rtable_id;
                     RDMA_ASSERT(pair.rtable_id != 0);
                     pair.sstable_id = fname_;
                     pairs.push_back(pair);
-                    reqs[i] = cc_client_->InitiatePersist(server_ids_[i], pairs);
-
+                    status_[i].persist_req_id = cc_client_->InitiatePersist(
+                            status_[i].remote_server_id, pairs);
                 }
+            }
+
+            if (processed == status_.size()) {
+                is_all_write_done = true;
+                break;
+            }
+
+            if (!block) {
+                break;
+            }
+            usleep(10);
+        }
+
+        if (!is_all_write_done) {
+            RDMA_ASSERT(!block);
+            return;
+        }
+
+        // Wait for persist to complete.
+        processed = 0;
+        while (processed < status_.size()) {
+            processed = 0;
+            for (int i = 0; i < status_.size(); i++) {
+                if (status_[i].is_persist_done) {
+                    processed++;
+                    continue;
+                }
+
+                CCResponse response;
+                uint64_t timeout = 0;
+                if (cc_client_->IsDone(status_[i].persist_req_id, &response,
+                                       &timeout)) {
+                    processed++;
+                    RDMA_ASSERT(response.rtable_handles.size() == 1);
+                    status_[i].result_handle = response.rtable_handles[0];
+                    status_[i].is_persist_done = true;
+                }
+            }
+
+            if (processed == status_.size()) {
+                break;
             }
 
             if (!block) {
@@ -285,7 +289,7 @@ namespace leveldb {
     }
 
     uint32_t
-    NovaCCMemFile::Finalize(const std::vector<RTableHandle> &rtable_handles) {
+    NovaCCMemFile::Finalize() {
         Status s;
         int file_size = used_size_;
         Slice footer_input(backing_mem_ + file_size - Footer::kEncodedLength,
@@ -318,7 +322,7 @@ namespace leveldb {
             nblocks_in_group[0] = num_data_blocks_;
         }
 
-        RTableHandle db_handle = rtable_handles[0];
+        RTableHandle db_handle = status_[0].result_handle;
         RTableHandle index_handle = db_handle;
         uint64_t relative_offset = 0;
         int group_id = 0;
@@ -372,11 +376,11 @@ namespace leveldb {
                 group_id++;
                 n = 0;
                 relative_offset = 0;
-                if (group_id == rtable_handles.size()) {
+                if (group_id == status_.size()) {
                     RDMA_ASSERT(!it->Valid());
                     break;
                 }
-                db_handle = rtable_handles[group_id];
+                db_handle = status_[group_id].result_handle;
                 index_handle = db_handle;
             }
         }

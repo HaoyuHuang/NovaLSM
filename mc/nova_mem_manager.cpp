@@ -4,7 +4,8 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
-#include <nova/nova_config.h>
+#include <fmt/core.h>
+
 #include "nova_mem_manager.h"
 #include "nova/nova_common.h"
 
@@ -28,7 +29,6 @@ namespace nova {
         char *buf = next_;
         next_ += item_size_;
         available_bytes_ -= item_size_;
-//        memset(buf, 0, item_size_);
         return buf;
     }
 
@@ -60,6 +60,8 @@ namespace nova {
     NovaPartitionedMemManager::NovaPartitionedMemManager(int pid, char *buf,
                                                          uint64_t data_size) {
         uint64_t slab_size = SLAB_SIZE_MB * 1024 * 1024;
+//        uint64_t slab_sizes[] = {8192, 1024 };
+
         uint64_t size = 1200;
         for (int i = 0; i < MAX_NUMBER_OF_SLAB_CLASSES; i++) {
             slab_classes_[i].size = size;
@@ -160,9 +162,8 @@ namespace nova {
         slab_class_mutex_[scid].unlock();
     }
 
-    NovaMemManager::NovaMemManager(char *buf) {
-        uint64_t partition_size =
-                NovaConfig::config->mem_pool_size_gb * 1024 * 1024 * 1024 /
+    NovaMemManager::NovaMemManager(char *buf, uint64_t mem_pool_size_gb) {
+        uint64_t partition_size = mem_pool_size_gb * 1024 * 1024 * 1024 /
                 NOVA_MEM_PARTITIONS;
         char *base = buf;
         for (int i = 0; i < NOVA_MEM_PARTITIONS; i++) {

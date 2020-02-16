@@ -1027,102 +1027,20 @@ namespace leveldb {
             compact->compaction->level() + 1,
             static_cast<long long>(compact->total_bytes));
 
-        std::vector<SSTableRTablePair> pairs[nova::NovaConfig::config->servers.size()];
-        std::vector<RTableHandle> handles[nova::NovaConfig::config->servers.size()];
-        uint32_t persist_reqs[nova::NovaConfig::config->servers.size()];
-        for (int i = 0; i < compact->output_files.size(); i++) {
-            MemWritableFile *out = compact->output_files[i];
-            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
-
-            mem_file->PullWRITEDataBlockRequests(true);
-            auto server_ids = mem_file->rtable_server_ids();
-            auto rtable_ids = mem_file->rtable_ids();
-            RDMA_ASSERT(server_ids.size() == rtable_ids.size());
-
-            for (int i = 0; i < server_ids.size(); i++) {
-                SSTableRTablePair pair;
-                pair.sstable_id = mem_file->sstable_id();
-                pair.rtable_id = rtable_ids[i];
-                RDMA_ASSERT(pair.rtable_id != 0);
-                pairs[server_ids[i]].push_back(pair);
-            }
-        }
-
-        bool is_done[nova::NovaConfig::config->servers.size()];
-        for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
-            if (pairs[i].empty()) {
-                is_done[i] = true;
-                continue;
-            }
-            persist_reqs[i] = options_.bg_thread->dc_client()->InitiatePersist(
-                    i, pairs[i]);
-            is_done[i] = false;
-        }
-
-        int processed = 0;
-        while (processed < nova::NovaConfig::config->servers.size()) {
-            processed = 0;
-            for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
-                if (is_done[i]) {
-                    processed++;
-                    continue;
-                }
-                CCResponse response;
-                uint64_t timeout = 0;
-                if (options_.bg_thread->dc_client()->IsDone(persist_reqs[i],
-                                                            &response,
-                                                            &timeout)) {
-                    is_done[i] = true;
-                    processed++;
-                    handles[i] = response.rtable_handles;
-                    RDMA_ASSERT(handles[i].size() == pairs[i].size());
-                };
-            }
-        }
-
         for (int i = 0; i < compact->output_files.size(); i++) {
             CompactionState::Output &output = compact->outputs[i];
             MemWritableFile *out = compact->output_files[i];
             auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
 
-            auto sstable_id = mem_file->sstable_id();
-            std::vector<RTableHandle> rtable_handles;
-            for (int j = 0; j < mem_file->rtable_server_ids().size(); j++) {
-                uint32_t server_id = mem_file->rtable_server_ids()[j];
-                uint32_t rtable_id = mem_file->rtable_ids()[j];
-                auto sr_pairs = pairs[server_id];
+            mem_file->PullWRITEDataBlockRequests(true);
+            output.converted_file_size = mem_file->Finalize();
+            output.data_block_group_handles = mem_file->rhs();
 
-                // Search for the correct RTableHandle for this SSTable.
-                // One SSTable can only be in one RTable.
-                for (int k = 0; k < sr_pairs.size(); k++) {
-                    if (sr_pairs[k].sstable_id == sstable_id &&
-                        sr_pairs[k].rtable_id == rtable_id) {
-                        RTableHandle &handle = handles[server_id][k];
-                        RDMA_ASSERT(handle.server_id == server_id);
-                        RDMA_ASSERT(handle.rtable_id == rtable_id);
-                        rtable_handles.push_back(handle);
-                        break;
-                    }
-                }
-            }
-            RDMA_ASSERT(rtable_handles.size() ==
-                        mem_file->rtable_server_ids().size());
-            output.converted_file_size = mem_file->Finalize(rtable_handles);
-            output.data_block_group_handles = rtable_handles;
-        }
-
-        // Delete the files.
-        for (int i = 0; i < compact->output_files.size(); i++) {
-            MemWritableFile *out = compact->output_files[i];
-            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
-            delete mem_file;
-            delete out;
 
             compact->output_files[i] = nullptr;
             mem_file = nullptr;
             out = nullptr;
         }
-//        compact->output_files.clear();
 
         // Add compaction outputs
         compact->compaction->AddInputDeletions(compact->compaction->edit());

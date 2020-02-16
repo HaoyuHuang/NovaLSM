@@ -20,6 +20,7 @@
 #include "log/nova_log.h"
 #include "nova_cc_log_writer.h"
 #include "nova_cc_server.h"
+#include "nova/nova_config.h"
 
 namespace nova {
 
@@ -45,15 +46,21 @@ namespace nova {
         struct event readevent;
     };
 
+    struct CacheValue {
+        std::string value;
+    };
+
     class NovaRDMAComputeComponent : public NovaMsgCallback {
     public:
         NovaRDMAComputeComponent(RdmaCtrl *rdma_ctrl,
                                  NovaMemManager *mem_manager,
                                  const std::vector<leveldb::DB *> &dbs,
                                  NovaAsyncCompleteQueue **cqs,
+                                 leveldb::Cache *row_cache,
                                  bool is_worker_thread) :
                 rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager), dbs_(dbs),
-                cqs_(cqs), is_worker_thread_(is_worker_thread) {
+                cqs_(cqs), row_cache_(row_cache),
+                is_worker_thread_(is_worker_thread) {
             conn_workers_ = new bool[NovaCCConfig::cc_config->num_conn_workers];
             sem_init(&sem_, 0, 0);
         }
@@ -83,6 +90,8 @@ namespace nova {
         void ProcessVerify(const NovaAsyncTask &task);
 
         int ProcessQueue();
+
+        leveldb::Cache *row_cache_ = nullptr;
 
         RdmaCtrl *rdma_ctrl_ = nullptr;
         NovaMemManager *mem_manager_ = nullptr;

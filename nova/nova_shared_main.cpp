@@ -67,6 +67,8 @@ DEFINE_uint32(cc_rtable_num_servers_scatter_data_blocks, 0,
               "Number of servers to scatter data blocks ");
 
 DEFINE_uint64(cc_block_cache_mb, 0, "leveldb block cache size in mb");
+DEFINE_uint64(cc_row_cache_mb, 0, "leveldb row cache size in mb");
+
 DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint64(cc_sstable_size_mb, 0, "sstable size in mb");
 DEFINE_uint32(cc_log_buf_size, 0, "log buffer size");
@@ -135,6 +137,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->rdma_pq_batch_size = FLAGS_rdma_pq_batch_size;
 
     NovaCCConfig::cc_config->block_cache_mb = FLAGS_cc_block_cache_mb;
+    NovaCCConfig::cc_config->row_cache_mb = FLAGS_cc_row_cache_mb;
     NovaCCConfig::cc_config->write_buffer_size_mb = FLAGS_cc_write_buffer_size_mb;
 
     NovaConfig::config->db_path = FLAGS_db_path;

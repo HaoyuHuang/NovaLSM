@@ -88,7 +88,11 @@ namespace nova {
             batch.Put(task.key, task.value);
             db->GenerateLogRecords(option, &batch);
         }
+
         leveldb::Status status = db->Put(option, task.key, task.value);
+        if (row_cache_) {
+            row_cache_->Erase(leveldb::Slice(task.key));
+        }
         RDMA_LOG(DEBUG) << "############### CC worker processed task "
                         << task.sock_fd << ":" << task.key;
         RDMA_ASSERT(status.ok()) << status.ToString();
@@ -98,6 +102,11 @@ namespace nova {
         int len = int_to_str(response_buf, nlen);
         task.conn->response_buf = task.conn->buf;
         task.conn->response_size = len + nlen;
+    }
+
+    static void DeleteEntry(const leveldb::Slice &key, void *value) {
+        CacheValue *tf = reinterpret_cast<CacheValue *>(value);
+        delete tf;
     }
 
     void NovaRDMAComputeComponent::ProcessGet(const nova::NovaAsyncTask &task) {
@@ -110,8 +119,27 @@ namespace nova {
         read_options.mem_manager = mem_manager_;
         read_options.thread_id = thread_id_;
 
-        leveldb::Status s = db->Get(read_options, task.key, &value);
-        RDMA_ASSERT(s.ok()) << s.ToString();
+        if (row_cache_) {
+            leveldb::Cache::Handle *handle = row_cache_->Lookup(
+                    leveldb::Slice(task.key));
+            if (handle) {
+                auto cache_value = reinterpret_cast<CacheValue *>(row_cache_->Value(
+                        handle));
+                RDMA_ASSERT(cache_value);
+                value = cache_value->value;
+            } else {
+                leveldb::Status s = db->Get(read_options, task.key, &value);
+                RDMA_ASSERT(s.ok()) << s.ToString();
+                CacheValue *cache_value = new CacheValue;
+                cache_value->value = value;
+                row_cache_->Insert(task.key, cache_value, value.size(),
+                                   &DeleteEntry);
+            }
+        } else {
+            leveldb::Status s = db->Get(read_options, task.key, &value);
+            RDMA_ASSERT(s.ok()) << s.ToString();
+        }
+
         task.conn->response_buf = task.conn->buf;
         char *response_buf = task.conn->response_buf;
         task.conn->response_size =

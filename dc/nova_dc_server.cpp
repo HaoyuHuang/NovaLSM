@@ -20,7 +20,8 @@ namespace nova {
         char *buf = rdmabuf;
         char *cache_buf = buf + nrdma_buf_dc();
 
-        NovaMemManager *mem_manager = new NovaMemManager(cache_buf);
+        NovaMemManager *mem_manager = new NovaMemManager(cache_buf,
+                                                         NovaConfig::config->mem_pool_size_gb);
         leveldb::Cache *cache = leveldb::NewLRUCache(1024 * 1024 * 1024);
         LogFileManager *logFileManager = new LogFileManager(mem_manager);
         std::vector<std::string> dbnames;
@@ -62,7 +63,23 @@ namespace nova {
             }
 
             if (NovaConfig::config->enable_rdma) {
-                store = new NovaRDMARCStore(buf, worker_id, endpoints, rdma_dc);
+//                int max_num_sends,
+//                int max_msg_size,
+//                int doorbell_batch_size,
+//                uint32_t my_server_id,
+//                char *mr_buf,
+//                uint64_t mr_size,
+//                uint64_t rdma_port,
+
+                store = new NovaRDMARCStore(buf, worker_id, endpoints,
+                        NovaConfig::config->rdma_max_num_sends,
+                        NovaConfig::config->max_msg_size,
+                        NovaConfig::config->rdma_doorbell_batch_size,
+                        NovaConfig::config->my_server_id,
+                        NovaConfig::config->nova_buf,
+                        NovaConfig::config->nnovabuf,
+                        NovaConfig::config->rdma_port,
+                        rdma_dc);
             } else {
                 store = new NovaRDMANoopStore();
             }

@@ -204,7 +204,6 @@ namespace leveldb {
         }
         mutex_.unlock();
 
-
         mutex_.lock();
         written_mem_blocks_.erase(written_mem_blocks_.begin(),
                                   written_mem_blocks_.begin() + writes.size());

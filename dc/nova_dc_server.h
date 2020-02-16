@@ -10,6 +10,7 @@
 #include <thread>
 #include "nova/rdma_ctrl.hpp"
 #include "cc/nova_cc_server.h"
+#include "nova/nova_config.h"
 
 namespace nova {
     class NovaDCServer {

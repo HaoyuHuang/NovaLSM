@@ -6,6 +6,8 @@
 
 #ifndef RLIB_NOVA_MSG_CALLBACK_H
 #define RLIB_NOVA_MSG_CALLBACK_H
+
+#include "rdma_ctrl.hpp"
 namespace nova {
 
     class NovaMsgCallback {

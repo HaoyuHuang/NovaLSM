@@ -21,12 +21,9 @@ namespace nova {
         RDMA_LOG(INFO) << "RDMA client thread " << thread_id_
                        << " initializing";
         RdmaCtrl::DevIdx idx{.dev_id = 0, .port_id = 1}; // using the first RNIC's first port
-        char *cache_buf = NovaConfig::config->nova_buf;
+        const char *cache_buf = mr_buf_;
         int num_servers = end_points_.size();
-        int max_num_sends = NovaConfig::config->rdma_max_num_sends;
-        int max_num_wrs = max_num_sends;
-        int my_server_id = NovaConfig::config->my_server_id;
-        uint64_t my_memory_id = my_server_id;
+        uint64_t my_memory_id = my_server_id_;
 
         open_device_mutex.lock();
         if (!is_device_opened) {
@@ -35,22 +32,22 @@ namespace nova {
             RDMA_ASSERT(
                     rdma_ctrl->register_memory(my_memory_id,
                                                cache_buf,
-                                               NovaConfig::config->nnovabuf,
+                                               mr_size_,
                                                device));
         }
         open_device_mutex.unlock();
 
         RDMA_LOG(INFO) << "rdma-rc[" << thread_id_ << "]: register bytes "
-                       << NovaConfig::config->nnovabuf
+                       << mr_size_
                        << " my memory id: "
                        << my_memory_id;
         for (int peer_id = 0; peer_id < num_servers; peer_id++) {
             QPEndPoint peer_store = end_points_[peer_id];
-            QPIdx my_rc_key = create_rc_idx(my_server_id, thread_id_,
+            QPIdx my_rc_key = create_rc_idx(my_server_id_, thread_id_,
                                             peer_store.server_id);
             QPIdx peer_rc_key = create_rc_idx(peer_store.server_id,
                                               peer_store.thread_id,
-                                              my_server_id);
+                                              my_server_id_);
             uint64_t peer_memory_id = static_cast<uint64_t >(peer_store.server_id);
             RDMA_LOG(INFO) << "rdma-rc[" << thread_id_
                            << "]: my rc key " << my_rc_key.node_id << ":"
@@ -64,9 +61,9 @@ namespace nova {
             MemoryAttr local_mr = rdma_ctrl->get_local_mr(
                     my_memory_id);
             ibv_cq *cq = rdma_ctrl->create_cq(
-                    device, max_num_wrs);
+                    device, max_num_sends_);
             ibv_cq *recv_cq = rdma_ctrl->create_cq(
-                    device, max_num_wrs);
+                    device, max_num_sends_);
             qp_[peer_id] = rdma_ctrl->create_rc_qp(my_rc_key,
                                                    device,
                                                    &local_mr,
@@ -74,7 +71,7 @@ namespace nova {
             // get remote server's memory information
             MemoryAttr remote_mr;
             while (QP::get_remote_mr(peer_store.host.ip,
-                                     NovaConfig::config->rdma_port,
+                                     rdma_port_,
                                      peer_memory_id, &remote_mr) != SUCC) {
                 usleep(CONN_SLEEP);
             }
@@ -85,7 +82,7 @@ namespace nova {
                            << ":" << peer_store.thread_id;
             // bind to the previous allocated mr
             while (qp_[peer_id]->connect(peer_store.host.ip,
-                                         NovaConfig::config->rdma_port,
+                                         rdma_port_,
                                          peer_rc_key) != SUCC) {
                 usleep(CONN_SLEEP);
             }
@@ -94,9 +91,9 @@ namespace nova {
                         "rdma-rc[{}]: connected to server {}:{}:{}. Posting {} recvs.",
                         thread_id_, peer_store.host.ip,
                         peer_store.host.port, peer_store.thread_id,
-                        max_num_sends);
+                        max_num_sends_);
 
-            for (int i = 0; i < max_num_sends; i++) {
+            for (int i = 0; i < max_num_sends_; i++) {
                 PostRecv(peer_store.server_id, i);
             }
         }
@@ -112,10 +109,6 @@ namespace nova {
                                   uint64_t remote_addr, bool is_offset,
                                   uint32_t imm_data) {
         uint32_t qp_idx = to_qp_idx(server_id);
-        int max_msg_size_ = NovaConfig::config->max_msg_size;
-        int doorbell_batch_size_ = NovaConfig::config->rdma_doorbell_batch_size;
-        int max_num_sends = NovaConfig::config->rdma_max_num_sends;
-
         uint64_t wr_id = psend_index_[qp_idx];
         const char *sendbuf = rdma_send_buf_[qp_idx] + wr_id * max_msg_size_;
         if (localbuf != nullptr) {
@@ -166,12 +159,12 @@ namespace nova {
                             << " requests";
         }
 
-        while (npending_send_[qp_idx] == max_num_sends) {
+        while (npending_send_[qp_idx] == max_num_sends_) {
             // poll sq as it is full.
             PollSQ(server_id);
         }
 
-        if (psend_index_[qp_idx] == max_num_sends) {
+        if (psend_index_[qp_idx] == max_num_sends_) {
             psend_index_[qp_idx] = 0;
         }
         return wr_id;
@@ -199,7 +192,7 @@ namespace nova {
     }
 
     void NovaRDMARCStore::FlushPendingSends(int server_id) {
-        if (server_id == NovaConfig::config->my_server_id) {
+        if (server_id == my_server_id_) {
             return;
         }
         uint32_t qp_idx = to_qp_idx(server_id);
@@ -239,7 +232,7 @@ namespace nova {
     }
 
     uint32_t NovaRDMARCStore::PollSQ(int server_id) {
-        if (server_id == NovaConfig::config->my_server_id) {
+        if (server_id == my_server_id_) {
             return 0;
         }
         uint32_t qp_idx = to_qp_idx(server_id);
@@ -248,9 +241,8 @@ namespace nova {
             return 0;
         }
 
-        int max_num_wrs = NovaConfig::config->rdma_max_num_sends;
         // FIFO.
-        int n = ibv_poll_cq(qp_[qp_idx]->cq_, max_num_wrs, wcs_);
+        int n = ibv_poll_cq(qp_[qp_idx]->cq_, max_num_sends_, wcs_);
         for (int i = 0; i < n; i++) {
             RDMA_ASSERT(wcs_[i].status == IBV_WC_SUCCESS)
                 << "rdma-rc[" << thread_id_ << "]: " << "SQ error wc status "
@@ -262,7 +254,7 @@ namespace nova {
                         thread_id_, server_id, wcs_[i].wr_id,
                         ibv_wc_opcode_str(wcs_[i].opcode));
             char *buf = rdma_send_buf_[qp_idx] +
-                        wcs_[i].wr_id * NovaConfig::config->max_msg_size;
+                        wcs_[i].wr_id * max_msg_size_;
             callback_->ProcessRDMAWC(wcs_[i].opcode, wcs_[i].wr_id, server_id,
                                      buf, wcs_[i].imm_data);
             // Send is complete.
@@ -282,24 +274,21 @@ namespace nova {
     }
 
     void NovaRDMARCStore::PostRecv(int server_id, int recv_buf_index) {
-        int msg_size = NovaConfig::config->max_msg_size;
         uint32_t qp_idx = to_qp_idx(server_id);
-        char *local_buf = rdma_recv_buf_[qp_idx] + msg_size * recv_buf_index;
+        char *local_buf = rdma_recv_buf_[qp_idx] + max_msg_size_ * recv_buf_index;
         local_buf[0] = '~';
-        auto ret = qp_[qp_idx]->post_recv(local_buf, msg_size, recv_buf_index);
+        auto ret = qp_[qp_idx]->post_recv(local_buf, max_msg_size_, recv_buf_index);
         RDMA_ASSERT(ret == SUCC) << ret;
     }
 
     void NovaRDMARCStore::FlushPendingRecvs() {}
 
     uint32_t NovaRDMARCStore::PollRQ(int server_id) {
-        int max_msg_size_ = NovaConfig::config->max_msg_size;
-        int max_num_wrs = NovaConfig::config->rdma_max_num_sends;
         uint32_t qp_idx = to_qp_idx(server_id);
-        int n = ibv_poll_cq(qp_[qp_idx]->recv_cq_, max_num_wrs, wcs_);
+        int n = ibv_poll_cq(qp_[qp_idx]->recv_cq_, max_num_sends_, wcs_);
         for (int i = 0; i < n; i++) {
             uint64_t wr_id = wcs_[i].wr_id;
-            RDMA_ASSERT(wr_id < max_num_wrs);
+            RDMA_ASSERT(wr_id < max_num_sends_);
             RDMA_ASSERT(wcs_[i].status == IBV_WC_SUCCESS)
                 << "rdma-rc[" << thread_id_ << "]: " << "RQ error wc status "
                 << ibv_wc_status_str(wcs_[i].status);
@@ -335,7 +324,6 @@ namespace nova {
 
     char *NovaRDMARCStore::GetSendBuf(int server_id) {
         uint32_t qp_idx = to_qp_idx(server_id);
-        int max_msg_size_ = NovaConfig::config->max_msg_size;
         return rdma_send_buf_[qp_idx] +
                psend_index_[qp_idx] * max_msg_size_;
     }
