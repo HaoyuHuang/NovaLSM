@@ -444,32 +444,32 @@ namespace leveldb {
             return PosixError(filename, errno);
         }
 
-        if (!mmap_limiter_.Acquire()) {
-            *result = new PosixRandomAccessFile(filename, fd,
-                                                &fd_limiter_);
-            return Status::OK();
-        }
+//        if (!mmap_limiter_.Acquire()) {
+        *result = new PosixRandomAccessFile(filename, fd,
+                                            &fd_limiter_);
+        return Status::OK();
+//        }
 
-        uint64_t file_size;
-        Status status = GetFileSize(filename, &file_size);
-        if (status.ok()) {
-            void *mmap_base =
-                    ::mmap(/*addr=*/nullptr, file_size, PROT_READ,
-                                    MAP_SHARED, fd, 0);
-            if (mmap_base != MAP_FAILED) {
-                *result = new PosixMmapReadableFile(filename,
-                                                    reinterpret_cast<char *>(mmap_base),
-                                                    file_size,
-                                                    &mmap_limiter_);
-            } else {
-                status = PosixError(filename, errno);
-            }
-        }
-        ::close(fd);
-        if (!status.ok()) {
-            mmap_limiter_.Release();
-        }
-        return status;
+//        uint64_t file_size;
+//        Status status = GetFileSize(filename, &file_size);
+//        if (status.ok()) {
+//            void *mmap_base =
+//                    ::mmap(/*addr=*/nullptr, file_size, PROT_READ,
+//                                    MAP_SHARED, fd, 0);
+//            if (mmap_base != MAP_FAILED) {
+//                *result = new PosixMmapReadableFile(filename,
+//                                                    reinterpret_cast<char *>(mmap_base),
+//                                                    file_size,
+//                                                    &mmap_limiter_);
+//            } else {
+//                status = PosixError(filename, errno);
+//            }
+//        }
+//        ::close(fd);
+//        if (!status.ok()) {
+//            mmap_limiter_.Release();
+//        }
+//        return status;
     }
 
     void PosixEnv::DeleteFileInternal(const std::string &path) {
