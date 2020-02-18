@@ -62,7 +62,7 @@ namespace nova {
             options.block_cache = cache;
             if (NovaCCConfig::cc_config->write_buffer_size_mb > 0) {
                 options.write_buffer_size =
-                        (uint64_t)(
+                        (uint64_t) (
                                 NovaCCConfig::cc_config->write_buffer_size_mb) *
                         1024 * 1024;
             }
@@ -178,10 +178,14 @@ namespace nova {
 
     void NovaCCNICServer::LoadData() {
         LoadDataWithRangePartition();
-//        LoadDataWithRangePartition();
+
 //        NovaAsyncTask task = {};
 //        task.type = RequestType::VERIFY_LOAD;
 //        async_workers[0]->AddTask(task);
+//
+//        while (!async_workers[0]->verify_complete()) {
+//            usleep(1000000);
+//        }
 
         for (int i = 0; i < dbs_.size(); i++) {
             RDMA_LOG(INFO) << "Database " << i;
@@ -227,13 +231,13 @@ namespace nova {
         leveldb::Cache *row_cache = nullptr;
         if (NovaCCConfig::cc_config->block_cache_mb > 0) {
             uint64_t cache_size =
-                    (uint64_t)(NovaCCConfig::cc_config->block_cache_mb) *
+                    (uint64_t) (NovaCCConfig::cc_config->block_cache_mb) *
                     1024 * 1024;
             block_cache = leveldb::NewLRUCache(cache_size);
         }
         if (NovaCCConfig::cc_config->row_cache_mb > 0) {
             uint64_t row_cache_size =
-                    (uint64_t)(NovaCCConfig::cc_config->row_cache_mb) * 1024 *
+                    (uint64_t) (NovaCCConfig::cc_config->row_cache_mb) * 1024 *
                     1024;
             row_cache = leveldb::NewLRUCache(row_cache_size);
         }

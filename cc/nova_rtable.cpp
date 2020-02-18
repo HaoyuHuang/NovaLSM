@@ -53,6 +53,49 @@ namespace leveldb {
     }
 
     Status NovaRTable::Read(uint64_t offset, uint32_t size, char *scratch) {
+        mutex_.lock();
+        if (backing_mem_ && !diskoff_memoff_.empty()) {
+            uint64_t diskoff = offset;
+            uint32_t read_size = 0;
+            auto it = diskoff_memoff_.lower_bound(offset);
+            if (it->first > diskoff || it == diskoff_memoff_.end()) {
+                it--;
+            }
+//            std::string ds;
+//            for (auto its : diskoff_memoff_) {
+//                ds.append(fmt::format("[{},{},{}],", its.first,
+//                                      its.second.offset(), its.second.size()));
+//            }
+
+//            RDMA_ASSERT(it != diskoff_memoff_.begin())
+//                << fmt::format("{} {} {} {} {} {}", offset, size, read_size,
+//                               file_size_, diskoff_memoff_.size(), ds);;
+            RDMA_ASSERT(diskoff >= it->first &&
+                        diskoff < it->first + it->second.size())
+                << fmt::format("{} {} {} {} {}", offset, size, read_size,
+                               file_size_, diskoff_memoff_.size());;
+
+            while (read_size < size) {
+                RDMA_ASSERT(it != diskoff_memoff_.end())
+                    << fmt::format("{} {} {} {} {}", offset, size, read_size,
+                                   file_size_, diskoff_memoff_.size());
+                uint64_t memoff =
+                        it->second.offset() + (diskoff - it->first);
+                uint32_t ss = std::min(size - read_size,
+                                       (uint32_t) (it->second.size() -
+                                                   (diskoff - it->first)));
+                memcpy(scratch + read_size, backing_mem_ + memoff, ss);
+
+                read_size += ss;
+                diskoff += ss;
+                it++;
+            }
+            RDMA_ASSERT(read_size == size);
+            mutex_.unlock();
+            return Status::OK();
+        }
+        mutex_.unlock();
+
         Slice s;
         RTableHandle h = {};
         return file_->Read(h, offset, size, &s, scratch);
@@ -125,6 +168,12 @@ namespace leveldb {
             SSTablePersistStatus &s = sstable_offset_[buf->sstable_id];
             s.disk_handle.set_offset(current_disk_offset_);
             s.disk_handle.set_size(buf->size);
+
+            BlockHandle mem_handle = {};
+            mem_handle.set_offset(buf->offset);
+            mem_handle.set_size(buf->size);
+            diskoff_memoff_[current_disk_offset_] = mem_handle;
+
             s.persisted = false;
             persisting_cnt += 1;
             current_disk_offset_ += buf->size;

@@ -374,7 +374,6 @@ namespace leveldb {
 
             static bool Match(void *arg, int level, FileMetaData *f) {
                 State *state = reinterpret_cast<State *>(arg);
-
                 if (state->stats->seek_file == nullptr &&
                     state->last_file_read != nullptr) {
                     // We have had more than one seek for this read.  Charge the 1st file.
@@ -392,6 +391,7 @@ namespace leveldb {
                                                           state->ikey,
                                                           &state->saver,
                                                           SaveValue);
+
                 if (!state->s.ok()) {
                     state->found = true;
                     return false;

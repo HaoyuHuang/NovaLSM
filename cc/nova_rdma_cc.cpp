@@ -10,6 +10,12 @@
 #include "nova/nova_common.h"
 
 namespace nova {
+
+    static void DeleteEntry(const leveldb::Slice &key, void *value) {
+        CacheValue *tf = reinterpret_cast<CacheValue *>(value);
+        delete tf;
+    }
+
     void NovaRDMAComputeComponent::AddTask(const NovaAsyncTask &task) {
         mutex_.Lock();
         queue_.push_back(task);
@@ -56,11 +62,34 @@ namespace nova {
                 std::string expected_val(
                         NovaConfig::config->load_default_value_size, v
                 );
-                std::string val;
-                leveldb::Status status = db->Get(read_options, key, &val);
+
+                std::string value;
+                if (row_cache_) {
+                    leveldb::Cache::Handle *handle = row_cache_->Lookup(
+                            leveldb::Slice(key));
+                    if (handle) {
+                        auto cache_value = reinterpret_cast<CacheValue *>(row_cache_->Value(
+                                handle));
+                        RDMA_ASSERT(cache_value);
+                        value = cache_value->value;
+                    } else {
+                        leveldb::Status s = db->Get(read_options, key, &value);
+                        RDMA_ASSERT(s.ok()) << s.ToString();
+                        CacheValue *cache_value = new CacheValue;
+                        cache_value->value = value;
+                        row_cache_->Insert(key, cache_value, value.size(),
+                                           &DeleteEntry);
+                    }
+                } else {
+                    leveldb::Status s = db->Get(read_options, key, &value);
+                    RDMA_ASSERT(s.ok()) << s.ToString();
+                }
+
+
+                leveldb::Status status = db->Get(read_options, key, &value);
                 RDMA_ASSERT(status.ok())
                     << fmt::format("key:{} status:{}", key, status.ToString());
-                RDMA_ASSERT(expected_val.compare(val) == 0) << val;
+                RDMA_ASSERT(expected_val.compare(value) == 0) << value;
 
                 if (j == frags[i]->range.key_start) {
                     break;
@@ -72,6 +101,10 @@ namespace nova {
                            << " to "
                            << frags[i]->range.key_end;
         }
+
+        mutex_.Lock();
+        verify_complete_ = true;
+        mutex_.Unlock();
     }
 
     void NovaRDMAComputeComponent::ProcessPut(const nova::NovaAsyncTask &task) {
@@ -104,11 +137,6 @@ namespace nova {
         task.conn->response_size = len + nlen;
     }
 
-    static void DeleteEntry(const leveldb::Slice &key, void *value) {
-        CacheValue *tf = reinterpret_cast<CacheValue *>(value);
-        delete tf;
-    }
-
     void NovaRDMAComputeComponent::ProcessGet(const nova::NovaAsyncTask &task) {
         uint64_t hv = keyhash(task.key.data(), task.key.size());
         CCFragment *frag = NovaCCConfig::home_fragment(hv);
@@ -139,6 +167,8 @@ namespace nova {
             leveldb::Status s = db->Get(read_options, task.key, &value);
             RDMA_ASSERT(s.ok()) << s.ToString();
         }
+
+//        value = std::string(NovaConfig::config->load_default_value_size, 'a');
 
         task.conn->response_buf = task.conn->buf;
         char *response_buf = task.conn->response_buf;

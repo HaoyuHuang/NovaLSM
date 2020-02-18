@@ -82,6 +82,13 @@ namespace nova {
         NovaCCServer *cc_server_ = nullptr;
         uint64_t thread_id_;
 
+        bool verify_complete() {
+            mutex_.Lock();
+            bool vc = verify_complete_;
+            mutex_.Unlock();
+            return vc;
+        }
+
     private:
         void ProcessGet(const NovaAsyncTask &task);
 
@@ -91,8 +98,8 @@ namespace nova {
 
         int ProcessQueue();
 
+        bool verify_complete_ = false;
         leveldb::Cache *row_cache_ = nullptr;
-
         RdmaCtrl *rdma_ctrl_ = nullptr;
         NovaMemManager *mem_manager_ = nullptr;
         bool is_running_ = false;

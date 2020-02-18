@@ -595,6 +595,7 @@ namespace leveldb {
                     rtable_handle, offset, n, backing_mem_block_);
             uint64_t timeout = 0;
             while (!dc_client_->IsDone(req_id, nullptr, &timeout)) {
+                usleep(10);
             }
             ptr = backing_mem_block_;
         }

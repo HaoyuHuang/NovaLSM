@@ -58,11 +58,11 @@ namespace nova {
     }
 
     void NovaCCServer::AddAsyncTask(const nova::NovaServerAsyncTask &task) {
-//        current_worker_id_ = current_worker_id_ % async_workers_.size();
-//        async_workers_[current_worker_id_]->AddTask(task);
-//        current_worker_id_ += 1;
+        current_worker_id_ = current_worker_id_ % async_workers_.size();
+        async_workers_[current_worker_id_]->AddTask(task);
+        current_worker_id_ += 1;
 
-        async_workers_[task.rtable_id % async_workers_.size()]->AddTask(task);
+//        async_workers_[task.rtable_id % async_workers_.size()]->AddTask(task);
 //        task.rtable_id % async_workers_.size();
     }
 
