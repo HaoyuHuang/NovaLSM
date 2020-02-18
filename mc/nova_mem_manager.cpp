@@ -162,11 +162,12 @@ namespace nova {
         slab_class_mutex_[scid].unlock();
     }
 
-    NovaMemManager::NovaMemManager(char *buf, uint64_t mem_pool_size_gb) {
+    NovaMemManager::NovaMemManager(char *buf, uint32_t num_mem_partitions,
+                                   uint64_t mem_pool_size_gb) {
         uint64_t partition_size = mem_pool_size_gb * 1024 * 1024 * 1024 /
-                NOVA_MEM_PARTITIONS;
+                                  num_mem_partitions;
         char *base = buf;
-        for (int i = 0; i < NOVA_MEM_PARTITIONS; i++) {
+        for (int i = 0; i < num_mem_partitions; i++) {
             partitioned_mem_managers_.push_back(
                     new NovaPartitionedMemManager(i, base, partition_size));
             base += partition_size;

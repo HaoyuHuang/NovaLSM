@@ -22,6 +22,30 @@
 namespace nova {
     class NovaCCConnWorker;
 
+    class NovaCCLoadThread {
+    public:
+        NovaCCLoadThread(std::vector<leveldb::DB *> &dbs,
+                         std::vector<NovaRDMAComputeComponent *> &async_workers,
+                         NovaMemManager *mem_manager,
+                         std::set<uint32_t> &assigned_dbids, uint32_t tid);
+
+        void Start();
+
+        uint64_t throughput = 0;
+
+    private:
+        void VerifyLoad();
+
+        uint64_t LoadDataWithRangePartition();
+
+        std::vector<NovaRDMAComputeComponent *> async_workers_;
+        NovaMemManager *mem_manager_;
+        std::vector<leveldb::DB *> dbs_;
+        uint32_t tid_;
+        std::set<uint32_t> assigned_dbids_;
+    };
+
+
     class NovaCCNICServer {
     public:
         NovaCCNICServer(RdmaCtrl *rdma_ctrl, char *rdmabuf, int nport);
@@ -32,17 +56,17 @@ namespace nova {
 
         void LoadData();
 
-        void LoadDataWithRangePartition();
-
         int nport_;
         int listen_fd_ = -1;            /* listener descriptor      */
 
         std::vector<leveldb::DB *> dbs_;
-        NovaMemManager *manager;
+        NovaMemManager *mem_manager;
         LogFileManager *log_manager;
 
         std::vector<NovaCCConnWorker *> conn_workers;
         std::vector<NovaRDMAComputeComponent *> async_workers;
+        std::vector<NovaRDMAComputeComponent *> async_compaction_workers;
+
         std::vector<NovaCCServerAsyncWorker *> cc_server_workers;
         std::vector<leveldb::NovaCCCompactionThread *> bgs;
 

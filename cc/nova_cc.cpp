@@ -132,23 +132,24 @@ namespace leveldb {
         index_block_ = new Block(index_block_contents,
                                  file_number_,
                                  footer.index_handle().offset());
-        int num_data_blocks_in_group = num_data_blocks_ /
-                                       nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks;
-        int nblocks_in_group[nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks];
-        for (int i = 0;
-             i <
-             nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks; i++) {
-            nblocks_in_group[i] = num_data_blocks_in_group;
-        }
-        nblocks_in_group[
-                nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks -
-                1] +=
-                num_data_blocks_ %
-                nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks;
-
-        if (num_data_blocks_ <
-            nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks) {
-            nblocks_in_group[0] = num_data_blocks_;
+        // 4 KB 500 = 2 MB
+        int min_num_data_blocks_in_group = std::max(num_data_blocks_ /
+                                                    nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks,
+                                                    1000);
+        uint32_t assigned_blocks = 0;
+        while (assigned_blocks < num_data_blocks_) {
+            int remaining_blocks = num_data_blocks_ - assigned_blocks;
+            if (remaining_blocks < min_num_data_blocks_in_group) {
+                if (nblocks_in_group_.empty()) {
+                    nblocks_in_group_.push_back(remaining_blocks);
+                } else {
+                    nblocks_in_group_[nblocks_in_group_.size() -
+                                     1] += remaining_blocks;
+                }
+                break;
+            }
+            nblocks_in_group_.push_back(min_num_data_blocks_in_group);
+            assigned_blocks += min_num_data_blocks_in_group;
         }
 
         Iterator *it = index_block_->NewIterator(options_.comparator);
@@ -157,8 +158,41 @@ namespace leveldb {
         int offset = 0;
         int size = 0;
         int group_id = 0;
-        uint32_t server_id = nova::NovaConfig::config->my_server_id + 1;
-        server_id %= nova::NovaConfig::config->servers.size();
+
+        int scatter_servers[nblocks_in_group_.size()];
+        bool used_server[nova::NovaConfig::config->servers.size()];
+
+        for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
+            used_server[i] = false;
+        }
+
+        uint32_t start_server_id = rand() %
+                                   (nova::NovaConfig::config->servers.size() -
+                                    1);// nova::NovaConfig::config->my_server_id + 1;
+        if (start_server_id >= nova::NovaConfig::config->my_server_id) {
+            start_server_id += 1;
+        }
+        start_server_id %= nova::NovaConfig::config->servers.size();
+        for (int i = 0; i < nblocks_in_group_.size(); i++) {
+            RDMA_ASSERT(
+                    start_server_id != nova::NovaConfig::config->my_server_id)
+                << start_server_id;
+            RDMA_ASSERT(!used_server[start_server_id]);
+            used_server[start_server_id] = true;
+            scatter_servers[i] = start_server_id;
+            start_server_id = (start_server_id + 1) %
+                              nova::NovaConfig::config->servers.size();
+            if (start_server_id == nova::NovaConfig::config->my_server_id) {
+                start_server_id = (start_server_id + 1) %
+                                  nova::NovaConfig::config->servers.size();
+            }
+        }
+
+        auto client = reinterpret_cast<NovaBlockCCClient *> (cc_client_);
+
+        uint32_t sid = 0;
+        uint32_t dbid = 0;
+        nova::ParseDBIndexFromDBName(dbname_, &sid, &dbid);
 
         while (it->Valid()) {
             Slice key = it->key();
@@ -177,119 +211,59 @@ namespace leveldb {
             RDMA_ASSERT(offset + size == handle.offset() + handle.size());
             it->Next();
 
-            if (n == nblocks_in_group[group_id]) {
+            if (n == nblocks_in_group_[group_id]) {
                 uint32_t rtable_id = 0;
-                uint32_t req_id = cc_client_->InitiateRTableWriteDataBlocks(
-                        server_id, thread_id_, &rtable_id,
+                client->set_dbid(dbid);
+                uint32_t req_id = client->InitiateRTableWriteDataBlocks(
+                        scatter_servers[group_id], thread_id_, &rtable_id,
                         backing_mem_ + offset,
                         dbname_, file_number_,
                         size);
+                RDMA_LOG(rdmaio::DEBUG)
+                    << fmt::format(
+                            "t[{}]: Initiate WRITE data blocks s:{} req:{} db:{} fn:{}",
+                            thread_id_, scatter_servers[group_id], req_id,
+                            dbname_, file_number_);
+
                 PersistStatus status = {};
-                status.remote_server_id = server_id;
-                status.remote_rtable_id = rtable_id;
-                status.is_WRITE_done = false;
+                status.remote_server_id = scatter_servers[group_id];
                 status.WRITE_req_id = req_id;
                 status.result_handle = {};
-                status.is_persist_done = false;
-                status.persist_req_id = 0;
-
                 status_.push_back(status);
 
                 n = 0;
                 offset = 0;
                 size = 0;
                 group_id += 1;
-                server_id += 1;
-                server_id %= nova::NovaConfig::config->servers.size();
             }
         }
+        RDMA_ASSERT(group_id == nblocks_in_group_.size());
         RDMA_ASSERT(n == 0)
             << fmt::format("Contain {} data blocks. Read {} data blocks",
                            num_data_blocks_, n);
         delete it;
     }
 
-    void NovaCCMemFile::PullWRITEDataBlockRequests(bool block) {
-        // Wait for all writes to complete.
-        int processed = 0;
-        bool is_all_write_done = false;
-        while (processed < status_.size()) {
-            processed = 0;
-            for (int i = 0; i < status_.size(); i++) {
-                if (status_[i].is_WRITE_done) {
-                    processed++;
-                    continue;
-                }
-
-                uint32_t req_id = status_[i].WRITE_req_id;
-                CCResponse response;
-                uint64_t timeout = 0;
-                if (cc_client_->IsDone(req_id, &response, &timeout)) {
-                    processed += 1;
-                    status_[i].remote_rtable_id = response.rtable_id;
-                    status_[i].is_WRITE_done = true;
-
-                    std::vector<SSTableRTablePair> pairs;
-                    SSTableRTablePair pair;
-                    pair.rtable_id = response.rtable_id;
-                    RDMA_ASSERT(pair.rtable_id != 0);
-                    pair.sstable_id = fname_;
-                    pairs.push_back(pair);
-                    status_[i].persist_req_id = cc_client_->InitiatePersist(
-                            status_[i].remote_server_id, pairs);
-                }
-            }
-
-            if (processed == status_.size()) {
-                is_all_write_done = true;
-                break;
-            }
-
-            if (!block) {
-                break;
-            }
-            usleep(10);
-        }
-
-        if (!is_all_write_done) {
-            RDMA_ASSERT(!block);
-            return;
-        }
-
-        // Wait for persist to complete.
-        processed = 0;
-        while (processed < status_.size()) {
-            processed = 0;
-            for (int i = 0; i < status_.size(); i++) {
-                if (status_[i].is_persist_done) {
-                    processed++;
-                    continue;
-                }
-
-                CCResponse response;
-                uint64_t timeout = 0;
-                if (cc_client_->IsDone(status_[i].persist_req_id, &response,
-                                       &timeout)) {
-                    processed++;
-                    RDMA_ASSERT(response.rtable_handles.size() == 1);
-                    status_[i].result_handle = response.rtable_handles[0];
-                    status_[i].is_persist_done = true;
-                }
-            }
-
-            if (processed == status_.size()) {
-                break;
-            }
-
-            if (!block) {
-                break;
-            }
-            usleep(10);
+    void NovaCCMemFile::WaitForPersistingDataBlocks() {
+        auto client = reinterpret_cast<NovaBlockCCClient *> (cc_client_);
+        for (int i = 0; i < nblocks_in_group_.size(); i++) {
+            client->Wait();
         }
     }
 
     uint32_t
     NovaCCMemFile::Finalize() {
+        auto client = reinterpret_cast<NovaBlockCCClient *> (cc_client_);
+        // Wait for all writes to complete.
+        for (int i = 0; i < status_.size(); i++) {
+            uint32_t req_id = status_[i].WRITE_req_id;
+            CCResponse response = {};
+            RDMA_ASSERT(client->IsDone(req_id, &response, nullptr));
+            RDMA_ASSERT(response.rtable_handles.size() == 1)
+                << fmt::format("{} {}", req_id, response.rtable_handles.size());
+            status_[i].result_handle = response.rtable_handles[0];
+        }
+
         Status s;
         int file_size = used_size_;
         Slice footer_input(backing_mem_ + file_size - Footer::kEncodedLength,
@@ -303,24 +277,6 @@ namespace leveldb {
         BlockBuilder index_block_builder(&opt);
         Iterator *it = index_block_->NewIterator(options_.comparator);
         it->SeekToFirst();
-        int num_data_blocks_in_group = num_data_blocks_ /
-                                       nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks;
-        int nblocks_in_group[nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks];
-        for (int i = 0;
-             i <
-             nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks; i++) {
-            nblocks_in_group[i] = num_data_blocks_in_group;
-        }
-        nblocks_in_group[
-                nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks -
-                1] +=
-                num_data_blocks_ %
-                nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks;
-
-        if (num_data_blocks_ <
-            nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks) {
-            nblocks_in_group[0] = num_data_blocks_;
-        }
 
         RTableHandle db_handle = status_[0].result_handle;
         RTableHandle index_handle = db_handle;
@@ -368,7 +324,7 @@ namespace leveldb {
             it->Next();
             n++;
 
-            if (n == nblocks_in_group[group_id]) {
+            if (n == nblocks_in_group_[group_id]) {
                 // Cover the block handle in the RTable.
                 RDMA_ASSERT(db_handle.offset + db_handle.size ==
                             index_handle.offset + index_handle.size +
@@ -532,9 +488,14 @@ namespace leveldb {
         RDMA_ASSERT(mem_manager_);
         RDMA_ASSERT(dc_client_);
 
+        uint32_t server_id = 0;
+        nova::ParseDBIndexFromDBName(dbname, &server_id, &dbid_);
         Status s = env_->NewRandomAccessFile(TableFileName(dbname, file_number),
                                              &local_ra_file_);
 
+        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client_);
+        RDMA_ASSERT(dc);
+        dc->set_dbid(dbid_);
 
         if (!prefetch_all_) {
             uint32_t scid = mem_manager_->slabclassid(thread_id_,
@@ -591,12 +552,15 @@ namespace leveldb {
             ptr = &backing_mem_table_[local_offset];
         } else {
             RDMA_ASSERT(backing_mem_block_);
-            uint32_t req_id = dc_client_->InitiateRTableReadDataBlock(
+
+            auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client_);
+            dc->set_dbid(dbid_);
+            uint32_t req_id = dc->InitiateRTableReadDataBlock(
                     rtable_handle, offset, n, backing_mem_block_);
-            uint64_t timeout = 0;
-            while (!dc_client_->IsDone(req_id, nullptr, &timeout)) {
-                usleep(10);
-            }
+            dc->Wait();
+            RDMA_ASSERT(dc_client_->IsDone(req_id, nullptr, nullptr));
+            RDMA_ASSERT(nova::IsRDMAWRITEComplete(backing_mem_block_, n));
+
             ptr = backing_mem_block_;
         }
         memcpy(scratch, ptr, n);
@@ -612,51 +576,44 @@ namespace leveldb {
         uint64_t offset = 0;
 
         uint32_t reqs[meta_.data_block_group_handles.size()];
+        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client_);
+
         for (int i = 0; i < meta_.data_block_group_handles.size(); i++) {
             RTableHandle &handle = meta_.data_block_group_handles[i];
             uint64_t id =
                     (((uint64_t) handle.server_id) << 32) |
                     handle.rtable_id;
-            reqs[i] = dc_client_->InitiateRTableReadDataBlock(handle,
-                                                              handle.offset,
-                                                              handle.size,
-                                                              backing_mem_table_ +
-                                                              offset);
+            reqs[i] = dc->InitiateRTableReadDataBlock(handle,
+                                                      handle.offset,
+                                                      handle.size,
+                                                      backing_mem_table_ +
+                                                      offset);
             DataBlockRTableLocalBuf buf = {};
             buf.offset = handle.offset;
             buf.size = handle.size;
             buf.local_offset = offset;
             rtable_local_offset_[id] = buf;
-
             offset += handle.size;
         }
 
         // Wait for all reads to complete.
-        int processed = 0;
-        bool is_done[meta_.data_block_group_handles.size()];
         for (int i = 0; i < meta_.data_block_group_handles.size(); i++) {
-            is_done[i] = false;
+            dc->Wait();
         }
-
-        while (processed < meta_.data_block_group_handles.size()) {
-            processed = 0;
-            for (int i = 0; i < meta_.data_block_group_handles.size(); i++) {
-                if (is_done[i]) {
-                    processed++;
-                    continue;
-                }
-                uint64_t timeout = 0;
-                if (dc_client_->IsDone(reqs[i], nullptr, &timeout)) {
-                    processed++;
-                    is_done[i] = true;
-                }
-            }
+        offset = 0;
+        for (int i = 0; i < meta_.data_block_group_handles.size(); i++) {
+            RTableHandle &handle = meta_.data_block_group_handles[i];
+            RDMA_ASSERT(dc->IsDone(reqs[i], nullptr, nullptr));
+            RDMA_ASSERT(nova::IsRDMAWRITEComplete(backing_mem_table_ + offset,
+                                                  handle.size));
+            offset += handle.size;
         }
         return Status::OK();
     }
 
-    NovaCCCompactionThread::NovaCCCompactionThread(rdmaio::RdmaCtrl *rdma_ctrl)
-            : rdma_ctrl_(rdma_ctrl) {
+    NovaCCCompactionThread::NovaCCCompactionThread(MemManager *mem_manager)
+            : mem_manager_(mem_manager) {
+        cc_client_ = new NovaBlockCCClient;
         sem_init(&signal, 0, 0);
     }
 
@@ -674,64 +631,29 @@ namespace leveldb {
     }
 
     bool NovaCCCompactionThread::IsInitialized() {
-        mutex_.Lock();
+        background_work_mutex_.Lock();
         bool is_running = is_running_;
-        mutex_.Unlock();
+        background_work_mutex_.Unlock();
         return is_running;
     }
 
-    void NovaCCCompactionThread::AddDeleteSSTables(
-            const std::vector<leveldb::DeleteTableRequest> &requests) {
-        mutex_.Lock();
-        for (auto &req : requests) {
-            delete_table_requests_.push_back(req);
-        }
-        mutex_.Unlock();
-        sem_post(&signal);
-    }
-
     void NovaCCCompactionThread::Start() {
-        rdma_store_->Init(rdma_ctrl_);
-
-        mutex_.Lock();
+        background_work_mutex_.Lock();
         is_running_ = true;
-        mutex_.Unlock();
+        background_work_mutex_.Unlock();
 
-        RDMA_LOG(rdmaio::INFO) << "BG thread started";
-
-        bool should_sleep = true;
-        uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
+        RDMA_LOG(rdmaio::INFO) << "Compaction workers started";
         while (is_running_) {
-            if (should_sleep) {
-                usleep(timeout);
-            }
-            int n = 0;
-            n += rdma_store_->PollSQ();
-            n += rdma_store_->PollRQ();
-            n += cc_server_->PullAsyncCQ();
+            sem_wait(&signal);
 
             background_work_mutex_.Lock();
-            n += background_work_queue_.size();
-            if (background_work_queue_.empty()) {
-                background_work_mutex_.Unlock();
-            } else {
-                auto background_work_function = background_work_queue_.front().function;
-                void *background_work_arg = background_work_queue_.front().arg;
-                background_work_queue_.pop();
-                background_work_mutex_.Unlock();
-                background_work_function(background_work_arg);
-            }
+            RDMA_ASSERT(!background_work_queue_.empty());
 
-            if (n == 0) {
-                should_sleep = true;
-                timeout *= 2;
-                if (timeout > RDMA_POLL_MAX_TIMEOUT_US) {
-                    timeout = RDMA_POLL_MAX_TIMEOUT_US;
-                }
-            } else {
-                should_sleep = false;
-                timeout = RDMA_POLL_MIN_TIMEOUT_US;
-            }
+            auto background_work_function = background_work_queue_.front().function;
+            void *background_work_arg = background_work_queue_.front().arg;
+            background_work_queue_.pop();
+            background_work_mutex_.Unlock();
+            background_work_function(background_work_arg);
         }
     }
 

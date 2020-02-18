@@ -20,7 +20,7 @@ namespace nova {
         char *buf = rdmabuf;
         char *cache_buf = buf + nrdma_buf_dc();
 
-        NovaMemManager *mem_manager = new NovaMemManager(cache_buf,
+        NovaMemManager *mem_manager = new NovaMemManager(cache_buf, 1,
                                                          NovaConfig::config->mem_pool_size_gb);
         leveldb::Cache *cache = leveldb::NewLRUCache(1024 * 1024 * 1024);
         LogFileManager *logFileManager = new LogFileManager(mem_manager);

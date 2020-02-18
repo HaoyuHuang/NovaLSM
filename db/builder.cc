@@ -47,7 +47,7 @@ namespace leveldb {
 
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format(
-                        "CompactMemTable tid:{} alloc_size:{} nentries:{} nblocks:{}",
+                        "!!!!!!!!!!!!!!!!!!!!! CompactMemTable tid:{} alloc_size:{} nentries:{} nblocks:{}",
                         key, options.max_dc_file_size, builder->NumEntries(),
                         builder->NumDataBlocks());
 
@@ -73,7 +73,7 @@ namespace leveldb {
             }
 
             // Make sure WRITEs are complete before we persist them.
-            cc_file->PullWRITEDataBlockRequests(true);
+            cc_file->WaitForPersistingDataBlocks();
             uint32_t new_file_size = cc_file->Finalize();
             meta->data_block_group_handles = cc_file->rhs();
             meta->converted_file_size = new_file_size;

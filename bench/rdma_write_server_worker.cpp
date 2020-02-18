@@ -38,7 +38,6 @@ namespace nova {
             auto &task = async_cq_.front();
             if (task.request_type ==
                 BenchRequestType::BENCH_PERSIST) {
-
                 if (!is_local_disk_bench_) {
                     char *sendbuf = rdma_store_->GetSendBuf(
                             task.remote_server_id);
@@ -68,9 +67,13 @@ namespace nova {
 
     RDMAWRITEServerWorker::RDMAWRITEServerWorker(uint32_t max_run_time,
                                                  uint32_t write_size_kb,
-                                                 bool is_local_disk_bench)
+                                                 bool is_local_disk_bench,
+                                                 bool eval_disk_horizontal_scalability,
+                                                 uint32_t server_id)
             : max_run_time_(max_run_time), write_size_kb_(write_size_kb),
-              is_local_disk_bench_(is_local_disk_bench) {
+              is_local_disk_bench_(is_local_disk_bench),
+              eval_disk_horizontal_scalability_(
+                      eval_disk_horizontal_scalability), server_id_(server_id) {
     }
 
 
@@ -86,6 +89,7 @@ namespace nova {
                                                       write_size_kb_ *
                                                       1024);
             char *buf = mem_manager_->ItemAlloc(thread_id_, scid);
+            RDMA_ASSERT(buf);
 
             std::string path = fmt::format("{}/{}", table_path_, thread_id_);
             mkdirs(path.c_str());
@@ -124,6 +128,23 @@ namespace nova {
 
 
         while (true) {
+            if (eval_disk_horizontal_scalability_ && server_id_ != 0) {
+                rdma_store_->PollSQ();
+                rdma_store_->PollRQ();
+                PullAsyncCQ();
+                processed_number_of_req_ += 1;
+                if (processed_number_of_req_ % 10000 == 0) {
+                    struct ::timeval timeval;
+                    ::gettimeofday(&timeval, nullptr);
+                    int64_t unix_time = timeval.tv_sec;
+
+                    if (unix_time - start_unix_time > max_run_time_) {
+                        break;
+                    }
+                }
+                continue;
+            }
+
             uint32_t req_id = client_->Initiate();
             processed_number_of_req_ += 1;
 
@@ -133,7 +154,7 @@ namespace nova {
                 PullAsyncCQ();
             }
 
-            if (processed_number_of_req_ % 10 == 0) {
+            if (processed_number_of_req_ % 1000 == 0) {
                 struct ::timeval timeval;
                 ::gettimeofday(&timeval, nullptr);
                 int64_t unix_time = timeval.tv_sec;

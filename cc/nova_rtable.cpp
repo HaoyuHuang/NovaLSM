@@ -237,7 +237,6 @@ namespace leveldb {
             size = writes[i].mem_handle.size();
             i += 1;
         }
-
         // Persist the last range.
         Status s = file_->Append(Slice(backing_mem_ + offset, size));
         RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
@@ -295,10 +294,11 @@ namespace leveldb {
 
         RDMA_ASSERT(file_);
 
-        file_->Close();
+        Status s = file_->Close();
+        RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
         delete file_;
         file_ = nullptr;
-        Status s = env_->DeleteFile(rtable_name_);
+        s = env_->DeleteFile(rtable_name_);
         RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
     }
 
@@ -319,13 +319,15 @@ namespace leveldb {
             return;
         }
 
+//        leveldb::Status s = file_->Sync();
+//        RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());;
+
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format(
                     "Rtable {} closed with t:{} file size {} allocated size {}",
                     rtable_id_, thread_id_,
                     file_size_, allocated_mem_size_);
         RDMA_ASSERT(backing_mem_);
-
         uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                   allocated_mem_size_);
         mem_manager_->FreeItem(thread_id_, backing_mem_, scid);

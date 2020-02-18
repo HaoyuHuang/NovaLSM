@@ -37,7 +37,7 @@ namespace nova {
     class RDMAWRITEServerWorker : public NovaMsgCallback {
     public:
         RDMAWRITEServerWorker(uint32_t max_run_time, uint32_t write_size_kb,
-                              bool is_local_disk_bench);
+                              bool is_local_disk_bench, bool eval_disk_horizontal_scalability, uint32_t server_id);
 
         void Start();
 
@@ -73,6 +73,8 @@ namespace nova {
         uint32_t processed_number_of_req_ = 0;
     private:
         bool is_local_disk_bench_;
+        bool eval_disk_horizontal_scalability_;
+        uint32_t server_id_;
         uint32_t max_run_time_;
 
         struct RequestContext {

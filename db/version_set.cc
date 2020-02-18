@@ -1159,7 +1159,8 @@ namespace leveldb {
             const std::vector<FileMetaData *> &files = current_->files_[level];
             for (size_t i = 0; i < files.size(); i++) {
                 const FileMetaData *f = files[i];
-                edit.AddFile(level, f->number, f->file_size, f->converted_file_size, f->smallest,
+                edit.AddFile(level, f->number, f->file_size,
+                             f->converted_file_size, f->smallest,
                              f->largest, f->data_block_group_handles);
             }
         }
@@ -1325,9 +1326,9 @@ namespace leveldb {
         Iterator **list = new Iterator *[space];
         int num = 0;
         for (int which = 0; which < 2; which++) {
-            if (!c->inputs_[which].empty()) {
+            const std::vector<FileMetaData *> &files = c->inputs_[which];
+            if (!files.empty()) {
                 if (c->level() + which == 0) {
-                    const std::vector<FileMetaData *> &files = c->inputs_[which];
                     for (size_t i = 0; i < files.size(); i++) {
                         list[num++] = table_cache_->NewIterator(
                                 AccessCaller::kCompaction, options,
@@ -1344,6 +1345,17 @@ namespace leveldb {
                             .file_number = 0,
                             .level = c->level() + which,
                     };
+//                    // Prefetch the files.
+//                    for (size_t i = 0; i < files.size(); i++) {
+//                        auto it = table_cache_->NewIterator(
+//                                AccessCaller::kCompaction, options,
+//                                *files[i],
+//                                files[i]->number,
+//                                c->level() +
+//                                which,
+//                                files[i]->converted_file_size);
+//                        delete it;
+//                    }
                     list[num++] = NewTwoLevelIterator(
                             new Version::LevelFileNumIterator(icmp_,
                                                               &c->inputs_[which]),

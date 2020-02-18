@@ -76,6 +76,6 @@ namespace nova {
         }
 
         // Wake up compaction thread to delete replicas of sstables.
-        compact_thread_->AddDeleteSSTables(requests);
+//        compact_thread_->AddDeleteSSTables(requests);
     }
 }

@@ -52,6 +52,7 @@ DEFINE_uint64(num_write_workers, 0, "Number of connection threads.");
 DEFINE_uint32(num_persist_workers, 0, "Number of async worker threads.");
 
 DEFINE_bool(is_local_disk_bench, false, "");
+DEFINE_bool(disk_horizontal_scalability, false, "");
 
 DEFINE_uint32(write_size_kb, 0, "");
 DEFINE_uint32(rtable_size_mb, 0, "");
@@ -112,7 +113,7 @@ int main(int argc, char *argv[]) {
     mkdirs(FLAGS_table_path.data());
 
     char *cache_buf = rdma_buf + bench_nrdma_buf();
-    NovaMemManager *mem_manager = new NovaMemManager(cache_buf,
+    NovaMemManager *mem_manager = new NovaMemManager(cache_buf, 32,
                                                      FLAGS_mem_pool_size_gb);
 
     // server.
@@ -175,7 +176,8 @@ int main(int argc, char *argv[]) {
 
         RDMAWRITEServerWorker *server_worker = new RDMAWRITEServerWorker(
                 FLAGS_max_run_time, FLAGS_write_size_kb,
-                FLAGS_is_local_disk_bench);
+                FLAGS_is_local_disk_bench, FLAGS_disk_horizontal_scalability,
+                FLAGS_server_id);
         store = new NovaRDMARCStore(rdma_worker_buf, worker_id, endpoints,
                                     FLAGS_rdma_max_num_sends,
                                     FLAGS_rdma_max_msg_size,

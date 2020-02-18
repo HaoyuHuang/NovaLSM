@@ -18,7 +18,7 @@ namespace nova {
 
 #define MAX_NUMBER_OF_SLAB_CLASSES 64
 #define SLAB_SIZE_FACTOR 2
-#define NOVA_MEM_PARTITIONS 1
+#define NOVA_MEM_PARTITIONS 4
 
     class Slab {
     public:
@@ -82,7 +82,7 @@ namespace nova {
 
     class NovaMemManager : public leveldb::MemManager {
     public:
-        NovaMemManager(char *buf, uint64_t mem_pool_size_gb);
+        NovaMemManager(char *buf, uint32_t num_mem_partitions, uint64_t mem_pool_size_gb);
 
         char *ItemAlloc(uint64_t key, uint32_t scid) override;
 

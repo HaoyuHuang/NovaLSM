@@ -83,9 +83,9 @@ namespace nova {
         records->backing_mems[thread_id].push_back(buf);
         records->mu.unlock();
 
-        RDMA_LOG(DEBUG)
-            << fmt::format("Allocate log buf for file:{} from thread {}",
-                           log_file, thread_id);
+//        RDMA_LOG(DEBUG)
+//            << fmt::format("Allocate log buf for file:{} from thread {}",
+//                           log_file, thread_id);
     }
 
     void LogFileManager::DeleteLogBuf(const std::string &log_file) {
@@ -113,9 +113,9 @@ namespace nova {
                 mem_manager_->FreeItems(it.first, items, scid);
             }
 
-            RDMA_LOG(DEBUG)
-                << fmt::format("Free {} log buf for file:{} from thread {}",
-                               items.size(), log_file, it.first);
+//            RDMA_LOG(DEBUG)
+//                << fmt::format("Free {} log buf for file:{} from thread {}",
+//                               items.size(), log_file, it.first);
         }
 
 
