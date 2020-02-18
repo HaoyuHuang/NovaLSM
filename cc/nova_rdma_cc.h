@@ -24,28 +24,6 @@
 
 namespace nova {
 
-    struct NovaAsyncTask {
-        RequestType type;
-        int conn_worker_id;
-        std::string key;
-        std::string value;
-        int sock_fd;
-        Connection *conn;
-    };
-
-    struct NovaAsyncCompleteTask {
-        int sock_fd;
-        Connection *conn;
-    };
-
-    struct NovaAsyncCompleteQueue {
-        std::list<NovaAsyncCompleteTask> queue;
-        leveldb::port::Mutex mutex;
-        int read_fd;
-        int write_fd;
-        struct event readevent;
-    };
-
     struct CacheValue {
         std::string value;
     };
@@ -54,14 +32,8 @@ namespace nova {
     public:
         NovaRDMAComputeComponent(RdmaCtrl *rdma_ctrl,
                                  NovaMemManager *mem_manager,
-                                 const std::vector<leveldb::DB *> &dbs,
-                                 NovaAsyncCompleteQueue **cqs,
-                                 leveldb::Cache *row_cache,
-                                 bool is_worker_thread) :
-                rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager), dbs_(dbs),
-                cqs_(cqs), row_cache_(row_cache),
-                is_worker_thread_(is_worker_thread) {
-            conn_workers_ = new bool[NovaCCConfig::cc_config->num_conn_workers];
+                                 const std::vector<leveldb::DB *> &dbs) :
+                rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager), dbs_(dbs) {
             sem_init(&sem_, 0, 0);
         }
 
@@ -73,14 +45,14 @@ namespace nova {
 
         void Start();
 
-        void AddTask(const NovaAsyncTask &task);
+        void AddTask(const leveldb::RDMAAsyncClientRequestTask &task);
 
         int size();
 
         NovaRDMAStore *rdma_store_ = nullptr;
         leveldb::CCClient *cc_client_ = nullptr;
         NovaCCServer *cc_server_ = nullptr;
-        uint64_t thread_id_;
+        uint64_t thread_id_ = 0;
 
         bool verify_complete() {
             mutex_.Lock();
@@ -90,26 +62,23 @@ namespace nova {
         }
 
     private:
-        void ProcessGet(const NovaAsyncTask &task);
-
-        void ProcessPut(const NovaAsyncTask &task);
-
-        void ProcessVerify(const NovaAsyncTask &task);
-
         int ProcessQueue();
 
+        struct RequestCtx {
+            uint32_t req_id = 0;
+            sem_t *sem = nullptr;
+            leveldb::CCResponse *response = nullptr;
+        };
+
         bool verify_complete_ = false;
-        leveldb::Cache *row_cache_ = nullptr;
+        std::list<RequestCtx> pending_reqs_;
         RdmaCtrl *rdma_ctrl_ = nullptr;
         NovaMemManager *mem_manager_ = nullptr;
         bool is_running_ = false;
         std::vector<leveldb::DB *> dbs_;
         leveldb::port::Mutex mutex_;
-        std::list<NovaAsyncTask> queue_;
-        NovaAsyncCompleteQueue **cqs_;
-        bool *conn_workers_;
+        std::list<leveldb::RDMAAsyncClientRequestTask> queue_;
         sem_t sem_;
-        bool is_worker_thread_;
     };
 }
 

@@ -16,14 +16,11 @@ namespace nova {
         delete tf;
     }
 
-    void NovaRDMAComputeComponent::AddTask(const NovaAsyncTask &task) {
+    void NovaRDMAComputeComponent::AddTask(
+            const leveldb::RDMAAsyncClientRequestTask &task) {
         mutex_.Lock();
         queue_.push_back(task);
         mutex_.Unlock();
-
-        if (is_worker_thread_) {
-            sem_post(&sem_);
-        }
     }
 
     int NovaRDMAComputeComponent::size() {
@@ -33,210 +30,67 @@ namespace nova {
         return size;
     }
 
-    void NovaRDMAComputeComponent::ProcessVerify(
-            const nova::NovaAsyncTask &task) {
-        // Verify loaded data are correct.
-        // Assert the loaded data is valid.
-        leveldb::ReadOptions read_options = {};
-        read_options.mem_manager = mem_manager_;
-        read_options.dc_client = cc_client_;
-        read_options.thread_id = thread_id_;
-        read_options.verify_checksums = false;
-        std::vector<CCFragment *> &frags = NovaCCConfig::cc_config->fragments;
-        for (int i = 0; i < frags.size(); i++) {
-            if (frags[i]->cc_server_id !=
-                NovaConfig::config->my_server_id) {
-                continue;
-            }
-            leveldb::DB *db = dbs_[frags[i]->dbid];
-
-            RDMA_LOG(INFO) << "Verify range "
-                           << frags[i]->range.key_start
-                           << " to "
-                           << frags[i]->range.key_end;
-
-            for (uint64_t j = frags[i]->range.key_end;
-                 j >= frags[i]->range.key_start; j--) {
-                auto v = static_cast<char>((j % 10) + 'a');
-                std::string key = std::to_string(j);
-                std::string expected_val(
-                        NovaConfig::config->load_default_value_size, v
-                );
-
-                std::string value;
-                if (row_cache_) {
-                    leveldb::Cache::Handle *handle = row_cache_->Lookup(
-                            leveldb::Slice(key));
-                    if (handle) {
-                        auto cache_value = reinterpret_cast<CacheValue *>(row_cache_->Value(
-                                handle));
-                        RDMA_ASSERT(cache_value);
-                        value = cache_value->value;
-                    } else {
-                        leveldb::Status s = db->Get(read_options, key, &value);
-                        RDMA_ASSERT(s.ok()) << s.ToString();
-                        CacheValue *cache_value = new CacheValue;
-                        cache_value->value = value;
-                        row_cache_->Insert(key, cache_value, value.size(),
-                                           &DeleteEntry);
-                    }
-                } else {
-                    leveldb::Status s = db->Get(read_options, key, &value);
-                    RDMA_ASSERT(s.ok()) << s.ToString();
-                }
-
-
-                leveldb::Status status = db->Get(read_options, key, &value);
-                RDMA_ASSERT(status.ok())
-                    << fmt::format("key:{} status:{}", key, status.ToString());
-                RDMA_ASSERT(expected_val.compare(value) == 0) << value;
-
-                if (j == frags[i]->range.key_start) {
-                    break;
-                }
-            }
-
-            RDMA_LOG(INFO) << "Success: Verified range "
-                           << frags[i]->range.key_start
-                           << " to "
-                           << frags[i]->range.key_end;
-        }
-
-        mutex_.Lock();
-        verify_complete_ = true;
-        mutex_.Unlock();
-    }
-
-    void NovaRDMAComputeComponent::ProcessPut(const nova::NovaAsyncTask &task) {
-        uint64_t hv = keyhash(task.key.data(), task.key.size());
-        leveldb::WriteOptions option;
-        option.dc_client = cc_client_;
-        option.sync = true;
-        option.local_write = false;
-        option.thread_id = thread_id_;
-        CCFragment *frag = NovaCCConfig::home_fragment(hv);
-        leveldb::DB *db = dbs_[frag->dbid];
-        if (!option.local_write) {
-            leveldb::WriteBatch batch;
-            batch.Put(task.key, task.value);
-            db->GenerateLogRecords(option, &batch);
-        }
-
-        leveldb::Status status = db->Put(option, task.key, task.value);
-        if (row_cache_) {
-            row_cache_->Erase(leveldb::Slice(task.key));
-        }
-        RDMA_LOG(DEBUG) << "############### CC worker processed task "
-                        << task.sock_fd << ":" << task.key;
-        RDMA_ASSERT(status.ok()) << status.ToString();
-
-        char *response_buf = task.conn->buf;
-        int nlen = 1;
-        int len = int_to_str(response_buf, nlen);
-        task.conn->response_buf = task.conn->buf;
-        task.conn->response_size = len + nlen;
-    }
-
-    void NovaRDMAComputeComponent::ProcessGet(const nova::NovaAsyncTask &task) {
-        uint64_t hv = keyhash(task.key.data(), task.key.size());
-        CCFragment *frag = NovaCCConfig::home_fragment(hv);
-        leveldb::DB *db = dbs_[frag->dbid];
-        std::string value;
-        leveldb::ReadOptions read_options;
-        read_options.dc_client = cc_client_;
-        read_options.mem_manager = mem_manager_;
-        read_options.thread_id = thread_id_;
-
-        if (row_cache_) {
-            leveldb::Cache::Handle *handle = row_cache_->Lookup(
-                    leveldb::Slice(task.key));
-            if (handle) {
-                auto cache_value = reinterpret_cast<CacheValue *>(row_cache_->Value(
-                        handle));
-                RDMA_ASSERT(cache_value);
-                value = cache_value->value;
-            } else {
-                leveldb::Status s = db->Get(read_options, task.key, &value);
-                RDMA_ASSERT(s.ok()) << s.ToString();
-                CacheValue *cache_value = new CacheValue;
-                cache_value->value = value;
-                row_cache_->Insert(task.key, cache_value, value.size(),
-                                   &DeleteEntry);
-            }
-        } else {
-            leveldb::Status s = db->Get(read_options, task.key, &value);
-            RDMA_ASSERT(s.ok()) << s.ToString();
-        }
-
-//        value = std::string(NovaConfig::config->load_default_value_size, 'a');
-
-        task.conn->response_buf = task.conn->buf;
-        char *response_buf = task.conn->response_buf;
-        task.conn->response_size =
-                nint_to_str(value.size()) + 1 + 1 + value.size();
-
-        response_buf += int_to_str(response_buf, value.size() + 1);
-        response_buf[0] = 'h';
-        response_buf += 1;
-        memcpy(response_buf, value.data(), value.size());
-        RDMA_ASSERT(
-                task.conn->response_size <
-                NovaConfig::config->max_msg_size);
-    }
-
     int NovaRDMAComputeComponent::ProcessQueue() {
+        auto it = pending_reqs_.begin();
+        while (it != pending_reqs_.end()) {
+            if (cc_client_->IsDone(it->req_id, it->response, nullptr)) {
+                if (it->sem) {
+                    RDMA_ASSERT(sem_post(it->sem) == 0);
+                }
+                it = pending_reqs_.erase(it);
+            } else {
+                it++;
+            }
+        }
+
         mutex_.Lock();
         if (queue_.empty()) {
             mutex_.Unlock();
             return 0;
         }
-        std::list<NovaAsyncTask> queue(queue_.begin(), queue_.end());
-        mutex_.Unlock();
 
-        for (const NovaAsyncTask &task : queue) {
-            switch (task.type) {
-                case RequestType::PUT:
-                    ProcessPut(task);
-                    conn_workers_[task.conn_worker_id] = true;
-                    break;
-                case RequestType::GET:
-                    ProcessGet(task);
-                    conn_workers_[task.conn_worker_id] = true;
-                    break;
-                case RequestType::VERIFY_LOAD:
-                    ProcessVerify(task);
-                    break;
-            }
+        std::list<leveldb::RDMAAsyncClientRequestTask> queue;
+        while (!queue_.empty()) {
+            queue.push_back(queue_.front());
+            queue_.pop_front();
         }
-
-        mutex_.Lock();
-        auto begin = queue_.begin();
-        auto end = queue_.begin();
-        std::advance(end, queue.size());
-        queue_.erase(begin, end);
         mutex_.Unlock();
 
-        for (int i = 0; i < NovaCCConfig::cc_config->num_conn_workers; i++) {
-            if (!conn_workers_[i]) {
-                continue;
-            }
-            conn_workers_[i] = false;
-            cqs_[i]->mutex.Lock();
-            for (const NovaAsyncTask &task : queue) {
-                if (task.conn_worker_id != i) {
-                    continue;
-                }
-                NovaAsyncCompleteTask t = {
-                        .sock_fd = task.sock_fd,
-                        .conn = task.conn
-                };
-                cqs_[i]->queue.push_back(t);
-            }
-            cqs_[i]->mutex.Unlock();
+        for (const leveldb::RDMAAsyncClientRequestTask &task : queue) {
+            RequestCtx ctx = {};
+            ctx.sem = task.sem;
+            ctx.response = task.response;
+            switch (task.type) {
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_READ:
+                    ctx.req_id = cc_client_->InitiateRTableReadDataBlock(
+                            task.rtable_handle,
+                            task.offset,
+                            task.size,
+                            task.result);
 
-            char buf[1];
-            buf[0] = 'a';
-            RDMA_ASSERT(write(cqs_[i]->write_fd, buf, 1) == 1);
+                    break;
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_CLOSE_LOG:
+                    ctx.req_id = cc_client_->InitiateCloseLogFile(
+                            task.log_file_name);
+                    break;
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD:
+                    ctx.req_id = cc_client_->InitiateReplicateLogRecords(
+                            task.log_file_name,
+                            task.thread_id,
+                            task.log_record);
+                    break;
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_WRITE_DATA_BLOCKS:
+                    ctx.req_id = cc_client_->InitiateRTableWriteDataBlocks(
+                            task.server_id, task.thread_id,
+                            nullptr, task.write_buf, task.dbname,
+                            task.file_number, task.write_size);
+                    break;
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_DELETE_TABLES:
+                    ctx.req_id = cc_client_->InitiateDeleteTables(
+                            task.server_id, task.rtable_ids);
+                    break;
+            }
+            pending_reqs_.push_back(ctx);
         }
         return queue.size();
     }
@@ -259,22 +113,18 @@ namespace nova {
         is_running_ = true;
         mutex_.Unlock();
 
-//        if (is_worker_thread_) {
-//            sem_wait(&sem_);
-//        }
-
         bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
             if (should_sleep) {
                 usleep(timeout);
             }
-            rdma_store_->PollSQ();
-            rdma_store_->PollRQ();
+            int n = 0;
+            n += rdma_store_->PollSQ();
+            n += rdma_store_->PollRQ();
+            n += cc_server_->PullAsyncCQ();
+            n += ProcessQueue();
 
-            cc_server_->PullAsyncCQ();
-
-            int n = ProcessQueue();
             if (n == 0) {
                 should_sleep = true;
                 timeout *= 2;

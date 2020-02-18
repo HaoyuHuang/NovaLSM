@@ -21,7 +21,7 @@ namespace nova {
         }
 
         uint64_t to_dc_req_id(uint64_t req_id) {
-            return (uint32_t)(req_id);
+            return (uint32_t) (req_id);
         }
     }
 
@@ -67,10 +67,6 @@ namespace nova {
     }
 
     int NovaCCServer::PullAsyncCQ() {
-//        if (!is_compaction_thread_) {
-//            return 0;
-//        }
-
         int nworks = 0;
         mutex_.lock();
         nworks = async_cq_.size();
@@ -89,9 +85,9 @@ namespace nova {
                 leveldb::EncodeFixed64(sendbuf + 1, wr_id);
                 leveldb::EncodeFixed32(sendbuf + 9, task.rtable_handle.size);
                 leveldb::EncodeFixed64(sendbuf + 13,
-                                       (uint64_t)(task.rdma_buf));
+                                       (uint64_t) (task.rdma_buf));
             } else if (task.request_type ==
-                       leveldb::CCRequestType::CC_RTABLE_PERSIST) {
+                       leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
                 char *sendbuf = rdma_store_->GetSendBuf(task.remote_server_id);
                 sendbuf[0] = leveldb::CCRequestType::CC_RTABLE_PERSIST_RESPONSE;
                 uint32_t msg_size = 1;
@@ -162,20 +158,33 @@ namespace nova {
                     auto &context = context_it->second;
                     // Waiting for writes.
                     if (context.request_type ==
-                        leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE_RESPONSE) {
+                        leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
                         if (IsRDMAWRITEComplete((char *) context.rtable_offset,
                                                 context.size)) {
                             RDMA_ASSERT(buf[0] == '~');
+
+                            rtable_manager_->rtable(
+                                    context.rtable_id)->MarkOffsetAsWritten(
+                                    context.rtable_offset);
+                            processed = true;
+
                             RDMA_LOG(DEBUG) << fmt::format(
                                         "dc[{}]: Write RTable complete id:{} offset:{} creq_id:{} req_id:{}",
                                         thread_id_, context.rtable_id,
                                         context.rtable_offset, dc_req_id,
                                         req_id);
 
-                            rtable_manager_->rtable(
-                                    context.rtable_id)->MarkOffsetAsWritten(
-                                    context.rtable_offset);
-                            processed = true;
+                            NovaServerAsyncTask task = {};
+                            task.request_type = leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE;
+                            task.remote_server_id = remote_server_id;
+                            task.cc_server_thread_id = thread_id_;
+                            task.dc_req_id = dc_req_id;
+                            leveldb::SSTableRTablePair pair = {};
+                            pair.rtable_id = context.rtable_id;
+                            pair.sstable_id = context.sstable_id;
+                            task.persist_pairs.push_back(pair);
+                            AddAsyncTask(task);
+
                             request_context_map_.erase(req_id);
                         }
                     }
@@ -269,6 +278,7 @@ namespace nova {
                         rtable_off = current_rtable_->AllocateBuf(table_name,
                                                                   size);
                     }
+
                     char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
                     sendbuf[0] =
                             leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE_RESPONSE;
@@ -281,9 +291,11 @@ namespace nova {
                     MarkCharAsWaitingForRDMAWRITE((char *) rtable_off, size);
 
                     RequestContext context = {};
-                    context.request_type = leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE_RESPONSE;
+                    context.request_type = leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE;
                     context.rtable_id = current_rtable_->rtable_id();
                     context.rtable_offset = rtable_off;
+                    context.sstable_id = leveldb::TableFileName(dbname,
+                                                                file_number);
                     context.size = size;
                     request_context_map_[req_id] = context;
 
@@ -291,33 +303,6 @@ namespace nova {
                                 "dc{}: Allocate buf for RTable Write db:{} fn:{} size:{} rtable_id:{} rtable_off:{}",
                                 thread_id_, dbname, file_number, size,
                                 current_rtable_->rtable_id(), rtable_off);
-                    processed = true;
-                } else if (buf[0] ==
-                           leveldb::CCRequestType::CC_RTABLE_PERSIST) {
-                    uint32_t msg_size = 1;
-                    uint32_t nrtables = leveldb::DecodeFixed32(buf + msg_size);
-                    msg_size += 4;
-
-
-                    NovaServerAsyncTask task = {};
-                    task.request_type = leveldb::CCRequestType::CC_RTABLE_PERSIST;
-                    task.remote_server_id = remote_server_id;
-                    task.cc_server_thread_id = thread_id_;
-                    task.dc_req_id = dc_req_id;
-                    for (int i = 0; i < nrtables; i++) {
-                        leveldb::SSTableRTablePair pair = {};
-                        msg_size += leveldb::DecodeStr(buf + msg_size,
-                                                       &pair.sstable_id);
-                        pair.rtable_id = leveldb::DecodeFixed32(
-                                buf + msg_size);
-                        task.rtable_id = pair.rtable_id;
-                        msg_size += 4;
-                        task.persist_pairs.push_back(pair);
-                    }
-                    AddAsyncTask(task);
-                    RDMA_LOG(DEBUG)
-                        << fmt::format("dc{}: Persist RTables n:{}",
-                                       thread_id_, nrtables);
                     processed = true;
                 } else if (buf[0] ==
                            leveldb::CCRequestType::CC_ALLOCATE_LOG_BUFFER) {
@@ -410,11 +395,16 @@ namespace nova {
                                                    task.rtable_handle.size,
                                                    task.rdma_buf);
                 } else if (task.request_type ==
-                           leveldb::CCRequestType::CC_RTABLE_PERSIST) {
+                           leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
+                    RDMA_ASSERT(task.persist_pairs.size() == 1);
                     for (auto &pair : task.persist_pairs) {
                         leveldb::NovaRTable *rtable = rtable_manager_->rtable(
                                 pair.rtable_id);
                         rtable->Persist();
+
+                        RDMA_LOG(DEBUG) << fmt::format("Persisting rtable {} for sstable {}",
+                                                       pair.rtable_id, pair.sstable_id);
+
                         leveldb::BlockHandle h = rtable->Handle(
                                 pair.sstable_id);
                         leveldb::RTableHandle rh = {};

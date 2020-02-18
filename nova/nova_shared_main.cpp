@@ -61,6 +61,9 @@ DEFINE_uint64(cc_num_conn_workers, 0, "Number of connection threads.");
 DEFINE_uint32(cc_num_async_workers, 0, "Number of async worker threads.");
 DEFINE_uint32(cc_num_compaction_workers, 0,
               "Number of compaction worker threads.");
+DEFINE_uint32(cc_num_rdma_compaction_workers, 0,
+              "Number of rdma compaction worker threads.");
+
 DEFINE_uint32(cc_num_cc_server_workers, 0,
               "Number of compaction worker threads.");
 DEFINE_uint32(cc_rtable_num_servers_scatter_data_blocks, 0,
@@ -74,6 +77,7 @@ DEFINE_uint64(cc_sstable_size_mb, 0, "sstable size in mb");
 DEFINE_uint32(cc_log_buf_size, 0, "log buffer size");
 DEFINE_uint32(cc_rtable_size_mb, 0, "RTable size");
 
+DEFINE_bool(cc_multiple_disks, false, "");
 
 void start(NovaCCNICServer *server) {
     server->Start();
@@ -156,10 +160,13 @@ int main(int argc, char *argv[]) {
     NovaCCConfig::cc_config->num_conn_async_workers = FLAGS_cc_num_async_workers;
     NovaCCConfig::cc_config->num_cc_server_workers = FLAGS_cc_num_cc_server_workers;
     NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
+    NovaCCConfig::cc_config->num_rdma_compaction_workers = FLAGS_cc_num_rdma_compaction_workers;
+
     NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks = FLAGS_cc_rtable_num_servers_scatter_data_blocks;
     NovaConfig::config->log_buf_size = FLAGS_cc_log_buf_size;
     NovaConfig::config->rtable_size = FLAGS_cc_rtable_size_mb * 1024 * 1024;
     NovaConfig::config->sstable_size = FLAGS_cc_sstable_size_mb * 1024 * 1024;
+    NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
 
 //    RDMA_ASSERT(FLAGS_cc_rtable_size_mb > std::max(FLAGS_cc_sstable_size_mb,
 //                                                   FLAGS_cc_write_buffer_size_mb));

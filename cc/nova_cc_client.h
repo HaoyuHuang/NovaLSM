@@ -14,42 +14,26 @@
 #include "include/leveldb/db_types.h"
 #include "include/leveldb/cc_client.h"
 #include "nova/nova_common.h"
-#include "dc/nova_dc.h"
 #include "nova/nova_rdma_rc_store.h"
 #include "cc/nova_cc_log_writer.h"
 
 #include "log/nova_log.h"
 #include "nova_rtable.h"
+#include "nova_rdma_cc.h"
+
+namespace nova {
+    class NovaRDMAComputeComponent;
+}
 
 namespace leveldb {
-    enum RDMAAsyncRequestType : char {
-        RDMA_ASYNC_REQ_READ = 'a',
-        RDMA_ASYNC_REQ_LOG_RECORD = 'l',
-        RDMA_ASYNC_REQ_CLOSE_LOG = 'c'
-    };
-
-    struct RDMAAsyncClientRequestTask {
-        RDMAAsyncRequestType type;
-        sem_t *sem;
-
-        RTableHandle rtable_handle;
-        uint64_t offset;
-        uint32_t size;
-        char *result;
-
-        std::string log_file_name;
-        uint64_t thread_id;
-        Slice log_record;
-    };
-
 
     class NovaBlockCCClient : public CCClient {
     public:
+        NovaBlockCCClient();
+
         uint32_t
         InitiateDeleteTables(uint32_t server_id,
-                             const std::vector<SSTableRTablePair> &rtable_ids) {
-            return 0;
-        };
+                             const std::vector<SSTableRTablePair> &rtable_ids) override;
 
         uint32_t
         InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
@@ -61,15 +45,7 @@ namespace leveldb {
                                       uint32_t *rtable_id, char *buf,
                                       const std::string &dbname,
                                       uint64_t file_number,
-                                      uint32_t size) {
-            return 0;
-        };
-
-        uint32_t
-        InitiatePersist(uint32_t server_id,
-                        const std::vector<SSTableRTablePair> &rtable_ids) {
-            return 0;
-        }
+                                      uint32_t size) override;
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
@@ -82,17 +58,33 @@ namespace leveldb {
 
         bool OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                     int remote_server_id, char *buf,
-                    uint32_t imm_data) {};
+                    uint32_t imm_data) {
+            RDMA_ASSERT(false);
+            return false;
+        };
 
         bool
-        IsDone(uint32_t req_id, CCResponse *response, uint64_t *timeout) {};
+        IsDone(uint32_t req_id, CCResponse *response,
+               uint64_t *timeout) override;
 
-        void set_sem(sem_t *sem) {
-            sem_ = sem;
+        std::vector<nova::NovaRDMAComputeComponent *> ccs_;
+
+        void set_dbid(uint32_t dbid) {
+            dbid_ = dbid;
+        }
+
+        sem_t Wait() {
+            RDMA_ASSERT(sem_wait(&sem_) == 0);
         }
 
     private:
-        sem_t *sem_ = nullptr;
+        std::map<uint32_t, CCResponse*> req_response;
+
+        void AddAsyncTask(const RDMAAsyncClientRequestTask &task);
+
+        uint32_t req_id_ = 0;
+        uint32_t dbid_ = 0;
+        sem_t sem_;
     };
 
 
@@ -128,10 +120,6 @@ namespace leveldb {
                                       uint32_t size) override;
 
         uint32_t
-        InitiatePersist(uint32_t server_id,
-                        const std::vector<SSTableRTablePair> &rtable_ids) override;
-
-        uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
                                     uint64_t thread_id,
                                     const Slice &slice) override;
@@ -152,50 +140,6 @@ namespace leveldb {
         void IncrementReqId();
 
     private:
-//        uint32_t
-//        InitiateReadBlocks(const std::string &dbname, uint64_t file_number,
-//                           const FileMetaData &meta,
-//                           const std::vector<CCBlockHandle> &block_handls,
-//                           char *result);
-//
-//        uint32_t
-//        InitiateReadBlock(const std::string &dbname, uint64_t file_number,
-//                          const FileMetaData &meta,
-//                          const CCBlockHandle &block_handle,
-//                          char *result);
-//
-//        // Read the SSTable and return the total size.
-//        uint32_t
-//        InitiateReadSSTable(const std::string &dbname, uint64_t file_number,
-//                            const FileMetaData &meta, char *result);
-//
-//        uint32_t InitiateFlushSSTable(const std::string &dbname,
-//                                      uint64_t file_number,
-//                                      const FileMetaData &meta,
-//                                      char *backing_mem);
-//
-//        uint32_t
-//        InitiateAllocateSSTableBuffer(uint32_t remote_server_id,
-//                                      const std::string &dbname,
-//                                      uint64_t file_number,
-//                                      uint64_t file_size);
-//
-//        uint32_t
-//        InitiateWRITESSTableBuffer(uint32_t remote_server_id, char *src,
-//                                   uint64_t dest,
-//                                   uint64_t file_size);
-//
-//        uint32_t InitiateReleaseSSTableBuffer(uint32_t remote_server_id,
-//                                              const std::string &dbname,
-//                                              uint64_t file_number,
-//                                              uint64_t file_size);
-//
-//        uint32_t
-//        InitiateDeleteFiles(const std::string &dbname,
-//                            const std::vector<FileMetaData> &filenames);
-
-//        uint32_t HomeCCNode(const FileMetaData &meta);
-
         uint32_t cc_client_id_ = 0;
         nova::NovaRDMAStore *rdma_store_;
         nova::NovaMemManager *mem_manager_;
@@ -203,19 +147,10 @@ namespace leveldb {
         CCServer *cc_server_;
         leveldb::log::RDMALogWriter *rdma_log_writer_ = nullptr;
 
-        leveldb::SSTableManager *sstable_manager_;
-
-
         uint32_t current_req_id_ = 1;
         uint32_t lower_req_id_;
         uint32_t upper_req_id_;
         std::map<uint32_t, CCRequestContext> request_context_;
-        struct ServerWRRequest {
-            int remote_server_id;
-            uint64_t wr_id;
-            uint32_t req_id;
-        };
-        std::list<ServerWRRequest> requests_;
 
     };
 }

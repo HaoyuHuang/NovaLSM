@@ -41,7 +41,7 @@ namespace leveldb {
 
         void Format();
 
-        void PullWRITEDataBlockRequests(bool block);
+        void WaitForPersistingDataBlocks();
 
         uint32_t Finalize();
 
@@ -74,15 +74,9 @@ namespace leveldb {
         }
 
     private:
-
         struct PersistStatus {
             uint32_t remote_server_id = 0;
-            uint32_t remote_rtable_id = 0;
             uint32_t WRITE_req_id = 0;
-            bool is_WRITE_done = false;
-            uint32_t persist_req_id = 0;
-            bool is_persist_done = false;
-
             RTableHandle result_handle;
         };
 
@@ -108,7 +102,7 @@ namespace leveldb {
         char *backing_mem_ = nullptr;
         uint64_t allocated_size_ = 0;
         uint64_t used_size_ = 0;
-
+        std::vector<int> nblocks_in_group_;
         std::vector<PersistStatus> status_;
     };
 
@@ -150,6 +144,7 @@ namespace leveldb {
 
         MemManager *mem_manager_ = nullptr;
         uint64_t thread_id_ = 0;
+        uint32_t dbid_ = 0;
         CCClient *dc_client_ = nullptr;
         const Options &options_;
         Env *env_ = nullptr;
@@ -163,30 +158,30 @@ namespace leveldb {
 
     class NovaCCCompactionThread : public EnvBGThread {
     public:
-        explicit NovaCCCompactionThread(rdmaio::RdmaCtrl *rdma_ctrl);
+        explicit NovaCCCompactionThread(MemManager *mem_manager);
 
         void Schedule(
                 void (*background_work_function)(void *background_work_arg),
                 void *background_work_arg) override;
 
-        CCClient *dc_client_;
-        CCServer *cc_server_;
-        MemManager *mem_manager_;
-
-        CCClient *dc_client() override { return dc_client_; }
-
-        MemManager *mem_manager() override { return mem_manager_; }
-
         uint64_t thread_id() override { return thread_id_; }
+
+        CCClient *dc_client() override {
+            return cc_client_;
+        };
+
+        MemManager *mem_manager() override {
+            return mem_manager_;
+        };
+
 
         bool IsInitialized();
 
         void Start();
 
-        void AddDeleteSSTables(const std::vector<DeleteTableRequest> &requests);
-
-        nova::NovaRDMAStore *rdma_store_;
         uint64_t thread_id_ = 0;
+
+        NovaBlockCCClient *cc_client_ = nullptr;
 
     private:
         // Stores the work item data in a Schedule() call.
@@ -205,15 +200,13 @@ namespace leveldb {
             void *const arg;
         };
 
-        rdmaio::RdmaCtrl *rdma_ctrl_;
         port::Mutex background_work_mutex_;
         sem_t signal;
         std::queue<BackgroundWorkItem> background_work_queue_
         GUARDED_BY(background_work_mutex_);
 
+        MemManager *mem_manager_ = nullptr;
         bool is_running_ = false;
-        std::vector<DeleteTableRequest> delete_table_requests_;
-        leveldb::port::Mutex mutex_;
     };
 }
 

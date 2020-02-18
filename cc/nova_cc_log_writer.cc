@@ -109,6 +109,10 @@ namespace leveldb {
             char *rnic_buf = Init(log_file_name, thread_id, slice);
             current_log_file_ = log_file_name;
 
+            if (frag->cc_server_ids.size() == 1) {
+                return Status::OK();
+            }
+
             for (int i = 0; i < frag->cc_server_ids.size(); i++) {
                 uint32_t remote_server_id = frag->cc_server_ids[i];
                 if (remote_server_id ==

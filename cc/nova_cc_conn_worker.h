@@ -100,17 +100,13 @@ namespace nova {
 
     class NovaCCConnWorker {
     public:
-        NovaCCConnWorker(int thread_id,
-                         NovaAsyncCompleteQueue *async_cq)
+        NovaCCConnWorker(int thread_id)
                 :
-                thread_id_(thread_id),
-                async_cq_(async_cq) {
+                thread_id_(thread_id){
             RDMA_LOG(INFO) << "memstore[" << thread_id << "]: "
                            << "create conn thread :" << thread_id;
             int fd[2];
             pipe(fd);
-            async_cq_->read_fd = fd[0];
-            async_cq_->write_fd = fd[1];
         }
 
         void Start();
@@ -118,8 +114,6 @@ namespace nova {
         void set_dbs(const std::vector<leveldb::DB *> &dbs) {
             dbs_ = dbs;
         }
-
-        void AddTask(const NovaAsyncTask &task);
 
         timeval start{};
         timeval read_start{};
@@ -131,12 +125,9 @@ namespace nova {
 
         std::vector<leveldb::DB *> dbs_;
         struct event_base *base = nullptr;
-        LogFileManager *log_manager_ = nullptr;
 
-        DBAsyncWorkers *db_async_workers_;
-        int *db_current_async_worker_id_;
-
-        NovaAsyncCompleteQueue *async_cq_;
+        leveldb::NovaBlockCCClient *cc_client_;
+        NovaMemManager *mem_manager_;
 
         int nconns = 0;
 

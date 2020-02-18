@@ -59,6 +59,7 @@ namespace nova {
         uint32_t rtable_id;
         uint64_t rtable_offset;
         uint32_t size;
+        std::string sstable_id;
     };
 
     class NovaCCServer : public NovaMsgCallback, public leveldb::CCServer {

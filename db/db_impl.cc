@@ -298,7 +298,7 @@ namespace leveldb {
                 if (!keep) {
                     files_to_delete.push_back(std::move(filename));
                     if (type == kTableFile) {
-                        table_cache_->Evict(number);
+//                        table_cache_->Evict(number);
                     }
                     Log(options_.info_log, "Delete type=%d #%lld\n",
                         static_cast<int>(type),
@@ -318,7 +318,7 @@ namespace leveldb {
                 it++;
                 continue;
             }
-
+            table_cache_->Evict(meta.number);
             auto handles = meta.data_block_group_handles;
             for (int i = 0; i < handles.size(); i++) {
                 SSTableRTablePair pair = {};
@@ -847,6 +847,10 @@ namespace leveldb {
             CleanupCompaction(compact);
             c->ReleaseInputs();
             DeleteObsoleteFiles();
+
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("!!!!!!!!!!!!!Compaction complete");
+
         }
         delete c;
 
@@ -975,20 +979,11 @@ namespace leveldb {
         mem_file->set_num_data_blocks(current_data_blocks);
 
         // Finish and check for file errors
-        if (s.ok()) {
-            s = compact->outfile->Sync();
-        }
-        if (s.ok()) {
-            s = compact->outfile->Close();
-        }
+        RDMA_ASSERT(s.ok());
+        s = compact->outfile->Sync();
+        s = compact->outfile->Close();
 
-        // TODO: Construct RTables.
-        // Also delete its contained mem file.
-        // Defer the deletion until compaction completes.
-//        delete mem_file;
-//        mem_file = nullptr;
-//        delete compact->outfile;
-//        compact->outfile = nullptr;
+        mem_file->WaitForPersistingDataBlocks();
 
         if (s.ok() && current_entries > 0) {
             // Verify that the table is usable
@@ -1009,12 +1004,6 @@ namespace leveldb {
 //                    (unsigned long long) current_bytes);
 //            }
         }
-
-        for (int i = 0; i < compact->output_files.size(); i++) {
-            MemWritableFile *out = compact->output_files[i];
-            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
-            mem_file->PullWRITEDataBlockRequests(false);
-        }
         return s;
     }
 
@@ -1027,16 +1016,24 @@ namespace leveldb {
             compact->compaction->level() + 1,
             static_cast<long long>(compact->total_bytes));
 
+        // Wait for all writes to complete.
+//        for (int i = 0; i < compact->output_files.size(); i++) {
+//            CompactionState::Output &output = compact->outputs[i];
+//            MemWritableFile *out = compact->output_files[i];
+//            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
+//            mem_file->WaitForPersistingDataBlocks();
+//        }
+
+        // Now finalize all SSTables.
         for (int i = 0; i < compact->output_files.size(); i++) {
             CompactionState::Output &output = compact->outputs[i];
             MemWritableFile *out = compact->output_files[i];
             auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
-
-            mem_file->PullWRITEDataBlockRequests(true);
             output.converted_file_size = mem_file->Finalize();
             output.data_block_group_handles = mem_file->rhs();
 
-
+            delete mem_file;
+            delete out;
             compact->output_files[i] = nullptr;
             mem_file = nullptr;
             out = nullptr;
@@ -1065,6 +1062,16 @@ namespace leveldb {
             compact->compaction->level(),
             compact->compaction->num_input_files(1),
             compact->compaction->level() + 1);
+
+        RDMA_LOG(rdmaio::DEBUG)
+            << fmt::format("!!!!!!!!!!!!!!!!!Compacting {}@{} + {}@{} files",
+                           compact->compaction->num_input_files(
+                                   0),
+                           compact->compaction->level(),
+                           compact->compaction->num_input_files(
+                                   1),
+                           compact->compaction->level() +
+                           1);
 
         assert(versions_->NumLevelFiles(compact->compaction->level()) > 0);
         assert(compact->builder == nullptr);
@@ -1439,6 +1446,13 @@ namespace leveldb {
         closed_log_files_.clear();
         mutex_.Unlock();
         // Synchronous replication.
+        uint32_t server_id = 0;
+        uint32_t dbid = 0;
+        nova::ParseDBIndexFromFile(current_log_file_name_, &server_id, &dbid);
+
+        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
+        RDMA_ASSERT(dc);
+        dc->set_dbid(dbid);
         options.dc_client->InitiateReplicateLogRecords(
                 logfile, options.thread_id,
                 WriteBatchInternal::Contents(updates));

@@ -46,6 +46,8 @@ namespace nova {
         uint32_t sstable_size;
         std::string rtable_path;
 
+        bool use_multiple_disks;
+
         uint64_t mem_pool_size_gb;
         char *nova_buf;
         uint64_t nnovabuf;
@@ -149,7 +151,7 @@ namespace nova {
         int num_conn_workers;
         int num_conn_async_workers;
         int num_compaction_workers;
-        int num_wb_workers;
+        int num_rdma_compaction_workers;
         int num_cc_server_workers;
 
         int block_cache_mb;
@@ -159,8 +161,6 @@ namespace nova {
         std::vector<CCFragment *> db_fragment;
         ScatterSSTablePolicy scatter_sstable_policy;
         int num_rtable_num_servers_scatter_data_blocks;
-
-
         static NovaCCConfig *cc_config;
     };
 
