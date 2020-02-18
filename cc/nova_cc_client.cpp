@@ -15,6 +15,52 @@ namespace leveldb {
 
     using namespace rdmaio;
 
+
+    uint32_t NovaBlockCCClient::InitiateRTableReadDataBlock(
+            const leveldb::RTableHandle &rtable_handle, uint64_t offset,
+            uint32_t size, char *result) {
+        RDMA_ASSERT(sem_);
+
+        RDMAAsyncClientRequestTask task = {};
+        task.type = RDMAAsyncRequestType ::RDMA_ASYNC_REQ_READ;
+        task.rtable_handle = rtable_handle;
+        task.offset = offset;
+        task.size = size;
+        task.result = result;
+        task.sem = sem_;
+
+
+
+    }
+
+    uint32_t NovaBlockCCClient::InitiateReplicateLogRecords(
+            const std::string &log_file_name, uint64_t thread_id,
+            const leveldb::Slice &slice) {
+        RDMA_ASSERT(sem_);
+
+        RDMAAsyncClientRequestTask task = {};
+        task.type = RDMAAsyncRequestType ::RDMA_ASYNC_REQ_LOG_RECORD;
+        task.log_file_name = log_file_name;
+        task.thread_id = thread_id;
+        task.log_record = slice;
+        task.sem = sem_;
+
+
+    }
+
+    uint32_t NovaBlockCCClient::InitiateCloseLogFile(
+            const std::string &log_file_name) {
+        RDMA_ASSERT(sem_);
+
+        RDMAAsyncClientRequestTask task = {};
+        task.type = RDMAAsyncRequestType ::RDMA_ASYNC_REQ_CLOSE_LOG;
+        task.log_file_name = log_file_name;
+        task.sem = sem_;
+
+
+    }
+
+
     void NovaCCClient::IncrementReqId() {
         current_req_id_++;
         if (current_req_id_ == upper_req_id_) {

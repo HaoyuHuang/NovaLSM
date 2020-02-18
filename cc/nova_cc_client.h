@@ -7,6 +7,8 @@
 #ifndef LEVELDB_NOVA_CC_CLIENT_H
 #define LEVELDB_NOVA_CC_CLIENT_H
 
+#include <semaphore.h>
+
 #include "util/env_mem.h"
 #include "db/version_edit.h"
 #include "include/leveldb/db_types.h"
@@ -20,6 +22,79 @@
 #include "nova_rtable.h"
 
 namespace leveldb {
+    enum RDMAAsyncRequestType : char {
+        RDMA_ASYNC_REQ_READ = 'a',
+        RDMA_ASYNC_REQ_LOG_RECORD = 'l',
+        RDMA_ASYNC_REQ_CLOSE_LOG = 'c'
+    };
+
+    struct RDMAAsyncClientRequestTask {
+        RDMAAsyncRequestType type;
+        sem_t *sem;
+
+        RTableHandle rtable_handle;
+        uint64_t offset;
+        uint32_t size;
+        char *result;
+
+        std::string log_file_name;
+        uint64_t thread_id;
+        Slice log_record;
+    };
+
+
+    class NovaBlockCCClient : public CCClient {
+    public:
+        uint32_t
+        InitiateDeleteTables(uint32_t server_id,
+                             const std::vector<SSTableRTablePair> &rtable_ids) {
+            return 0;
+        };
+
+        uint32_t
+        InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
+                                    uint64_t offset, uint32_t size,
+                                    char *result) override;
+
+        uint32_t
+        InitiateRTableWriteDataBlocks(uint32_t server_id, uint32_t thread_id,
+                                      uint32_t *rtable_id, char *buf,
+                                      const std::string &dbname,
+                                      uint64_t file_number,
+                                      uint32_t size) {
+            return 0;
+        };
+
+        uint32_t
+        InitiatePersist(uint32_t server_id,
+                        const std::vector<SSTableRTablePair> &rtable_ids) {
+            return 0;
+        }
+
+        uint32_t
+        InitiateReplicateLogRecords(const std::string &log_file_name,
+                                    uint64_t thread_id,
+                                    const Slice &slice) override;
+
+
+        uint32_t
+        InitiateCloseLogFile(const std::string &log_file_name) override;
+
+        bool OnRecv(ibv_wc_opcode type, uint64_t wr_id,
+                    int remote_server_id, char *buf,
+                    uint32_t imm_data) {};
+
+        bool
+        IsDone(uint32_t req_id, CCResponse *response, uint64_t *timeout) {};
+
+        void set_sem(sem_t *sem) {
+            sem_ = sem;
+        }
+
+    private:
+        sem_t *sem_ = nullptr;
+    };
+
 
     class NovaCCClient : public CCClient {
     public:
@@ -69,7 +144,8 @@ namespace leveldb {
                     int remote_server_id, char *buf,
                     uint32_t imm_data) override;
 
-        bool IsDone(uint32_t req_id, CCResponse *response, uint64_t *timeout) override;
+        bool IsDone(uint32_t req_id, CCResponse *response,
+                    uint64_t *timeout) override;
 
         uint32_t GetCurrentReqId();
 
