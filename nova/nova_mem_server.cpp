@@ -113,6 +113,7 @@ namespace nova {
         } else if (NovaConfig::config->partition_mode ==
                    NovaRDMAPartitionMode::RANGE) {
             LoadDataWithRangePartition();
+            LoadDataWithRangePartition();
         }
         for (int i = 0; i < dbs_.size(); i++) {
             RDMA_LOG(INFO) << "Database " << i;
