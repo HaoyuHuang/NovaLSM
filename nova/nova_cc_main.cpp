@@ -151,7 +151,7 @@ leveldb::DB *CreateDatabase(int sid, int db_index, leveldb::Cache *cache,
     }
     options.env = env;
     options.create_if_missing = true;
-    options.compression = leveldb::kSnappyCompression;
+    options.compression = leveldb::kNoCompression;
     options.filter_policy = leveldb::NewBloomFilterPolicy(10);
     options.bg_threads = bg_threads;
     options.max_file_size = 1024 * 1024 * FLAGS_sstable_size_mb;
