@@ -43,7 +43,8 @@ namespace leveldb {
         Block *index_block;
     };
 
-    Status Table::Open(const Options &options, RandomAccessFile *file,
+    Status Table::Open(const Options &options, const ReadOptions &read_options,
+                       RandomAccessFile *file,
                        uint64_t size, int level,
                        uint64_t file_number, Table **table,
                        DBProfiler *db_profiler) {
@@ -58,9 +59,10 @@ namespace leveldb {
         h.offset = size - Footer::kEncodedLength;
         h.size = Footer::kEncodedLength;
 
-        Status s = file->Read(h, size - Footer::kEncodedLength,
-                              Footer::kEncodedLength,
-                              &footer_input, footer_space);
+        auto f = reinterpret_cast<CCRandomAccessFile *>(file);
+        Status s = f->Read(read_options, h, size - Footer::kEncodedLength,
+                           Footer::kEncodedLength,
+                           &footer_input, footer_space);
         if (!s.ok()) return s;
 
         Footer footer;
@@ -71,14 +73,11 @@ namespace leveldb {
         *table = new Table();
         BlockContents index_block_contents;
         if (s.ok()) {
-            ReadOptions opt;
-            if (options.paranoid_checks) {
-                opt.verify_checksums = true;
-            }
             RTableHandle h = {};
             h.offset = footer.index_handle().offset();
             h.size = footer.index_handle().size();
-            s = (*table)->ReadBlock(file, opt, h, &index_block_contents);
+            s = (*table)->ReadBlock(file, read_options, h,
+                                    &index_block_contents);
         }
 
         if (s.ok()) {
@@ -467,9 +466,10 @@ namespace leveldb {
         size_t n = static_cast<size_t>(rtable_handle.size);
         char *buf = new char[n + kBlockTrailerSize];
         Slice contents;
-        Status s = file->Read(rtable_handle, rtable_handle.offset,
-                              n + kBlockTrailerSize, &contents,
-                              buf);
+        auto f = reinterpret_cast<CCRandomAccessFile *>(file);
+        Status s = f->Read(options, rtable_handle, rtable_handle.offset,
+                           n + kBlockTrailerSize, &contents,
+                           buf);
         if (!s.ok()) {
             delete[] buf;
             return s;

@@ -32,9 +32,10 @@ namespace nova {
         void Start();
 
         uint64_t throughput = 0;
+        void VerifyLoad();
 
     private:
-        void VerifyLoad();
+
 
         uint64_t LoadDataWithRangePartition();
 

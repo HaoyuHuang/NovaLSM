@@ -144,7 +144,7 @@ namespace leveldb {
                     nblocks_in_group_.push_back(remaining_blocks);
                 } else {
                     nblocks_in_group_[nblocks_in_group_.size() -
-                                     1] += remaining_blocks;
+                                      1] += remaining_blocks;
                 }
                 break;
             }
@@ -476,62 +476,35 @@ namespace leveldb {
     NovaCCRandomAccessFile::NovaCCRandomAccessFile(
             Env *env, const std::string &dbname, uint64_t file_number,
             const leveldb::FileMetaData &meta, leveldb::CCClient *dc_client,
-            leveldb::MemManager *mem_manager, const Options &options,
+            leveldb::MemManager *mem_manager,
             uint64_t thread_id,
             bool prefetch_all) : env_(env), dbname_(dbname),
                                  file_number_(file_number),
-                                 meta_(meta), dc_client_(dc_client),
+                                 meta_(meta),
                                  mem_manager_(mem_manager),
-                                 options_(options),
                                  thread_id_(thread_id),
                                  prefetch_all_(prefetch_all) {
         RDMA_ASSERT(mem_manager_);
-        RDMA_ASSERT(dc_client_);
 
         uint32_t server_id = 0;
         nova::ParseDBIndexFromDBName(dbname, &server_id, &dbid_);
         Status s = env_->NewRandomAccessFile(TableFileName(dbname, file_number),
                                              &local_ra_file_);
 
-        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client_);
+        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client);
         RDMA_ASSERT(dc);
         dc->set_dbid(dbid_);
 
-        if (!prefetch_all_) {
-            uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                      MAX_BLOCK_SIZE);
-            backing_mem_block_ = mem_manager_->ItemAlloc(thread_id_, scid);
-            RDMA_ASSERT(backing_mem_block_) << "Running out of memory";
-        } else {
-            RDMA_ASSERT(ReadAll().ok());
+        if (prefetch_all_) {
+            RDMA_ASSERT(ReadAll(dc_client).ok());
         }
-
         RDMA_ASSERT(s.ok()) << s.ToString();
     }
 
-    NovaCCRandomAccessFile::~NovaCCRandomAccessFile() {
-        if (local_ra_file_) {
-            delete local_ra_file_;
-        }
-
-        if (backing_mem_table_) {
-            uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                      meta_.file_size);
-            mem_manager_->FreeItem(thread_id_, backing_mem_table_, scid);
-            backing_mem_table_ = nullptr;
-        }
-        if (backing_mem_block_) {
-            uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                      MAX_BLOCK_SIZE);
-            mem_manager_->FreeItem(thread_id_, backing_mem_block_, scid);
-            backing_mem_block_ = nullptr;
-        }
-    }
-
-    Status NovaCCRandomAccessFile::Read(const RTableHandle &rtable_handle,
-                                        uint64_t offset, size_t n,
-                                        leveldb::Slice *result,
-                                        char *scratch) {
+    Status NovaCCRandomAccessFile::Read(
+            const leveldb::ReadOptions &read_options,
+            const leveldb::RTableHandle &rtable_handle, uint64_t offset,
+            size_t n, leveldb::Slice *result, char *scratch) {
         RDMA_ASSERT(scratch);
         if (rtable_handle.rtable_id == 0) {
             return local_ra_file_->Read(rtable_handle, offset, n, result,
@@ -551,24 +524,76 @@ namespace leveldb {
                     buf.local_offset + (offset - buf.offset);
             ptr = &backing_mem_table_[local_offset];
         } else {
-            RDMA_ASSERT(backing_mem_block_);
+            char *backing_mem_block = nullptr;
+            mutex_.lock();
+            auto it = t_backing_mem_block_.find(read_options.thread_id);
+            if (it != t_backing_mem_block_.end()) {
+                backing_mem_block = it->second;
+            } else {
+                uint32_t scid = mem_manager_->slabclassid(
+                        read_options.thread_id,
+                        MAX_BLOCK_SIZE);
+                backing_mem_block = mem_manager_->ItemAlloc(
+                        read_options.thread_id, scid);
+                t_backing_mem_block_[read_options.thread_id] = backing_mem_block;
+            }
+            mutex_.unlock();
 
-            auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client_);
+            RDMA_ASSERT(backing_mem_block);
+
+            auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(read_options.dc_client);
             dc->set_dbid(dbid_);
             uint32_t req_id = dc->InitiateRTableReadDataBlock(
-                    rtable_handle, offset, n, backing_mem_block_);
+                    rtable_handle, offset, n, backing_mem_block);
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("t[{}]: CCRead req:{} start db:{} fn:{} s:{}",
+                               read_options.thread_id,
+                               req_id, dbid_, file_number_, n);
             dc->Wait();
-            RDMA_ASSERT(dc_client_->IsDone(req_id, nullptr, nullptr));
-            RDMA_ASSERT(nova::IsRDMAWRITEComplete(backing_mem_block_, n));
 
-            ptr = backing_mem_block_;
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("t[{}]: CCRead req:{} complete db:{} fn:{} s:{}",
+                               read_options.thread_id,
+                               req_id, dbid_, file_number_, n);
+            RDMA_ASSERT(dc->IsDone(req_id, nullptr, nullptr));
+            RDMA_ASSERT(nova::IsRDMAWRITEComplete(backing_mem_block, n))
+                << fmt::format("t[{}]: {}", read_options.thread_id, req_id);
+
+            ptr = backing_mem_block;
         }
         memcpy(scratch, ptr, n);
         *result = Slice(scratch, n);
         return Status::OK();
     }
 
-    Status NovaCCRandomAccessFile::ReadAll() {
+    NovaCCRandomAccessFile::~NovaCCRandomAccessFile() {
+        if (local_ra_file_) {
+            delete local_ra_file_;
+        }
+
+        if (backing_mem_table_) {
+            uint32_t scid = mem_manager_->slabclassid(thread_id_,
+                                                      meta_.file_size);
+            mem_manager_->FreeItem(thread_id_, backing_mem_table_, scid);
+            backing_mem_table_ = nullptr;
+        }
+
+        for (auto it : t_backing_mem_block_) {
+            uint32_t scid = mem_manager_->slabclassid(it.first,
+                                                      MAX_BLOCK_SIZE);
+            mem_manager_->FreeItem(thread_id_, it.second, scid);
+        }
+    }
+
+    Status NovaCCRandomAccessFile::Read(const RTableHandle &rtable_handle,
+                                        uint64_t offset, size_t n,
+                                        leveldb::Slice *result,
+                                        char *scratch) {
+        RDMA_ASSERT(false);
+        return Status::OK();
+    }
+
+    Status NovaCCRandomAccessFile::ReadAll(CCClient *dc_client) {
         uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                   meta_.file_size);
         backing_mem_table_ = mem_manager_->ItemAlloc(thread_id_, scid);
@@ -576,7 +601,8 @@ namespace leveldb {
         uint64_t offset = 0;
 
         uint32_t reqs[meta_.data_block_group_handles.size()];
-        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client_);
+        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client);
+        dc->set_dbid(dbid_);
 
         for (int i = 0; i < meta_.data_block_group_handles.size(); i++) {
             RTableHandle &handle = meta_.data_block_group_handles[i];

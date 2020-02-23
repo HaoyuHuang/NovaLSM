@@ -148,7 +148,7 @@ namespace nova {
                            uint32_t size) {
         leveldb::Table *table = nullptr;
         leveldb::MemReadableFile readable_file("tmp", sstable, size);
-        leveldb::Status status = leveldb::Table::Open(options_, &readable_file,
+        leveldb::Status status = leveldb::Table::Open(options_, leveldb::ReadOptions(),&readable_file,
                                                       size, 0, handle.table_id,
                                                       &table,
                                                       nullptr);

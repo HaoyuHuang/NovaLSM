@@ -86,10 +86,9 @@ namespace leveldb {
             file = new NovaCCRandomAccessFile(env_, dbname_, file_number, meta,
                                               options.dc_client,
                                               options.mem_manager,
-                                              options_,
                                               options.thread_id,
                                               prefetch_all);
-            s = Table::Open(options_, file, file_size, level, file_number,
+            s = Table::Open(options_, options, file, file_size, level, file_number,
                             &table, db_profiler_);
             RDMA_ASSERT(s.ok()) << s.ToString();
 

@@ -45,7 +45,7 @@ int main(int argc, char *argv[]) {
     env->NewRandomAccessFile(leveldb::TableFileName(FLAGS_dbname, FLAGS_fn),
                              &r);
     leveldb::Table *table;
-    leveldb::Status s = leveldb::Table::Open(opt, r, FLAGS_size, 0, FLAGS_fn,
+    leveldb::Status s = leveldb::Table::Open(opt, leveldb::ReadOptions(), r, FLAGS_size, 0, FLAGS_fn,
                                              &table, nullptr);
 
     leveldb::Iterator *it = table->NewIterator(

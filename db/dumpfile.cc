@@ -163,7 +163,7 @@ namespace leveldb {
                 // comparator used in this database. However this should not cause
                 // problems since we only use Table operations that do not require
                 // any comparisons.  In particular, we do not call Seek or Prev.
-                s = Table::Open(Options(), file, file_size, 0, 0, &table,
+                s = Table::Open(Options(), ReadOptions(), file, file_size, 0, 0, &table,
                                 nullptr);
             }
             if (!s.ok()) {

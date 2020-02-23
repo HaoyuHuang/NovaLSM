@@ -51,7 +51,7 @@ namespace leveldb {
         // for the duration of the returned table's lifetime.
         //
         // *file must remain live while this Table is in use.
-        static Status Open(const Options &options, RandomAccessFile *file,
+        static Status Open(const Options &options, const ReadOptions& read_options, RandomAccessFile *file,
                            uint64_t file_size, int level,
                            uint64_t file_number, Table **table,
                            DBProfiler *db_profiler);
@@ -81,7 +81,8 @@ namespace leveldb {
 
 
         static Status
-        ReadBlock(const char *buf, const Slice& content, const ReadOptions &options,
+        ReadBlock(const char *buf, const Slice &content,
+                  const ReadOptions &options,
                   const RTableHandle &handle, BlockContents *result);
 
     private:
@@ -108,6 +109,15 @@ namespace leveldb {
 
         Rep *rep_;
         DBProfiler *db_profiler_ = nullptr;
+    };
+
+    class CCRandomAccessFile : public RandomAccessFile {
+    public:
+
+        virtual Status
+        Read(const ReadOptions &read_options, const RTableHandle &rtable_handle,
+             uint64_t offset, size_t n,
+             Slice *result, char *scratch) = 0;
     };
 
 }  // namespace leveldb

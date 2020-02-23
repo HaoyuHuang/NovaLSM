@@ -86,7 +86,10 @@ namespace leveldb {
         task.result = result;
         task.sem = &sem_;
         AddAsyncTask(task);
-        return 0;
+
+        uint32_t reqid = req_id_;
+        req_id_++;
+        return reqid;
     }
 
     uint32_t NovaBlockCCClient::InitiateReplicateLogRecords(

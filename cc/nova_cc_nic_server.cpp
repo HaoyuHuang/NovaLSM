@@ -62,7 +62,7 @@ namespace nova {
             options.block_cache = cache;
             if (NovaCCConfig::cc_config->write_buffer_size_mb > 0) {
                 options.write_buffer_size =
-                        (uint64_t)(
+                        (uint64_t) (
                                 NovaCCConfig::cc_config->write_buffer_size_mb) *
                         1024 * 1024;
             }
@@ -196,7 +196,7 @@ namespace nova {
         read_options.mem_manager = mem_manager_;
         read_options.dc_client = client;
 
-        read_options.thread_id = 0;
+        read_options.thread_id = tid_;
         read_options.verify_checksums = false;
         std::vector<CCFragment *> &frags = NovaCCConfig::cc_config->fragments;
         for (int i = 0; i < frags.size(); i++) {
@@ -254,6 +254,8 @@ namespace nova {
         gettimeofday(&end, nullptr);
 
         throughput = puts / std::max((int) (end.tv_sec - start.tv_sec), 1);
+
+//        VerifyLoad();
     }
 
     void NovaCCNICServer::LoadData() {
@@ -307,6 +309,24 @@ namespace nova {
             thpt += ts[i]->throughput;
         }
         RDMA_LOG(INFO) << fmt::format("Total throughput: {}", thpt);
+
+//        ts.clear();
+//        load_threads.clear();
+//        for (int i = 0; i < nloading_threads; i++) {
+//            std::set<uint32_t> dbids;
+//            for (int i = 0; i < ndb_per_thread; i++) {
+//                dbids.insert(current_db_id);
+//                current_db_id += 1;
+//            }
+//            NovaCCLoadThread *t = new NovaCCLoadThread(dbs_, async_workers,
+//                                                       mem_manager, dbids, i);
+//            load_threads.emplace_back(
+//                    std::thread(&NovaCCLoadThread::VerifyLoad, t));
+//        }
+//
+//        for (int i = 0; i < nloading_threads; i++) {
+//            load_threads[i].join();
+//        }
 
         for (int i = 0; i < dbs_.size(); i++) {
             RDMA_LOG(INFO) << "Database " << i;
@@ -365,7 +385,7 @@ namespace nova {
         leveldb::Cache *row_cache = nullptr;
         if (NovaCCConfig::cc_config->block_cache_mb > 0) {
             uint64_t cache_size =
-                    (uint64_t)(NovaCCConfig::cc_config->block_cache_mb) *
+                    (uint64_t) (NovaCCConfig::cc_config->block_cache_mb) *
                     1024 * 1024;
             block_cache = leveldb::NewLRUCache(cache_size);
 
@@ -376,7 +396,7 @@ namespace nova {
         }
         if (NovaCCConfig::cc_config->row_cache_mb > 0) {
             uint64_t row_cache_size =
-                    (uint64_t)(NovaCCConfig::cc_config->row_cache_mb) * 1024 *
+                    (uint64_t) (NovaCCConfig::cc_config->row_cache_mb) * 1024 *
                     1024;
             row_cache = leveldb::NewLRUCache(row_cache_size);
         }

@@ -12,6 +12,8 @@
 #include "util/env_mem.h"
 #include "nova_cc_client.h"
 #include "leveldb/env.h"
+#include "leveldb/table.h"
+
 
 namespace leveldb {
 
@@ -106,14 +108,13 @@ namespace leveldb {
         std::vector<PersistStatus> status_;
     };
 
-    class NovaCCRandomAccessFile : public RandomAccessFile {
+    class NovaCCRandomAccessFile : public CCRandomAccessFile {
     public:
         NovaCCRandomAccessFile(Env *env, const std::string &dbname,
                                uint64_t file_number,
                                const FileMetaData &meta,
                                CCClient *dc_client,
                                MemManager *mem_manager,
-                               const Options &options,
                                uint64_t thread_id,
                                bool prefetch_all);
 
@@ -123,6 +124,11 @@ namespace leveldb {
         Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
              Slice *result, char *scratch) override;
 
+        Status
+        Read(const ReadOptions &read_options, const RTableHandle &rtable_handle,
+             uint64_t offset, size_t n,
+             Slice *result, char *scratch) override;
+
     private:
         struct DataBlockRTableLocalBuf {
             uint64_t offset;
@@ -130,7 +136,7 @@ namespace leveldb {
             uint64_t local_offset;
         };
 
-        Status ReadAll();
+        Status ReadAll(CCClient *dc_client);
 
         const std::string &dbname_;
         uint64_t file_number_;
@@ -138,15 +144,14 @@ namespace leveldb {
 
         bool prefetch_all_ = false;
         char *backing_mem_table_ = nullptr;
-        char *backing_mem_block_ = nullptr;
 
         std::map<uint64_t, DataBlockRTableLocalBuf> rtable_local_offset_;
+        std::map<uint32_t, char*> t_backing_mem_block_;
+        std::mutex mutex_;
 
         MemManager *mem_manager_ = nullptr;
         uint64_t thread_id_ = 0;
         uint32_t dbid_ = 0;
-        CCClient *dc_client_ = nullptr;
-        const Options &options_;
         Env *env_ = nullptr;
         RandomAccessFile *local_ra_file_ = nullptr;
     };
