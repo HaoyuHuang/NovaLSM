@@ -1371,8 +1371,8 @@ namespace leveldb {
             {
                 mutex_.Unlock();
                 if (options.local_write) {
-//                    status = log_->AddRecord(
-//                            WriteBatchInternal::Contents(write_batch));
+                    status = log_->AddRecord(
+                            WriteBatchInternal::Contents(write_batch));
                 }
                 bool sync_error = false;
                 if (status.ok() && options.sync) {
