@@ -29,7 +29,7 @@ namespace leveldb {
 
     class NovaBlockCCClient : public CCClient {
     public:
-        NovaBlockCCClient();
+        NovaBlockCCClient(uint32_t client_id);
 
         uint32_t
         InitiateDeleteTables(uint32_t server_id,
@@ -81,7 +81,7 @@ namespace leveldb {
         std::map<uint32_t, CCResponse*> req_response;
 
         void AddAsyncTask(const RDMAAsyncClientRequestTask &task);
-
+        uint32_t current_cc_id_ = 0;
         uint32_t req_id_ = 0;
         uint32_t dbid_ = 0;
         sem_t sem_;

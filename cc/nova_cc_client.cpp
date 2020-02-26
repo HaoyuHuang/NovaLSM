@@ -15,8 +15,9 @@ namespace leveldb {
 
     using namespace rdmaio;
 
-    NovaBlockCCClient::NovaBlockCCClient() {
+    NovaBlockCCClient::NovaBlockCCClient(uint32_t client_id) {
         sem_init(&sem_, 0, 0);
+        current_cc_id_ = client_id;
     }
 
     uint32_t NovaBlockCCClient::InitiateRTableWriteDataBlocks(
@@ -71,8 +72,8 @@ namespace leveldb {
 
     void NovaBlockCCClient::AddAsyncTask(
             const leveldb::RDMAAsyncClientRequestTask &task) {
-        uint32_t ccid = dbid_ % ccs_.size();
-        ccs_[ccid]->AddTask(task);
+        current_cc_id_ = (current_cc_id_ + 1) % ccs_.size();
+        ccs_[current_cc_id_]->AddTask(task);
     }
 
     uint32_t NovaBlockCCClient::InitiateRTableReadDataBlock(

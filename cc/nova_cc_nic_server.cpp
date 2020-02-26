@@ -190,7 +190,7 @@ namespace nova {
     }
 
     void NovaCCLoadThread::VerifyLoad() {
-        auto client = new leveldb::NovaBlockCCClient;
+        auto client = new leveldb::NovaBlockCCClient(tid_);
         client->ccs_ = async_workers_;
         leveldb::ReadOptions read_options = {};
         read_options.mem_manager = mem_manager_;
@@ -378,7 +378,8 @@ namespace nova {
         int bg_thread_id = 0;
         for (int i = 0;
              i < NovaCCConfig::cc_config->num_compaction_workers; i++) {
-            bgs.push_back(new leveldb::NovaCCCompactionThread(mem_manager));
+            auto bg = new leveldb::NovaCCCompactionThread(mem_manager);
+            bgs.push_back(bg);
         }
 
         leveldb::Cache *block_cache = nullptr;
@@ -591,13 +592,14 @@ namespace nova {
             conn_workers.push_back(new NovaCCConnWorker(i));
             conn_workers[i]->set_dbs(dbs_);
             conn_workers[i]->mem_manager_ = mem_manager;
-            conn_workers[i]->cc_client_ = new leveldb::NovaBlockCCClient;
+            conn_workers[i]->cc_client_ = new leveldb::NovaBlockCCClient(i);
             conn_workers[i]->cc_client_->ccs_ = async_workers;
         }
 
         for (int i = 0;
              i <
              NovaCCConfig::cc_config->num_compaction_workers; i++) {
+            bgs[i]->cc_client_ = new leveldb::NovaBlockCCClient(i);
             bgs[i]->cc_client_->ccs_ = async_compaction_workers;
             bgs[i]->thread_id_ = i;
         }

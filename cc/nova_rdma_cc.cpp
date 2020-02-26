@@ -113,7 +113,7 @@ namespace nova {
         is_running_ = true;
         mutex_.Unlock();
 
-        bool should_sleep = true;
+        bool should_sleep = false;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
             if (should_sleep) {

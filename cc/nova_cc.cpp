@@ -132,10 +132,13 @@ namespace leveldb {
         index_block_ = new Block(index_block_contents,
                                  file_number_,
                                  footer.index_handle().offset());
-        // 4 KB 500 = 2 MB
-        int min_num_data_blocks_in_group = std::max(num_data_blocks_ /
-                                                    nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks,
-                                                    1000);
+        // 4 KB 250 = 1 MB
+        int min_num_data_blocks_in_group = num_data_blocks_ /
+                                           nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks;
+        if (num_data_blocks_ <= 250) {
+            min_num_data_blocks_in_group = num_data_blocks_;
+        }
+
         uint32_t assigned_blocks = 0;
         while (assigned_blocks < num_data_blocks_) {
             int remaining_blocks = num_data_blocks_ - assigned_blocks;
@@ -639,7 +642,6 @@ namespace leveldb {
 
     NovaCCCompactionThread::NovaCCCompactionThread(MemManager *mem_manager)
             : mem_manager_(mem_manager) {
-        cc_client_ = new NovaBlockCCClient;
         sem_init(&signal, 0, 0);
     }
 
