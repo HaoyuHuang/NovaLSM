@@ -7,6 +7,9 @@
 #include <netinet/tcp.h>
 #include <signal.h>
 #include <fmt/core.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 #include "leveldb/write_batch.h"
 #include "db/filename.h"
@@ -72,7 +75,7 @@ namespace nova {
 
             options.max_dc_file_size =
                     std::max(options.write_buffer_size, options.max_file_size) +
-                    1024 * 1024;
+                    15 * 1024 * 1024;
             options.env = env;
             options.create_if_missing = true;
             options.compression = leveldb::kNoCompression;
@@ -369,11 +372,17 @@ namespace nova {
             num_mem_partitions = 4;
         }
         NovaConfig::config->num_mem_partitions = num_mem_partitions;
+        uint64_t slab_size_mb = std::max(
+                NovaConfig::config->sstable_size / 1024 / 1024,
+                NovaCCConfig::cc_config->write_buffer_size_mb) + 15;
+
         mem_manager = new NovaMemManager(cache_buf,
                                          num_mem_partitions,
-                                         NovaConfig::config->mem_pool_size_gb);
+                                         NovaConfig::config->mem_pool_size_gb,
+                                         slab_size_mb);
         log_manager = new LogFileManager(mem_manager);
 
+        NovaConfig::config->add_tid_mapping();
 
         int bg_thread_id = 0;
         for (int i = 0;
@@ -690,6 +699,9 @@ namespace nova {
             conn_worker_threads.emplace_back(start, conn_workers[i]);
         }
         current_conn_worker_id_ = 0;
+
+        usleep(1000000);
+        nova::NovaConfig::config->print_mapping();
     }
 
     void make_socket_non_blocking(int sockfd) {

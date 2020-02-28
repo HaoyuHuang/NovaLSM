@@ -525,6 +525,9 @@ namespace nova {
     void NovaCCConnWorker::Start() {
         RDMA_LOG(INFO) << "memstore[" << thread_id_ << "]: "
                        << "starting mem worker";
+
+        nova::NovaConfig::config->add_tid_mapping();
+
         struct event new_conn_timer_event;
         struct event stats_event;
         struct event_config *ev_config;

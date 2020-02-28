@@ -666,6 +666,8 @@ namespace leveldb {
     }
 
     void NovaCCCompactionThread::Start() {
+        nova::NovaConfig::config->add_tid_mapping();
+
         background_work_mutex_.Lock();
         is_running_ = true;
         background_work_mutex_.Unlock();

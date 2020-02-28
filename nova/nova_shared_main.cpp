@@ -168,8 +168,8 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->sstable_size = FLAGS_cc_sstable_size_mb * 1024 * 1024;
     NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
 
-//    RDMA_ASSERT(FLAGS_cc_rtable_size_mb > std::max(FLAGS_cc_sstable_size_mb,
-//                                                   FLAGS_cc_write_buffer_size_mb));
+    RDMA_ASSERT(FLAGS_cc_rtable_size_mb > std::max(FLAGS_cc_sstable_size_mb,
+                                                   FLAGS_cc_write_buffer_size_mb));
     InitializeCC();
     return 0;
 }

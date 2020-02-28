@@ -12,6 +12,8 @@
 #include <fstream>
 #include <list>
 #include <fmt/core.h>
+#include <thread>
+#include <syscall.h>
 
 #include "nova/rdma_ctrl.hpp"
 #include "nova/nova_common.h"
@@ -41,9 +43,9 @@ namespace nova {
         int rdma_max_num_sends;
         int rdma_doorbell_batch_size;
 
-        uint32_t log_buf_size;
-        uint32_t rtable_size;
-        uint32_t sstable_size;
+        uint64_t log_buf_size;
+        uint64_t rtable_size;
+        uint64_t sstable_size;
         std::string rtable_path;
 
         bool use_multiple_disks;
@@ -52,6 +54,29 @@ namespace nova {
         uint32_t num_mem_partitions;
         char *nova_buf;
         uint64_t nnovabuf;
+
+        void add_tid_mapping() {
+            std::lock_guard<std::mutex> l(m);
+            threads[std::this_thread::get_id()] = syscall(SYS_gettid);
+        }
+
+        void print_mapping() {
+            std::lock_guard<std::mutex> l(m);
+            for (auto tid : threads) {
+                constexpr const int kMaxThreadIdSize = 32;
+                std::ostringstream thread_stream;
+                thread_stream << tid.first;
+                std::string thread_id = thread_stream.str();
+                if (thread_id.size() > kMaxThreadIdSize) {
+                    thread_id.resize(kMaxThreadIdSize);
+                }
+
+                RDMA_LOG(INFO) << fmt::format("{}:{}", thread_id, tid.second);
+            }
+        }
+
+        std::mutex m;
+        std::map<std::thread::id, pid_t> threads;
 
         static NovaConfig *config;
     };
@@ -91,7 +116,7 @@ namespace nova {
 
         static void
         ReadFragments(const std::string &path,
-                        std::vector<CCFragment *> *frags) {
+                      std::vector<CCFragment *> *frags) {
             std::string line;
             ifstream file;
             file.open(path);
@@ -109,7 +134,8 @@ namespace nova {
                 }
                 frags->push_back(frag);
             }
-            RDMA_LOG(INFO) << "CC Configuration has a total of " << frags->size()
+            RDMA_LOG(INFO) << "CC Configuration has a total of "
+                           << frags->size()
                            << " fragments.";
             for (int i = 0; i < frags->size(); i++) {
                 RDMA_LOG(DEBUG) << fmt::format("frag[{}]: {}-{}-{}-{}-{}", i,
@@ -157,7 +183,7 @@ namespace nova {
 
         int block_cache_mb;
         int row_cache_mb;
-        int write_buffer_size_mb;
+        uint64_t write_buffer_size_mb;
         std::vector<CCFragment *> fragments;
         std::vector<CCFragment *> db_fragment;
         ScatterSSTablePolicy scatter_sstable_policy;
@@ -169,7 +195,7 @@ namespace nova {
     public:
         static void
         ReadFragments(const std::string &path,
-                        std::vector<DCFragment *> *frags) {
+                      std::vector<DCFragment *> *frags) {
             std::string line;
             ifstream file;
             file.open(path);
@@ -181,7 +207,8 @@ namespace nova {
                 frag->dc_server_id = std::stoi(tokens[2]);
                 frags->push_back(frag);
             }
-            RDMA_LOG(INFO) << "DC Configuration has a total of " << frags->size()
+            RDMA_LOG(INFO) << "DC Configuration has a total of "
+                           << frags->size()
                            << " fragments.";
             for (int i = 0; i < frags->size(); i++) {
                 RDMA_LOG(DEBUG) << fmt::format("frag[{}]: {}-{}-{}", i,

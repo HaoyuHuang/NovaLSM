@@ -109,11 +109,13 @@ namespace nova {
             rdma_store_->Init(rdma_ctrl_);
         }
 
+        nova::NovaConfig::config->add_tid_mapping();
+
         mutex_.Lock();
         is_running_ = true;
         mutex_.Unlock();
 
-        bool should_sleep = false;
+        bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
             if (should_sleep) {

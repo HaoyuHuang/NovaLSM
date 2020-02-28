@@ -113,8 +113,9 @@ int main(int argc, char *argv[]) {
     mkdirs(FLAGS_table_path.data());
 
     char *cache_buf = rdma_buf + bench_nrdma_buf();
-    NovaMemManager *mem_manager = new NovaMemManager(cache_buf, 32,
-                                                     FLAGS_mem_pool_size_gb);
+    NovaMemManager *mem_manager = new NovaMemManager(cache_buf, 1,
+                                                     FLAGS_mem_pool_size_gb,
+                                                     1024);
 
     // server.
     std::vector<RDMAWRITEServerWorker *> server_workers;

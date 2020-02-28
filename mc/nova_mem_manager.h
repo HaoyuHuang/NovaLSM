@@ -22,7 +22,7 @@ namespace nova {
 
     class Slab {
     public:
-        Slab(char *base);
+        Slab(char *base, uint64_t slab_size_mb);
 
         void Init(uint32_t item_size);
 
@@ -33,6 +33,7 @@ namespace nova {
         uint32_t item_size_;
         char *next_;
         uint64_t available_bytes_;
+        uint64_t slab_size_mb_;
     };
 
     class SlabClass {
@@ -59,16 +60,17 @@ namespace nova {
 
     class NovaPartitionedMemManager {
     public:
-        NovaPartitionedMemManager(int pid, char *buf, uint64_t data_size);
+        NovaPartitionedMemManager(int pid, char *buf, uint64_t data_size,
+                                  uint64_t slab_size_mb);
 
-        char *ItemAlloc(uint32_t scid) ;
+        char *ItemAlloc(uint32_t scid);
 
-        void FreeItem(char *buf, uint32_t scid) ;
+        void FreeItem(char *buf, uint32_t scid);
 
         void
-        FreeItems(const std::vector<char *> &items, uint32_t scid) ;
+        FreeItems(const std::vector<char *> &items, uint32_t scid);
 
-        uint32_t slabclassid(uint32_t size) ;
+        uint32_t slabclassid(uint64_t  size);
 
     private:
         std::mutex slab_class_mutex_[MAX_NUMBER_OF_SLAB_CLASSES];
@@ -78,20 +80,23 @@ namespace nova {
         std::mutex free_slabs_mutex_;
         Slab **free_slabs_ = nullptr;
         uint64_t free_slab_index_ = 0;
+        uint64_t slab_size_mb_ = 0;
     };
 
     class NovaMemManager : public leveldb::MemManager {
     public:
-        NovaMemManager(char *buf, uint32_t num_mem_partitions, uint64_t mem_pool_size_gb);
+        NovaMemManager(char *buf, uint32_t num_mem_partitions,
+                       uint64_t mem_pool_size_gb, uint64_t slab_size_mb);
 
         char *ItemAlloc(uint64_t key, uint32_t scid) override;
 
         void FreeItem(uint64_t key, char *buf, uint32_t scid) override;
 
         void
-        FreeItems(uint64_t key, const std::vector<char *> &items, uint32_t scid) override;
+        FreeItems(uint64_t key, const std::vector<char *> &items,
+                  uint32_t scid) override;
 
-        uint32_t slabclassid(uint64_t key, uint32_t size) override;
+        uint32_t slabclassid(uint64_t key, uint64_t  size) override;
 
     private:
         std::vector<NovaPartitionedMemManager *> partitioned_mem_managers_;

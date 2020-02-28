@@ -360,6 +360,8 @@ namespace nova {
     void NovaCCServerAsyncWorker::Start() {
         RDMA_LOG(DEBUG) << "CC server worker started";
 
+        nova::NovaConfig::config->add_tid_mapping();
+
         while (is_running_) {
             sem_wait(&sem_);
 

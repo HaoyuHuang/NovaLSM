@@ -117,7 +117,7 @@ namespace leveldb {
         FreeItems(uint64_t key, const std::vector<char *> &items,
                   uint32_t scid) = 0;
 
-        virtual uint32_t slabclassid(uint64_t key, uint32_t size) = 0;
+        virtual uint32_t slabclassid(uint64_t key, uint64_t size) = 0;
     };
 
     class CCServer {
