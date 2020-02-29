@@ -1628,7 +1628,7 @@ namespace leveldb {
                 background_work_finished_signal_.Wait();
                 wait = true;
             } else if (versions_->NumLevelFiles(0) >=
-                       config::kL0_StopWritesTrigger) {
+                       options_.l0_stop_writes_trigger) {
                 // There are too many level-0 files.
                 Log(options_.info_log,
                     "Too many L0 files; Make room waiting...\n");

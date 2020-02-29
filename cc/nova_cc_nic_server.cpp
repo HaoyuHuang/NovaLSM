@@ -71,6 +71,7 @@ namespace nova {
             }
 
             options.num_memtables = NovaCCConfig::cc_config->num_memtables;
+            options.l0_stop_writes_trigger = 12;// options.num_memtables * 6;
             options.max_dc_file_size =
                     std::max(options.write_buffer_size, options.max_file_size) +
                     LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
