@@ -264,7 +264,7 @@ namespace leveldb {
 
         // Create an iterator that reads over the compaction inputs for "*c".
         // The caller should delete the iterator when no longer needed.
-        Iterator *MakeInputIterator(Compaction *c);
+        Iterator *MakeInputIterator(Compaction *c, EnvBGThread* bg_thread);
 
         void AddCompactedInputs(Compaction *c, std::map<uint64_t, FileMetaData>* map);
 

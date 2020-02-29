@@ -512,6 +512,7 @@ namespace leveldb {
             if (*result != nullptr) {
                 return Status::OK();
             }
+            return Status::NotFound(fn, " Not found");
         }
 
         int fd = ::open(filename.c_str(), O_RDONLY | kOpenBaseFlags);

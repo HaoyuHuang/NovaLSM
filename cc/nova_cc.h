@@ -160,59 +160,6 @@ namespace leveldb {
         std::string dbname;
         uint32_t file_number;
     };
-
-    class NovaCCCompactionThread : public EnvBGThread {
-    public:
-        explicit NovaCCCompactionThread(MemManager *mem_manager);
-
-        void Schedule(
-                void (*background_work_function)(void *background_work_arg),
-                void *background_work_arg) override;
-
-        uint64_t thread_id() override { return thread_id_; }
-
-        CCClient *dc_client() override {
-            return cc_client_;
-        };
-
-        MemManager *mem_manager() override {
-            return mem_manager_;
-        };
-
-
-        bool IsInitialized();
-
-        void Start();
-
-        uint64_t thread_id_ = 0;
-
-        NovaBlockCCClient *cc_client_ = nullptr;
-
-    private:
-        // Stores the work item data in a Schedule() call.
-        //
-        // Instances are constructed on the thread calling Schedule() and used on the
-        // background thread.
-        //
-        // This structure is thread-safe beacuse it is immutable.
-        struct BackgroundWorkItem {
-            explicit BackgroundWorkItem(void (*function)(void *arg),
-                                        void *arg)
-                    : function(function), arg(arg) {}
-
-            void (*const function)(void *);
-
-            void *const arg;
-        };
-
-        port::Mutex background_work_mutex_;
-        sem_t signal;
-        std::queue<BackgroundWorkItem> background_work_queue_
-        GUARDED_BY(background_work_mutex_);
-
-        MemManager *mem_manager_ = nullptr;
-        bool is_running_ = false;
-    };
 }
 
 

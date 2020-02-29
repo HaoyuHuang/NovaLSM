@@ -20,21 +20,21 @@ namespace leveldb {
 
     Status
     BuildTable(const std::string &dbname, Env *env, const Options &options,
-               TableCache *table_cache, Iterator *iter, FileMetaData *meta) {
+               TableCache *table_cache, Iterator *iter, FileMetaData *meta, EnvBGThread* bg_thread) {
         Status s;
         meta->file_size = 0;
         iter->SeekToFirst();
         std::string fname = TableFileName(dbname, meta->number);
         if (iter->Valid()) {
-            MemManager *mem_manager = options.bg_thread->mem_manager();
-            uint64_t key = options.bg_thread->thread_id();
+            MemManager *mem_manager = bg_thread->mem_manager();
+            uint64_t key = bg_thread->thread_id();
             NovaCCMemFile *cc_file = new NovaCCMemFile(env,
                                                        options,
                                                        meta->number,
                                                        mem_manager,
-                                                       options.bg_thread->dc_client(),
+                                                       bg_thread->dc_client(),
                                                        dbname,
-                                                       options.bg_thread->thread_id(),
+                                                       bg_thread->thread_id(),
                                                        options.max_dc_file_size);
             WritableFile *file = new MemWritableFile(cc_file);
             TableBuilder *builder = new TableBuilder(options, file);

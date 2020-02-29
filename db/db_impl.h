@@ -97,6 +97,8 @@ namespace leveldb {
         // bytes.
         void RecordReadSample(Slice key);
 
+        void PerformCompaction(EnvBGThread *bg_thread) override;
+
     private:
         friend class DB;
 
@@ -145,19 +147,22 @@ namespace leveldb {
         void MaybeIgnoreError(Status *s) const;
 
         // Delete any unneeded files and stale in-memory entries.
-        void DeleteObsoleteFiles() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        void
+        DeleteObsoleteFiles(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
+                mutex_);
 
         // Compact the in-memory write buffer to disk.  Switches to a new
         // log-file/memtable and writes a new descriptor iff successful.
         // Errors are recorded in bg_error_.
-        void CompactMemTable() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        bool CompactMemTable(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
+                mutex_);
+
+        void InstallMemTable(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
+                mutex_);
 
         Status
         RecoverLogFile(uint64_t log_number, bool last_log, bool *save_manifest,
                        VersionEdit *edit, SequenceNumber *max_sequence)
-        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
-        Status WriteLevel0Table(MemTable *mem, VersionEdit *edit, Version *base)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         Status MakeRoomForWrite(bool force /* compact even if there is room? */,
@@ -169,21 +174,19 @@ namespace leveldb {
 
         void RecordBackgroundError(const Status &s);
 
-        void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        void MaybeScheduleCompaction(bool compact_memtable = false, EnvBGThread*bg_thread = nullptr) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-        static void BGWork(void *db);
-
-        void BackgroundCall();
-
-        void BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        bool
+        BackgroundCompaction(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
+                mutex_);
 
         void CleanupCompaction(CompactionState *compact)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-        Status DoCompactionWork(CompactionState *compact)
+        Status DoCompactionWork(CompactionState *compact, EnvBGThread *bg_thread)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-        Status OpenCompactionOutputFile(CompactionState *compact);
+        Status OpenCompactionOutputFile(CompactionState *compact, EnvBGThread *bg_thread);
 
         Status
         FinishCompactionOutputFile(CompactionState *compact, Iterator *input);
@@ -194,8 +197,6 @@ namespace leveldb {
         const Comparator *user_comparator() const {
             return internal_comparator_.user_comparator();
         }
-
-        void Schedule(void (*function)(void *arg), void *arg);
 
         // Constant after construction
         Env *const env_;
@@ -215,11 +216,14 @@ namespace leveldb {
         // State below is protected by mutex_
         port::Mutex mutex_;
         std::atomic<bool> shutting_down_;
+        bool is_major_compaction_running_ = false;
         port::CondVar background_work_finished_signal_ GUARDED_BY(mutex_);
-        EnvBGThread *bg_thread_;
+
+        std::vector<EnvBGThread *> bg_threads_;
         MemTable *mem_;
-        MemTable *imm_ GUARDED_BY(mutex_);  // Memtable being compacted
-        std::atomic<bool> has_imm_;         // So bg thread can detect non-null imm_
+        std::vector<MemTable *> imms_ GUARDED_BY(
+                mutex_);  // Memtable being compacted
+        uint32_t nimms_ = 0;
         WritableFile *logfile_;
         uint64_t logfile_number_ GUARDED_BY(mutex_);
         log::Writer *log_;
@@ -235,9 +239,6 @@ namespace leveldb {
         // part of ongoing compactions.
         std::set<uint64_t> pending_outputs_ GUARDED_BY(mutex_);
         std::map<uint64_t, FileMetaData> compacted_tables_ GUARDED_BY(mutex_);
-
-        // Has a background compaction been scheduled or is running?
-        bool background_compaction_scheduled_ GUARDED_BY(mutex_);
 
         ManualCompaction *manual_compaction_ GUARDED_BY(mutex_);
 

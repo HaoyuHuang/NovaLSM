@@ -6,6 +6,8 @@
 #define STORAGE_LEVELDB_DB_BUILDER_H_
 
 #include "leveldb/status.h"
+#include "leveldb/env.h"
+#include "leveldb/env_bg_thread.h"
 
 namespace leveldb {
 
@@ -27,7 +29,8 @@ namespace leveldb {
 // zero, and no Table file will be produced.
     Status
     BuildTable(const std::string &dbname, Env *env, const Options &options,
-               TableCache *table_cache, Iterator *iter, FileMetaData *meta);
+               TableCache *table_cache, Iterator *iter, FileMetaData *meta,
+               EnvBGThread *bg_thread);
 
 }  // namespace leveldb
 

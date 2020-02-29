@@ -14,6 +14,7 @@
 #include "cc/nova_cc.h"
 #include "nova_mem_manager.h"
 #include "leveldb/env.h"
+#include "cc/db_compaction_thread.h"
 
 namespace nova {
 

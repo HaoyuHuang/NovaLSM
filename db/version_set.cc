@@ -884,33 +884,6 @@ namespace leveldb {
             }
         }
 
-        // Unlock during expensive MANIFEST log write
-        {
-            mu->Unlock();
-
-            // Write new record to MANIFEST log
-            if (s.ok()) {
-                std::string record;
-                edit->EncodeTo(&record);
-                s = descriptor_log_->AddRecord(record);
-                if (s.ok()) {
-                    s = descriptor_file_->Sync();
-                }
-                if (!s.ok()) {
-                    Log(options_->info_log, "MANIFEST write: %s\n",
-                        s.ToString().c_str());
-                }
-            }
-
-            // If we just created a new descriptor file, install it by writing a
-            // new CURRENT file that points to it.
-            if (s.ok() && !new_manifest_file.empty()) {
-                s = SetCurrentFile(env_, dbname_, manifest_file_number_);
-            }
-
-            mu->Lock();
-        }
-
         // Install the new version
         if (s.ok()) {
             AppendVersion(v);
@@ -927,6 +900,32 @@ namespace leveldb {
             }
         }
 
+        // Unlock during expensive MANIFEST log write
+//        {
+//            mu->Unlock();
+//
+//            // Write new record to MANIFEST log
+//            if (s.ok()) {
+//                std::string record;
+//                edit->EncodeTo(&record);
+//                s = descriptor_log_->AddRecord(record);
+//                if (s.ok()) {
+//                    s = descriptor_file_->Sync();
+//                }
+//                if (!s.ok()) {
+//                    Log(options_->info_log, "MANIFEST write: %s\n",
+//                        s.ToString().c_str());
+//                }
+//            }
+//
+//            // If we just created a new descriptor file, install it by writing a
+//            // new CURRENT file that points to it.
+//            if (s.ok() && !new_manifest_file.empty()) {
+//                s = SetCurrentFile(env_, dbname_, manifest_file_number_);
+//            }
+//
+//            mu->Lock();
+//        }
         return s;
     }
 
@@ -1136,6 +1135,11 @@ namespace leveldb {
 
         v->compaction_level_ = best_level;
         v->compaction_score_ = best_score;
+        if (v->files_[0].size() >=
+            static_cast<double>(config::kL0_CompactionTrigger)) {
+            v->compaction_level_ = 0;
+            v->compaction_score_ = 9999;
+        }
     }
 
     Status VersionSet::WriteSnapshot(log::Writer *log) {
@@ -1311,13 +1315,14 @@ namespace leveldb {
         }
     }
 
-    Iterator *VersionSet::MakeInputIterator(Compaction *c) {
+    Iterator *
+    VersionSet::MakeInputIterator(Compaction *c, EnvBGThread *bg_thread) {
         ReadOptions options;
         options.verify_checksums = options_->paranoid_checks;
         options.fill_cache = false;
-        options.thread_id = options_->bg_thread->thread_id();
-        options.mem_manager = options_->bg_thread->mem_manager();
-        options.dc_client = options_->bg_thread->dc_client();
+        options.thread_id = bg_thread->thread_id();
+        options.mem_manager = bg_thread->mem_manager();
+        options.dc_client = bg_thread->dc_client();
 
         // Level-0 files have to be merged together.  For other levels,
         // we will make a concatenating iterator per level.

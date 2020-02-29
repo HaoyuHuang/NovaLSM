@@ -75,23 +75,6 @@ namespace leveldb {
         NovaSSTableMode sstable_mode;
     };
 
-    class LEVELDB_EXPORT EnvBGThread {
-    public:
-        // Arrange to run "(*function)(arg)" once in a background thread.
-        //
-        // "function" may run in an unspecified thread.  Multiple functions
-        // added to the same Env may run concurrently in different threads.
-        // I.e., the caller may not assume that background work items are
-        // serialized.
-        virtual void Schedule(void (*function)(void *arg), void *arg) = 0;
-
-        virtual CCClient *dc_client() = 0;
-
-        virtual MemManager *mem_manager() = 0;
-
-        virtual uint64_t thread_id() = 0;
-    };
-
     class LEVELDB_EXPORT Env {
     public:
         Env() = default;

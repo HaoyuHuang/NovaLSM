@@ -18,40 +18,40 @@ namespace leveldb {
     }
 
     void DBProfiler::Trace(Access access) {
-        if (!tracing_) {
-            return;
-        }
-
-        mutex_.Lock();
-        accesses_[index_] = access;
-        index_++;
-        if (index_ == WRITE_BATCH_SIZE) {
-            WriteToFile();
-        }
-        mutex_.Unlock();
+//        if (!tracing_) {
+//            return;
+//        }
+//
+//        mutex_.Lock();
+//        accesses_[index_] = access;
+//        index_++;
+//        if (index_ == WRITE_BATCH_SIZE) {
+//            WriteToFile();
+//        }
+//        mutex_.Unlock();
     }
 
     void DBProfiler::Trace(CompactionProfiler compaction) {
-        if (!tracing_) {
-            return;
-        }
-
-        mutex_.Lock();
-        compaction_trace_file_writer_ << compaction.level << ","
-                                      << compaction.output_level << ","
-                                      << compaction.level_stats.num_files << ","
-                                      << compaction.level_stats.num_bytes_read
-                                      << ","
-                                      << compaction.next_level_stats.num_files
-                                      << ","
-                                      << compaction.next_level_stats.num_bytes_read
-                                      << ","
-                                      << compaction.next_level_output_stats.num_files
-                                      << ","
-                                      << compaction.next_level_output_stats.num_bytes_written
-                                      << std::endl;
-        compaction_trace_file_writer_.flush();
-        mutex_.Unlock();
+//        if (!tracing_) {
+//            return;
+//        }
+//
+//        mutex_.Lock();
+//        compaction_trace_file_writer_ << compaction.level << ","
+//                                      << compaction.output_level << ","
+//                                      << compaction.level_stats.num_files << ","
+//                                      << compaction.level_stats.num_bytes_read
+//                                      << ","
+//                                      << compaction.next_level_stats.num_files
+//                                      << ","
+//                                      << compaction.next_level_stats.num_bytes_read
+//                                      << ","
+//                                      << compaction.next_level_output_stats.num_files
+//                                      << ","
+//                                      << compaction.next_level_output_stats.num_bytes_written
+//                                      << std::endl;
+//        compaction_trace_file_writer_.flush();
+//        mutex_.Unlock();
     }
 
     void DBProfiler::StartTracing() {

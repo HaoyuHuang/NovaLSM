@@ -72,6 +72,7 @@ DEFINE_uint32(cc_rtable_num_servers_scatter_data_blocks, 0,
 DEFINE_uint64(cc_block_cache_mb, 0, "leveldb block cache size in mb");
 DEFINE_uint64(cc_row_cache_mb, 0, "leveldb row cache size in mb");
 
+DEFINE_uint32(cc_num_memtables, 0, "");
 DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint64(cc_sstable_size_mb, 0, "sstable size in mb");
 DEFINE_uint32(cc_log_buf_size, 0, "log buffer size");
@@ -161,6 +162,7 @@ int main(int argc, char *argv[]) {
     NovaCCConfig::cc_config->num_cc_server_workers = FLAGS_cc_num_cc_server_workers;
     NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
     NovaCCConfig::cc_config->num_rdma_compaction_workers = FLAGS_cc_num_rdma_compaction_workers;
+    NovaCCConfig::cc_config->num_memtables = FLAGS_cc_num_memtables;
 
     NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks = FLAGS_cc_rtable_num_servers_scatter_data_blocks;
     NovaConfig::config->log_buf_size = FLAGS_cc_log_buf_size;

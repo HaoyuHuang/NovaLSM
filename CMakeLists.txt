@@ -211,6 +211,8 @@ target_sources(leveldb
         "cc/nova_cc_server.cpp"
         "cc/nova_cc_server.h"
 
+        cc/db_compaction_thread.cpp
+        cc/db_compaction_thread.h
         nova/city_hash.h
         nova/city_hash.cpp
         nova/common.hpp
@@ -294,6 +296,7 @@ target_sources(leveldb
         "${LEVELDB_PUBLIC_INCLUDE_DIR}/table_builder.h"
         "${LEVELDB_PUBLIC_INCLUDE_DIR}/table.h"
         "${LEVELDB_PUBLIC_INCLUDE_DIR}/write_batch.h"
+        "${LEVELDB_PUBLIC_INCLUDE_DIR}/env_bg_thread.h"
         )
 
 if (WIN32)
@@ -311,11 +314,11 @@ else (WIN32)
 endif (WIN32)
 
 # MemEnv is not part of the interface and could be pulled to a separate library.
-target_sources(leveldb
-        PRIVATE
-        "helpers/memenv/memenv.cc"
-        "helpers/memenv/memenv.h"
-        )
+#target_sources(leveldb
+#        PRIVATE
+#        "helpers/memenv/memenv.cc"
+#        "helpers/memenv/memenv.h"
+#        )
 
 target_include_directories(leveldb
         PUBLIC
@@ -565,14 +568,14 @@ target_link_libraries(leveldbutil leveldb)
 #endif (LEVELDB_INSTALL)
 
 
-add_executable(nova_disaggregate_main "nova/nova_disaggregate_main.cpp")
-target_link_libraries(nova_disaggregate_main -lgflags leveldb)
+#add_executable(nova_disaggregate_main "nova/nova_disaggregate_main.cpp")
+#target_link_libraries(nova_disaggregate_main -lgflags leveldb)
 
 add_executable(nova_shared_main "nova/nova_shared_main.cpp")
 target_link_libraries(nova_shared_main -lgflags leveldb)
 
-add_executable(table_main "table/table_main.cc")
-target_link_libraries(table_main -lgflags leveldb)
+#add_executable(table_main "table/table_main.cc")
+#target_link_libraries(table_main -lgflags leveldb)
 
 add_executable(scatter_bench "bench/scatter_bench.cpp")
 target_link_libraries(scatter_bench -lgflags leveldb)

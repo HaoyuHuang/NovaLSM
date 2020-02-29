@@ -22,10 +22,6 @@ namespace nova {
     using namespace std;
     using namespace rdmaio;
 
-    enum ScatterSSTablePolicy {
-        SCATTER_SSTABLE_RANDOM
-    };
-
     class NovaConfig {
     public:
         bool enable_load_data;
@@ -183,10 +179,10 @@ namespace nova {
 
         int block_cache_mb;
         int row_cache_mb;
+        uint32_t num_memtables;
         uint64_t write_buffer_size_mb;
         std::vector<CCFragment *> fragments;
         std::vector<CCFragment *> db_fragment;
-        ScatterSSTablePolicy scatter_sstable_policy;
         int num_rtable_num_servers_scatter_data_blocks;
         static NovaCCConfig *cc_config;
     };

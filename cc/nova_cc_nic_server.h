@@ -17,6 +17,7 @@
 #include "cc/nova_rdma_cc.h"
 #include "leveldb/db.h"
 #include "nova_cc.h"
+#include "cc/db_compaction_thread.h"
 #include "mc/nova_mc_wb_worker.h"
 
 namespace nova {
@@ -32,6 +33,7 @@ namespace nova {
         void Start();
 
         uint64_t throughput = 0;
+
         void VerifyLoad();
 
     private:
@@ -69,7 +71,7 @@ namespace nova {
         std::vector<NovaRDMAComputeComponent *> async_compaction_workers;
 
         std::vector<NovaCCServerAsyncWorker *> cc_server_workers;
-        std::vector<leveldb::NovaCCCompactionThread *> bgs;
+        std::vector<leveldb::EnvBGThread *> bgs;
 
         struct event_base *base;
         int current_conn_worker_id_;
