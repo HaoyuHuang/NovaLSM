@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <deque>
+#include <queue>
 #include <set>
 #include <string>
 #include <leveldb/db_profiler.h>
@@ -168,7 +169,9 @@ namespace leveldb {
 
         void RecordBackgroundError(const Status &s);
 
-        void MaybeScheduleCompaction(bool compact_memtable = false, EnvBGThread*bg_thread = nullptr) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        void MaybeScheduleCompaction(bool compact_memtable = false,
+                                     EnvBGThread *bg_thread = nullptr) EXCLUSIVE_LOCKS_REQUIRED(
+                mutex_);
 
         bool
         BackgroundCompaction(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
@@ -177,10 +180,12 @@ namespace leveldb {
         void CleanupCompaction(CompactionState *compact)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-        Status DoCompactionWork(CompactionState *compact, EnvBGThread *bg_thread)
+        Status
+        DoCompactionWork(CompactionState *compact, EnvBGThread *bg_thread)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-        Status OpenCompactionOutputFile(CompactionState *compact, EnvBGThread *bg_thread);
+        Status OpenCompactionOutputFile(CompactionState *compact,
+                                        EnvBGThread *bg_thread);
 
         Status
         FinishCompactionOutputFile(CompactionState *compact, Iterator *input);
@@ -210,17 +215,19 @@ namespace leveldb {
         // State below is protected by mutex_
         port::Mutex mutex_;
         std::atomic<bool> shutting_down_;
-        bool is_major_compaction_running_ = false;
         port::CondVar background_work_finished_signal_ GUARDED_BY(mutex_);
 
         std::vector<EnvBGThread *> bg_threads_;
 
-        std::vector<MemTable *> active_memtables_;
+        std::vector<MemTable *> active_memtables_ GUARDED_BY(mutex_);
         std::vector<std::mutex *> active_memtable_mutexs_;
 
         std::vector<MemTable *> imms_ GUARDED_BY(
                 mutex_);  // Memtable being compacted
         uint32_t nimms_ = 0;
+        std::queue<uint32_t> available_imms_slots_ GUARDED_BY(
+                mutex_);
+
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
         SnapshotList snapshots_ GUARDED_BY(mutex_);

@@ -6,6 +6,7 @@
 #define STORAGE_LEVELDB_DB_MEMTABLE_H_
 
 #include <string>
+#include <set>
 
 #include "leveldb/db_profiler.h"
 #include "db/dbformat.h"
@@ -39,6 +40,16 @@ namespace leveldb {
 
         // Increase reference count.
         void Ref() { ++refs_; }
+
+        int refcount() {
+            return refs_;
+        }
+
+        void RemoveIfNoRef() {
+            if (refs_ <= 0) {
+                delete this;
+            }
+        }
 
         // Drop reference count.  Delete if no more references exist.
         void Unref() {

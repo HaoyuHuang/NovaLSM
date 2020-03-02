@@ -18,6 +18,7 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <atomic>
 
 #include "db/dbformat.h"
 #include "db/version_edit.h"
@@ -80,7 +81,7 @@ namespace leveldb {
         void AddIterators(const ReadOptions &, std::vector<Iterator *> *iters);
 
         Status Get(const ReadOptions &, const LookupKey &key, std::string *val,
-                   GetStats *stats);
+                   GetStats *stats, bool search_all_l0);
 
         // Adds "stats" into the current state.  Returns true if a new
         // compaction may need to be triggered, false otherwise.
@@ -91,7 +92,7 @@ namespace leveldb {
         // Samples are taken approximately once every config::kReadBytesPeriod
         // bytes.  Returns true if a new compaction may need to be triggered.
         // REQUIRES: lock is held
-        bool RecordReadSample(Slice key);
+//        bool RecordReadSample(Slice key);
 
         // Reference count management (so Versions do not disappear out from
         // under live iterators)
@@ -158,7 +159,7 @@ namespace leveldb {
         //
         // REQUIRES: user portion of internal_key == user_key.
         void ForEachOverlapping(Slice user_key, Slice internal_key, void *arg,
-                                bool (*func)(void *, int, FileMetaData *));
+                                bool (*func)(void *, int, FileMetaData *), bool search_all_l0);
 
         VersionSet *vset_;  // VersionSet to which this Version belongs
         Version *next_;     // Next version in linked list
@@ -227,7 +228,9 @@ namespace leveldb {
         int64_t NumLevelBytes(int level) const;
 
         // Return the last sequence number.
-        uint64_t LastSequence() const { return last_sequence_; }
+        uint64_t LastSequence() const {
+            return last_sequence_.load(std::memory_order_acquire);
+        }
 
         // Set the last sequence number to s.
         void SetLastSequence(uint64_t s) {
@@ -264,9 +267,10 @@ namespace leveldb {
 
         // Create an iterator that reads over the compaction inputs for "*c".
         // The caller should delete the iterator when no longer needed.
-        Iterator *MakeInputIterator(Compaction *c, EnvBGThread* bg_thread);
+        Iterator *MakeInputIterator(Compaction *c, EnvBGThread *bg_thread);
 
-        void AddCompactedInputs(Compaction *c, std::map<uint64_t, FileMetaData>* map);
+        void AddCompactedInputs(Compaction *c,
+                                std::map<uint64_t, FileMetaData> *map);
 
         // Returns true iff some level needs a compaction.
         bool NeedsCompaction() const {
@@ -291,6 +295,7 @@ namespace leveldb {
 
         const char *LevelSummary(LevelSummaryStorage *scratch) const;
 
+        std::atomic_uint_fast64_t last_sequence_;
     private:
         class Builder;
 
@@ -325,7 +330,6 @@ namespace leveldb {
         const InternalKeyComparator icmp_;
         uint64_t next_file_number_;
         uint64_t manifest_file_number_;
-        uint64_t last_sequence_;
         uint64_t log_number_;
         uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
 
@@ -338,6 +342,11 @@ namespace leveldb {
         // Per-level key at which the next compaction at that level should start.
         // Either an empty string, or a valid InternalKey.
         std::string compact_pointer_[config::kNumLevels];
+    };
+
+    enum CompactionType : char {
+        X_LEVEL_COMPACTION = 'a',
+        L0_COMPACTION = 'b'
     };
 
 // A Compaction encapsulates information about a compaction.

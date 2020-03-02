@@ -87,9 +87,15 @@ namespace leveldb {
         std::string DebugString() const;
     };
 
+    enum FileCompactionStatus {
+        NONE = 0,
+        COMPACTING = 1,
+    };
+
     struct FileMetaData {
         FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0),
-                         converted_file_size(0) {}
+                         converted_file_size(0),
+                         compaction_status(FileCompactionStatus::NONE) {}
 
         int refs;
         int allowed_seeks;  // Seeks allowed until compaction
@@ -98,6 +104,7 @@ namespace leveldb {
         uint64_t converted_file_size; // File size in bytes after converted to RTable.
         InternalKey smallest;  // Smallest internal key served by table
         InternalKey largest;   // Largest internal key served by table
+        FileCompactionStatus compaction_status;
 
         std::vector<RTableHandle> data_block_group_handles;
     };

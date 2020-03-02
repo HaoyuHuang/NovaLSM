@@ -140,7 +140,7 @@ namespace leveldb {
             size_t bytes_read = k.size() + iter_->value().size();
             while (bytes_until_read_sampling_ < bytes_read) {
                 bytes_until_read_sampling_ += RandomCompactionPeriod();
-                db_->RecordReadSample(k);
+//                db_->RecordReadSample(k);
             }
             assert(bytes_until_read_sampling_ >= bytes_read);
             bytes_until_read_sampling_ -= bytes_read;

@@ -171,5 +171,4 @@ namespace leveldb {
         }
         return false;
     }
-
 }  // namespace leveldb

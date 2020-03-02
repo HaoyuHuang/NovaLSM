@@ -312,7 +312,8 @@ namespace leveldb {
 
     void
     Version::ForEachOverlapping(Slice user_key, Slice internal_key, void *arg,
-                                bool (*func)(void *, int, FileMetaData *)) {
+                                bool (*func)(void *, int, FileMetaData *),
+                                bool search_all_l0) {
         const Comparator *ucmp = vset_->icmp_.user_comparator();
 
         // Search level-0 in order from newest to oldest.
@@ -325,13 +326,21 @@ namespace leveldb {
                 tmp.push_back(f);
             }
         }
+        bool found_in_l0 = false;
         if (!tmp.empty()) {
             std::sort(tmp.begin(), tmp.end(), NewestFirst);
             for (uint32_t i = 0; i < tmp.size(); i++) {
-                if (!(*func)(arg, 0, tmp[i])) {
-                    return;
+                if ((*func)(arg, 0, tmp[i])) {
+                    found_in_l0 = true;
+                    if (!search_all_l0) {
+                        return;
+                    }
                 }
             }
+        }
+
+        if (found_in_l0) {
+            return;
         }
 
         // Search other levels.
@@ -356,7 +365,8 @@ namespace leveldb {
     }
 
     Status Version::Get(const ReadOptions &options, const LookupKey &k,
-                        std::string *value, GetStats *stats) {
+                        std::string *value, GetStats *stats,
+                        bool search_all_l0) {
         stats->seek_file = nullptr;
         stats->seek_file_level = -1;
 
@@ -434,7 +444,7 @@ namespace leveldb {
         state.saver.value = value;
 
         ForEachOverlapping(state.saver.user_key, state.ikey, &state,
-                           &State::Match);
+                           &State::Match, search_all_l0);
 
         return state.found ? state.s : Status::NotFound(Slice());
     }
@@ -452,43 +462,43 @@ namespace leveldb {
         return false;
     }
 
-    bool Version::RecordReadSample(Slice internal_key) {
-        ParsedInternalKey ikey;
-        if (!ParseInternalKey(internal_key, &ikey)) {
-            return false;
-        }
-
-        struct State {
-            GetStats stats;  // Holds first matching file
-            int matches;
-
-            static bool Match(void *arg, int level, FileMetaData *f) {
-                State *state = reinterpret_cast<State *>(arg);
-                state->matches++;
-                if (state->matches == 1) {
-                    // Remember first match.
-                    state->stats.seek_file = f;
-                    state->stats.seek_file_level = level;
-                }
-                // We can stop iterating once we have a second match.
-                return state->matches < 2;
-            }
-        };
-
-        State state;
-        state.matches = 0;
-        ForEachOverlapping(ikey.user_key, internal_key, &state, &State::Match);
-
-        // Must have at least two matches since we want to merge across
-        // files. But what if we have a single file that contains many
-        // overwrites and deletions?  Should we have another mechanism for
-        // finding such files?
-        if (state.matches >= 2) {
-            // 1MB cost is about 1 seek (see comment in Builder::Apply).
-            return UpdateStats(state.stats);
-        }
-        return false;
-    }
+//    bool Version::RecordReadSample(Slice internal_key) {
+//        ParsedInternalKey ikey;
+//        if (!ParseInternalKey(internal_key, &ikey)) {
+//            return false;
+//        }
+//
+//        struct State {
+//            GetStats stats;  // Holds first matching file
+//            int matches;
+//
+//            static bool Match(void *arg, int level, FileMetaData *f) {
+//                State *state = reinterpret_cast<State *>(arg);
+//                state->matches++;
+//                if (state->matches == 1) {
+//                    // Remember first match.
+//                    state->stats.seek_file = f;
+//                    state->stats.seek_file_level = level;
+//                }
+//                // We can stop iterating once we have a second match.
+//                return state->matches < 2;
+//            }
+//        };
+//
+//        State state;
+//        state.matches = 0;
+//        ForEachOverlapping(ikey.user_key, internal_key, &state, &State::Match);
+//
+//        // Must have at least two matches since we want to merge across
+//        // files. But what if we have a single file that contains many
+//        // overwrites and deletions?  Should we have another mechanism for
+//        // finding such files?
+//        if (state.matches >= 2) {
+//            // 1MB cost is about 1 seek (see comment in Builder::Apply).
+//            return UpdateStats(state.stats);
+//        }
+//        return false;
+//    }
 
     void Version::Ref() { ++refs_; }
 
@@ -1410,10 +1420,8 @@ namespace leveldb {
         } else {
             return nullptr;
         }
-
         c->input_version_ = current_;
         c->input_version_->Ref();
-
         // Files in level 0 may overlap each other, so pick up all overlapping ones
         if (level == 0) {
             InternalKey smallest, largest;
@@ -1425,9 +1433,7 @@ namespace leveldb {
                                            &c->inputs_[0]);
             assert(!c->inputs_[0].empty());
         }
-
         SetupOtherInputs(c);
-
         return c;
     }
 
