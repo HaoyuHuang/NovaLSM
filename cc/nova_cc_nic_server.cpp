@@ -70,8 +70,12 @@ namespace nova {
                 options.max_file_size = NovaConfig::config->sstable_size;
             }
 
+            options.num_memtable_partitions = NovaCCConfig::cc_config->num_memtable_partitions;
             options.num_memtables = NovaCCConfig::cc_config->num_memtables;
-            options.l0_stop_writes_trigger = UINT32_MAX;// options.num_memtables * 6;
+            options.l0_stop_writes_trigger = NovaCCConfig::cc_config->cc_l0_stop_write;
+            if (NovaCCConfig::cc_config->cc_l0_stop_write == 0){
+                options.l0_stop_writes_trigger = UINT32_MAX;
+            }
             options.max_dc_file_size =
                     std::max(options.write_buffer_size, options.max_file_size) +
                     LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;

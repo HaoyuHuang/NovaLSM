@@ -203,7 +203,7 @@ void leveldb_delete(leveldb_t *db, const leveldb_writeoptions_t *options,
 
 void leveldb_write(leveldb_t *db, const leveldb_writeoptions_t *options,
                    leveldb_writebatch_t *batch, char **errptr) {
-    SaveError(errptr, db->rep->Write(options->rep, &batch->rep));
+//    SaveError(errptr, db->rep->Write(options->rep, &batch->rep));
 }
 
 char *leveldb_get(leveldb_t *db, const leveldb_readoptions_t *options,

@@ -55,7 +55,8 @@ namespace leveldb {
 
         Status Delete(const WriteOptions &, const Slice &key) override;
 
-        Status Write(const WriteOptions &options, WriteBatch *updates) override;
+        Status Write(const WriteOptions &options, const Slice &key,
+                     const Slice &value) override;
 
         Status Get(const ReadOptions &options, const Slice &key,
                    std::string *value) override;
@@ -165,13 +166,6 @@ namespace leveldb {
                        VersionEdit *edit, SequenceNumber *max_sequence)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-        Status MakeRoomForWrite(bool force /* compact even if there is room? */,
-                                const WriteOptions &write_options)
-        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
-        WriteBatch *BuildBatchGroup(Writer **last_writer)
-        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
         void RecordBackgroundError(const Status &s);
 
         void MaybeScheduleCompaction(bool compact_memtable = false, EnvBGThread*bg_thread = nullptr) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
@@ -220,18 +214,14 @@ namespace leveldb {
         port::CondVar background_work_finished_signal_ GUARDED_BY(mutex_);
 
         std::vector<EnvBGThread *> bg_threads_;
-        MemTable *mem_;
+
+        std::vector<MemTable *> active_memtables_;
+        std::vector<std::mutex *> active_memtable_mutexs_;
+
         std::vector<MemTable *> imms_ GUARDED_BY(
                 mutex_);  // Memtable being compacted
         uint32_t nimms_ = 0;
-        WritableFile *logfile_;
-        uint64_t logfile_number_ GUARDED_BY(mutex_);
-        log::Writer *log_;
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
-
-        // Queue of writers.
-        std::deque<Writer *> writers_ GUARDED_BY(mutex_);
-        WriteBatch *tmp_batch_ GUARDED_BY(mutex_);
 
         SnapshotList snapshots_ GUARDED_BY(mutex_);
 

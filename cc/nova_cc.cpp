@@ -487,6 +487,7 @@ namespace leveldb {
                                  mem_manager_(mem_manager),
                                  thread_id_(thread_id),
                                  prefetch_all_(prefetch_all) {
+        prefetch_all_ = false;
         RDMA_ASSERT(mem_manager_);
 
         uint32_t server_id = 0;

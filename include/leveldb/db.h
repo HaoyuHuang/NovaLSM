@@ -86,7 +86,8 @@ namespace leveldb {
         // Returns OK on success, non-OK on failure.
         // Note: consider setting options.sync = true.
         virtual Status
-        Write(const WriteOptions &options, WriteBatch *updates) = 0;
+        Write(const WriteOptions &options, const Slice &key,
+              const Slice &value) = 0;
 
         // If the database contains an entry for "key" store the
         // corresponding value in *value and return OK.

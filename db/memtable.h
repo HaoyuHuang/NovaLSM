@@ -21,8 +21,9 @@ namespace leveldb {
 
     enum MemTableState {
         MEMTABLE_INIT = 0,
-        MEMTABLE_FLUSHING = 1,
-        MEMTABLE_FLUSHED = 2,
+        MEMTABLE_FULL = 1,
+        MEMTABLE_FLUSHING = 2,
+        MEMTABLE_FLUSHED = 3,
     };
 
     class MemTable {

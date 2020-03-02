@@ -180,10 +180,14 @@ namespace nova {
         int block_cache_mb;
         int row_cache_mb;
         uint32_t num_memtables;
+        uint32_t num_memtable_partitions;
         uint64_t write_buffer_size_mb;
+        uint32_t cc_l0_stop_write;
         std::vector<CCFragment *> fragments;
         std::vector<CCFragment *> db_fragment;
         int num_rtable_num_servers_scatter_data_blocks;
+
+
         static NovaCCConfig *cc_config;
     };
 

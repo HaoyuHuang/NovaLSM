@@ -1135,11 +1135,11 @@ namespace leveldb {
 
         v->compaction_level_ = best_level;
         v->compaction_score_ = best_score;
-        if (v->files_[0].size() >=
-            static_cast<double>(config::kL0_CompactionTrigger)) {
-            v->compaction_level_ = 0;
-            v->compaction_score_ = 9999;
-        }
+//        if (v->files_[0].size() >=
+//            static_cast<double>(config::kL0_CompactionTrigger)) {
+//            v->compaction_level_ = 0;
+//            v->compaction_score_ = 9999;
+//        }
     }
 
     Status VersionSet::WriteSnapshot(log::Writer *log) {
