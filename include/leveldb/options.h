@@ -85,6 +85,10 @@ namespace leveldb {
 
         uint32_t l0_stop_writes_trigger = 12;
 
+        uint32_t l0_start_consolidate_trigger = 32;
+
+        uint32_t l0_consolidate_group_size = 8;
+
         uint32_t num_memtable_partitions = 1;
 
 
@@ -150,6 +154,8 @@ namespace leveldb {
         size_t l0_sstables_per_group = 8;
 
         bool mc_enable_eager_trim_log_records = false;
+
+
 
         // Compress blocks using the specified compression algorithm.  This
         // parameter can be changed dynamically.

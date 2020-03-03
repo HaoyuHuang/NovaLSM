@@ -775,8 +775,9 @@ namespace leveldb {
             // Move file to next level
             assert(c->num_input_files(0) == 1);
             FileMetaData *f = c->input(0, 0);
-            c->edit()->DeleteFile(c->level(), f->number);
-            c->edit()->AddFile(c->level() + 1, f->number, f->file_size,
+            int level = c->level() == -1 ? 0 : c->level();
+            c->edit()->DeleteFile(level, f->number);
+            c->edit()->AddFile(level + 1, f->number, f->file_size,
                                f->converted_file_size,
                                f->smallest,
                                f->largest, f->data_block_group_handles);
@@ -786,8 +787,8 @@ namespace leveldb {
             }
             VersionSet::LevelSummaryStorage tmp;
             Log(options_.info_log,
-                "Moved #%lld to level-%d %lld bytes %s: %s\n",
-                static_cast<unsigned long long>(f->number), c->level() + 1,
+                "Moved #%lld from level-%d to level-%d %lld bytes %s: %s\n",
+                static_cast<unsigned long long>(f->number), level, level + 1,
                 static_cast<unsigned long long>(f->file_size),
                 status.ToString().c_str(), versions_->LevelSummary(&tmp));
         } else {
@@ -986,10 +987,13 @@ namespace leveldb {
 
         // Add compaction outputs
         compact->compaction->AddInputDeletions(compact->compaction->edit());
-        const int level = compact->compaction->level();
+        const int src_level = compact->compaction->level() == -1 ? 0
+                                                                 : compact->compaction->level();
+        const int dest_level = compact->compaction->level() == -1 ? 0 :
+                               compact->compaction->level() + 1;
         for (size_t i = 0; i < compact->outputs.size(); i++) {
             const CompactionState::Output &out = compact->outputs[i];
-            compact->compaction->edit()->AddFile(level + 1, out.number,
+            compact->compaction->edit()->AddFile(dest_level, out.number,
                                                  out.file_size,
                                                  out.converted_file_size,
                                                  out.smallest, out.largest,
@@ -998,9 +1002,9 @@ namespace leveldb {
         mutex_.Lock();
         Log(options_.info_log, "Compacted %d@%d + %d@%d files => %lld bytes",
             compact->compaction->num_input_files(0),
-            compact->compaction->level(),
+            src_level,
             compact->compaction->num_input_files(1),
-            compact->compaction->level() + 1,
+            dest_level,
             static_cast<long long>(compact->total_bytes));
         return versions_->LogAndApply(compact->compaction->edit(), &mutex_);
     }
@@ -1026,7 +1030,9 @@ namespace leveldb {
                            compact->compaction->level() +
                            1);
 
-        assert(versions_->NumLevelFiles(compact->compaction->level()) > 0);
+        int src_level = compact->compaction->level() == -1 ? 0
+                                                           : compact->compaction->level();
+        assert(versions_->NumLevelFiles(src_level) > 0);
         assert(compact->builder == nullptr);
         assert(compact->outfile == nullptr);
         assert(compact->outputs.empty());
@@ -1168,31 +1174,6 @@ namespace leveldb {
         for (size_t i = 0; i < compact->outputs.size(); i++) {
             stats.bytes_written += compact->outputs[i].file_size;
         }
-
-//        if (db_profiler_) {
-//            CompactionProfiler compaction;
-//            compaction.level = compact->compaction->level();
-//            compaction.output_level = compact->compaction->level() + 1;
-//            compaction.level_stats.num_files = compact->compaction->num_input_files(
-//                    0);
-//            for (int i = 0;
-//                 i < compact->compaction->num_input_files(0); i++) {
-//                compaction.level_stats.num_bytes_read += compact->compaction->input(
-//                        0, i)->file_size;
-//            }
-//
-//            compaction.next_level_stats.num_files = compact->compaction->num_input_files(
-//                    1);
-//            for (int i = 0;
-//                 i < compact->compaction->num_input_files(1); i++) {
-//                compaction.next_level_stats.num_bytes_read += compact->compaction->input(
-//                        1, i)->file_size;
-//            }
-//
-//            compaction.next_level_output_stats.num_files = compact->outputs.size();
-//            compaction.next_level_output_stats.num_bytes_written = stats.bytes_written;
-//            db_profiler_->Trace(compaction);
-//        }
 
         if (status.ok()) {
             status = InstallCompactionResults(compact);

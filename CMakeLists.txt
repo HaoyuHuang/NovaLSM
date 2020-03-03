@@ -132,8 +132,6 @@ target_sources(leveldb
         "db/builder.cc"
         "db/builder.h"
         "db/c.cc"
-        "db/compaction.cc"
-        "db/compaction.h"
         "db/db_impl.cc"
         "db/db_impl.h"
         "db/db_iter.cc"
@@ -245,10 +243,10 @@ target_sources(leveldb
         nova/linked_list.h
         mc/nova_chained_hashtable.cpp
         mc/nova_chained_hashtable.h
-        mc/mc.cpp
-        mc/mc.h
-        mc/worker.cpp
-        mc/worker.h
+#        mc/mc.cpp
+#        mc/mc.h
+#        mc/worker.cpp
+#        mc/worker.h
         log/nova_log.cpp
         log/nova_log.h
         cc/nova_cc_log_writer.cc
@@ -262,12 +260,12 @@ target_sources(leveldb
 
         dc/nova_dc_server.cpp
         dc/nova_dc_server.h
-
-        mc/nova_mc_wb_worker.cpp
-        mc/nova_mc_wb_worker.h
-
-        mc/nova_sstable.cpp
-        mc/nova_sstable.h
+#
+#        mc/nova_mc_wb_worker.cpp
+#        mc/nova_mc_wb_worker.h
+#
+#        mc/nova_sstable.cpp
+#        mc/nova_sstable.h
 
         cc/nova_rtable.cpp
         cc/nova_rtable.h

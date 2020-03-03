@@ -65,6 +65,11 @@ namespace leveldb {
                                const Slice *smallest_user_key,
                                const Slice *largest_user_key);
 
+    struct CompactionPriority {
+        int level;
+        double score;
+    };
+
     class Version {
     public:
         // Lookup the value for key.  If found, store it in *val and
@@ -140,9 +145,7 @@ namespace leveldb {
                   prev_(this),
                   refs_(0),
                   file_to_compact_(nullptr),
-                  file_to_compact_level_(-1),
-                  compaction_score_(-1),
-                  compaction_level_(-1) {}
+                  file_to_compact_level_(-1) {}
 
         Version(const Version &) = delete;
 
@@ -177,8 +180,7 @@ namespace leveldb {
         // Level that should be compacted next and its compaction score.
         // Score < 1 means compaction is not strictly needed.  These fields
         // are initialized by Finalize().
-        double compaction_score_;
-        int compaction_level_;
+        std::vector<CompactionPriority> compaction_levels_;
     };
 
     class VersionSet {
@@ -275,7 +277,7 @@ namespace leveldb {
         // Returns true iff some level needs a compaction.
         bool NeedsCompaction() const {
             Version *v = current_;
-            return (v->compaction_score_ >= 1) ||
+            return (v->compaction_levels_[0].score >= 1) ||
                    (v->file_to_compact_ != nullptr);
         }
 
@@ -303,6 +305,8 @@ namespace leveldb {
 
         friend class Version;
 
+        static bool compareCompactionPriority(CompactionPriority p1, CompactionPriority p2);
+
         bool
         ReuseManifest(const std::string &dscname, const std::string &dscbase);
 
@@ -317,6 +321,8 @@ namespace leveldb {
                        InternalKey *smallest, InternalKey *largest);
 
         void SetupOtherInputs(Compaction *c);
+
+        void SetupOtherInputsForL0Consolidation(Compaction *c);
 
         // Save current contents to *log
         Status WriteSnapshot(log::Writer *log);
@@ -344,12 +350,7 @@ namespace leveldb {
         std::string compact_pointer_[config::kNumLevels];
     };
 
-    enum CompactionType : char {
-        X_LEVEL_COMPACTION = 'a',
-        L0_COMPACTION = 'b'
-    };
-
-// A Compaction encapsulates information about a compaction.
+    // A Compaction encapsulates information about a compaction.
     class Compaction {
     public:
         ~Compaction();
