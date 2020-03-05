@@ -13,12 +13,19 @@ namespace leveldb {
         sem_init(&signal, 0, 0);
     }
 
-    void NovaCCCompactionThread::Schedule(const CompactionTask &task) {
+    bool NovaCCCompactionThread::Schedule(const CompactionTask &task) {
+        bool scheduled = false;
         background_work_mutex_.Lock();
-        background_work_queue_.emplace(task);
-        num_tasks_ += 1;
+        if (background_work_queue_.empty()) {
+            scheduled = true;
+            background_work_queue_.emplace(task);
+            num_tasks_ += 1;
+        }
         background_work_mutex_.Unlock();
-        sem_post(&signal);
+        if (scheduled) {
+            sem_post(&signal);
+        }
+        return scheduled;
     }
 
     bool NovaCCCompactionThread::IsInitialized() {
@@ -50,7 +57,7 @@ namespace leveldb {
             background_work_queue_.pop();
             background_work_mutex_.Unlock();
             auto db = reinterpret_cast<DB *>(task.db);
-            db->PerformCompaction(this);
+            db->PerformCompaction(this, task);
 
             background_work_mutex_.Lock();
             num_tasks_ -= 1;

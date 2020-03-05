@@ -390,6 +390,7 @@ namespace leveldb {
                                   t.meta.converted_file_size,
                                   t.meta.smallest,
                                   t.meta.largest,
+                                  FileCompactionStatus::NONE,
                                   t.meta.data_block_group_handles);
                 }
 

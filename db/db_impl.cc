@@ -154,7 +154,6 @@ namespace leveldb {
               db_lock_(nullptr),
               shutting_down_(false),
               background_work_finished_signal_(&mutex_),
-              nimms_(0),
               seed_(0),
               manual_compaction_(nullptr),
               versions_(new VersionSet(dbname_, &options_, table_cache_,
@@ -530,58 +529,16 @@ namespace leveldb {
         return status;
     }
 
-    void DBImpl::InstallMemTable(leveldb::EnvBGThread *bg_thread) {
-        mutex_.AssertHeld();
-        VersionEdit edit;
-        Version *base = versions_->current();
-
-        for (int i = 0; i < imms_.size(); i++) {
-            if (imms_[i] == nullptr ||
-                imms_[i]->state() == MemTableState::MEMTABLE_FLUSHED) {
-                continue;
-            }
-
-            MemTable *imm = imms_[i];
-            FileMetaData &meta = imm->meta();
-            Log(options_.info_log, "Level-0 table #%llu: %lld bytes",
-                (unsigned long long) meta.number,
-                (unsigned long long) meta.file_size);
-            pending_outputs_.erase(meta.number);
-
-            // Note that if file_size is zero, the file has been deleted and
-            // should not be added to the manifest.
-            int level = 0;
-            if (meta.file_size > 0) {
-                const Slice min_user_key = meta.smallest.user_key();
-                const Slice max_user_key = meta.largest.user_key();
-                level = base->PickLevelForMemTableOutput(min_user_key,
-                                                         max_user_key);
-                edit.AddFile(level, meta.number, meta.file_size,
-                             meta.converted_file_size, meta.smallest,
-                             meta.largest, meta.data_block_group_handles);
-            }
-
-            CompactionStats stats;
-            stats.micros = env_->NowMicros() - 0;
-            stats.bytes_written = meta.file_size;
-            stats_[level].Add(stats);
-
-            imm->Unref();
-            imms_[i] = nullptr;
-            available_imms_slots_.push(i);
-        }
-        // Replace immutable memtable with the generated Table
-        edit.SetPrevLogNumber(0);
-        Status s = versions_->LogAndApply(&edit, &mutex_);
-//        DeleteObsoleteFiles(bg_thread);
-    }
-
     bool DBImpl::CompactMemTable(EnvBGThread *bg_thread) {
         mutex_.AssertHeld();
+        if (imms_.empty() || versions_->current()->NumFiles(0) + imms_.size() -
+                             nimms_wait_for_compaction_ >=
+                             options_.l0_stop_writes_trigger) {
+            return false;
+        }
         MemTable *imm = nullptr;
         for (int i = 0; i < imms_.size(); i++) {
-            if (imms_[i] != nullptr &&
-                imms_[i]->state() == MemTableState::MEMTABLE_FULL) {
+            if (imms_[i]->state() == MemTableState::MEMTABLE_FULL) {
                 imm = imms_[i];
                 break;
             }
@@ -589,13 +546,13 @@ namespace leveldb {
         if (!imm) {
             return false;
         }
-
+        nimms_wait_for_compaction_ -= 1;
         imm->set_state(MemTableState::MEMTABLE_FLUSHING);
         FileMetaData &meta = imm->meta();
         meta.number = versions_->NewFileNumber();
         pending_outputs_.insert(meta.number);
-        nimms_ -= 1;
-        Log(options_.info_log, "Level-0 table #%llu: started",
+        Log(options_.info_log, "bg[%lu]: Level-0 table #%llu: started",
+            bg_thread->thread_id(),
             (unsigned long long) meta.number);
 
         Status s;
@@ -610,7 +567,53 @@ namespace leveldb {
             mutex_.Lock();
             imm->set_state(MemTableState::MEMTABLE_FLUSHED);
         }
-        InstallMemTable(bg_thread);
+
+        {
+            VersionEdit edit;
+            Version *base = versions_->current();
+            auto it = imms_.begin();
+            while (it != imms_.end()) {
+                MemTable *imm = *it;
+                if (imm->state() != MemTableState::MEMTABLE_FLUSHED) {
+                    it++;
+                    continue;
+                }
+                FileMetaData &meta = imm->meta();
+                Log(options_.info_log,
+                    "bg[%lu]: Level-0 table #%llu: %lld bytes",
+                    bg_thread->thread_id(),
+                    (unsigned long long) meta.number,
+                    (unsigned long long) meta.file_size);
+                pending_outputs_.erase(meta.number);
+
+                // Note that if file_size is zero, the file has been deleted and
+                // should not be added to the manifest.
+                int level = 0;
+                if (meta.file_size > 0) {
+                    const Slice min_user_key = meta.smallest.user_key();
+                    const Slice max_user_key = meta.largest.user_key();
+                    level = base->PickLevelForMemTableOutput(min_user_key,
+                                                             max_user_key);
+                    edit.AddFile(level, meta.number, meta.file_size,
+                                 meta.converted_file_size, meta.smallest,
+                                 meta.largest, FileCompactionStatus::NONE,
+                                 meta.data_block_group_handles);
+                }
+
+                CompactionStats stats;
+                stats.micros = env_->NowMicros() - 0;
+                stats.bytes_written = meta.file_size;
+                stats_[level].Add(stats);
+
+                imm->Unref();
+                it = imms_.erase(it);
+            }
+            // Replace immutable memtable with the generated Table
+            edit.SetPrevLogNumber(0);
+            Status s = versions_->LogAndApply(&edit, &mutex_);
+            RDMA_ASSERT(s.ok());
+//        DeleteObsoleteFiles(bg_thread);
+        }
         return true;
     }
 
@@ -697,13 +700,13 @@ namespace leveldb {
         }
     }
 
-    void DBImpl::MaybeScheduleCompaction(bool compact_memtable,
-                                         EnvBGThread *bg_thread) {
+    void DBImpl::MaybeScheduleCompaction(uint32_t thread_id) {
         EnvBGThread *bg = nullptr;
-        if (compact_memtable) {
+        if (nimms_wait_for_compaction_ > 0 ||
+            versions_->NeedsCompaction()) {
             uint32_t min_tasks = 99999;
             uint32_t min_bg_id = 0;
-            for (int i = 1; i < bg_threads_.size(); i++) {
+            for (int i = 0; i < bg_threads_.size(); i++) {
                 uint32_t tasks = bg_threads_[i]->num_running_tasks();
                 if (tasks < min_tasks) {
                     min_tasks = tasks;
@@ -711,41 +714,61 @@ namespace leveldb {
                 }
             }
             bg = bg_threads_[min_bg_id];
-        } else if (versions_->NeedsCompaction()) {
-            bg = bg_threads_[0];
         }
 
         CompactionTask task = {};
         task.db = this;
         if (bg) {
-            Log(options_.info_log, "BG: Schedule compaction.");
-            bg->Schedule(task);
+            if (bg->Schedule(task)) {
+                Log(options_.info_log,
+                    "t[%u]: Schedule compaction on thread %lu. %u",
+                    thread_id, bg->thread_id(), nimms_wait_for_compaction_);
+            }
             return;
         }
     }
 
-    void DBImpl::PerformCompaction(leveldb::EnvBGThread *bg_thread) {
-        bool schedule_one_more = false;
+    void DBImpl::PerformCompaction(leveldb::EnvBGThread *bg_thread,
+                                   const CompactionTask &task) {
         MutexLock l(&mutex_);
+        bool schedule = false;
         if (shutting_down_.load(std::memory_order_acquire)) {
             // No more background work when shutting down.
         } else if (!bg_error_.ok()) {
             // No more background work after a background error.
         } else {
-            schedule_one_more = BackgroundCompaction(bg_thread);
+            bool compacted = BackgroundCompaction(bg_thread);
+            if (compacted) {
+                versions_->LevelSummary(bg_thread->thread_id());
+                schedule = true;
+            }
+
+            if (nimms_wait_for_compaction_ > 0 &&
+                versions_->current()->NumFiles(0) + imms_.size() -
+                nimms_wait_for_compaction_ <
+                options_.l0_stop_writes_trigger) {
+                schedule = true;
+            }
         }
 
-        // Previous compaction may have produced too many files in a level,
-        // so reschedule another compaction if needed.
-//        if (schedule_one_more) {
-        MaybeScheduleCompaction(false, bg_thread);
-//        }
-        background_work_finished_signal_.SignalAll();
+        if (schedule) {
+            MaybeScheduleCompaction(bg_thread->thread_id());
+        }
+
+        if (imms_.size() < options_.num_memtables - 1 ||
+            (versions_->NumLevelFiles(0) <
+             options_.l0_stop_writes_trigger &&
+             options_.l0_stop_writes_trigger != UINT32_MAX)) {
+            background_work_finished_signal_.SignalAll();
+        }
     }
 
     bool DBImpl::BackgroundCompaction(EnvBGThread *bg_thread) {
         mutex_.AssertHeld();
-        if (CompactMemTable(bg_thread)) {
+        if (!versions_->NeedsCompaction()) {
+            if (CompactMemTable(bg_thread)) {
+                return true;
+            }
             return false;
         }
         Compaction *c;
@@ -765,32 +788,40 @@ namespace leveldb {
                 (m->end ? m->end->DebugString().c_str() : "(end)"),
                 (m->done ? "(end)" : manual_end.DebugString().c_str()));
         } else {
-            c = versions_->PickCompaction();
+            c = versions_->PickCompaction(bg_thread->thread_id());
         }
 
         Status status;
         if (c == nullptr) {
             // Nothing to do
-        } else if (!is_manual && c->IsTrivialMove()) {
+            if (CompactMemTable(bg_thread)) {
+                return true;
+            }
+            return false;
+        }
+        if (!is_manual && c->IsTrivialMove()) {
             // Move file to next level
+            assert(c->level() >= 0);
             assert(c->num_input_files(0) == 1);
+            assert(c->num_input_files(1) == 0);
             FileMetaData *f = c->input(0, 0);
             int level = c->level() == -1 ? 0 : c->level();
             c->edit()->DeleteFile(level, f->number);
             c->edit()->AddFile(level + 1, f->number, f->file_size,
                                f->converted_file_size,
                                f->smallest,
-                               f->largest, f->data_block_group_handles);
+                               f->largest, FileCompactionStatus::NONE,
+                               f->data_block_group_handles);
             status = versions_->LogAndApply(c->edit(), &mutex_);
             if (!status.ok()) {
                 RecordBackgroundError(status);
             }
-            VersionSet::LevelSummaryStorage tmp;
             Log(options_.info_log,
-                "Moved #%lld from level-%d to level-%d %lld bytes %s: %s\n",
-                static_cast<unsigned long long>(f->number), level, level + 1,
+                "Moved #%lld@%d to level-%d %lld bytes %s\n",
+                static_cast<unsigned long long>(f->number),
+                c->level(), c->level() + 1,
                 static_cast<unsigned long long>(f->file_size),
-                status.ToString().c_str(), versions_->LevelSummary(&tmp));
+                status.ToString().c_str());
         } else {
             CompactionState *compact = new CompactionState(c);
             status = DoCompactionWork(compact, bg_thread);
@@ -828,7 +859,7 @@ namespace leveldb {
             }
             manual_compaction_ = nullptr;
         }
-        return true;
+        return true;;
     }
 
     void DBImpl::CleanupCompaction(CompactionState *compact) {
@@ -961,7 +992,8 @@ namespace leveldb {
         return s;
     }
 
-    Status DBImpl::InstallCompactionResults(CompactionState *compact) {
+    Status DBImpl::InstallCompactionResults(CompactionState *compact,
+                                            uint32_t thread_id) {
         // Wait for all writes to complete.
 //        for (int i = 0; i < compact->output_files.size(); i++) {
 //            CompactionState::Output &output = compact->outputs[i];
@@ -991,16 +1023,23 @@ namespace leveldb {
                                                                  : compact->compaction->level();
         const int dest_level = compact->compaction->level() == -1 ? 0 :
                                compact->compaction->level() + 1;
+        FileCompactionStatus status = FileCompactionStatus::NONE;
+        if (compact->compaction->level() == -1) {
+            status = FileCompactionStatus::COMPACTED;
+        }
         for (size_t i = 0; i < compact->outputs.size(); i++) {
             const CompactionState::Output &out = compact->outputs[i];
             compact->compaction->edit()->AddFile(dest_level, out.number,
                                                  out.file_size,
                                                  out.converted_file_size,
                                                  out.smallest, out.largest,
+                                                 status,
                                                  out.data_block_group_handles);
         }
         mutex_.Lock();
-        Log(options_.info_log, "Compacted %d@%d + %d@%d files => %lld bytes",
+        Log(options_.info_log,
+            "bg[%u]: Compacted %d@%d + %d@%d files => %lld bytes",
+            thread_id,
             compact->compaction->num_input_files(0),
             src_level,
             compact->compaction->num_input_files(1),
@@ -1014,21 +1053,22 @@ namespace leveldb {
         const uint64_t start_micros = env_->NowMicros();
         int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
 
-        Log(options_.info_log, "Compacting %d@%d + %d@%d files",
+        Log(options_.info_log, "bg[%lu] Compacting %d@%d + %d@%d files",
+            bg_thread->thread_id(),
             compact->compaction->num_input_files(0),
             compact->compaction->level(),
             compact->compaction->num_input_files(1),
             compact->compaction->level() + 1);
 
-        RDMA_LOG(rdmaio::DEBUG)
-            << fmt::format("!!!!!!!!!!!!!!!!!Compacting {}@{} + {}@{} files",
-                           compact->compaction->num_input_files(
-                                   0),
-                           compact->compaction->level(),
-                           compact->compaction->num_input_files(
-                                   1),
-                           compact->compaction->level() +
-                           1);
+        //        RDMA_LOG(rdmaio::DEBUG)
+//            << fmt::format("!!!!!!!!!!!!!!!!!Compacting {}@{} + {}@{} files",
+//                           compact->compaction->num_input_files(
+//                                   0),
+//                           compact->compaction->level(),
+//                           compact->compaction->num_input_files(
+//                                   1),
+//                           compact->compaction->level() +
+//                           1);
 
         int src_level = compact->compaction->level() == -1 ? 0
                                                            : compact->compaction->level();
@@ -1047,7 +1087,6 @@ namespace leveldb {
 
         Iterator *input = versions_->MakeInputIterator(compact->compaction,
                                                        bg_thread);
-
         input->SeekToFirst();
         Status status;
         ParsedInternalKey ikey;
@@ -1057,16 +1096,16 @@ namespace leveldb {
         while (input->Valid() &&
                !shutting_down_.load(std::memory_order_acquire)) {
             // Prioritize immutable compaction work
-            if (nimms_ > 0) {
-                const uint64_t imm_start = env_->NowMicros();
-                mutex_.Lock();
-                if (CompactMemTable(bg_thread)) {
-                    // Wake up MakeRoomForWrite() if necessary.
-                    background_work_finished_signal_.SignalAll();
-                }
-                mutex_.Unlock();
-                imm_micros += (env_->NowMicros() - imm_start);
-            }
+//            if (nimms_ > 0) {
+//                const uint64_t imm_start = env_->NowMicros();
+//                mutex_.Lock();
+//                if (CompactMemTable(bg_thread)) {
+//                    // Wake up MakeRoomForWrite() if necessary.
+//                    background_work_finished_signal_.SignalAll();
+//                }
+//                mutex_.Unlock();
+//                imm_micros += (env_->NowMicros() - imm_start);
+//            }
 
             Slice key = input->key();
             if (compact->compaction->ShouldStopBefore(key) &&
@@ -1176,21 +1215,17 @@ namespace leveldb {
         }
 
         if (status.ok()) {
-            status = InstallCompactionResults(compact);
+            status = InstallCompactionResults(compact, bg_thread->thread_id());
         }
         if (!status.ok()) {
             RecordBackgroundError(status);
         }
         stats_[compact->compaction->level() + 1].Add(stats);
         versions_->AddCompactedInputs(compact->compaction, &compacted_tables_);
-        VersionSet::LevelSummaryStorage tmp;
-        Log(options_.info_log, "compacted to: %s",
-            versions_->LevelSummary(&tmp));
         return status;
     }
 
     namespace {
-
         struct IterState {
             port::Mutex *const mu;
             Version *const version
@@ -1265,6 +1300,7 @@ namespace leveldb {
     Status DBImpl::Get(const ReadOptions &options, const Slice &key,
                        std::string *value) {
         Status s;
+        std::string tmp;
         MutexLock l(&mutex_);
         SequenceNumber snapshot;
         if (options.snapshot != nullptr) {
@@ -1299,8 +1335,9 @@ namespace leveldb {
             bool search_all = options_.num_memtable_partitions > 1;
             LookupKey lkey(key, snapshot);
             for (auto it = mems.begin(); it != mems.end(); it++) {
-                if ((*it)->Get(lkey, value, &s)) {
+                if ((*it)->Get(lkey, &tmp, &s)) {
                     found = true;
+                    *value = tmp;
                     if (!search_all) {
                         break;
                     }
@@ -1309,7 +1346,8 @@ namespace leveldb {
             if (!found && !imms.empty()) {
                 // search in reverse order.
                 for (auto it = imms.rbegin(); it != imms.rend(); it++) {
-                    if (*it != nullptr && (*it)->Get(lkey, value, &s)) {
+                    if (*it != nullptr && (*it)->Get(lkey, &tmp, &s)) {
+                        *value = tmp;
                         found = true;
                         if (!search_all) {
                             break;
@@ -1318,15 +1356,18 @@ namespace leveldb {
                 }
             }
             if (!found) {
-                s = current->Get(options, lkey, value, &stats, search_all);
+                s = current->Get(options, lkey, &tmp, &stats, search_all);
+                if (s.ok()) {
+                    *value = tmp;
+                }
                 have_stat_update = true;
             }
             mutex_.Lock();
         }
 
-        if (have_stat_update && current->UpdateStats(stats)) {
-            MaybeScheduleCompaction();
-        }
+//        if (have_stat_update && current->UpdateStats(stats)) {
+//            MaybeScheduleCompaction();
+//        }
         for (auto mem : mems) {
             mem->Unref();
         }
@@ -1414,7 +1455,6 @@ namespace leveldb {
                          const Slice &val) {
         uint64_t last_sequence = versions_->last_sequence_.fetch_add(1,
                                                                      std::memory_order_relaxed);
-
         uint32_t partition_id = last_sequence % active_memtables_.size();
         active_memtable_mutexs_[partition_id]->lock();
         MemTable *table = active_memtables_[partition_id];
@@ -1427,25 +1467,22 @@ namespace leveldb {
 
         // Table is full.
         mutex_.Lock();
-        if (available_imms_slots_.size() > 0 &&
+        if (imms_.size() < options_.num_memtables - 1 &&
             versions_->NumLevelFiles(0) <
             options_.l0_stop_writes_trigger) {
             if (table->state() == MemTableState::MEMTABLE_INIT) {
                 table->set_state(MemTableState::MEMTABLE_FULL);
-                uint32_t available_slot = available_imms_slots_.front();
-                available_imms_slots_.pop();
-                imms_[available_slot] = table;
-
+                imms_.push_back(table);
+                nimms_wait_for_compaction_ += 1;
                 table = new MemTable(internal_comparator_, db_profiler_);
                 table->Ref();
                 active_memtables_[partition_id] = table;
             }
             table = active_memtables_[partition_id];
             mutex_.Unlock();
-
             table->Add(last_sequence, ValueType::kTypeValue, key, val);
             active_memtable_mutexs_[partition_id]->unlock();
-            MaybeScheduleCompaction(true);
+            MaybeScheduleCompaction(options.thread_id + 100);
             return Status::OK();
         }
 
@@ -1454,8 +1491,9 @@ namespace leveldb {
         bool wait = false;
         while (true) {
             mutex_.AssertHeld();
-            if (available_imms_slots_.empty()) {
-                // We have filled up the current memtable, but the previous
+//            MaybeScheduleCompaction();
+            if (imms_.size() >= options_.num_memtables - 1) {
+                // We have filled up all memtables, but the previous
                 // one is still being compacted, so we wait.
                 Log(options_.info_log,
                     "Current memtable full; Make room waiting...\n");
@@ -1476,25 +1514,28 @@ namespace leveldb {
             }
         }
 
-        assert(available_imms_slots_.size() > 0 &&
+        assert(imms_.size() < options_.num_memtables - 1 &&
                versions_->NumLevelFiles(0) <
                options_.l0_stop_writes_trigger);
+        mutex_.Unlock();
+
+        active_memtable_mutexs_[partition_id]->lock();
+        mutex_.Lock();
+        table = active_memtables_[partition_id];
+
         if (table->state() == MemTableState::MEMTABLE_INIT) {
             table->set_state(MemTableState::MEMTABLE_FULL);
-            uint32_t available_slot = available_imms_slots_.front();
-            available_imms_slots_.pop();
-            imms_[available_slot] = table;
+            imms_.push_back(table);
+            nimms_wait_for_compaction_ += 1;
 
             table = new MemTable(internal_comparator_, db_profiler_);
             table->Ref();
             active_memtables_[partition_id] = table;
         }
-        table = active_memtables_[partition_id];
         mutex_.Unlock();
-        active_memtable_mutexs_[partition_id]->lock();
         table->Add(last_sequence, ValueType::kTypeValue, key, val);
         active_memtable_mutexs_[partition_id]->unlock();
-        MaybeScheduleCompaction(true);
+        MaybeScheduleCompaction(options.thread_id + 100);
         return Status::OK();
     }
 
@@ -1549,6 +1590,9 @@ namespace leveldb {
                 total_usage += mem->ApproximateMemoryUsage();
             }
             for (auto imm : imms_) {
+                if (!imm) {
+                    continue;
+                }
                 total_usage += imm->ApproximateMemoryUsage();
             }
             char buf[50];
@@ -1623,11 +1667,6 @@ namespace leveldb {
                     table->Ref();
                     impl->active_memtables_.push_back(table);
                     impl->active_memtable_mutexs_.push_back(new std::mutex);
-                }
-                impl->imms_.resize(options.num_memtables - 1);
-                impl->nimms_ = 0;
-                for (int i = 0; i < options.num_memtables - 1; i++) {
-                    impl->available_imms_slots_.push(i);
                 }
             }
         }

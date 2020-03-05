@@ -90,6 +90,7 @@ namespace leveldb {
     enum FileCompactionStatus {
         NONE = 0,
         COMPACTING = 1,
+        COMPACTED = 2
     };
 
     struct FileMetaData {

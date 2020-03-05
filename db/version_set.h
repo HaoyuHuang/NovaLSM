@@ -132,6 +132,8 @@ namespace leveldb {
 
         FileMetaData *file_meta(uint64_t fn);
 
+        void UpdateScore(Compaction *c, const Options &options);
+
     private:
         friend class Compaction;
 
@@ -162,7 +164,8 @@ namespace leveldb {
         //
         // REQUIRES: user portion of internal_key == user_key.
         void ForEachOverlapping(Slice user_key, Slice internal_key, void *arg,
-                                bool (*func)(void *, int, FileMetaData *), bool search_all_l0);
+                                bool (*func)(void *, int, FileMetaData *),
+                                bool search_all_l0);
 
         VersionSet *vset_;  // VersionSet to which this Version belongs
         Version *next_;     // Next version in linked list
@@ -172,6 +175,7 @@ namespace leveldb {
         // List of files per level
         std::vector<FileMetaData *> files_[config::kNumLevels];
         std::map<uint64_t, FileMetaData *> fn_files_;
+        std::set<uint64_t> skip_tables_for_compaction_;
 
         // Next file to compact based on seek stats.
         FileMetaData *file_to_compact_;
@@ -254,7 +258,7 @@ namespace leveldb {
         // Returns nullptr if there is no compaction to be done.
         // Otherwise returns a pointer to a heap-allocated object that
         // describes the compaction.  Caller should delete the result.
-        Compaction *PickCompaction();
+        Compaction *PickCompaction(uint32_t thread_id);
 
         // Return a compaction object for compacting the range [begin,end] in
         // the specified level.  Returns nullptr if there is nothing in that
@@ -277,8 +281,7 @@ namespace leveldb {
         // Returns true iff some level needs a compaction.
         bool NeedsCompaction() const {
             Version *v = current_;
-            return (v->compaction_levels_[0].score >= 1) ||
-                   (v->file_to_compact_ != nullptr);
+            return (v->compaction_levels_[0].score >= 1);
         }
 
         // Add all files listed in any live version to *live.
@@ -295,7 +298,7 @@ namespace leveldb {
             char buffer[100];
         };
 
-        const char *LevelSummary(LevelSummaryStorage *scratch) const;
+        const char *LevelSummary(uint32_t thread_id) const;
 
         std::atomic_uint_fast64_t last_sequence_;
     private:
@@ -305,7 +308,8 @@ namespace leveldb {
 
         friend class Version;
 
-        static bool compareCompactionPriority(CompactionPriority p1, CompactionPriority p2);
+        static bool
+        compareCompactionPriority(CompactionPriority p1, CompactionPriority p2);
 
         bool
         ReuseManifest(const std::string &dscname, const std::string &dscbase);

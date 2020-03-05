@@ -13,6 +13,7 @@
 #include "leveldb/db_types.h"
 
 namespace leveldb {
+
     struct CompactionTask {
         void *db;
     };
@@ -25,7 +26,7 @@ namespace leveldb {
         // added to the same Env may run concurrently in different threads.
         // I.e., the caller may not assume that background work items are
         // serialized.
-        virtual void Schedule(const CompactionTask &task) = 0;
+        virtual bool Schedule(const CompactionTask &task) = 0;
 
         virtual CCClient *dc_client() = 0;
 

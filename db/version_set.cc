@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include <fmt/core.h>
 #include "nova/logging.hpp"
 
 #include "db/filename.h"
@@ -40,7 +41,7 @@ namespace leveldb {
         return 25 * TargetFileSize(options);
     }
 
-    static double MaxBytesForLevel(const Options *options, int level) {
+    static double MaxBytesForLevel(const Options &options, int level) {
         // Note: the result for level zero is not really used since we set
         // the level-0 compaction threshold based on number of files.
 
@@ -330,7 +331,7 @@ namespace leveldb {
         if (!tmp.empty()) {
             std::sort(tmp.begin(), tmp.end(), NewestFirst);
             for (uint32_t i = 0; i < tmp.size(); i++) {
-                if ((*func)(arg, 0, tmp[i])) {
+                if (!(*func)(arg, 0, tmp[i])) {
                     found_in_l0 = true;
                     if (!search_all_l0) {
                         return;
@@ -759,7 +760,9 @@ namespace leveldb {
                          base_iter != bpos; ++base_iter) {
                         MaybeAddFile(v, level, *base_iter);
                     }
-
+                    RDMA_ASSERT(added_file->compaction_status !=
+                                FileCompactionStatus::COMPACTING)
+                        << fmt::format("{}@{}", added_file->number, level);
                     MaybeAddFile(v, level, added_file);
                 }
 
@@ -801,6 +804,8 @@ namespace leveldb {
                 }
                 f->refs++;
                 files->push_back(f);
+                RDMA_ASSERT(v->fn_files_.find(f->number) == v->fn_files_.end())
+                    << fmt::format("{}@{}", f->number, level);
                 v->fn_files_[f->number] = f;
             }
         }
@@ -874,41 +879,44 @@ namespace leveldb {
         }
         Finalize(v);
 
+        AppendVersion(v);
+        log_number_ = edit->log_number_;
+        prev_log_number_ = edit->prev_log_number_;
+        return Status::OK();
+
         // Initialize new descriptor log file if necessary by creating
         // a temporary file that contains a snapshot of the current version.
-        std::string new_manifest_file;
-        Status s;
-        if (descriptor_log_ == nullptr) {
-            // No reason to unlock *mu here since we only hit this path in the
-            // first call to LogAndApply (when opening the database).
-            assert(descriptor_file_ == nullptr);
-            new_manifest_file = DescriptorFileName(dbname_,
-                                                   manifest_file_number_);
-            edit->SetNextFile(next_file_number_);
-            s = env_->NewWritableFile(new_manifest_file, {
-                    .level = -1
-            }, &descriptor_file_);
-            if (s.ok()) {
-                descriptor_log_ = new log::Writer(descriptor_file_);
-                s = WriteSnapshot(descriptor_log_);
-            }
-        }
-
-        // Install the new version
-        if (s.ok()) {
-            AppendVersion(v);
-            log_number_ = edit->log_number_;
-            prev_log_number_ = edit->prev_log_number_;
-        } else {
-            delete v;
-            if (!new_manifest_file.empty()) {
-                delete descriptor_log_;
-                delete descriptor_file_;
-                descriptor_log_ = nullptr;
-                descriptor_file_ = nullptr;
-                env_->DeleteFile(new_manifest_file);
-            }
-        }
+//        std::string new_manifest_file;
+//        Status s;
+//        if (descriptor_log_ == nullptr) {
+//            // No reason to unlock *mu here since we only hit this path in the
+//            // first call to LogAndApply (when opening the database).
+//            assert(descriptor_file_ == nullptr);
+//            new_manifest_file = DescriptorFileName(dbname_,
+//                                                   manifest_file_number_);
+//            edit->SetNextFile(next_file_number_);
+//            s = env_->NewWritableFile(new_manifest_file, {
+//                    .level = -1
+//            }, &descriptor_file_);
+//            if (s.ok()) {
+//                descriptor_log_ = new log::Writer(descriptor_file_);
+//                s = WriteSnapshot(descriptor_log_);
+//            }
+//        }
+//
+//        // Install the new version
+//        if (s.ok()) {
+//
+//        } else {
+//            delete v;
+//            if (!new_manifest_file.empty()) {
+//                delete descriptor_log_;
+//                delete descriptor_file_;
+//                descriptor_log_ = nullptr;
+//                descriptor_file_ = nullptr;
+//                env_->DeleteFile(new_manifest_file);
+//            }
+//        }
 
         // Unlock during expensive MANIFEST log write
 //        {
@@ -936,7 +944,7 @@ namespace leveldb {
 //
 //            mu->Lock();
 //        }
-        return s;
+//        return s;
     }
 
     Status VersionSet::Recover(bool *save_manifest) {
@@ -1113,6 +1121,23 @@ namespace leveldb {
         return p1.score > p2.score;
     }
 
+    void Version::UpdateScore(leveldb::Compaction *c, const Options &options) {
+        int level = c->level();
+        for (int i = 0; i < compaction_levels_.size(); i++) {
+            CompactionPriority &p = compaction_levels_[i];
+            if (p.level == level) {
+                if (level == 0) {
+                    p.score -=
+                            c->inputs_[0].size() /
+                            static_cast<double>(config::kL0_CompactionTrigger);
+                } else {
+                    p.score -= c->inputs_[0].size() * options.max_file_size /
+                               MaxBytesForLevel(options, level);
+                }
+            }
+        }
+    }
+
     void VersionSet::Finalize(Version *v) {
         // Precomputed best level for next compaction
         int best_level = -1;
@@ -1139,7 +1164,7 @@ namespace leveldb {
                 const uint64_t level_bytes = TotalFileSize(v->files_[level]);
                 score =
                         static_cast<double>(level_bytes) /
-                        MaxBytesForLevel(options_, level);
+                        MaxBytesForLevel(*options_, level);
             }
             CompactionPriority priority = {};
             priority.level = level;
@@ -1150,12 +1175,23 @@ namespace leveldb {
                 best_score = score;
             }
         }
-        if (v->files_[0].size() > options_->l0_start_consolidate_trigger) {
-            CompactionPriority priority = {};
-            priority.level = -1;
-            priority.score = 999999;
-            v->compaction_levels_.push_back(priority);
-        }
+//        CompactionPriority priority = {};
+//        priority.level = -1;
+//        priority.score = 0;
+//        if (options_->num_memtable_partitions > 1 &&
+//            v->files_[0].size() > options_->l0_start_consolidate_trigger) {
+//            uint32_t uncompacted_l0 = 0;
+//            for (int i = 0; i < v->files_[0].size(); i++) {
+//                if (v->files_[0][i]->compaction_status ==
+//                    FileCompactionStatus::NONE) {
+//                    uncompacted_l0++;
+//                }
+//            }
+//            if (uncompacted_l0 > 0) {
+//                priority.score = 999999;
+//            }
+//        }
+//        v->compaction_levels_.push_back(priority);
         std::sort(v->compaction_levels_.begin(), v->compaction_levels_.end(),
                   compareCompactionPriority);
     }
@@ -1183,7 +1219,8 @@ namespace leveldb {
                 const FileMetaData *f = files[i];
                 edit.AddFile(level, f->number, f->file_size,
                              f->converted_file_size, f->smallest,
-                             f->largest, f->data_block_group_handles);
+                             f->largest, FileCompactionStatus::NONE,
+                             f->data_block_group_handles);
             }
         }
 
@@ -1198,19 +1235,22 @@ namespace leveldb {
         return current_->files_[level].size();
     }
 
-    const char *VersionSet::LevelSummary(LevelSummaryStorage *scratch) const {
+    const char *VersionSet::LevelSummary(uint32_t thread_id) const {
         // Update code if kNumLevels changes
-        static_assert(config::kNumLevels == 7, "");
-        snprintf(scratch->buffer, sizeof(scratch->buffer),
-                 "files[ %d %d %d %d %d %d %d ]",
-                 int(current_->files_[0].size()),
-                 int(current_->files_[1].size()),
-                 int(current_->files_[2].size()),
-                 int(current_->files_[3].size()),
-                 int(current_->files_[4].size()),
-                 int(current_->files_[5].size()),
-                 int(current_->files_[6].size()));
-        return scratch->buffer;
+        std::string summary = "files[ ";
+        for (int i = 0; i < 7; i++) {
+            summary += std::to_string(current_->files_[i].size()) + " ";
+        }
+        summary += "] compaction: [ ";
+        for (int i = 0; i < current_->compaction_levels_.size(); i++) {
+            summary += fmt::format("{}:{} ",
+                                   current_->compaction_levels_[i].level,
+                                   current_->compaction_levels_[i].score);
+        }
+        summary += "]";
+        Log(options_->info_log, "bg[%d]: compacted to: %s", thread_id,
+            summary.c_str());
+        return nullptr;
     }
 
     uint64_t
@@ -1402,87 +1442,108 @@ namespace leveldb {
         return result;
     }
 
-    Compaction *VersionSet::PickCompaction() {
+    Compaction *VersionSet::PickCompaction(uint32_t thread_id) {
         if (current_->compaction_levels_[0].score < 1) {
             return nullptr;
         }
         Compaction *c = new Compaction(options_, -2);
         // If level- -1: consolidate all L0 files.
-        // level-0 and above: compact files at each level only once.
+        // level-0 and above: compact files follow the compact pointer.
         for (int i = 0; i < current_->compaction_levels_.size(); i++) {
             CompactionPriority &p = current_->compaction_levels_[0];
+            c->level_ = p.level;
             assert(p.level >= -1);
             assert(p.level + 1 < config::kNumLevels);
+            bool clear_score = true;
+            if (p.score < 1) {
+                continue;
+            }
             // Pick only one file.
-            if (p.level == -1) {
-                // Pick the first file that was not compacting.
-                for (size_t i = 0; i < current_->files_[0].size(); i++) {
-                    FileMetaData *f = current_->files_[0][i];
-                    if (f->compaction_status == FileCompactionStatus::NONE) {
+//            if (p.level == -1) {
+//                // Pick the first file that is not compacting and has not been compacted before.
+//                for (size_t i = 0; i < current_->files_[0].size(); i++) {
+//                    FileMetaData *f = current_->files_[0][i];
+//                    if (f->compaction_status == FileCompactionStatus::NONE) {
+//                        c->inputs_[0].push_back(f);
+//                        break;
+//                    }
+//                }
+//            } else {
+            // Pick the first file that is not compacting following the compact pointer.
+            for (size_t i = 0; i < current_->files_[p.level].size(); i++) {
+                FileMetaData *f = current_->files_[p.level][i];
+                if (compact_pointer_[p.level].empty() ||
+                    icmp_.Compare(f->largest.Encode(),
+                                  compact_pointer_[p.level]) > 0) {
+                    if (f->compaction_status !=
+                        FileCompactionStatus::COMPACTING &&
+                        current_->skip_tables_for_compaction_.find(
+                                f->number) ==
+                        current_->skip_tables_for_compaction_.end()) {
                         c->inputs_[0].push_back(f);
                         break;
                     }
                 }
-            } else {
-                // Pick the first file that was not compacting.
-                for (size_t i = 0; i < current_->files_[p.level].size(); i++) {
+            }
+
+            if (c->inputs_[0].empty()) {
+                // Wrap-around to the beginning of the key space
+                for (size_t i = 0;
+                     i < current_->files_[p.level].size(); i++) {
                     FileMetaData *f = current_->files_[p.level][i];
-                    if (compact_pointer_[p.level].empty() ||
-                        icmp_.Compare(f->largest.Encode(),
-                                      compact_pointer_[p.level]) > 0) {
-                        if (f->compaction_status ==
-                            FileCompactionStatus::NONE) {
-                            c->inputs_[0].push_back(f);
-                            break;
-                        }
-                    }
-                }
-
-                if (c->inputs_[0].empty()) {
-                    // Wrap-around to the beginning of the key space
-                    for (size_t i = 0;
-                         i < current_->files_[p.level].size(); i++) {
-                        FileMetaData *f = current_->files_[p.level][i];
-                        if (f->compaction_status ==
-                            FileCompactionStatus::NONE) {
-                            c->inputs_[0].push_back(
-                                    current_->files_[p.level][i]);
-                            break;
-                        }
-                    }
-                }
-                // Files in level 0 may overlap each other, so pick up all overlapping ones
-                if (p.level == 0) {
-                    InternalKey smallest, largest;
-                    GetRange(c->inputs_[0], &smallest, &largest);
-                    // Note that the next call will discard the file we placed in
-                    // c->inputs_[0] earlier and replace it with an overlapping set
-                    // which will include the picked file.
-                    current_->GetOverlappingInputs(0, &smallest, &largest,
-                                                   &c->inputs_[0]);
-                    assert(!c->inputs_[0].empty());
-
-                    // This compaction collides with another compaction that consolidates L0 SSTables.
-                    // We terminate the compaction here.
-                    uint32_t ncompacting = 0;
-                    for (int i = 0; i < c->inputs_[0].size(); i++) {
-                        if (c->inputs_[0][i]->compaction_status ==
-                            FileCompactionStatus::COMPACTING) {
-                            ncompacting++;
-                        }
-                    }
-                    if (ncompacting > 0) {
-                        c->inputs_[0].clear();
+                    if (f->compaction_status !=
+                        FileCompactionStatus::COMPACTING &&
+                        current_->skip_tables_for_compaction_.find(
+                                f->number) ==
+                        current_->skip_tables_for_compaction_.end()) {
+                        c->inputs_[0].push_back(f);
+                        break;
                     }
                 }
             }
+            // Files in level 0 may overlap each other, so pick up all overlapping ones
+            if (p.level == 0 && !c->inputs_[0].empty()) {
+                assert(c->inputs_[0].size() == 1);
+                InternalKey smallest, largest;
+                GetRange(c->inputs_[0], &smallest, &largest);
+                // Note that the next call will discard the file we placed in
+                // c->inputs_[0] earlier and replace it with an overlapping set
+                // which will include the picked file.
+                current_->GetOverlappingInputs(0, &smallest, &largest,
+                                               &c->inputs_[0]);
+                assert(!c->inputs_[0].empty());
+
+                // This compaction collides with another compaction that consolidates L0 SSTables.
+                // We terminate the compaction here.
+//                uint32_t ncompacting = 0;
+//                for (int i = 0; i < c->inputs_[0].size(); i++) {
+//                    FileMetaData *f = current_->files_[0][i];
+//                    if (f->compaction_status ==
+//                        FileCompactionStatus::COMPACTING ||
+//                        current_->skip_tables_for_compaction_.find(
+//                                f->number) !=
+//                        current_->skip_tables_for_compaction_.end()) {
+//                        ncompacting++;
+//                    }
+//                }
+//                if (ncompacting > 0) {
+//                    current_->skip_tables_for_compaction_.insert(
+//                            picked_file->number);
+//                    clear_score = false;
+//                    c->inputs_[0].clear();
+//                }
+            }
+//            }
             if (c->inputs_[0].empty()) {
+                // Nothing to compact.
+                if (clear_score) {
+                    p.score = 0;
+                }
                 continue;
             } else {
                 break;
             }
         }
-
         if (c->inputs_[0].empty()) {
             delete c;
             return nullptr;
@@ -1498,42 +1559,107 @@ namespace leveldb {
         }
 
         // Filter out all files in compacting state.
+        std::string compacting_files;
         uint32_t number_of_compacting_tables = 0;
+        uint32_t number_of_compacted_tables_l0 = 0;
         for (int which = 0; which < 2; which++) {
             auto it = c->inputs_[which].begin();
             while (it != c->inputs_[which].end()) {
                 FileMetaData *f = *it;
                 if (f->compaction_status == FileCompactionStatus::COMPACTING) {
+                    compacting_files += fmt::format("{}@{} ", f->number,
+                                                    c->level_ + which);
                     it = c->inputs_[which].erase(it);
-                    number_of_compacting_tables += 1;
+                    number_of_compacting_tables++;
                     continue;
+                } else if (f->compaction_status ==
+                           FileCompactionStatus::COMPACTED) {
+                    if (which == 0 && c->level_ == 0) {
+                        number_of_compacted_tables_l0++;
+                    }
                 }
                 it++;
             }
         }
 
-        if (c->level_ >= 0) {
-            // Sanity check.
-            assert(number_of_compacting_tables == 0);
-        }
-
         // Limit the input size to options.l0 group size.
-        if (c->level_ == -1 &&
-            c->inputs_[1].size() > options_->l0_consolidate_group_size + 1) {
-            c->inputs_[1].resize(options_->l0_consolidate_group_size - 1);
-        }
+        bool consolidation = false;
+//        if (c->level() == 0 &&
+//            number_of_compacted_tables_l0 < c->inputs_[0].size()) {
+//            // Consolidation.
+//            if (c->inputs_[0].size() >= options_->l0_consolidate_group_size) {
+//                c->level_ = -1;
+//                c->inputs_[0].resize(options_->l0_consolidate_group_size);
+//                c->inputs_[1].clear();
+//                consolidation = true;
+//            } else if (number_of_compacting_tables > 0) {
+//                c->level_ = -1;
+//                c->inputs_[1].clear();
+//                consolidation = true;
+//            }
+//
+//            if (consolidation && c->inputs_[0].size() == 1) {
+//                delete c;
+//                return nullptr;
+//            }
+//        }
 
-        // set all file status to compacting.
-        if (c->inputs_[0].size() + c->inputs_[1].size() <= 1) {
+//        if (c->level_ == -1 &&
+//            c->inputs_[1].size() > options_->l0_consolidate_group_size - 1) {
+//            c->inputs_[1].resize(options_->l0_consolidate_group_size - 1);
+//        }
+
+//        if (c->level_ == -1 && c->inputs_[1].empty()) {
+//            // No overlapping SSTables for L0 SSTable consolidation.
+//            // Mark all as compacted so that future consolidation at this verison won't pick them up.
+//            // A future L0 SSTable will be marked as NONE and will consolidate with these compacted SSTables.
+//            for (int i = 0; i < c->inputs_[0].size(); i++) {
+//                c->inputs_[0][i]->compaction_status = FileCompactionStatus::COMPACTED;
+//            }
+//            delete c;
+//            return nullptr;
+//        }
+
+        if (c->inputs_[0].size() == 1 && c->inputs_[1].empty() &&
+            !c->IsTrivialMove()) {
+            // No overlapping ranges and is not a trivial move. Terminate.
             delete c;
             return nullptr;
         }
 
+        std::string files;
+        for (int which = 0; which < 2; which++) {
+            for (int i = 0; i < c->inputs_[which].size(); i++) {
+                auto f = c->inputs_[which][i];
+                files += fmt::format("{}@{}-{}-{} ", f->number,
+                                     c->level_ + which,
+                                     f->smallest.DebugString(),
+                                     f->largest.DebugString());
+            }
+        }
+
+        if (c->level_ >= 0 && !consolidation &&
+            number_of_compacting_tables > 0) {
+            // Sanity check.
+            // Skip these files.
+            for (int i = 0; i < c->inputs_[0].size(); i++) {
+                current_->skip_tables_for_compaction_.insert(
+                        c->inputs_[0][i]->number);
+            }
+            delete c;
+            return nullptr;
+        }
+
+        Log(options_->info_log, "bg[%d]: Compaction picks files %s", thread_id,
+            files.c_str());
+
+        // set all file status to compacting.
         for (int which = 0; which < 2; which++) {
             for (int i = 0; i < c->inputs_[which].size(); i++) {
                 c->inputs_[which][i]->compaction_status = FileCompactionStatus::COMPACTING;
             }
         }
+        current_->UpdateScore(c, *options_);
         return c;
     }
 
@@ -1625,6 +1751,23 @@ namespace leveldb {
         GetRange(c->inputs_[0], &smallest, &largest);
         current_->GetOverlappingInputs(0, &smallest, &largest,
                                        &c->inputs_[1]);
+        // Remove itself.
+        auto it = c->inputs_[1].begin();
+        while (it != c->inputs_[1].end()) {
+            bool found = false;
+            FileMetaData *f = *it;
+            for (int i = 0; i < c->inputs_[0].size(); i++) {
+                if (c->inputs_[0][i]->number == f->number) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                it = c->inputs_[1].erase(it);
+            } else {
+                it++;
+            }
+        }
     }
 
     void VersionSet::SetupOtherInputs(Compaction *c) {
@@ -1759,7 +1902,11 @@ namespace leveldb {
     void Compaction::AddInputDeletions(VersionEdit *edit) {
         for (int which = 0; which < 2; which++) {
             for (size_t i = 0; i < inputs_[which].size(); i++) {
-                edit->DeleteFile(level_ + which, inputs_[which][i]->number);
+                int delete_level = level_ + which;
+                if (level_ == -1) {
+                    delete_level = 0;
+                }
+                edit->DeleteFile(delete_level, inputs_[which][i]->number);
             }
         }
     }

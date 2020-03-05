@@ -99,7 +99,8 @@ namespace leveldb {
         // bytes.
         void RecordReadSample(Slice key);
 
-        void PerformCompaction(EnvBGThread *bg_thread) override;
+        void PerformCompaction(EnvBGThread *bg_thread,
+                               const CompactionTask &task) override;
 
     private:
         friend class DB;
@@ -159,9 +160,6 @@ namespace leveldb {
         bool CompactMemTable(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
-        void InstallMemTable(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
-                mutex_);
-
         Status
         RecoverLogFile(uint64_t log_number, bool last_log, bool *save_manifest,
                        VersionEdit *edit, SequenceNumber *max_sequence)
@@ -169,8 +167,8 @@ namespace leveldb {
 
         void RecordBackgroundError(const Status &s);
 
-        void MaybeScheduleCompaction(bool compact_memtable = false,
-                                     EnvBGThread *bg_thread = nullptr) EXCLUSIVE_LOCKS_REQUIRED(
+        void MaybeScheduleCompaction(
+                uint32_t thread_id) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         bool
@@ -190,7 +188,8 @@ namespace leveldb {
         Status
         FinishCompactionOutputFile(CompactionState *compact, Iterator *input);
 
-        Status InstallCompactionResults(CompactionState *compact)
+        Status
+        InstallCompactionResults(CompactionState *compact, uint32_t thread_id)
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         const Comparator *user_comparator() const {
@@ -224,9 +223,7 @@ namespace leveldb {
 
         std::vector<MemTable *> imms_ GUARDED_BY(
                 mutex_);  // Memtable being compacted
-        uint32_t nimms_ = 0;
-        std::queue<uint32_t> available_imms_slots_ GUARDED_BY(
-                mutex_);
+        uint32_t nimms_wait_for_compaction_ = 0;
 
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 

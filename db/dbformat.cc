@@ -105,9 +105,10 @@ namespace leveldb {
 
     std::string ParsedInternalKey::DebugString() const {
         std::ostringstream ss;
-        ss << '\'' << EscapeString(user_key.ToString()) << "' @ " << sequence
-           << " : "
-           << static_cast<int>(type);
+        ss << '\'' << EscapeString(user_key.ToString());
+//        << "'@" << sequence
+//           << ":"
+//           << static_cast<int>(type);
         return ss.str();
     }
 

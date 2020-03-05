@@ -49,7 +49,7 @@ namespace leveldb {
         }
 
         void SetCompactPointer(int level, const InternalKey &key) {
-            compact_pointers_.push_back(std::make_pair(level, key));
+            compact_pointers_.emplace_back(std::make_pair(level, key));
         }
 
         // Add the specified file at the specified number.
@@ -58,6 +58,7 @@ namespace leveldb {
         void AddFile(int level, uint64_t file, uint64_t file_size,
                      uint64_t converted_file_size,
                      const InternalKey &smallest, const InternalKey &largest,
+                     FileCompactionStatus status,
                      const std::vector<RTableHandle> &data_block_group_handles) {
             FileMetaData f;
             f.number = file;
@@ -65,8 +66,9 @@ namespace leveldb {
             f.converted_file_size = converted_file_size;
             f.smallest = smallest;
             f.largest = largest;
+            f.compaction_status = status;
             f.data_block_group_handles = data_block_group_handles;
-            new_files_.push_back(std::make_pair(level, f));
+            new_files_.emplace_back(std::make_pair(level, f));
         }
 
         // Delete the specified "file" from the specified "level".

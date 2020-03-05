@@ -19,7 +19,7 @@ namespace leveldb {
     public:
         explicit NovaCCCompactionThread(MemManager *mem_manager);
 
-        void Schedule(const CompactionTask& task) override;
+        bool Schedule(const CompactionTask& task) override;
 
         uint64_t thread_id() override { return thread_id_; }
 

@@ -71,6 +71,7 @@ namespace nova {
             }
 
             options.num_memtable_partitions = NovaCCConfig::cc_config->num_memtable_partitions;
+            options.l0_consolidate_group_size = 8;
             options.num_memtables = NovaCCConfig::cc_config->num_memtables;
             options.l0_stop_writes_trigger = NovaCCConfig::cc_config->cc_l0_stop_write;
             if (NovaCCConfig::cc_config->cc_l0_stop_write == 0){
@@ -260,7 +261,6 @@ namespace nova {
         gettimeofday(&end, nullptr);
 
         throughput = puts / std::max((int) (end.tv_sec - start.tv_sec), 1);
-//        VerifyLoad();
     }
 
     void NovaCCNICServer::LoadData() {
