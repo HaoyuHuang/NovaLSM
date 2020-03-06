@@ -93,6 +93,13 @@ namespace leveldb {
         COMPACTED = 2
     };
 
+    struct DeletedFileIdentifier {
+        DeletedFileIdentifier() {}
+
+        uint32_t memtable_id = 0;
+        uint64_t fnumber = 0;
+    };
+
     struct FileMetaData {
         FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0),
                          converted_file_size(0),
@@ -100,6 +107,7 @@ namespace leveldb {
 
         int refs;
         int allowed_seeks;  // Seeks allowed until compaction
+        uint32_t memtable_id = 0;
         uint64_t number;
         uint64_t file_size;    // File size in bytes in original SSTable format.
         uint64_t converted_file_size; // File size in bytes after converted to RTable.

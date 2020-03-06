@@ -55,12 +55,14 @@ namespace leveldb {
         // Add the specified file at the specified number.
         // REQUIRES: This version has not been saved (see VersionSet::SaveTo)
         // REQUIRES: "smallest" and "largest" are smallest and largest keys in file
-        void AddFile(int level, uint64_t file, uint64_t file_size,
+        void AddFile(int level, uint32_t memtable_id, uint64_t file,
+                     uint64_t file_size,
                      uint64_t converted_file_size,
                      const InternalKey &smallest, const InternalKey &largest,
                      FileCompactionStatus status,
                      const std::vector<RTableHandle> &data_block_group_handles) {
             FileMetaData f;
+            f.memtable_id = memtable_id;
             f.number = file;
             f.file_size = file_size;
             f.converted_file_size = converted_file_size;
@@ -72,8 +74,11 @@ namespace leveldb {
         }
 
         // Delete the specified "file" from the specified "level".
-        void DeleteFile(int level, uint64_t file) {
-            deleted_files_.insert(std::make_pair(level, file));
+        void DeleteFile(int level, uint32_t memtable_id, uint64_t file) {
+            DeletedFileIdentifier f = {};
+            f.memtable_id = memtable_id;
+            f.fnumber = file;
+            deleted_files_.emplace_back(std::make_pair(level, f));
         }
 
         void EncodeTo(std::string *dst) const;
@@ -84,8 +89,6 @@ namespace leveldb {
 
     private:
         friend class VersionSet;
-
-        typedef std::set<std::pair<int, uint64_t>> DeletedFileSet;
 
         std::string comparator_;
         uint64_t log_number_;
@@ -99,7 +102,7 @@ namespace leveldb {
         bool has_last_sequence_;
 
         std::vector<std::pair<int, InternalKey>> compact_pointers_;
-        DeletedFileSet deleted_files_;
+        std::vector<std::pair<int, DeletedFileIdentifier>> deleted_files_;
         std::vector<std::pair<int, FileMetaData>> new_files_;
     };
 

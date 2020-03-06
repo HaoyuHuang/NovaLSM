@@ -70,6 +70,11 @@ namespace leveldb {
         double score;
     };
 
+    struct TableReference {
+        MemTable *memtable = nullptr;
+        uint64_t l0_file_number = 0;
+    };
+
     class Version {
     public:
         // Lookup the value for key.  If found, store it in *val and
@@ -87,6 +92,9 @@ namespace leveldb {
 
         Status Get(const ReadOptions &, const LookupKey &key, std::string *val,
                    GetStats *stats, bool search_all_l0);
+
+        Status Get(const ReadOptions &, uint64_t fn, const LookupKey &key,
+                   std::string *val);
 
         // Adds "stats" into the current state.  Returns true if a new
         // compaction may need to be triggered, false otherwise.
@@ -301,6 +309,11 @@ namespace leveldb {
         const char *LevelSummary(uint32_t thread_id) const;
 
         std::atomic_uint_fast64_t last_sequence_;
+
+        std::map<uint32_t, TableReference> &mid_table_mapping() {
+            return mid_table_mapping_;
+        }
+
     private:
         class Builder;
 
@@ -342,6 +355,8 @@ namespace leveldb {
         uint64_t manifest_file_number_;
         uint64_t log_number_;
         uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
+
+        std::map<uint32_t, TableReference> mid_table_mapping_;
 
         // Opened lazily
         WritableFile *descriptor_file_;

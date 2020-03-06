@@ -21,8 +21,10 @@ namespace leveldb {
     }
 
     MemTable::MemTable(const InternalKeyComparator &comparator,
+                       uint32_t memtable_id,
                        DBProfiler *db_profiler)
-            : comparator_(comparator), refs_(0), table_(comparator_, &arena_),
+            : comparator_(comparator), memtable_id_(memtable_id), refs_(0),
+              table_(comparator_, &arena_),
               db_profiler_(db_profiler) {}
 
     MemTable::~MemTable() { assert(refs_ == 0); }

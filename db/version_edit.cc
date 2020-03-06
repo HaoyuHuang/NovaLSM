@@ -69,7 +69,7 @@ namespace leveldb {
         for (const auto &deleted_file_kvp : deleted_files_) {
             PutVarint32(dst, kDeletedFile);
             PutVarint32(dst, deleted_file_kvp.first);   // level
-            PutVarint64(dst, deleted_file_kvp.second);  // file number
+            PutVarint64(dst, deleted_file_kvp.second.fnumber);  // file number
         }
 
         for (size_t i = 0; i < new_files_.size(); i++) {
@@ -170,7 +170,9 @@ namespace leveldb {
                 case kDeletedFile:
                     if (GetLevel(&input, &level) &&
                         GetVarint64(&input, &number)) {
-                        deleted_files_.insert(std::make_pair(level, number));
+                        DeletedFileIdentifier df = {};
+                        df.fnumber = number;
+                        deleted_files_.emplace_back(std::make_pair(level, df));
                     } else {
                         msg = "deleted file";
                     }
@@ -238,7 +240,7 @@ namespace leveldb {
             r.append("\n  DeleteFile: ");
             AppendNumberTo(&r, deleted_files_kvp.first);
             r.append(" ");
-            AppendNumberTo(&r, deleted_files_kvp.second);
+            AppendNumberTo(&r, deleted_files_kvp.second.fnumber);
         }
         for (size_t i = 0; i < new_files_.size(); i++) {
             const FileMetaData &f = new_files_[i].second;

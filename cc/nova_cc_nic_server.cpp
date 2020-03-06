@@ -18,8 +18,6 @@
 #include "util/env_posix.h"
 
 namespace nova {
-
-
     namespace {
         class YCSBKeyComparator : public leveldb::Comparator {
         public:
@@ -74,7 +72,8 @@ namespace nova {
             options.l0_consolidate_group_size = 8;
             options.num_memtables = NovaCCConfig::cc_config->num_memtables;
             options.l0_stop_writes_trigger = NovaCCConfig::cc_config->cc_l0_stop_write;
-            if (NovaCCConfig::cc_config->cc_l0_stop_write == 0){
+            options.enable_table_locator = NovaCCConfig::cc_config->enable_table_locator;
+            if (NovaCCConfig::cc_config->cc_l0_stop_write == 0) {
                 options.l0_stop_writes_trigger = UINT32_MAX;
             }
             options.max_dc_file_size =

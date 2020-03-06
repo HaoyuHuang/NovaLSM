@@ -41,6 +41,17 @@
 
 namespace leveldb {
 
+    namespace {
+        struct TableLocation {
+            uint32_t memtable_id;
+        };
+
+        static void DeleteEntry(const Slice &key, void *value) {
+            TableLocation *tf = reinterpret_cast<TableLocation *>(value);
+            delete tf;
+        }
+    }
+
     const int kNumNonTableCacheFiles = 10;
 
 // Information kept for every waiting writer
@@ -159,6 +170,9 @@ namespace leveldb {
               versions_(new VersionSet(dbname_, &options_, table_cache_,
                                        &internal_comparator_)),
               bg_threads_(raw_options.bg_threads) {
+        if (options_.enable_table_locator) {
+            table_locator_ = NewLRUCache(10000000);
+        }
         RDMA_LOG(rdmaio::INFO) << fmt::format("DB Cache capacity {}. {}",
                                               options_.block_cache->TotalCapacity(),
                                               raw_options.block_cache->TotalCapacity());
@@ -481,8 +495,15 @@ namespace leveldb {
             WriteBatchInternal::SetContents(&batch, record);
 
             if (mem == nullptr) {
-                mem = new MemTable(internal_comparator_, db_profiler_);
+                mem = new MemTable(internal_comparator_, memtable_id_,
+                                   db_profiler_);
                 mem->Ref();
+                TableReference ref = {};
+                ref.memtable = mem;
+                mem->Ref();
+                versions_->mid_table_mapping()[memtable_id_] = ref;
+
+                memtable_id_++;
             }
             status = WriteBatchInternal::InsertInto(&batch, mem);
             MaybeIgnoreError(&status);
@@ -572,6 +593,7 @@ namespace leveldb {
             VersionEdit edit;
             Version *base = versions_->current();
             auto it = imms_.begin();
+            std::map<uint32_t, uint64_t> mid_l0fn;
             while (it != imms_.end()) {
                 MemTable *imm = *it;
                 if (imm->state() != MemTableState::MEMTABLE_FLUSHED) {
@@ -594,7 +616,10 @@ namespace leveldb {
                     const Slice max_user_key = meta.largest.user_key();
                     level = base->PickLevelForMemTableOutput(min_user_key,
                                                              max_user_key);
-                    edit.AddFile(level, meta.number, meta.file_size,
+                    RDMA_ASSERT(imm->memtableid() != 0);
+                    edit.AddFile(level, imm->memtableid(),
+                                 meta.number,
+                                 meta.file_size,
                                  meta.converted_file_size, meta.smallest,
                                  meta.largest, FileCompactionStatus::NONE,
                                  meta.data_block_group_handles);
@@ -605,6 +630,10 @@ namespace leveldb {
                 stats.bytes_written = meta.file_size;
                 stats_[level].Add(stats);
 
+                versions_->mid_table_mapping().erase(imm->memtableid());
+                // Remove the mapping here so that future reads won't use the
+                // memtable as it will be deleted.
+                mid_l0fn[imm->memtableid()] = meta.number;
                 imm->Unref();
                 it = imms_.erase(it);
             }
@@ -612,7 +641,6 @@ namespace leveldb {
             edit.SetPrevLogNumber(0);
             Status s = versions_->LogAndApply(&edit, &mutex_);
             RDMA_ASSERT(s.ok());
-//        DeleteObsoleteFiles(bg_thread);
         }
         return true;
     }
@@ -765,12 +793,20 @@ namespace leveldb {
 
     bool DBImpl::BackgroundCompaction(EnvBGThread *bg_thread) {
         mutex_.AssertHeld();
-        if (!versions_->NeedsCompaction()) {
-            if (CompactMemTable(bg_thread)) {
-                return true;
-            }
+        if (CompactMemTable(bg_thread)) {
+            return true;
+        }
+
+        if (is_major_compaciton_running_) {
             return false;
         }
+
+//        if (!versions_->NeedsCompaction()) {
+//            if (CompactMemTable(bg_thread)) {
+//                return true;
+//            }
+//            return false;
+//        }
         Compaction *c;
         bool is_manual = (manual_compaction_ != nullptr);
         InternalKey manual_end;
@@ -806,8 +842,10 @@ namespace leveldb {
             assert(c->num_input_files(1) == 0);
             FileMetaData *f = c->input(0, 0);
             int level = c->level() == -1 ? 0 : c->level();
-            c->edit()->DeleteFile(level, f->number);
-            c->edit()->AddFile(level + 1, f->number, f->file_size,
+            c->edit()->DeleteFile(level, f->memtable_id, f->number);
+            c->edit()->AddFile(level + 1,
+                               0,
+                               f->number, f->file_size,
                                f->converted_file_size,
                                f->smallest,
                                f->largest, FileCompactionStatus::NONE,
@@ -823,6 +861,7 @@ namespace leveldb {
                 static_cast<unsigned long long>(f->file_size),
                 status.ToString().c_str());
         } else {
+            is_major_compaciton_running_ = true;
             CompactionState *compact = new CompactionState(c);
             status = DoCompactionWork(compact, bg_thread);
             if (!status.ok()) {
@@ -831,6 +870,7 @@ namespace leveldb {
             CleanupCompaction(compact);
             c->ReleaseInputs();
             DeleteObsoleteFiles(bg_thread);
+            is_major_compaciton_running_ = false;
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("!!!!!!!!!!!!!Compaction complete");
 
@@ -1029,7 +1069,9 @@ namespace leveldb {
         }
         for (size_t i = 0; i < compact->outputs.size(); i++) {
             const CompactionState::Output &out = compact->outputs[i];
-            compact->compaction->edit()->AddFile(dest_level, out.number,
+            compact->compaction->edit()->AddFile(dest_level,
+                                                 0,
+                                                 out.number,
                                                  out.file_size,
                                                  out.converted_file_size,
                                                  out.smallest, out.largest,
@@ -1301,19 +1343,58 @@ namespace leveldb {
                        std::string *value) {
         Status s;
         std::string tmp;
-        MutexLock l(&mutex_);
-        SequenceNumber snapshot;
-        if (options.snapshot != nullptr) {
-            snapshot =
-                    static_cast<const SnapshotImpl *>(options.snapshot)->sequence_number();
-        } else {
-            snapshot = versions_->LastSequence();
+        SequenceNumber snapshot = kMaxSequenceNumber;
+
+        mutex_.Lock();
+        Version *current = versions_->current();
+        current->Ref();
+
+        TableReference ref = {};
+        bool table_located = false;
+        MemTable *memtable = nullptr;
+        if (table_locator_ != nullptr) {
+            Cache::Handle *handle = table_locator_->Lookup(key);
+            if (handle != nullptr) {
+                TableLocation *loc = reinterpret_cast<TableLocation *>(table_locator_->Value(
+                        handle));
+                if (loc->memtable_id != 0) {
+                    auto it = versions_->mid_table_mapping().find(
+                            loc->memtable_id);
+                    if (it != versions_->mid_table_mapping().end()) {
+                        // found.
+                        ref = it->second;
+                        if (ref.memtable != nullptr) {
+                            ref.memtable->Ref();
+                            memtable = ref.memtable;
+                        }
+                        table_located = true;
+                    }
+                }
+            }
+        }
+
+        if (table_located && (memtable != nullptr || ref.l0_file_number != 0)) {
+            mutex_.Unlock();
+            LookupKey lkey(key, snapshot);
+            if (memtable != nullptr) {
+                RDMA_ASSERT(memtable->Get(lkey, value, &s))
+                    << fmt::format("key:{} memtable:{} s:{}", key.ToString(),
+                                   ref.memtable->memtableid(), s.ToString());
+            } else if (ref.l0_file_number != 0) {
+                s = current->Get(options, ref.l0_file_number, lkey, value);
+            }
+            mutex_.Lock();
+            if (memtable != nullptr) {
+                memtable->Unref();
+            }
+            current->Unref();
+            mutex_.Unlock();
+            return s;
         }
 
         // Make a copy of memtables and immutable memtables.
         std::vector<MemTable *> mems = active_memtables_;
         std::vector<MemTable *> imms = imms_;
-        Version *current = versions_->current();
         for (auto mem : mems) {
             mem->Ref();
         }
@@ -1322,7 +1403,6 @@ namespace leveldb {
                 imm->Ref();
             }
         }
-        current->Ref();
 
         bool have_stat_update = false;
         Version::GetStats stats;
@@ -1365,9 +1445,6 @@ namespace leveldb {
             mutex_.Lock();
         }
 
-//        if (have_stat_update && current->UpdateStats(stats)) {
-//            MaybeScheduleCompaction();
-//        }
         for (auto mem : mems) {
             mem->Unref();
         }
@@ -1377,6 +1454,7 @@ namespace leveldb {
             }
         }
         current->Unref();
+        mutex_.Unlock();
         return s;
     }
 
@@ -1461,7 +1539,13 @@ namespace leveldb {
 
         if (table->ApproximateMemoryUsage() <= options_.write_buffer_size) {
             table->Add(last_sequence, ValueType::kTypeValue, key, val);
+            TableLocation *loc = new TableLocation;
+            loc->memtable_id = table->memtableid();
+            table_locator_->Insert(key, loc, 1, &DeleteEntry);
             active_memtable_mutexs_[partition_id]->unlock();
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("#### Put key {} in table {}", key.ToString(),
+                               loc->memtable_id);
             return Status::OK();
         }
 
@@ -1474,15 +1558,30 @@ namespace leveldb {
                 table->set_state(MemTableState::MEMTABLE_FULL);
                 imms_.push_back(table);
                 nimms_wait_for_compaction_ += 1;
-                table = new MemTable(internal_comparator_, db_profiler_);
+                table = new MemTable(internal_comparator_, memtable_id_,
+                                     db_profiler_);
                 table->Ref();
+                TableReference ref = {};
+                ref.memtable = table;
+                table->Ref();
+                versions_->mid_table_mapping()[memtable_id_] = ref;
+                memtable_id_++;
                 active_memtables_[partition_id] = table;
             }
             table = active_memtables_[partition_id];
             mutex_.Unlock();
             table->Add(last_sequence, ValueType::kTypeValue, key, val);
+
+            TableLocation *loc = new TableLocation;
+            loc->memtable_id = table->memtableid();
+            table_locator_->Insert(key, loc, 1, &DeleteEntry);
+
             active_memtable_mutexs_[partition_id]->unlock();
             MaybeScheduleCompaction(options.thread_id + 100);
+
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("#### Put key {} in table {}", key.ToString(),
+                               loc->memtable_id);
             return Status::OK();
         }
 
@@ -1491,7 +1590,6 @@ namespace leveldb {
         bool wait = false;
         while (true) {
             mutex_.AssertHeld();
-//            MaybeScheduleCompaction();
             if (imms_.size() >= options_.num_memtables - 1) {
                 // We have filled up all memtables, but the previous
                 // one is still being compacted, so we wait.
@@ -1527,15 +1625,27 @@ namespace leveldb {
             table->set_state(MemTableState::MEMTABLE_FULL);
             imms_.push_back(table);
             nimms_wait_for_compaction_ += 1;
-
-            table = new MemTable(internal_comparator_, db_profiler_);
+            table = new MemTable(internal_comparator_, memtable_id_,
+                                 db_profiler_);
             table->Ref();
+            TableReference ref = {};
+            ref.memtable = table;
+            table->Ref();
+            versions_->mid_table_mapping()[memtable_id_] = ref;
+            memtable_id_++;
             active_memtables_[partition_id] = table;
         }
         mutex_.Unlock();
         table->Add(last_sequence, ValueType::kTypeValue, key, val);
+
+        TableLocation *loc = new TableLocation;
+        loc->memtable_id = table->memtableid();
+        table_locator_->Insert(key, loc, 1, &DeleteEntry);
         active_memtable_mutexs_[partition_id]->unlock();
         MaybeScheduleCompaction(options.thread_id + 100);
+        RDMA_LOG(rdmaio::DEBUG)
+            << fmt::format("#### Put key {} in table {}", key.ToString(),
+                           loc->memtable_id);
         return Status::OK();
     }
 
@@ -1663,8 +1773,16 @@ namespace leveldb {
 
                 for (int i = 0; i < options.num_memtable_partitions; i++) {
                     MemTable *table = new MemTable(impl->internal_comparator_,
+                                                   impl->memtable_id_,
                                                    impl->db_profiler_);
                     table->Ref();
+
+                    TableReference ref = {};
+                    ref.memtable = table;
+                    table->Ref();
+                    impl->versions_->mid_table_mapping()[impl->memtable_id_] = ref;
+
+                    impl->memtable_id_++;
                     impl->active_memtables_.push_back(table);
                     impl->active_memtable_mutexs_.push_back(new std::mutex);
                 }

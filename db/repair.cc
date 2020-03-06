@@ -183,7 +183,7 @@ namespace leveldb {
                 std::string scratch;
                 Slice record;
                 WriteBatch batch;
-                MemTable *mem = new MemTable(icmp_, nullptr);
+                MemTable *mem = new MemTable(icmp_, 0, nullptr);
                 mem->Ref();
                 int counter = 0;
                 while (reader.ReadRecord(&record, &scratch)) {
@@ -386,7 +386,7 @@ namespace leveldb {
                 for (size_t i = 0; i < tables_.size(); i++) {
                     // TODO(opt): separate out into multiple levels
                     const TableInfo &t = tables_[i];
-                    edit_.AddFile(0, t.meta.number, t.meta.file_size,
+                    edit_.AddFile(0, 0, t.meta.number, t.meta.file_size,
                                   t.meta.converted_file_size,
                                   t.meta.smallest,
                                   t.meta.largest,

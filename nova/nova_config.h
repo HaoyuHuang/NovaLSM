@@ -179,6 +179,7 @@ namespace nova {
 
         int block_cache_mb;
         int row_cache_mb;
+        bool enable_table_locator;
         uint32_t num_memtables;
         uint32_t num_memtable_partitions;
         uint64_t write_buffer_size_mb;

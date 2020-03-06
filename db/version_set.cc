@@ -365,6 +365,28 @@ namespace leveldb {
         }
     }
 
+    Status Version::Get(const leveldb::ReadOptions &options, uint64_t fn,
+                        const leveldb::LookupKey &key, std::string *val) {
+        auto *file = fn_files_[fn];
+        RDMA_ASSERT(file);
+        RDMA_ASSERT(file->number == fn);
+        Saver saver;
+        saver.state = kNotFound;
+        saver.ucmp = vset_->icmp_.user_comparator();
+        saver.user_key = key.user_key();
+        saver.value = val;
+        Status s = vset_->table_cache_->Get(options,
+                                            *file,
+                                            file->number,
+                                            file->converted_file_size,
+                                            0,
+                                            key.internal_key(),
+                                            &saver,
+                                            SaveValue);
+        RDMA_ASSERT(saver.state == kFound);
+        return s;
+    }
+
     Status Version::Get(const ReadOptions &options, const LookupKey &k,
                         std::string *value, GetStats *stats,
                         bool search_all_l0) {
@@ -708,7 +730,7 @@ namespace leveldb {
             // Delete files
             for (const auto &deleted_file_set_kvp : edit->deleted_files_) {
                 const int level = deleted_file_set_kvp.first;
-                const uint64_t number = deleted_file_set_kvp.second;
+                const uint64_t number = deleted_file_set_kvp.second.fnumber;
                 levels_[level].deleted_files.insert(number);
             }
 
@@ -878,10 +900,26 @@ namespace leveldb {
             builder.SaveTo(v);
         }
         Finalize(v);
-
         AppendVersion(v);
         log_number_ = edit->log_number_;
         prev_log_number_ = edit->prev_log_number_;
+
+        // Add L0 files and update the mapping.
+        for (auto &file : edit->new_files_) {
+            if (file.first == 0 && file.second.memtable_id != 0) {
+                // L0 files.
+                TableReference ref = {};
+                ref.memtable = nullptr;
+                ref.l0_file_number = file.second.number;
+                mid_table_mapping_[file.second.memtable_id] = ref;
+            }
+        }
+        // Remove the mapping for deleted files.
+        for (auto &file : edit->deleted_files_) {
+            if (file.second.memtable_id != 0) {
+                mid_table_mapping_.erase(file.second.memtable_id);
+            }
+        }
         return Status::OK();
 
         // Initialize new descriptor log file if necessary by creating
@@ -1217,7 +1255,7 @@ namespace leveldb {
             const std::vector<FileMetaData *> &files = current_->files_[level];
             for (size_t i = 0; i < files.size(); i++) {
                 const FileMetaData *f = files[i];
-                edit.AddFile(level, f->number, f->file_size,
+                edit.AddFile(level, 0, f->number, f->file_size,
                              f->converted_file_size, f->smallest,
                              f->largest, FileCompactionStatus::NONE,
                              f->data_block_group_handles);
@@ -1584,25 +1622,25 @@ namespace leveldb {
 
         // Limit the input size to options.l0 group size.
         bool consolidation = false;
-//        if (c->level() == 0 &&
-//            number_of_compacted_tables_l0 < c->inputs_[0].size()) {
-//            // Consolidation.
-//            if (c->inputs_[0].size() >= options_->l0_consolidate_group_size) {
-//                c->level_ = -1;
-//                c->inputs_[0].resize(options_->l0_consolidate_group_size);
-//                c->inputs_[1].clear();
-//                consolidation = true;
-//            } else if (number_of_compacting_tables > 0) {
-//                c->level_ = -1;
-//                c->inputs_[1].clear();
-//                consolidation = true;
-//            }
-//
-//            if (consolidation && c->inputs_[0].size() == 1) {
-//                delete c;
-//                return nullptr;
-//            }
-//        }
+        if (c->level() == 0 &&
+            number_of_compacted_tables_l0 < c->inputs_[0].size()) {
+            // Consolidation.
+            if (c->inputs_[0].size() >= options_->l0_consolidate_group_size) {
+                c->level_ = -1;
+                c->inputs_[0].resize(options_->l0_consolidate_group_size);
+                c->inputs_[1].clear();
+                consolidation = true;
+            } else if (number_of_compacting_tables > 0) {
+                c->level_ = -1;
+                c->inputs_[1].clear();
+                consolidation = true;
+            }
+
+            if (consolidation && c->inputs_[0].size() == 1) {
+                delete c;
+                return nullptr;
+            }
+        }
 
 //        if (c->level_ == -1 &&
 //            c->inputs_[1].size() > options_->l0_consolidate_group_size - 1) {
@@ -1906,7 +1944,8 @@ namespace leveldb {
                 if (level_ == -1) {
                     delete_level = 0;
                 }
-                edit->DeleteFile(delete_level, inputs_[which][i]->number);
+                auto *f = inputs_[which][i];
+                edit->DeleteFile(delete_level, f->memtable_id, f->number);
             }
         }
     }

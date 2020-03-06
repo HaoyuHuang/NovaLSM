@@ -13,6 +13,7 @@
 #include <leveldb/db_profiler.h>
 #include <list>
 #include <map>
+#include <leveldb/cache.h>
 
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -218,6 +219,10 @@ namespace leveldb {
 
         std::vector<EnvBGThread *> bg_threads_;
 
+        uint32_t memtable_id_  GUARDED_BY(mutex_) = 1;
+        // key -> memtable-id.
+        Cache *table_locator_ GUARDED_BY(mutex_) = nullptr;
+
         std::vector<MemTable *> active_memtables_ GUARDED_BY(mutex_);
         std::vector<std::mutex *> active_memtable_mutexs_;
 
@@ -233,7 +238,7 @@ namespace leveldb {
         // part of ongoing compactions.
         std::set<uint64_t> pending_outputs_ GUARDED_BY(mutex_);
         std::map<uint64_t, FileMetaData> compacted_tables_ GUARDED_BY(mutex_);
-
+        bool is_major_compaciton_running_ = false;
         ManualCompaction *manual_compaction_ GUARDED_BY(mutex_);
 
         VersionSet *const versions_ GUARDED_BY(mutex_);

@@ -32,6 +32,7 @@ namespace leveldb {
         // MemTables are reference counted.  The initial reference count
         // is zero and the caller must call Ref() at least once.
         explicit MemTable(const InternalKeyComparator &comparator,
+                          uint32_t memtable_id,
                           DBProfiler *db_profiler);
 
         MemTable(const MemTable &) = delete;
@@ -39,16 +40,36 @@ namespace leveldb {
         MemTable &operator=(const MemTable &) = delete;
 
         // Increase reference count.
-        void Ref() { ++refs_; }
-
-        int refcount() {
-            return refs_;
+        void Ref() {
+            ++refs_;
         }
 
-        void RemoveIfNoRef() {
-            if (refs_ <= 0) {
-                delete this;
-            }
+//        MemTable *RefByTable() {
+//            int refs = 0;
+//            MemTable *table = nullptr;
+//            bool should_delete = false;
+//            mutex_.lock();
+//            --refs_;
+//            if (refs <= 0 && !delete_) {
+//                should_delete = true;
+//                delete_ = true;
+//            } else {
+//                table = this;
+//            }
+//            refs = refs_;
+//            mutex_.unlock();
+//
+//            if (should_delete) {
+//                assert(refs >= 0);
+//                if (refs <= 0) {
+//                    delete this;
+//                }
+//            }
+//            return  table;
+//        }
+
+        uint32_t memtableid() {
+            return memtable_id_;
         }
 
         // Drop reference count.  Delete if no more references exist.
@@ -114,9 +135,13 @@ namespace leveldb {
 
         ~MemTable();  // Private since only Unref() should be used to delete it
 
+//        bool delete_ = false;
+
         DBProfiler *db_profiler_ = nullptr;
         KeyComparator comparator_;
         int refs_;
+//        std::mutex mutex_;
+        uint32_t memtable_id_;
         Arena arena_;
         Table table_;
         MemTableState state_ = MemTableState::MEMTABLE_INIT;

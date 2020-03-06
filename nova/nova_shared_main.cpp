@@ -74,6 +74,7 @@ DEFINE_uint64(cc_row_cache_mb, 0, "leveldb row cache size in mb");
 
 DEFINE_uint32(cc_num_memtables, 0, "");
 DEFINE_uint32(cc_num_memtable_partitions, 0, "");
+DEFINE_bool(cc_enable_table_locator, false, "");
 
 DEFINE_uint32(cc_l0_stop_write, 0, "");
 
@@ -174,6 +175,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->rtable_size = FLAGS_cc_rtable_size_mb * 1024 * 1024;
     NovaConfig::config->sstable_size = FLAGS_cc_sstable_size_mb * 1024 * 1024;
     NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
+    NovaCCConfig::cc_config->enable_table_locator = FLAGS_cc_enable_table_locator;
 
     RDMA_ASSERT(FLAGS_cc_rtable_size_mb > std::max(FLAGS_cc_sstable_size_mb,
                                                    FLAGS_cc_write_buffer_size_mb));
