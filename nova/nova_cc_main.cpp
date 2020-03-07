@@ -35,7 +35,6 @@ RdmaCtrl *NovaConfig::rdma_ctrl;
 
 DEFINE_string(db_path, "/tmp/nova", "level db path");
 DEFINE_uint64(block_cache_mb, 0, "leveldb block cache size in mb");
-DEFINE_bool(write_sync, false, "fsync write");
 DEFINE_string(persist_log_records_mode, "", "local/rdma/nic");
 DEFINE_uint64(write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint32(log_buf_size, 0, "log buffer size");
@@ -235,12 +234,15 @@ int main(int argc, char *argv[]) {
     // LevelDB
     NovaConfig::config->db_path = FLAGS_db_path;
     NovaConfig::config->profiler_file_path = FLAGS_profiler_file_path;
-    NovaConfig::config->fsync = FLAGS_write_sync;
     NovaConfig::config->log_buf_size = FLAGS_log_buf_size;
     NovaConfig::config->num_async_workers = FLAGS_num_async_workers;
 
-    if (FLAGS_persist_log_records_mode == "local") {
+    if (FLAGS_persist_log_records_mode == "disk") {
         NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_LOCAL;
+        NovaConfig::config->fsync = true;
+    } else if (FLAGS_persist_log_records_mode == "mem") {
+        NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_LOCAL;
+        NovaConfig::config->fsync = false;
     } else if (FLAGS_persist_log_records_mode == "rdma") {
         NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_RDMA;
     } else if (FLAGS_persist_log_records_mode == "nic") {
