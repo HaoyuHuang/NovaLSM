@@ -783,113 +783,114 @@ namespace leveldb {
 
     bool DBImpl::BackgroundCompaction(EnvBGThread *bg_thread) {
         mutex_.AssertHeld();
-        if (CompactMemTable(bg_thread)) {
-            return true;
-        }
-
-        if (is_major_compaciton_running_) {
-            return false;
-        }
-
-//        if (!versions_->NeedsCompaction()) {
+        return CompactMemTable(bg_thread);
+//        if (CompactMemTable(bg_thread)) {
+//            return true;
+//        }
+//
+//        if (is_major_compaciton_running_) {
+//            return false;
+//        }
+//
+////        if (!versions_->NeedsCompaction()) {
+////            if (CompactMemTable(bg_thread)) {
+////                return true;
+////            }
+////            return false;
+////        }
+//        Compaction *c;
+//        bool is_manual = (manual_compaction_ != nullptr);
+//        InternalKey manual_end;
+//        if (is_manual) {
+//            ManualCompaction *m = manual_compaction_;
+//            c = versions_->CompactRange(m->level, m->begin, m->end);
+//            m->done = (c == nullptr);
+//            if (c != nullptr) {
+//                manual_end = c->input(0, c->num_input_files(0) - 1)->largest;
+//            }
+//            Log(options_.info_log,
+//                "Manual compaction at level-%d from %s .. %s; will stop at %s\n",
+//                m->level,
+//                (m->begin ? m->begin->DebugString().c_str() : "(begin)"),
+//                (m->end ? m->end->DebugString().c_str() : "(end)"),
+//                (m->done ? "(end)" : manual_end.DebugString().c_str()));
+//        } else {
+//            c = versions_->PickCompaction(bg_thread->thread_id());
+//        }
+//
+//        Status status;
+//        if (c == nullptr) {
+//            // Nothing to do
 //            if (CompactMemTable(bg_thread)) {
 //                return true;
 //            }
 //            return false;
 //        }
-        Compaction *c;
-        bool is_manual = (manual_compaction_ != nullptr);
-        InternalKey manual_end;
-        if (is_manual) {
-            ManualCompaction *m = manual_compaction_;
-            c = versions_->CompactRange(m->level, m->begin, m->end);
-            m->done = (c == nullptr);
-            if (c != nullptr) {
-                manual_end = c->input(0, c->num_input_files(0) - 1)->largest;
-            }
-            Log(options_.info_log,
-                "Manual compaction at level-%d from %s .. %s; will stop at %s\n",
-                m->level,
-                (m->begin ? m->begin->DebugString().c_str() : "(begin)"),
-                (m->end ? m->end->DebugString().c_str() : "(end)"),
-                (m->done ? "(end)" : manual_end.DebugString().c_str()));
-        } else {
-            c = versions_->PickCompaction(bg_thread->thread_id());
-        }
-
-        Status status;
-        if (c == nullptr) {
-            // Nothing to do
-            if (CompactMemTable(bg_thread)) {
-                return true;
-            }
-            return false;
-        }
-        if (!is_manual && c->IsTrivialMove()) {
-            // Move file to next level
-            assert(c->level() >= 0);
-            assert(c->num_input_files(0) == 1);
-            assert(c->num_input_files(1) == 0);
-            FileMetaData *f = c->input(0, 0);
-            int level = c->level() == -1 ? 0 : c->level();
-            c->edit()->DeleteFile(level, f->memtable_id, f->number);
-            c->edit()->AddFile(level + 1,
-                               0,
-                               f->number, f->file_size,
-                               f->converted_file_size,
-                               f->smallest,
-                               f->largest, FileCompactionStatus::NONE,
-                               f->data_block_group_handles);
-            status = versions_->LogAndApply(c->edit(), &mutex_);
-            if (!status.ok()) {
-                RecordBackgroundError(status);
-            }
-            Log(options_.info_log,
-                "Moved #%lld@%d to level-%d %lld bytes %s\n",
-                static_cast<unsigned long long>(f->number),
-                c->level(), c->level() + 1,
-                static_cast<unsigned long long>(f->file_size),
-                status.ToString().c_str());
-        } else {
-            is_major_compaciton_running_ = true;
-            CompactionState *compact = new CompactionState(c);
-            status = DoCompactionWork(compact, bg_thread);
-            if (!status.ok()) {
-                RecordBackgroundError(status);
-            }
-            CleanupCompaction(compact);
-            c->ReleaseInputs();
-            DeleteObsoleteFiles(bg_thread);
-            is_major_compaciton_running_ = false;
-            RDMA_LOG(rdmaio::DEBUG)
-                << fmt::format("!!!!!!!!!!!!!Compaction complete");
-
-        }
-        delete c;
-
-        if (status.ok()) {
-            // Done
-        } else if (shutting_down_.load(std::memory_order_acquire)) {
-            // Ignore compaction errors found during shutting down
-        } else {
-            Log(options_.info_log, "Compaction error: %s",
-                status.ToString().c_str());
-        }
-
-        if (is_manual) {
-            ManualCompaction *m = manual_compaction_;
-            if (!status.ok()) {
-                m->done = true;
-            }
-            if (!m->done) {
-                // We only compacted part of the requested range.  Update *m
-                // to the range that is left to be compacted.
-                m->tmp_storage = manual_end;
-                m->begin = &m->tmp_storage;
-            }
-            manual_compaction_ = nullptr;
-        }
-        return true;;
+//        if (!is_manual && c->IsTrivialMove()) {
+//            // Move file to next level
+//            assert(c->level() >= 0);
+//            assert(c->num_input_files(0) == 1);
+//            assert(c->num_input_files(1) == 0);
+//            FileMetaData *f = c->input(0, 0);
+//            int level = c->level() == -1 ? 0 : c->level();
+//            c->edit()->DeleteFile(level, f->memtable_id, f->number);
+//            c->edit()->AddFile(level + 1,
+//                               0,
+//                               f->number, f->file_size,
+//                               f->converted_file_size,
+//                               f->smallest,
+//                               f->largest, FileCompactionStatus::NONE,
+//                               f->data_block_group_handles);
+//            status = versions_->LogAndApply(c->edit(), &mutex_);
+//            if (!status.ok()) {
+//                RecordBackgroundError(status);
+//            }
+//            Log(options_.info_log,
+//                "Moved #%lld@%d to level-%d %lld bytes %s\n",
+//                static_cast<unsigned long long>(f->number),
+//                c->level(), c->level() + 1,
+//                static_cast<unsigned long long>(f->file_size),
+//                status.ToString().c_str());
+//        } else {
+//            is_major_compaciton_running_ = true;
+//            CompactionState *compact = new CompactionState(c);
+//            status = DoCompactionWork(compact, bg_thread);
+//            if (!status.ok()) {
+//                RecordBackgroundError(status);
+//            }
+//            CleanupCompaction(compact);
+//            c->ReleaseInputs();
+//            DeleteObsoleteFiles(bg_thread);
+//            is_major_compaciton_running_ = false;
+//            RDMA_LOG(rdmaio::DEBUG)
+//                << fmt::format("!!!!!!!!!!!!!Compaction complete");
+//
+//        }
+//        delete c;
+//
+//        if (status.ok()) {
+//            // Done
+//        } else if (shutting_down_.load(std::memory_order_acquire)) {
+//            // Ignore compaction errors found during shutting down
+//        } else {
+//            Log(options_.info_log, "Compaction error: %s",
+//                status.ToString().c_str());
+//        }
+//
+//        if (is_manual) {
+//            ManualCompaction *m = manual_compaction_;
+//            if (!status.ok()) {
+//                m->done = true;
+//            }
+//            if (!m->done) {
+//                // We only compacted part of the requested range.  Update *m
+//                // to the range that is left to be compacted.
+//                m->tmp_storage = manual_end;
+//                m->begin = &m->tmp_storage;
+//            }
+//            manual_compaction_ = nullptr;
+//        }
+//        return true;;
     }
 
     void DBImpl::CleanupCompaction(CompactionState *compact) {
@@ -1355,7 +1356,6 @@ namespace leveldb {
         }
 
         if (memtable != nullptr || l0_file_number != 0) {
-            mutex_.Unlock();
             LookupKey lkey(key, snapshot);
             if (memtable != nullptr) {
                 RDMA_ASSERT(memtable->Get(lkey, value, &s))
@@ -1521,15 +1521,15 @@ namespace leveldb {
 
         if (table->ApproximateMemoryUsage() <= options_.write_buffer_size) {
             table->Add(last_sequence, ValueType::kTypeValue, key, val);
-            TableLocation *loc = new TableLocation;
-            loc->memtable_id = table->memtableid();
             if (table_locator_ != nullptr) {
+                TableLocation *loc = new TableLocation;
+                loc->memtable_id = table->memtableid();
                 table_locator_->Insert(key, loc, 1, &DeleteEntry);
             }
             active_memtable_mutexs_[partition_id]->unlock();
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("#### Put key {} in table {}", key.ToString(),
-                               loc->memtable_id);
+                               table->memtableid());
             return Status::OK();
         }
 
@@ -1554,18 +1554,17 @@ namespace leveldb {
             mutex_.Unlock();
             table->Add(last_sequence, ValueType::kTypeValue, key, val);
 
-            TableLocation *loc = new TableLocation;
-            loc->memtable_id = table->memtableid();
             if (table_locator_ != nullptr) {
+                TableLocation *loc = new TableLocation;
+                loc->memtable_id = table->memtableid();
                 table_locator_->Insert(key, loc, 1, &DeleteEntry);
             }
 
             active_memtable_mutexs_[partition_id]->unlock();
             MaybeScheduleCompaction(options.thread_id + 100);
-
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("#### Put key {} in table {}", key.ToString(),
-                               loc->memtable_id);
+                               table->memtableid());
             return Status::OK();
         }
 
@@ -1621,16 +1620,16 @@ namespace leveldb {
         mutex_.Unlock();
         table->Add(last_sequence, ValueType::kTypeValue, key, val);
 
-        TableLocation *loc = new TableLocation;
-        loc->memtable_id = table->memtableid();
         if (table_locator_ != nullptr) {
+            TableLocation *loc = new TableLocation;
+            loc->memtable_id = table->memtableid();
             table_locator_->Insert(key, loc, 1, &DeleteEntry);
         }
         active_memtable_mutexs_[partition_id]->unlock();
         MaybeScheduleCompaction(options.thread_id + 100);
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format("#### Put key {} in table {}", key.ToString(),
-                           loc->memtable_id);
+                           table->memtableid());
         return Status::OK();
     }
 
