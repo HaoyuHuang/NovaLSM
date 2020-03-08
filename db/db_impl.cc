@@ -498,10 +498,8 @@ namespace leveldb {
                 mem = new MemTable(internal_comparator_, memtable_id_,
                                    db_profiler_);
                 mem->Ref();
-                TableReference ref = {};
-                ref.memtable = mem;
-                versions_->mid_table_mapping()[memtable_id_] = ref;
-
+                RDMA_ASSERT(memtable_id_ < MAX_LIVE_MEMTABLES);
+                versions_->mid_table_mapping_[memtable_id_].SetMemTable(mem);
                 memtable_id_++;
             }
             status = WriteBatchInternal::InsertInto(&batch, mem);
@@ -520,7 +518,7 @@ namespace leveldb {
                 compactions++;
                 *save_manifest = true;
 //                status = WriteLevel0Table(mem, edit, nullptr);
-                mem->Unref();
+                versions_->mid_table_mapping_[mem->memtableid()].Unref();
                 mem = nullptr;
                 if (!status.ok()) {
                     // Reflect errors immediately so that conditions like full
@@ -543,7 +541,7 @@ namespace leveldb {
                 *save_manifest = true;
 //                status = WriteLevel0Table(mem, edit, nullptr);
             }
-            mem->Unref();
+            versions_->mid_table_mapping_[mem->memtableid()].Unref();
         }
 
         return status;
@@ -592,7 +590,6 @@ namespace leveldb {
             VersionEdit edit;
             Version *base = versions_->current();
             auto it = imms_.begin();
-            std::map<uint32_t, uint64_t> mid_l0fn;
             while (it != imms_.end()) {
                 MemTable *imm = *it;
                 if (imm->state() != MemTableState::MEMTABLE_FLUSHED) {
@@ -628,12 +625,6 @@ namespace leveldb {
                 stats.micros = env_->NowMicros() - 0;
                 stats.bytes_written = meta.file_size;
                 stats_[level].Add(stats);
-
-                versions_->mid_table_mapping().erase(imm->memtableid());
-                // Remove the mapping here so that future reads won't use the
-                // memtable as it will be deleted.
-                mid_l0fn[imm->memtableid()] = meta.number;
-                imm->Unref();
                 it = imms_.erase(it);
             }
             // Replace immutable memtable with the generated Table
@@ -1347,59 +1338,51 @@ namespace leveldb {
         mutex_.Lock();
         Version *current = versions_->current();
         current->Ref();
+        mutex_.Unlock();
 
-        TableReference ref = {};
-        bool table_located = false;
         MemTable *memtable = nullptr;
+        uint64_t l0_file_number = 0;
         if (table_locator_ != nullptr) {
             Cache::Handle *handle = table_locator_->Lookup(key);
             if (handle != nullptr) {
                 TableLocation *loc = reinterpret_cast<TableLocation *>(table_locator_->Value(
                         handle));
                 if (loc->memtable_id != 0) {
-                    auto it = versions_->mid_table_mapping().find(
-                            loc->memtable_id);
-                    if (it != versions_->mid_table_mapping().end()) {
-                        // found.
-                        ref = it->second;
-                        if (ref.memtable != nullptr) {
-                            ref.memtable->Ref();
-                            memtable = ref.memtable;
-                        }
-                        table_located = true;
-                    }
+                    memtable = versions_->mid_table_mapping_[loc->memtable_id].Ref(
+                            &l0_file_number);
                 }
             }
         }
 
-        if (table_located && (memtable != nullptr || ref.l0_file_number != 0)) {
+        if (memtable != nullptr || l0_file_number != 0) {
             mutex_.Unlock();
             LookupKey lkey(key, snapshot);
             if (memtable != nullptr) {
                 RDMA_ASSERT(memtable->Get(lkey, value, &s))
                     << fmt::format("key:{} memtable:{} s:{}", key.ToString(),
-                                   ref.memtable->memtableid(), s.ToString());
-            } else if (ref.l0_file_number != 0) {
-                s = current->Get(options, ref.l0_file_number, lkey, value);
+                                   memtable->memtableid(), s.ToString());
+            } else if (l0_file_number != 0) {
+                s = current->Get(options, l0_file_number, lkey, value);
             }
             mutex_.Lock();
             if (memtable != nullptr) {
-                memtable->Unref();
+                versions_->mid_table_mapping_[memtable->memtableid()].Unref();
             }
             current->Unref();
             mutex_.Unlock();
             return s;
         }
 
+        mutex_.Lock();
         // Make a copy of memtables and immutable memtables.
         std::vector<MemTable *> mems = active_memtables_;
         std::vector<MemTable *> imms = imms_;
         for (auto mem : mems) {
-            mem->Ref();
+            versions_->mid_table_mapping_[mem->memtableid()].Ref(nullptr);
         }
         for (auto imm : imms) {
             if (imm) {
-                imm->Ref();
+                versions_->mid_table_mapping_[imm->memtableid()].Ref(nullptr);
             }
         }
 
@@ -1445,11 +1428,11 @@ namespace leveldb {
         }
 
         for (auto mem : mems) {
-            mem->Unref();
+            versions_->mid_table_mapping_[mem->memtableid()].Unref();
         }
         for (auto imm : imms) {
             if (imm) {
-                imm->Unref();
+                versions_->mid_table_mapping_[imm->memtableid()].Unref();
             }
         }
         current->Unref();
@@ -1562,9 +1545,8 @@ namespace leveldb {
                 table = new MemTable(internal_comparator_, memtable_id_,
                                      db_profiler_);
                 table->Ref();
-                TableReference ref = {};
-                ref.memtable = table;
-                versions_->mid_table_mapping()[memtable_id_] = ref;
+                RDMA_ASSERT(memtable_id_ < MAX_LIVE_MEMTABLES);
+                versions_->mid_table_mapping_[memtable_id_].SetMemTable(table);
                 memtable_id_++;
                 active_memtables_[partition_id] = table;
             }
@@ -1630,9 +1612,9 @@ namespace leveldb {
             table = new MemTable(internal_comparator_, memtable_id_,
                                  db_profiler_);
             table->Ref();
-            TableReference ref = {};
-            ref.memtable = table;
-            versions_->mid_table_mapping()[memtable_id_] = ref;
+            RDMA_ASSERT(memtable_id_ < MAX_LIVE_MEMTABLES);
+            versions_->mid_table_mapping_[memtable_id_].SetMemTable(table);
+
             memtable_id_++;
             active_memtables_[partition_id] = table;
         }
@@ -1779,11 +1761,9 @@ namespace leveldb {
                                                    impl->memtable_id_,
                                                    impl->db_profiler_);
                     table->Ref();
-
-                    TableReference ref = {};
-                    ref.memtable = table;
-                    impl->versions_->mid_table_mapping()[impl->memtable_id_] = ref;
-
+                    RDMA_ASSERT(impl->memtable_id_ < MAX_LIVE_MEMTABLES);
+                    impl->versions_->mid_table_mapping_[impl->memtable_id_].SetMemTable(
+                            table);
                     impl->memtable_id_++;
                     impl->active_memtables_.push_back(table);
                     impl->active_memtable_mutexs_.push_back(new std::mutex);

@@ -908,16 +908,15 @@ namespace leveldb {
         for (auto &file : edit->new_files_) {
             if (file.first == 0 && file.second.memtable_id != 0) {
                 // L0 files.
-                TableReference ref = {};
-                ref.memtable = nullptr;
-                ref.l0_file_number = file.second.number;
-                mid_table_mapping_[file.second.memtable_id] = ref;
+                mid_table_mapping_[file.second.memtable_id].SetFlushed(
+                        file.second.number);
             }
         }
         // Remove the mapping for deleted files.
         for (auto &file : edit->deleted_files_) {
             if (file.second.memtable_id != 0) {
-                mid_table_mapping_.erase(file.second.memtable_id);
+                mid_table_mapping_[file.second.memtable_id].SetFlushed(
+                        0);
             }
         }
         return Status::OK();

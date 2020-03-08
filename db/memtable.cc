@@ -3,6 +3,7 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include <leveldb/db_profiler.h>
+#include <nova/logging.hpp>
 #include "db/memtable.h"
 #include "db/dbformat.h"
 #include "leveldb/comparator.h"
@@ -172,5 +173,51 @@ namespace leveldb {
             }
         }
         return false;
+    }
+
+    void AtomicMemTable::SetMemTable(leveldb::MemTable *mem) {
+        mutex.lock();
+        l0_file_number = 0;
+        memtable_flushed_ = false;
+        RDMA_ASSERT(!memtable);
+        memtable = mem;
+        mutex.unlock();
+    }
+
+    void AtomicMemTable::SetFlushed(uint64_t l0fn) {
+        mutex.lock();
+        l0_file_number = l0fn;
+        memtable_flushed_ = true;
+
+        uint32_t refs = memtable->Unref();
+        if (refs == 0) {
+            memtable = nullptr;
+        }
+        mutex.unlock();
+    }
+
+    MemTable *AtomicMemTable::Ref(uint64_t *l0_fn) {
+        MemTable *mem = nullptr;
+        mutex.lock();
+        if (memtable != nullptr && !memtable_flushed_) {
+            mem = memtable;
+            memtable->Ref();
+        }
+        if (l0_fn) {
+            *l0_fn = l0_file_number;
+        }
+        mutex.unlock();
+        return mem;
+    }
+
+    void AtomicMemTable::Unref() {
+        mutex.lock();
+        if (memtable != nullptr) {
+            uint32_t refs = memtable->Unref();
+            if (refs == 0) {
+                memtable = nullptr;
+            }
+        }
+        mutex.unlock();
     }
 }  // namespace leveldb

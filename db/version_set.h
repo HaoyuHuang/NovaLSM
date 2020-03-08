@@ -24,6 +24,9 @@
 #include "db/version_edit.h"
 #include "port/port.h"
 #include "port/thread_annotations.h"
+#include "memtable.h"
+
+#define MAX_LIVE_MEMTABLES 1000000
 
 namespace leveldb {
 
@@ -68,11 +71,6 @@ namespace leveldb {
     struct CompactionPriority {
         int level;
         double score;
-    };
-
-    struct TableReference {
-        MemTable *memtable = nullptr;
-        uint64_t l0_file_number = 0;
     };
 
     class Version {
@@ -310,9 +308,7 @@ namespace leveldb {
 
         std::atomic_uint_fast64_t last_sequence_;
 
-        std::map<uint32_t, TableReference> &mid_table_mapping() {
-            return mid_table_mapping_;
-        }
+        AtomicMemTable mid_table_mapping_[MAX_LIVE_MEMTABLES];
 
     private:
         class Builder;
@@ -355,8 +351,6 @@ namespace leveldb {
         uint64_t manifest_file_number_;
         uint64_t log_number_;
         uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
-
-        std::map<uint32_t, TableReference> mid_table_mapping_;
 
         // Opened lazily
         WritableFile *descriptor_file_;

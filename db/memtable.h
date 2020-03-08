@@ -73,12 +73,14 @@ namespace leveldb {
         }
 
         // Drop reference count.  Delete if no more references exist.
-        void Unref() {
+        uint32_t Unref() {
             --refs_;
+            uint32_t refs = refs_;
             assert(refs_ >= 0);
             if (refs_ <= 0) {
                 delete this;
             }
+            return refs;
         }
 
         MemTableState state() {
@@ -146,6 +148,22 @@ namespace leveldb {
         Table table_;
         MemTableState state_ = MemTableState::MEMTABLE_INIT;
         FileMetaData flushed_meta_;
+    };
+
+    class AtomicMemTable {
+    public:
+        void SetMemTable(MemTable *mem);
+
+        void SetFlushed(uint64_t l0_file_number);
+
+        MemTable *Ref(uint64_t *l0_fn);
+
+        void Unref();
+
+        bool memtable_flushed_ = false;
+        uint64_t l0_file_number = 0;
+        std::mutex mutex;
+        MemTable *memtable = nullptr;
     };
 
 }  // namespace leveldb
