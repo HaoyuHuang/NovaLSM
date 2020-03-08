@@ -500,7 +500,6 @@ namespace leveldb {
                 mem->Ref();
                 TableReference ref = {};
                 ref.memtable = mem;
-                mem->Ref();
                 versions_->mid_table_mapping()[memtable_id_] = ref;
 
                 memtable_id_++;
@@ -1541,7 +1540,9 @@ namespace leveldb {
             table->Add(last_sequence, ValueType::kTypeValue, key, val);
             TableLocation *loc = new TableLocation;
             loc->memtable_id = table->memtableid();
-            table_locator_->Insert(key, loc, 1, &DeleteEntry);
+            if (table_locator_ != nullptr) {
+                table_locator_->Insert(key, loc, 1, &DeleteEntry);
+            }
             active_memtable_mutexs_[partition_id]->unlock();
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("#### Put key {} in table {}", key.ToString(),
@@ -1563,7 +1564,6 @@ namespace leveldb {
                 table->Ref();
                 TableReference ref = {};
                 ref.memtable = table;
-                table->Ref();
                 versions_->mid_table_mapping()[memtable_id_] = ref;
                 memtable_id_++;
                 active_memtables_[partition_id] = table;
@@ -1574,7 +1574,9 @@ namespace leveldb {
 
             TableLocation *loc = new TableLocation;
             loc->memtable_id = table->memtableid();
-            table_locator_->Insert(key, loc, 1, &DeleteEntry);
+            if (table_locator_ != nullptr) {
+                table_locator_->Insert(key, loc, 1, &DeleteEntry);
+            }
 
             active_memtable_mutexs_[partition_id]->unlock();
             MaybeScheduleCompaction(options.thread_id + 100);
@@ -1630,7 +1632,6 @@ namespace leveldb {
             table->Ref();
             TableReference ref = {};
             ref.memtable = table;
-            table->Ref();
             versions_->mid_table_mapping()[memtable_id_] = ref;
             memtable_id_++;
             active_memtables_[partition_id] = table;
@@ -1640,7 +1641,9 @@ namespace leveldb {
 
         TableLocation *loc = new TableLocation;
         loc->memtable_id = table->memtableid();
-        table_locator_->Insert(key, loc, 1, &DeleteEntry);
+        if (table_locator_ != nullptr) {
+            table_locator_->Insert(key, loc, 1, &DeleteEntry);
+        }
         active_memtable_mutexs_[partition_id]->unlock();
         MaybeScheduleCompaction(options.thread_id + 100);
         RDMA_LOG(rdmaio::DEBUG)
@@ -1779,7 +1782,6 @@ namespace leveldb {
 
                     TableReference ref = {};
                     ref.memtable = table;
-                    table->Ref();
                     impl->versions_->mid_table_mapping()[impl->memtable_id_] = ref;
 
                     impl->memtable_id_++;
