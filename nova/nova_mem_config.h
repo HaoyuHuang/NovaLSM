@@ -35,7 +35,7 @@ namespace nova {
         uint64_t key_start;
         uint64_t key_end;
         std::vector<uint32_t> server_ids;
-        std::vector<uint32_t> db_ids;
+        uint32_t dbid;
     };
 
     class NovaConfig {
@@ -87,14 +87,14 @@ namespace nova {
             std::set<uint32_t> ndbs;
             for (int i = 0; i < nfragments; i++) {
                 if (fragments[i]->server_ids[0] == server_id) {
-                    ndbs.insert(fragments[i]->db_ids[0]);
+                    ndbs.insert(fragments[i]->dbid);
                 }
             }
             db_fragment = (Fragment **) malloc(
                     ndbs.size() * sizeof(Fragment *));
             for (int i = 0; i < nfragments; i++) {
                 if (fragments[i]->server_ids[0] == server_id) {
-                    db_fragment[fragments[i]->db_ids[0]] = fragments[i];
+                    db_fragment[fragments[i]->dbid] = fragments[i];
                 }
             }
             return ndbs.size();
@@ -110,13 +110,11 @@ namespace nova {
                 std::vector<std::string> tokens = SplitByDelimiter(&line, ",");
                 frag->key_start = std::stoi(tokens[0]);
                 frag->key_end = std::stoi(tokens[1]);
+                frag->dbid = std::stoi(tokens[3]);
 
-                int nreplicas = (tokens.size() - 2) / 2;
-                int index = 2;
+                int nreplicas = (tokens.size() - 4);
                 for (int i = 0; i < nreplicas; i++) {
-                    frag->server_ids.push_back(std::stoi(tokens[index]));
-                    frag->db_ids.push_back(std::stoi(tokens[index + 1]));
-                    index += 2;
+                    frag->server_ids.push_back(std::stoi(tokens[i + 4]));
                 }
                 frags.push_back(frag);
             }
@@ -128,11 +126,11 @@ namespace nova {
             RDMA_LOG(INFO) << "Configuration has a total of " << frags.size()
                            << " fragments.";
             for (int i = 0; i < nfragments; i++) {
-                RDMA_LOG(DEBUG) << "frag[" << i << "]: "
+                RDMA_LOG(INFO) << "frag[" << i << "]: "
                                 << fragments[i]->key_start
                                 << "-" << fragments[i]->key_end
                                 << "-" << ToString(fragments[i]->server_ids)
-                                << "-" << ToString(fragments[i]->db_ids);
+                                << "-" << fragments[i]->dbid;
             }
         }
 

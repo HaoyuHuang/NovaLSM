@@ -252,7 +252,7 @@ namespace nova {
                         << fd << " key:" << int_key << " nkey:" << nkey
                         << " hv:"
                         << hv << " home:" << frag->server_ids[0] << " db:"
-                        << frag->db_ids[0];
+                        << frag->dbid;
         int home_server = frag->server_ids[0];
         worker->stats.nget_hits++;
 
@@ -294,7 +294,7 @@ namespace nova {
                         << " nrecords: " << nrecords;
         uint64_t hv = NovaConfig::keyhash(startkey, nkey);
         Fragment *frag = NovaConfig::home_fragment(hv);
-        leveldb::Iterator *iterator = worker->dbs_[frag->db_ids[0]]->NewIterator(
+        leveldb::Iterator *iterator = worker->dbs_[frag->dbid]->NewIterator(
                 leveldb::ReadOptions());
         iterator->Seek(startkey);
         int records = 0;
@@ -620,7 +620,7 @@ namespace nova {
         uint64_t hv = NovaConfig::keyhash(task.key.data(),
                                           task.key.size());
         Fragment *frag = NovaConfig::home_fragment(hv);
-        uint32_t dbid = frag->db_ids[0];
+        uint32_t dbid = frag->dbid;
         async_workers_[dbid % async_workers_.size()]->AddTask(task);
 //        current_async_worker_id_ += 1;
 //        current_async_worker_id_ %= async_workers_.size();

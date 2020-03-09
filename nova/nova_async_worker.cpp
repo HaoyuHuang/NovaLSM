@@ -49,7 +49,7 @@ namespace nova {
         }
 
         Fragment *frag = NovaConfig::home_fragment(hv);
-        leveldb::DB *db = dbs_[frag->db_ids[0]];
+        leveldb::DB *db = dbs_[frag->dbid];
         if (!option.local_write) {
             leveldb::WriteBatch batch;
             batch.Put(task.key, task.value);
@@ -72,7 +72,7 @@ namespace nova {
         uint64_t hv = NovaConfig::keyhash(task.key.data(),
                                           task.key.size());
         Fragment *frag = NovaConfig::home_fragment(hv);
-        leveldb::DB *db = dbs_[frag->db_ids[0]];
+        leveldb::DB *db = dbs_[frag->dbid];
         std::string value;
         leveldb::Status s = db->Get(
                 leveldb::ReadOptions(), task.key, &value);

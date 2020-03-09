@@ -32,7 +32,7 @@ namespace nova {
             int bs = 0;
             // Insert cold keys first so that hot keys will be at the top level.
             std::vector<std::string *> pointers;
-            leveldb::DB *db = dbs_[frags[i]->db_ids[0]];
+            leveldb::DB *db = dbs_[frags[i]->dbid];
 
             RDMA_LOG(INFO) << "Insert " << frags[i]->key_start << " to "
                            << frags[i]->key_end;
