@@ -231,6 +231,28 @@ namespace nova {
         conn->response_ind = 0;
     }
 
+    bool process_leveldb_get(NovaConnWorker *worker, Connection *conn,
+                             leveldb::Slice &key) {
+        uint64_t hv = NovaConfig::keyhash(key.data(),
+                                          key.size());
+        Fragment *frag = NovaConfig::home_fragment(hv);
+        leveldb::DB *db = worker->dbs_[frag->dbid];
+        std::string value;
+        leveldb::Status s = db->Get(
+                leveldb::ReadOptions(), key, &value);
+        RDMA_ASSERT(s.ok());
+        conn->response_buf = conn->buf;
+        char *response_buf = conn->response_buf;
+        conn->response_size =
+                nint_to_str(value.size()) + 1 + 1 + value.size();
+
+        response_buf += int_to_str(response_buf, value.size() + 1);
+        response_buf[0] = 'h';
+        response_buf += 1;
+        memcpy(response_buf, value.data(), value.size());
+        return true;
+    }
+
     bool
     process_socket_get(int fd, Connection *conn, bool no_redirect) {
         // Stats.
@@ -257,17 +279,18 @@ namespace nova {
         worker->stats.nget_hits++;
 
         leveldb::Slice key(buf, nkey);
-        // I'm the home.
-        NovaAsyncTask task = {
-                .type = RequestType::GET,
-                .conn_worker_id = worker->thread_id_,
-                .key = key.ToString(),
-                .value = "",
-                .sock_fd = fd,
-                .conn = conn
-        };
-        worker->AddTask(task);
-        return false;
+        return process_leveldb_get(worker, conn, key);
+//        // I'm the home.
+//        NovaAsyncTask task = {
+//                .type = RequestType::GET,
+//                .conn_worker_id = worker->thread_id_,
+//                .key = key.ToString(),
+//                .value = "",
+//                .sock_fd = fd,
+//                .conn = conn
+//        };
+//        worker->AddTask(task);
+//        return false;
     }
 
     bool
@@ -356,9 +379,32 @@ namespace nova {
                         << " put fd:"
                         << fd << ": key:" << key << " nkey:" << nkey << " nval:"
                         << nval;
-        // I'm the home.
+
         leveldb::Slice dbkey(ckey, nkey);
         leveldb::Slice dbval(val, nval);
+
+        if (NovaConfig::config->log_record_mode == LOG_LOCAL) {
+            leveldb::WriteOptions option;
+            option.sync = NovaConfig::config->fsync;
+            option.local_write = true;
+
+            Fragment *frag = NovaConfig::home_fragment(hv);
+            leveldb::DB *db = worker->dbs_[frag->dbid];
+            leveldb::Status status = db->Put(option, dbkey, dbval);
+            RDMA_LOG(DEBUG) << "############### Async worker processed task "
+                            << fd
+                            << ":" << dbkey.ToString();
+            RDMA_ASSERT(status.ok()) << status.ToString();
+
+            char *response_buf = conn->buf;
+            int nlen = 1;
+            int len = int_to_str(response_buf, nlen);
+            conn->response_buf = conn->buf;
+            conn->response_size = len + nlen;
+            return true;
+        }
+
+        // I'm the home.
         NovaAsyncTask task = {
                 .type = RequestType::PUT,
                 .conn_worker_id = worker->thread_id_,
