@@ -675,19 +675,6 @@ namespace nova {
     void NovaConnWorker::Start() {
         RDMA_LOG(INFO) << "memstore[" << thread_id_ << "]: "
                        << "starting mem worker";
-        bool all_initialized = false;
-
-        while (!all_initialized) {
-            all_initialized = true;
-            for (const auto &worker : async_workers_) {
-                if (!worker->IsInitialized()) {
-                    all_initialized = false;
-                    break;
-                }
-            }
-            usleep(10000);
-        }
-
         struct event new_conn_timer_event;
         struct event stats_event;
         struct event_config *ev_config;

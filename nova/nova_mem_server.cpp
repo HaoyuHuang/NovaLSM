@@ -216,31 +216,34 @@ namespace nova {
                         async_worker_id % NovaConfig::config->num_async_workers;
             }
         }
-
         RDMA_LOG(INFO) << "Number of worker thread per conn thread "
                        << conn_workers[0]->async_workers_.size();
 
         // Start the threads.
-        for (int worker_id = 0;
-             worker_id < NovaConfig::config->num_conn_workers; worker_id++) {
-            worker_threads.emplace_back(start, conn_workers[worker_id]);
-        }
         for (int worker_id = 0;
              worker_id < NovaConfig::config->num_async_workers; worker_id++) {
             async_worker_threads.emplace_back(&NovaAsyncWorker::Start,
                                               async_workers[worker_id]);
         }
 
-//    int cores[] = {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31};
-//    for (int i = 0; i < worker_threads.size(); i++) {
-//        // Create a cpu_set_t object representing a set of CPUs. Clear it and mark
-//        // only CPU i as set.
-//        cpu_set_t cpuset;
-//        CPU_ZERO(&cpuset);
-//        CPU_SET(i, &cpuset);
-//        int rc = pthread_setaffinity_np(worker_threads[i].native_handle(),
-//                                        sizeof(cpu_set_t), &cpuset);
-//    }
+        bool all_initialized = false;
+        while (!all_initialized) {
+            all_initialized = true;
+            for (int worker_id = 0;
+                 worker_id <
+                 NovaConfig::config->num_async_workers; worker_id++) {
+                if (!async_workers[worker_id]->IsInitialized()) {
+                    all_initialized = false;
+                    break;
+                }
+            }
+            usleep(10000);
+        }
+
+        for (int worker_id = 0;
+             worker_id < NovaConfig::config->num_conn_workers; worker_id++) {
+            worker_threads.emplace_back(start, conn_workers[worker_id]);
+        }
         current_store_id_ = 0;
     }
 
