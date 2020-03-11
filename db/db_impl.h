@@ -159,7 +159,7 @@ namespace leveldb {
         // Compact the in-memory write buffer to disk.  Switches to a new
         // log-file/memtable and writes a new descriptor iff successful.
         // Errors are recorded in bg_error_.
-        bool CompactMemTable(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
+        bool CompactMemTable(EnvBGThread *bg_thread, const CompactionTask &task) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         Status
@@ -170,7 +170,7 @@ namespace leveldb {
         void RecordBackgroundError(const Status &s);
 
         void MaybeScheduleCompaction(
-                uint32_t thread_id) EXCLUSIVE_LOCKS_REQUIRED(
+                uint32_t thread_id, MemTable* imm, uint32_t partition_id, uint32_t imm_slot) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         bool
@@ -216,20 +216,29 @@ namespace leveldb {
         // State below is protected by mutex_
         port::Mutex mutex_;
         std::atomic<bool> shutting_down_;
-        port::CondVar background_work_finished_signal_ GUARDED_BY(mutex_);
 
         std::vector<EnvBGThread *> bg_threads_;
 
-        uint32_t memtable_id_  GUARDED_BY(mutex_) = 1;
+        std::atomic_int_fast32_t memtable_id_seq_  GUARDED_BY(mutex_);
         // key -> memtable-id.
         Cache *table_locator_ GUARDED_BY(mutex_) = nullptr;
 
-        std::vector<MemTable *> active_memtables_ GUARDED_BY(mutex_);
-        std::vector<std::mutex *> active_memtable_mutexs_;
+        struct MemTablePartition {
+            MemTablePartition() : background_work_finished_signal_(&mutex) {
+
+            };
+            MemTable *memtable;
+            port::Mutex mutex;
+            uint32_t partition_id = 0;
+            std::vector<uint32_t> imm_slots;
+            uint32_t next_local_imm_slots = 0;
+            port::CondVar background_work_finished_signal_ GUARDED_BY(mutex);
+        };
+
+        std::vector<MemTablePartition *> active_memtables_ GUARDED_BY(mutex_);
 
         std::vector<MemTable *> imms_ GUARDED_BY(
                 mutex_);  // Memtable being compacted
-        uint32_t nimms_wait_for_compaction_ = 0;
 
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 

@@ -20,13 +20,6 @@ namespace leveldb {
 
     class MemTableIterator;
 
-    enum MemTableState {
-        MEMTABLE_INIT = 0,
-        MEMTABLE_FULL = 1,
-        MEMTABLE_FLUSHING = 2,
-        MEMTABLE_FLUSHED = 3,
-    };
-
     class MemTable {
     public:
         // MemTables are reference counted.  The initial reference count
@@ -44,30 +37,6 @@ namespace leveldb {
             ++refs_;
         }
 
-//        MemTable *RefByTable() {
-//            int refs = 0;
-//            MemTable *table = nullptr;
-//            bool should_delete = false;
-//            mutex_.lock();
-//            --refs_;
-//            if (refs <= 0 && !delete_) {
-//                should_delete = true;
-//                delete_ = true;
-//            } else {
-//                table = this;
-//            }
-//            refs = refs_;
-//            mutex_.unlock();
-//
-//            if (should_delete) {
-//                assert(refs >= 0);
-//                if (refs <= 0) {
-//                    delete this;
-//                }
-//            }
-//            return  table;
-//        }
-
         uint32_t memtableid() {
             return memtable_id_;
         }
@@ -81,14 +50,6 @@ namespace leveldb {
                 delete this;
             }
             return refs;
-        }
-
-        MemTableState state() {
-            return state_;
-        }
-
-        void set_state(MemTableState state) {
-            state_ = state;
         }
 
         // Returns an estimate of the number of bytes of data in use by this
@@ -146,7 +107,6 @@ namespace leveldb {
         uint32_t memtable_id_;
         Arena arena_;
         Table table_;
-        MemTableState state_ = MemTableState::MEMTABLE_INIT;
         FileMetaData flushed_meta_;
     };
 

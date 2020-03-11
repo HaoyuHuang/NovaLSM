@@ -38,7 +38,6 @@ namespace nova {
                 }
                 return 0;
             }
-
             // Ignore the following methods for now:
             const char *Name() const { return "YCSBKeyComparator"; }
 

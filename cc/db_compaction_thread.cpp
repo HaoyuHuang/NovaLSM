@@ -14,13 +14,11 @@ namespace leveldb {
     }
 
     bool NovaCCCompactionThread::Schedule(const CompactionTask &task) {
-        bool scheduled = false;
+        bool scheduled = true;
         background_work_mutex_.Lock();
-        if (background_work_queue_.empty()) {
-            scheduled = true;
-            background_work_queue_.emplace(task);
-            num_tasks_ += 1;
-        }
+        scheduled = true;
+        background_work_queue_.emplace(task);
+        num_tasks_ += 1;
         background_work_mutex_.Unlock();
         if (scheduled) {
             sem_post(&signal);

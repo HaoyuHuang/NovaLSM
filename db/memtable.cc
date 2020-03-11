@@ -188,10 +188,11 @@ namespace leveldb {
         mutex.lock();
         l0_file_number = l0fn;
         memtable_flushed_ = true;
-
-        uint32_t refs = memtable->Unref();
-        if (refs == 0) {
-            memtable = nullptr;
+        if (memtable) {
+            uint32_t refs = memtable->Unref();
+            if (refs == 0) {
+                memtable = nullptr;
+            }
         }
         mutex.unlock();
     }

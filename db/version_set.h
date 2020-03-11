@@ -109,7 +109,7 @@ namespace leveldb {
         // under live iterators)
         void Ref();
 
-        void Unref();
+        uint32_t Unref();
 
         void GetOverlappingInputs(
                 int level,
@@ -147,13 +147,13 @@ namespace leveldb {
 
         class LevelFileNumIterator;
 
-        explicit Version(VersionSet *vset)
+        explicit Version(VersionSet *vset, uint32_t version_id)
                 : vset_(vset),
                   next_(this),
                   prev_(this),
                   refs_(0),
                   file_to_compact_(nullptr),
-                  file_to_compact_level_(-1) {}
+                  file_to_compact_level_(-1), version_id_(version_id) {};
 
         Version(const Version &) = delete;
 
@@ -186,11 +186,25 @@ namespace leveldb {
         // Next file to compact based on seek stats.
         FileMetaData *file_to_compact_;
         int file_to_compact_level_;
+        uint32_t version_id_;
 
         // Level that should be compacted next and its compaction score.
         // Score < 1 means compaction is not strictly needed.  These fields
         // are initialized by Finalize().
         std::vector<CompactionPriority> compaction_levels_;
+    };
+
+    class AtomicVersion {
+    public:
+        void SetVersion(Version *v);
+
+        Version *Ref();
+
+        void Unref();
+
+        bool version_deleted_ = false;
+        std::mutex mutex;
+        Version *version = nullptr;
     };
 
     class VersionSet {
@@ -222,7 +236,9 @@ namespace leveldb {
         uint64_t ManifestFileNumber() const { return manifest_file_number_; }
 
         // Allocate and return a new file number
-        uint64_t NewFileNumber() { return next_file_number_++; }
+        uint64_t NewFileNumber() {
+            return next_file_number_.fetch_add(1, std::memory_order_acquire);
+        }
 
         // Arrange to reuse "file_number" unless a newer file number has
         // already been allocated.
@@ -306,10 +322,15 @@ namespace leveldb {
 
         const char *LevelSummary(uint32_t thread_id) const;
 
+        uint32_t current_version_id() {
+            return current_version_id_.load(std::memory_order_acquire);
+        }
+
         std::atomic_uint_fast64_t last_sequence_;
 
         AtomicMemTable mid_table_mapping_[MAX_LIVE_MEMTABLES];
-
+        AtomicVersion versions_[MAX_LIVE_MEMTABLES];
+        uint32_t version_id_seq_ = 0;
     private:
         class Builder;
 
@@ -347,7 +368,7 @@ namespace leveldb {
         const Options *const options_;
         TableCache *const table_cache_;
         const InternalKeyComparator icmp_;
-        uint64_t next_file_number_;
+        std::atomic_int_fast64_t next_file_number_;
         uint64_t manifest_file_number_;
         uint64_t log_number_;
         uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
@@ -357,6 +378,7 @@ namespace leveldb {
         log::Writer *descriptor_log_;
         Version dummy_versions_;  // Head of circular doubly-linked list of versions.
         Version *current_;        // == dummy_versions_.prev_
+        std::atomic_int_fast32_t current_version_id_;
 
         // Per-level key at which the next compaction at that level should start.
         // Either an empty string, or a valid InternalKey.

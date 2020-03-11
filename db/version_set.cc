@@ -523,15 +523,20 @@ namespace leveldb {
 //        return false;
 //    }
 
-    void Version::Ref() { ++refs_; }
+    void Version::Ref() {
+        ++refs_;
+    }
 
-    void Version::Unref() {
+    uint32_t Version::Unref() {
+        uint32_t refs = 0;
         assert(this != &vset_->dummy_versions_);
         assert(refs_ >= 1);
         --refs_;
+        refs = refs_;
         if (refs_ == 0) {
             delete this;
         }
+        return refs;
     }
 
     bool Version::OverlapInLevel(int level, const Slice *smallest_user_key,
@@ -688,7 +693,7 @@ namespace leveldb {
     public:
         // Initialize a builder with the files from *base and other info from *vset
         Builder(VersionSet *vset, Version *base) : vset_(vset), base_(base) {
-            base_->Ref();
+            vset->versions_[base->version_id_].Ref();
             BySmallestKey cmp;
             cmp.internal_comparator = &vset_->icmp_;
             for (int level = 0; level < config::kNumLevels; level++) {
@@ -715,7 +720,7 @@ namespace leveldb {
                     }
                 }
             }
-            base_->Unref();
+            vset_->versions_[base_->version_id_].Unref();
         }
 
         // Apply all of the edits in *edit to the current state.
@@ -848,13 +853,13 @@ namespace leveldb {
               prev_log_number_(0),
               descriptor_file_(nullptr),
               descriptor_log_(nullptr),
-              dummy_versions_(this),
+              dummy_versions_(this, version_id_seq_++),
               current_(nullptr) {
-        AppendVersion(new Version(this));
+        AppendVersion(new Version(this, version_id_seq_++));
     }
 
     VersionSet::~VersionSet() {
-        current_->Unref();
+        versions_[current_->version_id_].Unref();
         assert(dummy_versions_.next_ ==
                &dummy_versions_);  // List must be empty
         delete descriptor_log_;
@@ -866,16 +871,18 @@ namespace leveldb {
         assert(v->refs_ == 0);
         assert(v != current_);
         if (current_ != nullptr) {
-            current_->Unref();
+            versions_[current_->version_id_].Unref();
         }
         current_ = v;
-        v->Ref();
 
         // Append to linked list
         v->prev_ = dummy_versions_.prev_;
         v->next_ = &dummy_versions_;
         v->prev_->next_ = v;
         v->next_->prev_ = v;
+
+        versions_[v->version_id_].SetVersion(v);
+        current_version_id_.store(v->version_id_, std::memory_order_acquire);
     }
 
     Status VersionSet::LogAndApply(VersionEdit *edit, port::Mutex *mu) {
@@ -893,7 +900,7 @@ namespace leveldb {
         edit->SetNextFile(next_file_number_);
         edit->SetLastSequence(last_sequence_);
 
-        Version *v = new Version(this);
+        Version *v = new Version(this, version_id_seq_++);
         {
             Builder builder(this, current_);
             builder.Apply(edit);
@@ -1093,7 +1100,7 @@ namespace leveldb {
         }
 
         if (s.ok()) {
-            Version *v = new Version(this);
+            Version *v = new Version(this, version_id_seq_++);
             builder.SaveTo(v);
             // Install recovered version
             Finalize(v);
@@ -1586,8 +1593,8 @@ namespace leveldb {
             return nullptr;
         }
 
-        c->input_version_ = current_;
-        c->input_version_->Ref();
+//        c->input_version_ = current_;
+//        c->input_version_->Ref();
 
         if (c->level_ == -1) {
             SetupOtherInputsForL0Consolidation(c);
@@ -1902,7 +1909,7 @@ namespace leveldb {
 
         Compaction *c = new Compaction(options_, level);
         c->input_version_ = current_;
-        c->input_version_->Ref();
+//        c->input_version_->Ref();
         c->inputs_[0] = inputs;
         SetupOtherInputs(c);
         return c;
@@ -1922,7 +1929,7 @@ namespace leveldb {
 
     Compaction::~Compaction() {
         if (input_version_ != nullptr) {
-            input_version_->Unref();
+//            input_version_->Unref();
         }
     }
 
@@ -1997,9 +2004,40 @@ namespace leveldb {
 
     void Compaction::ReleaseInputs() {
         if (input_version_ != nullptr) {
-            input_version_->Unref();
+//            input_version_->Unref();
             input_version_ = nullptr;
         }
+    }
+
+    void AtomicVersion::SetVersion(leveldb::Version *v) {
+        mutex.lock();
+        version_deleted_ = false;
+        RDMA_ASSERT(!version);
+        version = v;
+        v->Ref();
+        mutex.unlock();
+    }
+
+    Version *AtomicVersion::Ref() {
+        Version *v = nullptr;
+        mutex.lock();
+        if (version != nullptr && !version_deleted_) {
+            v = version;
+            v->Ref();
+        }
+        mutex.unlock();
+        return v;
+    }
+
+    void AtomicVersion::Unref() {
+        mutex.lock();
+        if (version != nullptr) {
+            uint32_t refs = version->Unref();
+            if (refs == 0) {
+                version = nullptr;
+            }
+        }
+        mutex.unlock();
     }
 
 }  // namespace leveldb
