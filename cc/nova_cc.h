@@ -26,7 +26,7 @@ namespace leveldb {
                       CCClient *cc_client,
                       const std::string &dbname,
                       uint64_t thread_id,
-                      uint64_t file_size);
+                      uint64_t file_size, unsigned int *rand_seed);
 
         ~NovaCCMemFile();
 
@@ -89,6 +89,7 @@ namespace leveldb {
                                uint64_t offset);
 
         Env *env_;
+        unsigned int *rand_seed_;
         uint64_t file_number_;
         const std::string fname_;
         MemManager *mem_manager_;
@@ -136,6 +137,12 @@ namespace leveldb {
             uint64_t local_offset;
         };
 
+        struct DataBlockBuf {
+            uint32_t thread_id;
+            char *buf = nullptr;
+            bool is_using = false;
+        };
+
         Status ReadAll(CCClient *dc_client);
 
         const std::string &dbname_;
@@ -146,7 +153,7 @@ namespace leveldb {
         char *backing_mem_table_ = nullptr;
 
         std::map<uint64_t, DataBlockRTableLocalBuf> rtable_local_offset_;
-        std::map<uint32_t, char*> t_backing_mem_block_;
+        std::vector<DataBlockBuf> backing_mem_blocks_;
         std::mutex mutex_;
 
         MemManager *mem_manager_ = nullptr;

@@ -4,6 +4,7 @@
 
 #include <leveldb/db_profiler.h>
 #include <nova/logging.hpp>
+#include <fmt/core.h>
 #include "db/memtable.h"
 #include "db/dbformat.h"
 #include "leveldb/comparator.h"
@@ -181,18 +182,22 @@ namespace leveldb {
         memtable_flushed_ = false;
         RDMA_ASSERT(!memtable);
         memtable = mem;
+        memtable->Ref();
         mutex.unlock();
     }
 
     void AtomicMemTable::SetFlushed(uint64_t l0fn) {
         mutex.lock();
+        RDMA_ASSERT(!memtable_flushed_);
+        RDMA_ASSERT(l0_file_number == 0);
         l0_file_number = l0fn;
         memtable_flushed_ = true;
-        if (memtable) {
-            uint32_t refs = memtable->Unref();
-            if (refs == 0) {
-                memtable = nullptr;
-            }
+        RDMA_ASSERT(memtable);
+        uint32_t mid = memtable->memtableid();
+        uint32_t refs = memtable->Unref();
+        if (refs <= 0) {
+            RDMA_LOG(rdmaio::DEBUG) << fmt::format("delete mid-{}", mid);
+            memtable = nullptr;
         }
         mutex.unlock();
     }
@@ -213,11 +218,12 @@ namespace leveldb {
 
     void AtomicMemTable::Unref() {
         mutex.lock();
-        if (memtable != nullptr) {
-            uint32_t refs = memtable->Unref();
-            if (refs == 0) {
-                memtable = nullptr;
-            }
+        RDMA_ASSERT(memtable);
+        uint32_t mid = memtable->memtableid();
+        uint32_t refs = memtable->Unref();
+        if (refs == 0) {
+            RDMA_LOG(rdmaio::INFO) << fmt::format("delete mid-{}", mid);
+            memtable = nullptr;
         }
         mutex.unlock();
     }

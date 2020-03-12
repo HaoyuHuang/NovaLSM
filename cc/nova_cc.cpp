@@ -24,13 +24,13 @@ namespace leveldb {
                                  CCClient *cc_client,
                                  const std::string &dbname,
                                  uint64_t thread_id,
-                                 uint64_t file_size)
+                                 uint64_t file_size, unsigned int *rand_seed)
             : env_(env), options_(options), file_number_(file_number),
               fname_(TableFileName(dbname, file_number)),
               mem_manager_(mem_manager),
               cc_client_(cc_client),
               dbname_(dbname), thread_id_(thread_id),
-              allocated_size_(file_size),
+              allocated_size_(file_size), rand_seed_(rand_seed),
               MemFile(nullptr, "", false) {
         RDMA_ASSERT(mem_manager);
         RDMA_ASSERT(cc_client);
@@ -169,7 +169,7 @@ namespace leveldb {
             used_server[i] = false;
         }
 
-        uint32_t start_server_id = rand() %
+        uint32_t start_server_id = rand_r(rand_seed_) %
                                    (nova::NovaConfig::config->servers.size() -
                                     1);// nova::NovaConfig::config->my_server_id + 1;
         if (start_server_id >= nova::NovaConfig::config->my_server_id) {
@@ -527,24 +527,39 @@ namespace leveldb {
             local_offset =
                     buf.local_offset + (offset - buf.offset);
             ptr = &backing_mem_table_[local_offset];
+            memcpy(scratch, ptr, n);
+            *result = Slice(scratch, n);
         } else {
+            RDMA_ASSERT(n < MAX_BLOCK_SIZE);
             char *backing_mem_block = nullptr;
+            int buf_id = -1;
+
+            // Search the first available buf.
             mutex_.lock();
-            auto it = t_backing_mem_block_.find(read_options.thread_id);
-            if (it != t_backing_mem_block_.end()) {
-                backing_mem_block = it->second;
-            } else {
+            for (int i = 0; i < backing_mem_blocks_.size(); i++) {
+                if (!backing_mem_blocks_[i].is_using) {
+                    buf_id = i;
+                    break;
+                }
+            }
+
+            if (buf_id == -1) {
                 uint32_t scid = mem_manager_->slabclassid(
                         read_options.thread_id,
                         MAX_BLOCK_SIZE);
                 backing_mem_block = mem_manager_->ItemAlloc(
                         read_options.thread_id, scid);
-                t_backing_mem_block_[read_options.thread_id] = backing_mem_block;
+                DataBlockBuf buf = {};
+                buf.is_using = true;
+                buf.thread_id = read_options.thread_id;
+                buf.buf = backing_mem_block;
+                backing_mem_blocks_.emplace_back(buf);
+                buf_id = backing_mem_blocks_.size() - 1;
             }
+            backing_mem_blocks_[buf_id].is_using = true;
+            backing_mem_block = backing_mem_blocks_[buf_id].buf;
             mutex_.unlock();
-
             RDMA_ASSERT(backing_mem_block);
-
             auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(read_options.dc_client);
             dc->set_dbid(dbid_);
             uint32_t req_id = dc->InitiateRTableReadDataBlock(
@@ -564,9 +579,14 @@ namespace leveldb {
                 << fmt::format("t[{}]: {}", read_options.thread_id, req_id);
 
             ptr = backing_mem_block;
+            memcpy(scratch, ptr, n);
+            *result = Slice(scratch, n);
+
+            // Return the buf.
+            mutex_.lock();
+            backing_mem_blocks_[buf_id].is_using = false;
+            mutex_.unlock();
         }
-        memcpy(scratch, ptr, n);
-        *result = Slice(scratch, n);
         return Status::OK();
     }
 
@@ -582,10 +602,11 @@ namespace leveldb {
             backing_mem_table_ = nullptr;
         }
 
-        for (auto it : t_backing_mem_block_) {
-            uint32_t scid = mem_manager_->slabclassid(it.first,
+        for (auto &it : backing_mem_blocks_) {
+            RDMA_ASSERT(!it.is_using);
+            uint32_t scid = mem_manager_->slabclassid(it.thread_id,
                                                       MAX_BLOCK_SIZE);
-            mem_manager_->FreeItem(thread_id_, it.second, scid);
+            mem_manager_->FreeItem(it.thread_id, it.buf, scid);
         }
     }
 

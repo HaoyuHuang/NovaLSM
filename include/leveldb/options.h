@@ -203,6 +203,8 @@ namespace leveldb {
 
         CCClient *dc_client = nullptr;
 
+        uint64_t hash = 0;
+
         // If "snapshot" is non-null, read as of the supplied snapshot
         // (which must belong to the DB that is being read and which must
         // not have been released).  If "snapshot" is null, use an implicit
@@ -231,7 +233,9 @@ namespace leveldb {
         bool sync = false;
 
         bool local_write = false;
+        unsigned int *rand_seed;
 
+        uint64_t hash = 0;
         // For replicating log records.
         uint64_t thread_id;
         CCClient *dc_client = nullptr;

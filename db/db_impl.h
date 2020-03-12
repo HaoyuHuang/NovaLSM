@@ -24,6 +24,8 @@
 #include "port/thread_annotations.h"
 #include "memtable.h"
 
+#define MAX_BUCKETS 10000000
+
 namespace leveldb {
 
     class MemTable;
@@ -35,6 +37,21 @@ namespace leveldb {
     class VersionEdit;
 
     class VersionSet;
+
+    struct TableLocation {
+        std::mutex mutex;
+        std::atomic_int_fast64_t memtable_id;
+    };
+
+    class TableLocator {
+    public:
+        uint64_t Lookup(const Slice &key, uint64_t hash);
+
+        void Insert(const Slice &key, uint64_t hash, uint32_t memtableid);
+
+    private:
+        TableLocation table_locator_[MAX_BUCKETS];
+    };
 
     class DBImpl : public DB {
     public:
@@ -102,7 +119,7 @@ namespace leveldb {
         void RecordReadSample(Slice key);
 
         void PerformCompaction(EnvBGThread *bg_thread,
-                               const CompactionTask &task) override;
+                               const std::vector<CompactionTask> &tasks) override;
 
     private:
         friend class DB;
@@ -111,6 +128,10 @@ namespace leveldb {
         struct Writer;
 
         DBProfiler *db_profiler_ = nullptr;
+
+        bool Write(const WriteOptions &options, const Slice &key,
+                   const Slice &value, uint32_t partition_id, bool should_wait,
+                   uint64_t last_sequence);
 
         // Information for a manual compaction
         struct ManualCompaction {
@@ -159,7 +180,8 @@ namespace leveldb {
         // Compact the in-memory write buffer to disk.  Switches to a new
         // log-file/memtable and writes a new descriptor iff successful.
         // Errors are recorded in bg_error_.
-        bool CompactMemTable(EnvBGThread *bg_thread, const CompactionTask &task) EXCLUSIVE_LOCKS_REQUIRED(
+        bool CompactMemTable(EnvBGThread *bg_thread,
+                             const std::vector<CompactionTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         Status
@@ -170,7 +192,9 @@ namespace leveldb {
         void RecordBackgroundError(const Status &s);
 
         void MaybeScheduleCompaction(
-                uint32_t thread_id, MemTable* imm, uint32_t partition_id, uint32_t imm_slot) EXCLUSIVE_LOCKS_REQUIRED(
+                uint32_t thread_id, MemTable *imm, uint32_t partition_id,
+                uint32_t imm_slot,
+                unsigned int *rand_seed) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         bool
@@ -219,9 +243,13 @@ namespace leveldb {
 
         std::vector<EnvBGThread *> bg_threads_;
 
-        std::atomic_int_fast32_t memtable_id_seq_  GUARDED_BY(mutex_);
+        std::atomic_int_fast32_t memtable_id_seq_ ;
+        std::atomic_int_fast32_t bg_thread_id_seq_;
         // key -> memtable-id.
-        Cache *table_locator_ GUARDED_BY(mutex_) = nullptr;
+        struct TableLocation {
+            uint32_t memtable_id = 0;
+        };
+        TableLocator *table_locator_ = nullptr;
 
         struct MemTablePartition {
             MemTablePartition() : background_work_finished_signal_(&mutex) {
@@ -231,7 +259,7 @@ namespace leveldb {
             port::Mutex mutex;
             uint32_t partition_id = 0;
             std::vector<uint32_t> imm_slots;
-            uint32_t next_local_imm_slots = 0;
+            std::queue<uint32_t> available_slots;
             port::CondVar background_work_finished_signal_ GUARDED_BY(mutex);
         };
 

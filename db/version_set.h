@@ -26,7 +26,7 @@
 #include "port/thread_annotations.h"
 #include "memtable.h"
 
-#define MAX_LIVE_MEMTABLES 1000000
+#define MAX_LIVE_MEMTABLES 100000
 
 namespace leveldb {
 
@@ -140,12 +140,9 @@ namespace leveldb {
 
         void UpdateScore(Compaction *c, const Options &options);
 
-    private:
-        friend class Compaction;
-
-        friend class VersionSet;
-
-        class LevelFileNumIterator;
+        uint32_t version_id() {
+            return version_id_;
+        }
 
         explicit Version(VersionSet *vset, uint32_t version_id)
                 : vset_(vset),
@@ -154,6 +151,12 @@ namespace leveldb {
                   refs_(0),
                   file_to_compact_(nullptr),
                   file_to_compact_level_(-1), version_id_(version_id) {};
+    private:
+        friend class Compaction;
+
+        friend class VersionSet;
+
+        class LevelFileNumIterator;
 
         Version(const Version &) = delete;
 
@@ -180,7 +183,7 @@ namespace leveldb {
 
         // List of files per level
         std::vector<FileMetaData *> files_[config::kNumLevels];
-        std::map<uint64_t, FileMetaData *> fn_files_;
+        FileMetaData* fn_files_[MAX_LIVE_MEMTABLES];
         std::set<uint64_t> skip_tables_for_compaction_;
 
         // Next file to compact based on seek stats.
@@ -223,8 +226,7 @@ namespace leveldb {
         // current version.  Will release *mu while actually writing to the file.
         // REQUIRES: *mu is held on entry.
         // REQUIRES: no other thread concurrently calls LogAndApply()
-        Status LogAndApply(VersionEdit *edit, port::Mutex *mu)
-        EXCLUSIVE_LOCKS_REQUIRED(mu);
+        Status LogAndApply(VersionEdit *edit, Version*new_version);
 
         // Recover the last saved descriptor from persistent storage.
         Status Recover(bool *save_manifest);
@@ -330,7 +332,7 @@ namespace leveldb {
 
         AtomicMemTable mid_table_mapping_[MAX_LIVE_MEMTABLES];
         AtomicVersion versions_[MAX_LIVE_MEMTABLES];
-        uint32_t version_id_seq_ = 0;
+        std::atomic_int_fast32_t version_id_seq_;
     private:
         class Builder;
 

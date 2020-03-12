@@ -20,7 +20,8 @@ namespace leveldb {
 
     Status
     BuildTable(const std::string &dbname, Env *env, const Options &options,
-               TableCache *table_cache, Iterator *iter, FileMetaData *meta, EnvBGThread* bg_thread) {
+               TableCache *table_cache, Iterator *iter, FileMetaData *meta,
+               EnvBGThread *bg_thread) {
         Status s;
         meta->file_size = 0;
         iter->SeekToFirst();
@@ -35,7 +36,8 @@ namespace leveldb {
                                                        bg_thread->dc_client(),
                                                        dbname,
                                                        bg_thread->thread_id(),
-                                                       options.max_dc_file_size);
+                                                       options.max_dc_file_size,
+                                                       bg_thread->rand_seed());
             WritableFile *file = new MemWritableFile(cc_file);
             TableBuilder *builder = new TableBuilder(options, file);
             meta->smallest.DecodeFrom(iter->key());
@@ -82,6 +84,15 @@ namespace leveldb {
             cc_file = nullptr;
             delete file;
             file = nullptr;
+
+//            ReadOptions read_options = {};
+//            read_options.thread_id = bg_thread->thread_id();
+//            read_options.dc_client = bg_thread->dc_client();
+//            read_options.mem_manager = bg_thread->mem_manager();
+//            Cache::Handle *handle = nullptr;
+//            table_cache->FindTable(AccessCaller::kUserIterator, read_options,
+//                                   *meta, meta->number, meta->file_size, 0,
+//                                   &handle);
 
 //            if (cc_file->backing_mem()) {
 //                options.sstable_manager->AddSSTable(dbname,

@@ -102,11 +102,10 @@ namespace nova {
     public:
         NovaCCConnWorker(int thread_id)
                 :
-                thread_id_(thread_id){
+                thread_id_(thread_id) {
             RDMA_LOG(INFO) << "memstore[" << thread_id << "]: "
                            << "create conn thread :" << thread_id;
-            int fd[2];
-            pipe(fd);
+            rand_seed = thread_id;
         }
 
         void Start();
@@ -136,6 +135,7 @@ namespace nova {
         vector<Connection *> conns;
         Stats stats;
         Stats prev_stats;
+        unsigned int rand_seed = 0;
     };
 }
 

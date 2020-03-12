@@ -186,6 +186,7 @@ namespace nova {
         leveldb::DB *db = worker->dbs_[frag->dbid];
         std::string value;
         leveldb::ReadOptions read_options;
+        read_options.hash = int_key;
         read_options.dc_client = worker->cc_client_;
         read_options.mem_manager = worker->mem_manager_;
         read_options.thread_id = worker->thread_id_;
@@ -302,6 +303,8 @@ namespace nova {
         option.sync = true;
         option.local_write = false;
         option.thread_id = worker->thread_id_;
+        option.rand_seed = &worker->rand_seed;
+        option.hash = key;
         CCFragment *frag = NovaCCConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
 
@@ -572,17 +575,17 @@ namespace nova {
             RDMA_ASSERT(event_add(&new_conn_timer_event, &tv) == 0);
         }
         /* Timer event for stats */
-        {
-            struct timeval tv;
-            tv.tv_sec = 10;
-            tv.tv_usec = 0;
-            memset(&stats_event, 0, sizeof(struct event));
-            RDMA_ASSERT(
-                    event_assign(&stats_event, base, -1, EV_PERSIST,
-                                 stats_handler,
-                                 (void *) this) == 0);
-            RDMA_ASSERT(event_add(&stats_event, &tv) == 0);
-        }
+//        {
+//            struct timeval tv;
+//            tv.tv_sec = 10;
+//            tv.tv_usec = 0;
+//            memset(&stats_event, 0, sizeof(struct event));
+//            RDMA_ASSERT(
+//                    event_assign(&stats_event, base, -1, EV_PERSIST,
+//                                 stats_handler,
+//                                 (void *) this) == 0);
+//            RDMA_ASSERT(event_add(&stats_event, &tv) == 0);
+//        }
         /* Timer event for RDMA */
 //        if (NovaConfig::config->enable_rdma) {
 //            struct timeval tv;

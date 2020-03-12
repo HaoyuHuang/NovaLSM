@@ -78,11 +78,12 @@ namespace leveldb {
         for (int level = 0; level < config::kNumLevels; level++) {
             for (size_t i = 0; i < files_[level].size(); i++) {
                 FileMetaData *f = files_[level][i];
-                assert(f->refs > 0);
-                f->refs--;
-                if (f->refs <= 0) {
-                    delete f;
-                }
+//                assert(f->refs > 0);
+//                f->refs--;
+//                if (f->refs <= 0) {
+//                    RDMA_LOG(rdmaio::INFO) << "delete f " << f->memtable_id;
+//                    delete f;
+//                }
             }
         }
     }
@@ -367,7 +368,15 @@ namespace leveldb {
 
     Status Version::Get(const leveldb::ReadOptions &options, uint64_t fn,
                         const leveldb::LookupKey &key, std::string *val) {
-        auto *file = fn_files_[fn];
+        RDMA_ASSERT(fn < MAX_LIVE_MEMTABLES);
+        FileMetaData *file = nullptr;
+        for (uint32_t i = 0; i < files_[0].size(); i++) {
+            FileMetaData *f = files_[0][i];
+            if (f->number == fn) {
+                file = f;
+                break;
+            }
+        }
         RDMA_ASSERT(file);
         RDMA_ASSERT(file->number == fn);
         Saver saver;
@@ -726,11 +735,11 @@ namespace leveldb {
         // Apply all of the edits in *edit to the current state.
         void Apply(VersionEdit *edit) {
             // Update compaction pointers
-            for (size_t i = 0; i < edit->compact_pointers_.size(); i++) {
-                const int level = edit->compact_pointers_[i].first;
-                vset_->compact_pointer_[level] =
-                        edit->compact_pointers_[i].second.Encode().ToString();
-            }
+//            for (size_t i = 0; i < edit->compact_pointers_.size(); i++) {
+//                const int level = edit->compact_pointers_[i].first;
+//                vset_->compact_pointer_[level] =
+//                        edit->compact_pointers_[i].second.Encode().ToString();
+//            }
 
             // Delete files
             for (const auto &deleted_file_set_kvp : edit->deleted_files_) {
@@ -831,8 +840,9 @@ namespace leveldb {
                 }
                 f->refs++;
                 files->push_back(f);
-                RDMA_ASSERT(v->fn_files_.find(f->number) == v->fn_files_.end())
-                    << fmt::format("{}@{}", f->number, level);
+                RDMA_ASSERT(f->number < MAX_LIVE_MEMTABLES);
+//                RDMA_ASSERT(v->fn_files_[f->number] == nullptr)
+//                    << fmt::format("{}@{}", f->number, level);
                 v->fn_files_[f->number] = f;
             }
         }
@@ -853,6 +863,7 @@ namespace leveldb {
               prev_log_number_(0),
               descriptor_file_(nullptr),
               descriptor_log_(nullptr),
+              version_id_seq_(0),
               dummy_versions_(this, version_id_seq_++),
               current_(nullptr) {
         AppendVersion(new Version(this, version_id_seq_++));
@@ -885,7 +896,7 @@ namespace leveldb {
         current_version_id_.store(v->version_id_, std::memory_order_acquire);
     }
 
-    Status VersionSet::LogAndApply(VersionEdit *edit, port::Mutex *mu) {
+    Status VersionSet::LogAndApply(VersionEdit *edit, Version *v) {
         if (edit->has_log_number_) {
             assert(edit->log_number_ >= log_number_);
             assert(edit->log_number_ < next_file_number_);
@@ -900,32 +911,14 @@ namespace leveldb {
         edit->SetNextFile(next_file_number_);
         edit->SetLastSequence(last_sequence_);
 
-        Version *v = new Version(this, version_id_seq_++);
         {
             Builder builder(this, current_);
             builder.Apply(edit);
             builder.SaveTo(v);
         }
-        Finalize(v);
         AppendVersion(v);
         log_number_ = edit->log_number_;
         prev_log_number_ = edit->prev_log_number_;
-
-        // Add L0 files and update the mapping.
-        for (auto &file : edit->new_files_) {
-            if (file.first == 0 && file.second.memtable_id != 0) {
-                // L0 files.
-                mid_table_mapping_[file.second.memtable_id].SetFlushed(
-                        file.second.number);
-            }
-        }
-        // Remove the mapping for deleted files.
-        for (auto &file : edit->deleted_files_) {
-            if (file.second.memtable_id != 0) {
-                mid_table_mapping_[file.second.memtable_id].SetFlushed(
-                        0);
-            }
-        }
         return Status::OK();
 
         // Initialize new descriptor log file if necessary by creating
@@ -1281,19 +1274,13 @@ namespace leveldb {
 
     const char *VersionSet::LevelSummary(uint32_t thread_id) const {
         // Update code if kNumLevels changes
-        std::string summary = "files[ ";
-        for (int i = 0; i < 7; i++) {
-            summary += std::to_string(current_->files_[i].size()) + " ";
-        }
-        summary += "] compaction: [ ";
-        for (int i = 0; i < current_->compaction_levels_.size(); i++) {
-            summary += fmt::format("{}:{} ",
-                                   current_->compaction_levels_[i].level,
-                                   current_->compaction_levels_[i].score);
-        }
-        summary += "]";
-        Log(options_->info_log, "bg[%d]: compacted to: %s", thread_id,
-            summary.c_str());
+//        std::string summary = "files[ ";
+//        for (int i = 0; i < 7; i++) {
+//            summary += std::to_string(current_->files_[i].size()) + " ";
+//        }
+//        summary += "]";
+//        Log(options_->info_log, "bg[%d]: compacted to: %s", thread_id,
+//            summary.c_str());
         return nullptr;
     }
 
@@ -2031,11 +2018,12 @@ namespace leveldb {
 
     void AtomicVersion::Unref() {
         mutex.lock();
-        if (version != nullptr) {
-            uint32_t refs = version->Unref();
-            if (refs == 0) {
-                version = nullptr;
-            }
+        RDMA_ASSERT(version);
+        uint32_t vid = version->version_id();
+        uint32_t refs = version->Unref();
+        if (refs == 0) {
+            RDMA_LOG(rdmaio::DEBUG) << fmt::format("delete vid-{}", vid);
+            version = nullptr;
         }
         mutex.unlock();
     }

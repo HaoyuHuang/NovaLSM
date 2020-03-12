@@ -161,7 +161,7 @@ namespace leveldb {
         virtual void CompactRange(const Slice *begin, const Slice *end) = 0;
 
         virtual void PerformCompaction(EnvBGThread *bg_thread,
-                                       const CompactionTask &task) = 0;
+                                       const std::vector<CompactionTask> &tasks) = 0;
     };
 
 // Destroy the contents of the specified database.

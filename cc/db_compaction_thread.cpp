@@ -14,16 +14,11 @@ namespace leveldb {
     }
 
     bool NovaCCCompactionThread::Schedule(const CompactionTask &task) {
-        bool scheduled = true;
         background_work_mutex_.Lock();
-        scheduled = true;
-        background_work_queue_.emplace(task);
-        num_tasks_ += 1;
+        background_work_queue_.push_back(task);
         background_work_mutex_.Unlock();
-        if (scheduled) {
-            sem_post(&signal);
-        }
-        return scheduled;
+        sem_post(&signal);
+        return true;
     }
 
     bool NovaCCCompactionThread::IsInitialized() {
@@ -44,22 +39,34 @@ namespace leveldb {
         is_running_ = true;
         background_work_mutex_.Unlock();
 
+        rand_seed_ = thread_id_ + 100000;
+
         RDMA_LOG(rdmaio::INFO) << "Compaction workers started";
         while (is_running_) {
             sem_wait(&signal);
 
             background_work_mutex_.Lock();
-            RDMA_ASSERT(!background_work_queue_.empty());
+            if (background_work_queue_.empty()) {
+                background_work_mutex_.Unlock();
+                continue;
+            }
 
-            auto task = background_work_queue_.front();
-            background_work_queue_.pop();
+            std::vector<CompactionTask> tasks(background_work_queue_);
+            background_work_queue_.clear();
             background_work_mutex_.Unlock();
-            auto db = reinterpret_cast<DB *>(task.db);
-            db->PerformCompaction(this, task);
 
-            background_work_mutex_.Lock();
-            num_tasks_ -= 1;
-            background_work_mutex_.Unlock();
+            auto db = reinterpret_cast<DB *>(tasks[0].db);
+            db->PerformCompaction(this, tasks);
+
+//            std::map<void *, std::vector<CompactionTask>> db_tasks;
+//            for (auto &task : tasks) {
+//                db_tasks[task.db].push_back(task);
+//            }
+//
+//            for (auto& it : db_tasks) {
+//                auto db = reinterpret_cast<DB *>(it.first);
+//                db->PerformCompaction(this, it.second);
+//            }
         }
     }
 }

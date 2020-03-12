@@ -40,6 +40,8 @@ namespace leveldb {
         virtual uint32_t num_running_tasks() = 0;
 
         virtual bool IsInitialized() = 0;
+
+        virtual unsigned int* rand_seed() = 0;
     };
 }
 

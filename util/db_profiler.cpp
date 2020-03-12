@@ -13,7 +13,7 @@ namespace leveldb {
                       trace_file_path + "/access_profiler.log"),
               compaction_trace_file_writer_(
                       trace_file_path + "/compaction_profiler.log") {
-        accesses_ = new Access[WRITE_BATCH_SIZE];
+//        accesses_ = new Access[WRITE_BATCH_SIZE];
         tracing_ = false;
     }
 

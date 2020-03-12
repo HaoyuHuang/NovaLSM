@@ -33,6 +33,10 @@ namespace leveldb {
             return mem_manager_;
         };
 
+        unsigned int* rand_seed() override {
+            return &rand_seed_;
+        }
+
 
         bool IsInitialized() override;
 
@@ -45,12 +49,13 @@ namespace leveldb {
     private:
         port::Mutex background_work_mutex_;
         sem_t signal;
-        std::queue <CompactionTask> background_work_queue_
+        std::vector <CompactionTask> background_work_queue_
         GUARDED_BY(background_work_mutex_);
         uint32_t num_tasks_ = 0;
 
         MemManager *mem_manager_ = nullptr;
         bool is_running_ = false;
+        unsigned int rand_seed_;
     };
 }
 

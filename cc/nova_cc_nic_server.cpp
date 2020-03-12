@@ -71,6 +71,7 @@ namespace nova {
             options.l0_consolidate_group_size = 8;
             options.num_memtables = NovaCCConfig::cc_config->num_memtables;
             options.l0_stop_writes_trigger = NovaCCConfig::cc_config->cc_l0_stop_write;
+            options.max_open_files = 50000;
             options.enable_table_locator = NovaCCConfig::cc_config->enable_table_locator;
             if (NovaCCConfig::cc_config->cc_l0_stop_write == 0) {
                 options.l0_stop_writes_trigger = UINT32_MAX;
@@ -134,8 +135,8 @@ namespace nova {
         gettimeofday(&start, nullptr);
         uint64_t loaded_keys = 0;
         std::vector<CCFragment *> &frags = NovaCCConfig::cc_config->fragments;
-        leveldb::WriteOptions option;
-        option.sync = true;
+
+        unsigned int rand_seed = tid_;
 
         int pivot = 0;
         int i = pivot;
@@ -157,7 +158,6 @@ namespace nova {
 
             // Insert cold keys first so that hot keys will be at the top level.
             leveldb::DB *db = dbs_[frags[i]->dbid];
-
             RDMA_LOG(INFO) << fmt::format("t[{}] Insert range {} to {}", tid_,
                                           frags[i]->range.key_start,
                                           frags[i]->range.key_end);
@@ -168,6 +168,10 @@ namespace nova {
                 std::string key(std::to_string(j));
                 std::string val(
                         NovaConfig::config->load_default_value_size, v);
+                leveldb::WriteOptions option;
+                option.sync = true;
+                option.hash = j;
+                option.rand_seed = &rand_seed;
                 leveldb::Status s = db->Put(option, key, val);
                 RDMA_ASSERT(s.ok());
                 loaded_keys++;

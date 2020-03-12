@@ -50,13 +50,13 @@ namespace leveldb {
         // Evict any entry for the specified file number
         void Evict(uint64_t file_number);
 
-    private:
         Status
         FindTable(AccessCaller caller, const ReadOptions &options, const FileMetaData &meta,
                   uint64_t file_number,
                   uint64_t file_size,
                   int level, Cache::Handle **);
 
+    private:
         Env *const env_;
         const std::string dbname_;
         const Options &options_;
