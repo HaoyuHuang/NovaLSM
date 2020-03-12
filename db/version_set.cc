@@ -369,14 +369,14 @@ namespace leveldb {
     Status Version::Get(const leveldb::ReadOptions &options, uint64_t fn,
                         const leveldb::LookupKey &key, std::string *val) {
         RDMA_ASSERT(fn < MAX_LIVE_MEMTABLES);
-        FileMetaData *file = nullptr;
-        for (uint32_t i = 0; i < files_[0].size(); i++) {
-            FileMetaData *f = files_[0][i];
-            if (f->number == fn) {
-                file = f;
-                break;
-            }
-        }
+        FileMetaData *file = fn_files_[fn];
+//        for (uint32_t i = 0; i < files_[0].size(); i++) {
+//            FileMetaData *f = files_[0][i];
+//            if (f->number == fn) {
+//                file = f;
+//                break;
+//            }
+//        }
         RDMA_ASSERT(file);
         RDMA_ASSERT(file->number == fn);
         Saver saver;
@@ -893,7 +893,7 @@ namespace leveldb {
         v->next_->prev_ = v;
 
         versions_[v->version_id_].SetVersion(v);
-        current_version_id_.store(v->version_id_, std::memory_order_acquire);
+        current_version_id_.store(v->version_id_, std::memory_order_release);
     }
 
     Status VersionSet::LogAndApply(VersionEdit *edit, Version *v) {

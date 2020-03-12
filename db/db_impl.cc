@@ -47,7 +47,7 @@ namespace leveldb {
 //        memtable_id = loc.memtable_id;
 //        loc.mutex.unlock();
 //        return memtable_id;
-        return loc.memtable_id.load(std::memory_order_acquire);
+        return loc.memtable_id.load(std::memory_order_consume);
     }
 
     void TableLocator::Insert(const leveldb::Slice &key, uint64_t hash,
@@ -495,7 +495,7 @@ namespace leveldb {
 
             if (mem == nullptr) {
                 uint32_t memtable_id = memtable_id_seq_.fetch_add(1,
-                                                                  std::memory_order_seq_cst);
+                                                                  std::memory_order_acq_rel);
                 mem = new MemTable(internal_comparator_, memtable_id,
                                    db_profiler_);
                 RDMA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
@@ -589,7 +589,7 @@ namespace leveldb {
 //            bg_thread->thread_id(), tasks.size());
         Version *v = new Version(versions_,
                                  versions_->version_id_seq_.fetch_add(1,
-                                                                      std::memory_order_seq_cst));
+                                                                      std::memory_order_acq_rel));
         mutex_.Lock();
 //            Log(options_.info_log,
 //                "bg[%lu]: Level-0 table #%llu pid-%u mem-%u acquired lock",
@@ -618,6 +618,7 @@ namespace leveldb {
             p->mutex.Lock();
             bool no_slots = p->available_slots.empty();
             for (auto &task : it.second) {
+                RDMA_ASSERT(task.imm_slot < imms_.size());
                 RDMA_ASSERT(imms_[task.imm_slot]);
                 imms_[task.imm_slot] = nullptr;
                 p->available_slots.push(task.imm_slot);
@@ -740,15 +741,17 @@ namespace leveldb {
 
     void DBImpl::PerformCompaction(leveldb::EnvBGThread *bg_thread,
                                    const std::vector<CompactionTask> &tasks) {
-        if (shutting_down_.load(std::memory_order_acquire)) {
-            // No more background work when shutting down.
-        } else if (!bg_error_.ok()) {
-            // No more background work after a background error.
-        } else {
-            bool compacted = CompactMemTable(bg_thread, tasks);
-            if (compacted) {
-                versions_->LevelSummary(bg_thread->thread_id());
-            }
+//        if (shutting_down_.load(std::memory_order_acquire)) {
+//            // No more background work when shutting down.
+//        } else if (!bg_error_.ok()) {
+//            // No more background work after a background error.
+//        } else {
+//
+//        }
+
+        bool compacted = CompactMemTable(bg_thread, tasks);
+        if (compacted) {
+            versions_->LevelSummary(bg_thread->thread_id());
         }
     }
 
@@ -1513,7 +1516,7 @@ namespace leveldb {
                     RDMA_ASSERT(imms_[next_imm_slot] == nullptr);
                     imms_[next_imm_slot] = table;
                     uint32_t memtable_id = memtable_id_seq_.fetch_add(1,
-                                                                      std::memory_order_seq_cst);
+                                                                      std::memory_order_acq_rel);
                     table = new MemTable(internal_comparator_, memtable_id,
                                          db_profiler_);
                     RDMA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
@@ -1551,7 +1554,7 @@ namespace leveldb {
     Status DBImpl::Write(const WriteOptions &options, const Slice &key,
                          const Slice &val) {
         uint64_t last_sequence = versions_->last_sequence_.fetch_add(1,
-                                                                     std::memory_order_seq_cst);
+                                                                     std::memory_order_acq_rel);
         uint32_t partition_id =
                 rand_r(options.rand_seed) % active_memtables_.size();
         if (options_.num_memtable_partitions > 1) {
@@ -1710,7 +1713,7 @@ namespace leveldb {
                 uint32_t slot_id = 0;
                 for (int i = 0; i < options.num_memtable_partitions; i++) {
                     uint64_t memtable_id = impl->memtable_id_seq_.fetch_add(1,
-                                                                            std::memory_order_seq_cst);
+                                                                            std::memory_order_acq_rel);
 
                     MemTable *table = new MemTable(impl->internal_comparator_,
                                                    memtable_id,
@@ -1752,7 +1755,7 @@ namespace leveldb {
             edit.SetLogNumber(0);
             Version *v = new Version(impl->versions_,
                                      impl->versions_->version_id_seq_.fetch_add(
-                                             1, std::memory_order_seq_cst));
+                                             1, std::memory_order_acq_rel));
             s = impl->versions_->LogAndApply(&edit, v);
         }
         if (s.ok()) {

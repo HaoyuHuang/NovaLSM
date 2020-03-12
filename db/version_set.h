@@ -239,7 +239,7 @@ namespace leveldb {
 
         // Allocate and return a new file number
         uint64_t NewFileNumber() {
-            return next_file_number_.fetch_add(1, std::memory_order_acquire);
+            return next_file_number_.fetch_add(1, std::memory_order_acq_rel);
         }
 
         // Arrange to reuse "file_number" unless a newer file number has
