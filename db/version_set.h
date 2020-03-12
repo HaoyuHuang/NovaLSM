@@ -151,6 +151,8 @@ namespace leveldb {
                   refs_(0),
                   file_to_compact_(nullptr),
                   file_to_compact_level_(-1), version_id_(version_id) {};
+
+        ~Version();
     private:
         friend class Compaction;
 
@@ -162,7 +164,7 @@ namespace leveldb {
 
         Version &operator=(const Version &) = delete;
 
-        ~Version();
+
 
         Iterator *
         NewConcatenatingIterator(const ReadOptions &, int level) const;

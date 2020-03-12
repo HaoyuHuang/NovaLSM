@@ -47,7 +47,7 @@ namespace leveldb {
 //        memtable_id = loc.memtable_id;
 //        loc.mutex.unlock();
 //        return memtable_id;
-        return loc.memtable_id.load(std::memory_order_consume);
+        return loc.memtable_id.load(std::memory_order_acquire);
     }
 
     void TableLocator::Insert(const leveldb::Slice &key, uint64_t hash,

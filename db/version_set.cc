@@ -542,9 +542,6 @@ namespace leveldb {
         assert(refs_ >= 1);
         --refs_;
         refs = refs_;
-        if (refs_ == 0) {
-            delete this;
-        }
         return refs;
     }
 
@@ -2022,7 +2019,8 @@ namespace leveldb {
         uint32_t vid = version->version_id();
         uint32_t refs = version->Unref();
         if (refs == 0) {
-            RDMA_LOG(rdmaio::DEBUG) << fmt::format("delete vid-{}", vid);
+            delete version;
+            RDMA_LOG(rdmaio::INFO) << fmt::format("delete vid-{}", vid);
             version = nullptr;
         }
         mutex.unlock();

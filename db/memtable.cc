@@ -196,7 +196,8 @@ namespace leveldb {
         uint32_t mid = memtable->memtableid();
         uint32_t refs = memtable->Unref();
         if (refs <= 0) {
-            RDMA_LOG(rdmaio::DEBUG) << fmt::format("delete mid-{}", mid);
+            delete memtable;
+            RDMA_LOG(rdmaio::INFO) << fmt::format("flush delete mid-{}", mid);
             memtable = nullptr;
         }
         mutex.unlock();
@@ -222,7 +223,8 @@ namespace leveldb {
         uint32_t mid = memtable->memtableid();
         uint32_t refs = memtable->Unref();
         if (refs == 0) {
-            RDMA_LOG(rdmaio::INFO) << fmt::format("delete mid-{}", mid);
+            delete memtable;
+            RDMA_LOG(rdmaio::INFO) << fmt::format("unref delete mid-{}", mid);
             memtable = nullptr;
         }
         mutex.unlock();

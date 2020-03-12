@@ -46,9 +46,6 @@ namespace leveldb {
             --refs_;
             uint32_t refs = refs_;
             assert(refs_ >= 0);
-            if (refs_ <= 0) {
-                delete this;
-            }
             return refs;
         }
 
@@ -80,6 +77,7 @@ namespace leveldb {
             return flushed_meta_;
         }
 
+        ~MemTable();  // Private since only Unref() should be used to delete it
     private:
         friend class MemTableIterator;
 
@@ -96,7 +94,6 @@ namespace leveldb {
 
         typedef SkipList<const char *, KeyComparator> Table;
 
-        ~MemTable();  // Private since only Unref() should be used to delete it
 
 //        bool delete_ = false;
 
