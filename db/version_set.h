@@ -205,9 +205,8 @@ namespace leveldb {
 
         Version *Ref();
 
-        void Unref();
+        void Unref(const std::string& dbname);
 
-        bool version_deleted_ = false;
         std::mutex mutex;
         Version *version = nullptr;
     };
@@ -241,7 +240,7 @@ namespace leveldb {
 
         // Allocate and return a new file number
         uint64_t NewFileNumber() {
-            return next_file_number_.fetch_add(1, std::memory_order_acq_rel);
+            return next_file_number_.fetch_add(1);
         }
 
         // Arrange to reuse "file_number" unless a newer file number has
@@ -261,7 +260,7 @@ namespace leveldb {
 
         // Return the last sequence number.
         uint64_t LastSequence() const {
-            return last_sequence_.load(std::memory_order_acquire);
+            return last_sequence_.load();
         }
 
         // Set the last sequence number to s.
@@ -327,7 +326,7 @@ namespace leveldb {
         const char *LevelSummary(uint32_t thread_id) const;
 
         uint32_t current_version_id() {
-            return current_version_id_.load(std::memory_order_acquire);
+            return current_version_id_.load();
         }
 
         std::atomic_uint_fast64_t last_sequence_;

@@ -726,7 +726,7 @@ namespace leveldb {
                     }
                 }
             }
-            vset_->versions_[base_->version_id_].Unref();
+            vset_->versions_[base_->version_id_].Unref(vset_->dbname_);
         }
 
         // Apply all of the edits in *edit to the current state.
@@ -867,7 +867,7 @@ namespace leveldb {
     }
 
     VersionSet::~VersionSet() {
-        versions_[current_->version_id_].Unref();
+        versions_[current_->version_id_].Unref(dbname_);
         assert(dummy_versions_.next_ ==
                &dummy_versions_);  // List must be empty
         delete descriptor_log_;
@@ -879,7 +879,7 @@ namespace leveldb {
         assert(v->refs_ == 0);
         assert(v != current_);
         if (current_ != nullptr) {
-            versions_[current_->version_id_].Unref();
+            versions_[current_->version_id_].Unref(dbname_);
         }
         current_ = v;
 
@@ -890,7 +890,7 @@ namespace leveldb {
         v->next_->prev_ = v;
 
         versions_[v->version_id_].SetVersion(v);
-        current_version_id_.store(v->version_id_, std::memory_order_release);
+        current_version_id_.store(v->version_id_);
     }
 
     Status VersionSet::LogAndApply(VersionEdit *edit, Version *v) {
@@ -1995,7 +1995,6 @@ namespace leveldb {
 
     void AtomicVersion::SetVersion(leveldb::Version *v) {
         mutex.lock();
-        version_deleted_ = false;
         RDMA_ASSERT(!version);
         version = v;
         v->Ref();
@@ -2005,7 +2004,7 @@ namespace leveldb {
     Version *AtomicVersion::Ref() {
         Version *v = nullptr;
         mutex.lock();
-        if (version != nullptr && !version_deleted_) {
+        if (version != nullptr) {
             v = version;
             v->Ref();
         }
@@ -2013,14 +2012,15 @@ namespace leveldb {
         return v;
     }
 
-    void AtomicVersion::Unref() {
+    void AtomicVersion::Unref(const std::string &dbname) {
         mutex.lock();
         RDMA_ASSERT(version);
         uint32_t vid = version->version_id();
         uint32_t refs = version->Unref();
         if (refs == 0) {
+            RDMA_LOG(rdmaio::INFO)
+                << fmt::format("delete db-{} vid-{}", dbname, vid);
             delete version;
-            RDMA_LOG(rdmaio::INFO) << fmt::format("delete vid-{}", vid);
             version = nullptr;
         }
         mutex.unlock();

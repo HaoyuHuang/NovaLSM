@@ -95,6 +95,7 @@ namespace rdmaio {
             struct ibv_pd *pd = nullptr;
             int num_devices;
             int rc;  // return code
+            ibv_port_attr port_attr = {};
 
             dev_list = ibv_get_device_list(&num_devices);
 
@@ -123,7 +124,7 @@ namespace rdmaio {
             }
 
             // fill the lid
-            ibv_port_attr port_attr;
+
             rc = ibv_query_port (ib_ctx, idx.port_id, &port_attr);
             if (rc < 0) {
                 RDMA_LOG(WARNING) << "failed to query port status w error: "
@@ -364,7 +365,7 @@ namespace rdmaio {
                     close(csfd);
                     continue;
                 }
-                ConnArg arg;
+                ConnArg arg = {};
                 auto n = recv(csfd, (char *) (&arg), sizeof(ConnArg),
                               MSG_WAITALL);
                 if (n != sizeof(ConnArg)) {
@@ -372,7 +373,7 @@ namespace rdmaio {
                     close(csfd);
                     continue;
                 }
-                ConnReply reply;
+                ConnReply reply = {};
                 reply.ack = ERR;
                 { // in a global critical section
                     SCS s;

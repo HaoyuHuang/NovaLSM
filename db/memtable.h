@@ -111,11 +111,11 @@ namespace leveldb {
     public:
         void SetMemTable(MemTable *mem);
 
-        void SetFlushed(uint64_t l0_file_number);
+        void SetFlushed(const std::string& dbname, uint64_t l0_file_number);
 
         MemTable *Ref(uint64_t *l0_fn);
 
-        void Unref();
+        void Unref(const std::string& dbname);
 
         bool memtable_flushed_ = false;
         uint64_t l0_file_number = 0;

@@ -55,18 +55,18 @@ namespace leveldb {
             background_work_queue_.clear();
             background_work_mutex_.Unlock();
 
-            auto db = reinterpret_cast<DB *>(tasks[0].db);
-            db->PerformCompaction(this, tasks);
+//            auto db = reinterpret_cast<DB *>(tasks[0].db);
+//            db->PerformCompaction(this, tasks);
 
-//            std::map<void *, std::vector<CompactionTask>> db_tasks;
-//            for (auto &task : tasks) {
-//                db_tasks[task.db].push_back(task);
-//            }
-//
-//            for (auto& it : db_tasks) {
-//                auto db = reinterpret_cast<DB *>(it.first);
-//                db->PerformCompaction(this, it.second);
-//            }
+            std::map<void *, std::vector<CompactionTask>> db_tasks;
+            for (auto &task : tasks) {
+                db_tasks[task.db].push_back(task);
+            }
+
+            for (auto& it : db_tasks) {
+                auto db = reinterpret_cast<DB *>(it.first);
+                db->PerformCompaction(this, it.second);
+            }
         }
     }
 }

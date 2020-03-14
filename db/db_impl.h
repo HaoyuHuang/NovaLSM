@@ -39,7 +39,6 @@ namespace leveldb {
     class VersionSet;
 
     struct TableLocation {
-        std::mutex mutex;
         std::atomic_int_fast64_t memtable_id;
     };
 
