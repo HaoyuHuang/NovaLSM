@@ -675,6 +675,21 @@ namespace nova {
     void NovaConnWorker::Start() {
         RDMA_LOG(INFO) << "memstore[" << thread_id_ << "]: "
                        << "starting mem worker";
+
+        if (NovaConfig::config->log_record_mode == NovaLogRecordMode::LOG_NIC) {
+            bool all_initialized = false;
+            while (!all_initialized) {
+                all_initialized = true;
+                for (const auto &worker : async_workers_) {
+                    if (!worker->IsInitialized()) {
+                        all_initialized = false;
+                        break;
+                    }
+                }
+                usleep(10000);
+            }
+        }
+
         struct event new_conn_timer_event;
         struct event stats_event;
         struct event_config *ev_config;
@@ -753,8 +768,9 @@ namespace nova {
 //                                 rdma_timer_event_handler, (void *) this) == 0);
 //            RDMA_ASSERT(event_add(&rdma_timer_event, &tv) == 0);
 //        }
+        RDMA_LOG(INFO) << "NIC worker started";
         RDMA_ASSERT(event_base_loop(base, 0) == 0);
-        RDMA_LOG(INFO) << "started";
+
     }
 
     void Connection::Init(int f, void *store) {

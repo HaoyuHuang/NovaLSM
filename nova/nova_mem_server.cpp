@@ -226,20 +226,22 @@ namespace nova {
                                               async_workers[worker_id]);
         }
 
-        bool all_initialized = false;
-        while (!all_initialized) {
-            all_initialized = true;
-            for (int worker_id = 0;
-                 worker_id <
-                 NovaConfig::config->num_async_workers; worker_id++) {
-                if (!async_workers[worker_id]->IsInitialized()) {
-                    all_initialized = false;
-                    break;
+        if (NovaConfig::config->log_record_mode ==
+            NovaLogRecordMode::LOG_RDMA) {
+            bool all_initialized = false;
+            while (!all_initialized) {
+                all_initialized = true;
+                for (int worker_id = 0;
+                     worker_id <
+                     NovaConfig::config->num_async_workers; worker_id++) {
+                    if (!async_workers[worker_id]->IsInitialized()) {
+                        all_initialized = false;
+                        break;
+                    }
                 }
+                usleep(10000);
             }
-            usleep(10000);
         }
-
         for (int worker_id = 0;
              worker_id < NovaConfig::config->num_conn_workers; worker_id++) {
             worker_threads.emplace_back(start, conn_workers[worker_id]);

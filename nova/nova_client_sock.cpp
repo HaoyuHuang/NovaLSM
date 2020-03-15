@@ -47,7 +47,7 @@ namespace nova {
             memset(&serv_addr, 0, sizeof(serv_addr));
             serv_addr.sin_family = AF_INET;
             serv_addr.sin_port = htons(host.port);
-
+            RDMA_LOG(rdmaio::INFO) << host.ip << ":" << host.port;
             auto ip = host_to_ip(host.ip);
             RDMA_ASSERT(ip != "");
             serv_addr.sin_addr.s_addr = inet_addr(ip.c_str());

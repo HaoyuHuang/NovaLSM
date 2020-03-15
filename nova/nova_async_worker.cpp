@@ -209,9 +209,9 @@ namespace nova {
         while (is_running_) {
             if (NovaConfig::config->log_record_mode ==
                 NovaLogRecordMode::LOG_RDMA) {
-//                if (should_sleep) {
-//                    usleep(timeout);
-//                }
+                if (should_sleep) {
+                    usleep(timeout);
+                }
                 rdma_store_->PollSQ();
                 rdma_store_->PollRQ();
 
