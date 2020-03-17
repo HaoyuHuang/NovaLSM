@@ -332,7 +332,8 @@ namespace leveldb {
                 auto &it = server_pairs[meta.meta_block_handle.server_id];
                 bool found = false;
                 for (auto &rtable : it) {
-                    if (rtable.rtable_id == meta.meta_block_handle.rtable_id) {
+                    if (rtable.rtable_id == meta.meta_block_handle.rtable_id ||
+                        meta.meta_block_handle.rtable_id == 0) {
                         found = true;
                         break;
                     }

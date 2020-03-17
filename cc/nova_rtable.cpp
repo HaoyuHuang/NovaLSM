@@ -176,9 +176,6 @@ namespace leveldb {
                 buf++;
                 continue;
             }
-            RDMA_ASSERT(sstable_data_block_offset_.find(buf->sstable_id) ==
-                        sstable_data_block_offset_.end());
-
             if (buf->is_meta_blocks) {
                 RDMA_ASSERT(sstable_meta_block_offset_.find(buf->sstable_id) ==
                             sstable_meta_block_offset_.end());
@@ -260,12 +257,14 @@ namespace leveldb {
             for (int j = persisted_i; j < i; j++) {
                 if (writes[j].is_meta_blocks) {
                     RDMA_ASSERT(
-                            sstable_meta_block_offset_.find(writes[j].sstable) !=
+                            sstable_meta_block_offset_.find(
+                                    writes[j].sstable) !=
                             sstable_meta_block_offset_.end());
                     sstable_meta_block_offset_[writes[j].sstable].persisted = true;
                 } else {
                     RDMA_ASSERT(
-                            sstable_data_block_offset_.find(writes[j].sstable) !=
+                            sstable_data_block_offset_.find(
+                                    writes[j].sstable) !=
                             sstable_data_block_offset_.end());
                     sstable_data_block_offset_[writes[j].sstable].persisted = true;
                 }
@@ -321,19 +320,20 @@ namespace leveldb {
         Seal();
         {
             auto it = sstable_data_block_offset_.find(sstable_id);
-            RDMA_ASSERT(it != sstable_data_block_offset_.end());
-            RDMA_ASSERT(it->second.persisted);
-            int n = sstable_data_block_offset_.erase(sstable_id);
-            RDMA_ASSERT(n == 1);
+            if (it != sstable_data_block_offset_.end()) {
+                RDMA_ASSERT(it->second.persisted);
+                int n = sstable_data_block_offset_.erase(sstable_id);
+                RDMA_ASSERT(n == 1);
+            }
         }
         {
             auto it = sstable_meta_block_offset_.find(sstable_id);
-            RDMA_ASSERT(it != sstable_meta_block_offset_.end());
-            RDMA_ASSERT(it->second.persisted);
-            int n = sstable_meta_block_offset_.erase(sstable_id);
-            RDMA_ASSERT(n == 1);
+            if (it != sstable_meta_block_offset_.end()) {
+                RDMA_ASSERT(it->second.persisted);
+                int n = sstable_meta_block_offset_.erase(sstable_id);
+                RDMA_ASSERT(n == 1);
+            }
         }
-
         if (sstable_data_block_offset_.empty() &&
             sstable_meta_block_offset_.empty() && is_full_ &&
             allocated_bufs_.empty() &&
@@ -423,8 +423,8 @@ namespace leveldb {
                 }
                 mutex_.unlock();
             }
-            return handle;
         }
+        return handle;
     }
 
     void NovaRTableManager::ReadDataBlock(
