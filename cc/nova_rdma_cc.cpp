@@ -89,6 +89,9 @@ namespace nova {
                     ctx.req_id = cc_client_->InitiateDeleteTables(
                             task.server_id, task.rtable_ids);
                     break;
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_READ_DC_STATS:
+                    ctx.req_id = cc_client_->InitiateReadDCStats(task.server_id);
+                    break;
             }
             pending_reqs_.push_back(ctx);
         }

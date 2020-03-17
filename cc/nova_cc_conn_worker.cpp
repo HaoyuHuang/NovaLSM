@@ -308,10 +308,6 @@ namespace nova {
         CCFragment *frag = NovaCCConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
 
-//        leveldb::WriteBatch batch;
-//        batch.Put(dbkey, dbval);
-//        db->GenerateLogRecords(option, &batch);
-
         leveldb::Status status = db->Put(option, dbkey, dbval);
 //        RDMA_LOG(DEBUG) << "############### CC worker processed task "
 //                        << fd << ":" << dbkey.ToString();
@@ -575,17 +571,17 @@ namespace nova {
             RDMA_ASSERT(event_add(&new_conn_timer_event, &tv) == 0);
         }
         /* Timer event for stats */
-//        {
-//            struct timeval tv;
-//            tv.tv_sec = 10;
-//            tv.tv_usec = 0;
-//            memset(&stats_event, 0, sizeof(struct event));
-//            RDMA_ASSERT(
-//                    event_assign(&stats_event, base, -1, EV_PERSIST,
-//                                 stats_handler,
-//                                 (void *) this) == 0);
-//            RDMA_ASSERT(event_add(&stats_event, &tv) == 0);
-//        }
+        {
+            struct timeval tv;
+            tv.tv_sec = 10;
+            tv.tv_usec = 0;
+            memset(&stats_event, 0, sizeof(struct event));
+            RDMA_ASSERT(
+                    event_assign(&stats_event, base, -1, EV_PERSIST,
+                                 stats_handler,
+                                 (void *) this) == 0);
+            RDMA_ASSERT(event_add(&stats_event, &tv) == 0);
+        }
         /* Timer event for RDMA */
 //        if (NovaConfig::config->enable_rdma) {
 //            struct timeval tv;

@@ -4,14 +4,16 @@
 // Copyright (c) 2020 University of Southern California. All rights reserved.
 //
 #include <fmt/core.h>
+#include "db/filename.h"
 
 #include "nova_rtable.h"
-
-#include "db/filename.h"
 #include "nova/logging.hpp"
 #include "nova/nova_common.h"
+#include "nova/nova_config.h"
 
 namespace leveldb {
+
+//    nova::DCStats dc_stats;
 
     void RTableHandle::EncodeHandle(char *buf) {
         EncodeFixed32(buf, server_id);
@@ -98,7 +100,12 @@ namespace leveldb {
 
         Slice s;
         RTableHandle h = {};
-        return file_->Read(h, offset, size, &s, scratch);
+        nova::dc_stats.dc_queue_depth += 1;
+        nova::dc_stats.dc_pending_disk_reads += size;
+        Status status = file_->Read(h, offset, size, &s, scratch);
+        nova::dc_stats.dc_queue_depth -= 1;
+        nova::dc_stats.dc_pending_disk_reads -= size;
+        return status;
     }
 
     void NovaRTable::MarkOffsetAsWritten(uint64_t offset) {
@@ -219,10 +226,17 @@ namespace leveldb {
             }
 
             // persist offset -> size.
+            nova::dc_stats.dc_queue_depth += 1;
+            nova::dc_stats.dc_pending_disk_writes += size;
+
             Status s = file_->Append(Slice(backing_mem_ + offset, size));
             RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
             s = file_->Sync();
-            RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());;
+            RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
+
+            nova::dc_stats.dc_queue_depth -= 1;
+            nova::dc_stats.dc_pending_disk_writes -= size;
+
             mutex_.lock();
             for (int j = persisted_i; j < i; j++) {
                 RDMA_ASSERT(
@@ -238,10 +252,17 @@ namespace leveldb {
             i += 1;
         }
         // Persist the last range.
+        nova::dc_stats.dc_queue_depth += 1;
+        nova::dc_stats.dc_pending_disk_writes += size;
+
         Status s = file_->Append(Slice(backing_mem_ + offset, size));
         RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
         s = file_->Sync();
-        RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());;
+        RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
+
+        nova::dc_stats.dc_queue_depth -= 1;
+        nova::dc_stats.dc_pending_disk_writes -= size;
+
         mutex_.lock();
         for (int j = persisted_i; j < writes.size(); j++) {
             RDMA_ASSERT(

@@ -45,6 +45,22 @@ namespace leveldb {
         return reqid;
     }
 
+    uint32_t NovaBlockCCClient::InitiateReadDCStats(uint32_t server_id) {
+        RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
+        RDMAAsyncClientRequestTask task = {};
+        task.type = RDMAAsyncRequestType::RDMA_ASYNC_READ_DC_STATS;
+        task.server_id = server_id;
+        task.sem = &sem_;
+
+        uint32_t reqid = req_id_;
+        CCResponse *response = new CCResponse;
+        req_response[reqid] = response;
+        task.response = response;
+        AddAsyncTask(task);
+        req_id_++;
+        return reqid;
+    };
+
     bool NovaBlockCCClient::IsDone(uint32_t req_id,
                                    leveldb::CCResponse *response,
                                    uint64_t *timeout) {
@@ -168,7 +184,8 @@ namespace leveldb {
     uint32_t NovaCCClient::InitiateRTableReadDataBlock(
             const leveldb::RTableHandle &rtable_handle, uint64_t offset,
             uint32_t size, char *result) {
-        RDMA_ASSERT(rtable_handle.server_id != nova::NovaConfig::config->my_server_id);
+        RDMA_ASSERT(rtable_handle.server_id !=
+                    nova::NovaConfig::config->my_server_id);
         if (rtable_handle.server_id == nova::NovaConfig::config->my_server_id) {
             rtable_manager_->ReadDataBlock(rtable_handle, offset, size, result);
             return 0;
@@ -211,6 +228,25 @@ namespace leveldb {
                     rtable_handle.size, offset, size, req_id);
         return req_id;
     }
+
+    uint32_t NovaCCClient::InitiateReadDCStats(uint32_t server_id) {
+        RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
+        uint32_t req_id = current_req_id_;
+        CCRequestContext context = {};
+        context.done = false;
+        context.req_type = CCRequestType::CC_DC_READ_STATS;
+
+        char *send_buf = rdma_store_->GetSendBuf(server_id);
+        uint32_t msg_size = 1;
+        send_buf[0] = CCRequestType::CC_DC_READ_STATS;
+        rdma_store_->PostSend(send_buf, msg_size, server_id, req_id);
+        request_context_[req_id] = context;
+        IncrementReqId();
+
+        rdma_store_->FlushPendingSends(server_id);
+        return req_id;
+    }
+
 
     uint32_t NovaCCClient::InitiateRTableWriteDataBlocks(uint32_t server_id,
                                                          uint32_t thread_id,
@@ -267,7 +303,6 @@ namespace leveldb {
     uint32_t NovaCCClient::InitiateReplicateLogRecords(
             const std::string &log_file_name, uint64_t thread_id,
             const leveldb::Slice &slice) {
-        // Synchronous replication.
         rdma_log_writer_->AddRecord(log_file_name, thread_id, slice);
         return 0;
     }
@@ -299,6 +334,9 @@ namespace leveldb {
             if (response) {
                 response->rtable_id = context_it->second.rtable_id;
                 response->rtable_handles = context_it->second.rtable_handles;
+                response->dc_queue_depth = context_it->second.dc_queue_depth;
+                response->dc_pending_read_bytes = context_it->second.dc_pending_read_bytes;
+                response->dc_pending_write_bytes = context_it->second.dc_pending_write_bytes;
             }
             request_context_.erase(req_id);
             return true;
@@ -399,6 +437,16 @@ namespace leveldb {
                                     "dcclient[{}]: Persist RTable received handles:{} rids:{} req:{}",
                                     cc_client_id_, rtable_handles, rids,
                                     req_id);
+                        processed = true;
+                    } else if (buf[0] ==
+                               CCRequestType::CC_DC_READ_STATS_RESPONSE) {
+                        context.dc_queue_depth = leveldb::DecodeFixed64(
+                                buf + 1);
+                        context.dc_pending_read_bytes = leveldb::DecodeFixed64(
+                                buf + 9);
+                        context.dc_pending_write_bytes = leveldb::DecodeFixed64(
+                                buf + 17);
+                        context.done = true;
                         processed = true;
                     }
                 }

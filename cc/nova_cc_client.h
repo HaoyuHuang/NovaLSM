@@ -56,6 +56,8 @@ namespace leveldb {
         uint32_t
         InitiateCloseLogFile(const std::string &log_file_name) override;
 
+        uint32_t InitiateReadDCStats(uint32_t server_id) override;
+
         bool OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                     int remote_server_id, char *buf,
                     uint32_t imm_data) {
@@ -124,6 +126,7 @@ namespace leveldb {
                                     uint64_t thread_id,
                                     const Slice &slice) override;
 
+        uint32_t InitiateReadDCStats(uint32_t server_id) override;
 
         uint32_t
         InitiateCloseLogFile(const std::string &log_file_name) override;

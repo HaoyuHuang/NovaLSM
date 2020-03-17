@@ -14,6 +14,7 @@
 #include <fmt/core.h>
 #include <thread>
 #include <syscall.h>
+#include <atomic>
 
 #include "nova/rdma_ctrl.hpp"
 #include "nova/nova_common.h"
@@ -21,6 +22,11 @@
 namespace nova {
     using namespace std;
     using namespace rdmaio;
+
+    enum ScatterPolicy {
+        SCATTER_DC_STATS,
+        RANDOM
+    };
 
     class NovaConfig {
     public:
@@ -50,6 +56,8 @@ namespace nova {
         uint32_t num_mem_partitions;
         char *nova_buf;
         uint64_t nnovabuf;
+
+        ScatterPolicy  scatter_policy;
 
         void add_tid_mapping() {
             std::lock_guard<std::mutex> l(m);
@@ -171,6 +179,7 @@ namespace nova {
         }
 
         vector<Host> cc_servers;
+        vector<Host> dc_servers;
         int num_conn_workers;
         int num_conn_async_workers;
         int num_compaction_workers;

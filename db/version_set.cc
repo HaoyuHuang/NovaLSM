@@ -913,6 +913,7 @@ namespace leveldb {
             builder.Apply(edit);
             builder.SaveTo(v);
         }
+        Finalize(v);
         AppendVersion(v);
         log_number_ = edit->log_number_;
         prev_log_number_ = edit->prev_log_number_;

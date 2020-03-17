@@ -190,7 +190,20 @@ namespace nova {
                     }
                 }
 
-                if (buf[0] == leveldb::CCRequestType::CC_DELETE_TABLES) {
+                if (buf[0] == leveldb::CCRequestType::CC_DC_READ_STATS) {
+                    char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
+                    sendbuf[0] =
+                            leveldb::CCRequestType::CC_DC_READ_STATS_RESPONSE;
+                    leveldb::EncodeFixed64(sendbuf + 1,
+                                           dc_stats.dc_queue_depth);
+                    leveldb::EncodeFixed64(sendbuf + 9,
+                                           dc_stats.dc_pending_disk_reads);
+                    leveldb::EncodeFixed64(sendbuf + 17,
+                                           dc_stats.dc_pending_disk_writes);
+                    rdma_store_->PostSend(sendbuf, 13, remote_server_id,
+                                          dc_req_id);
+                    processed = true;
+                } else if (buf[0] == leveldb::CCRequestType::CC_DELETE_TABLES) {
                     uint32_t msg_size = 1;
                     uint32_t nrtables = leveldb::DecodeFixed32(buf + msg_size);
                     msg_size += 4;
@@ -404,8 +417,9 @@ namespace nova {
                                 pair.rtable_id);
                         rtable->Persist();
 
-                        RDMA_LOG(DEBUG) << fmt::format("Persisting rtable {} for sstable {}",
-                                                       pair.rtable_id, pair.sstable_id);
+                        RDMA_LOG(DEBUG) << fmt::format(
+                                    "Persisting rtable {} for sstable {}",
+                                    pair.rtable_id, pair.sstable_id);
 
                         leveldb::BlockHandle h = rtable->Handle(
                                 pair.sstable_id);

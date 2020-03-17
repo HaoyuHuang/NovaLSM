@@ -248,7 +248,7 @@ namespace nova {
             RDMA_ASSERT(wcs_[i].status == IBV_WC_SUCCESS)
                 << "rdma-rc[" << thread_id_ << "]: " << "SQ error wc status "
                 << wcs_[i].status << " str:"
-                << ibv_wc_status_str(wcs_[i].status);
+                << ibv_wc_status_str(wcs_[i].status) << " serverid " << server_id;
 
             RDMA_LOG(DEBUG) << fmt::format(
                         "rdma-rc[{}]: SQ: poll complete from server {} wr:{} op:{}",

@@ -16,7 +16,6 @@
 
 namespace leveldb {
 
-
     class NovaRTable {
     public:
         NovaRTable(uint32_t rtable_id, Env *env, std::string rtable_name,
@@ -107,7 +106,6 @@ namespace leveldb {
                            uint32_t size, char *scratch);
 
     private:
-
         Env *env_ = nullptr;
         MemManager *mem_manager_ = nullptr;
         uint32_t rtable_size_ = 0;

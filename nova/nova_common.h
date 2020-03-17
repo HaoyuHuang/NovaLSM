@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <vector>
+#include <atomic>
 #include "city_hash.h"
 
 #include <string>
@@ -35,6 +36,15 @@ namespace nova {
 
     using namespace std;
     using namespace rdmaio;
+
+    struct DCStats {
+        // DC stats
+        std::atomic_int_fast64_t dc_pending_disk_writes;
+        std::atomic_int_fast64_t dc_pending_disk_reads;
+        std::atomic_int_fast64_t dc_queue_depth;
+    };
+
+    extern nova::DCStats dc_stats;
 
     enum NovaRDMAPartitionMode {
         RANGE = 0,
@@ -351,6 +361,7 @@ namespace nova {
                      uint64_t *from_sock_fd, char **key, uint64_t *nkey);
 
     struct Host {
+        uint32_t server_id;
         string ip;
         int port;
     };

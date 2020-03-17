@@ -17,6 +17,12 @@
 
 namespace leveldb {
 
+    struct DCStatsStatus {
+        uint32_t remote_dc_id = 0;
+        uint32_t req_id = 0;
+        CCResponse response;
+    };
+
     class NovaCCMemFile : public MemFile {
     public:
         NovaCCMemFile(Env *env,
@@ -106,6 +112,7 @@ namespace leveldb {
         uint64_t allocated_size_ = 0;
         uint64_t used_size_ = 0;
         std::vector<int> nblocks_in_group_;
+        std::vector<DCStatsStatus> dc_stats_status_;
         std::vector<PersistStatus> status_;
     };
 

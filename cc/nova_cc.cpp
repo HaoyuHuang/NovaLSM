@@ -18,6 +18,13 @@
 #define MAX_BLOCK_SIZE 10240
 
 namespace leveldb {
+    namespace {
+        bool dc_stats_comparator(const DCStatsStatus &s1,
+                                 const DCStatsStatus &s2) {
+            return s1.response.dc_queue_depth < s2.response.dc_queue_depth;
+        }
+    }
+
     NovaCCMemFile::NovaCCMemFile(Env *env, const Options &options,
                                  uint64_t file_number,
                                  MemManager *mem_manager,
@@ -162,36 +169,50 @@ namespace leveldb {
         int size = 0;
         int group_id = 0;
 
-        int scatter_servers[nblocks_in_group_.size()];
-        bool used_server[nova::NovaConfig::config->servers.size()];
+        auto client = reinterpret_cast<NovaBlockCCClient *> (cc_client_);
+        int scatter_dcs[nblocks_in_group_.size()];
 
-        for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
-            used_server[i] = false;
-        }
+        // Pull stats from all DCs.
+        if (nova::NovaConfig::config->scatter_policy ==
+            nova::ScatterPolicy::SCATTER_DC_STATS) {
+            for (int i = 0;
+                 i < nova::NovaCCConfig::cc_config->dc_servers.size(); i++) {
+                uint32_t server_id = nova::NovaCCConfig::cc_config->dc_servers[i].server_id;
+                uint32_t req_id = client->InitiateReadDCStats(
+                        nova::NovaCCConfig::cc_config->dc_servers[i].server_id);
+                DCStatsStatus status;
+                status.remote_dc_id = server_id;
+                status.req_id = req_id;
+                dc_stats_status_.push_back(status);
+            }
 
-        uint32_t start_server_id = rand_r(rand_seed_) %
-                                   (nova::NovaConfig::config->servers.size() -
-                                    1);// nova::NovaConfig::config->my_server_id + 1;
-        if (start_server_id >= nova::NovaConfig::config->my_server_id) {
-            start_server_id += 1;
-        }
-        start_server_id %= nova::NovaConfig::config->servers.size();
-        for (int i = 0; i < nblocks_in_group_.size(); i++) {
-            RDMA_ASSERT(
-                    start_server_id != nova::NovaConfig::config->my_server_id)
-                << start_server_id;
-            RDMA_ASSERT(!used_server[start_server_id]);
-            used_server[start_server_id] = true;
-            scatter_servers[i] = start_server_id;
-            start_server_id = (start_server_id + 1) %
-                              nova::NovaConfig::config->servers.size();
-            if (start_server_id == nova::NovaConfig::config->my_server_id) {
-                start_server_id = (start_server_id + 1) %
-                                  nova::NovaConfig::config->servers.size();
+            for (int i = 0;
+                 i < dc_stats_status_.size(); i++) {
+                client->Wait();
+            }
+
+            for (int i = 0;
+                 i < dc_stats_status_.size(); i++) {
+                RDMA_ASSERT(client->IsDone(dc_stats_status_[i].req_id,
+                                           &dc_stats_status_[i].response,
+                                           nullptr));
+            }
+            // sort the dc stats.
+            std::sort(dc_stats_status_.begin(), dc_stats_status_.end(),
+                      dc_stats_comparator);
+            for (int i = 0; i < nblocks_in_group_.size(); i++) {
+                scatter_dcs[i] = dc_stats_status_[i].remote_dc_id;
+            }
+        } else {
+            // Random.
+            uint32_t start_dc_id = rand_r(rand_seed_) %
+                                   nova::NovaCCConfig::cc_config->dc_servers.size();
+            for (int i = 0; i < nblocks_in_group_.size(); i++) {
+                scatter_dcs[i] = nova::NovaCCConfig::cc_config->dc_servers[start_dc_id].server_id;
+                start_dc_id = (start_dc_id + 1) %
+                              nova::NovaCCConfig::cc_config->dc_servers.size();
             }
         }
-
-        auto client = reinterpret_cast<NovaBlockCCClient *> (cc_client_);
 
         uint32_t sid = 0;
         uint32_t dbid = 0;
@@ -218,18 +239,18 @@ namespace leveldb {
                 uint32_t rtable_id = 0;
                 client->set_dbid(dbid);
                 uint32_t req_id = client->InitiateRTableWriteDataBlocks(
-                        scatter_servers[group_id], thread_id_, &rtable_id,
+                        scatter_dcs[group_id], thread_id_, &rtable_id,
                         backing_mem_ + offset,
                         dbname_, file_number_,
                         size);
                 RDMA_LOG(rdmaio::DEBUG)
                     << fmt::format(
                             "t[{}]: Initiate WRITE data blocks s:{} req:{} db:{} fn:{}",
-                            thread_id_, scatter_servers[group_id], req_id,
+                            thread_id_, scatter_dcs[group_id], req_id,
                             dbname_, file_number_);
 
                 PersistStatus status = {};
-                status.remote_server_id = scatter_servers[group_id];
+                status.remote_server_id = scatter_dcs[group_id];
                 status.WRITE_req_id = req_id;
                 status.result_handle = {};
                 status_.push_back(status);

@@ -197,7 +197,7 @@ namespace leveldb {
                 mutex_);
 
         bool
-        BackgroundCompaction(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
+        BackgroundCompaction(EnvBGThread *bg_thread, const std::vector<CompactionTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         void CleanupCompaction(CompactionState *compact)
@@ -223,6 +223,8 @@ namespace leveldb {
 
         // Constant after construction
         Env *const env_;
+        uint32_t server_id_;
+        uint32_t dbid_;
         const InternalKeyComparator internal_comparator_;
         const InternalFilterPolicy internal_filter_policy_;
         const Options options_;  // options_.comparator == &internal_comparator_
@@ -259,6 +261,7 @@ namespace leveldb {
             uint32_t partition_id = 0;
             std::vector<uint32_t> imm_slots;
             std::queue<uint32_t> available_slots;
+            std::vector<uint32_t> closed_log_files;
             port::CondVar background_work_finished_signal_ GUARDED_BY(mutex);
         };
 

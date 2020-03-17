@@ -9,7 +9,8 @@
 
 namespace nova {
 
-// random vector from http://home.comcast.net/~bretm/hash/10.html
+    DCStats dc_stats;
+    // random vector from http://home.comcast.net/~bretm/hash/10.html
     static const uint32_t sbox[] =
             {
                     0xF53E1837, 0x5F14C86B, 0x9EE3964C, 0xFA796D53,
@@ -379,23 +380,24 @@ namespace nova {
         return len;
     }
 
-    Host convert_host(string host_str) {
-        RDMA_LOG(INFO) << host_str;
-
-        std::vector<std::string> ip_port;
-        std::stringstream ss_ip_port(host_str);
-        while (ss_ip_port.good()) {
-            std::string substr;
-            getline(ss_ip_port, substr, ':');
-            ip_port.push_back(substr);
-        }
-        return Host{ip_port[0], atoi(ip_port[1].c_str())};
-    }
+//    Host convert_host(string host_str) {
+//        RDMA_LOG(INFO) << host_str;
+//
+//        std::vector<std::string> ip_port;
+//        std::stringstream ss_ip_port(host_str);
+//        while (ss_ip_port.good()) {
+//            std::string substr;
+//            getline(ss_ip_port, substr, ':');
+//            ip_port.push_back(substr);
+//        }
+//        return Host{ip_port[0], atoi(ip_port[1].c_str())};
+//    }
 
     vector<Host> convert_hosts(string hosts_str) {
         RDMA_LOG(INFO) << hosts_str;
         vector<Host> hosts;
         std::stringstream ss_hosts(hosts_str);
+        uint32_t host_id = 0;
         while (ss_hosts.good()) {
             string host_str;
             getline(ss_hosts, host_str, ',');
@@ -410,7 +412,12 @@ namespace nova {
                 getline(ss_ip_port, substr, ':');
                 ip_port.push_back(substr);
             }
-            hosts.push_back(Host{ip_port[0], atoi(ip_port[1].c_str())});
+            Host host = {};
+            host.server_id = host_id;
+            host.ip = ip_port[0];
+            host.port = atoi(ip_port[1].c_str());
+            hosts.push_back(host);
+            host_id++;
         }
         return hosts;
     }

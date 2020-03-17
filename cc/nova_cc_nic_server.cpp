@@ -38,6 +38,7 @@ namespace nova {
                 }
                 return 0;
             }
+
             // Ignore the following methods for now:
             const char *Name() const { return "YCSBKeyComparator"; }
 
@@ -266,9 +267,11 @@ namespace nova {
     }
 
     void NovaCCNICServer::LoadData() {
-        if (NovaConfig::config->use_multiple_disks &&
-            NovaConfig::config->my_server_id != 0) {
-            return;
+        for (int i = 0; i < NovaCCConfig::cc_config->dc_servers.size(); i++) {
+            if (NovaConfig::config->my_server_id ==
+                NovaCCConfig::cc_config->dc_servers[i].server_id) {
+                return;
+            }
         }
 
         uint32_t nloading_threads = std::min(32, (int) dbs_.size());
@@ -465,13 +468,13 @@ namespace nova {
             NovaRDMAStore *store = nullptr;
             std::vector<QPEndPoint> endpoints;
             for (int i = 0;
-                 i < NovaCCConfig::cc_config->cc_servers.size(); i++) {
+                 i < NovaConfig::config->servers.size(); i++) {
                 if (i == NovaConfig::config->my_server_id) {
                     continue;
                 }
 
                 QPEndPoint qp;
-                qp.host = NovaCCConfig::cc_config->cc_servers[i];
+                qp.host = NovaConfig::config->servers[i];
                 qp.thread_id = worker_id;
                 qp.server_id = i;
                 endpoints.push_back(qp);
@@ -524,7 +527,7 @@ namespace nova {
             cc->cc_server_ = cc_server;
 
             buf += nrdma_buf_unit() *
-                   NovaCCConfig::cc_config->cc_servers.size();
+                   NovaConfig::config->servers.size();
         }
 
         for (int i = 0;
@@ -538,13 +541,13 @@ namespace nova {
             NovaRDMAStore *store = nullptr;
             std::vector<QPEndPoint> endpoints;
             for (int j = 0;
-                 j < NovaCCConfig::cc_config->cc_servers.size(); j++) {
+                 j < NovaConfig::config->servers.size(); j++) {
                 if (j == NovaConfig::config->my_server_id) {
                     continue;
                 }
 
                 QPEndPoint qp;
-                qp.host = NovaCCConfig::cc_config->cc_servers[j];
+                qp.host = NovaConfig::config->servers[j];
                 qp.thread_id = worker_id;
                 qp.server_id = j;
                 endpoints.push_back(qp);
@@ -594,7 +597,7 @@ namespace nova {
             cc->cc_server_ = cc_server;
             worker_id++;
             buf += nrdma_buf_unit() *
-                   NovaCCConfig::cc_config->cc_servers.size();
+                   NovaConfig::config->servers.size();
         }
 
         for (int i = 0;

@@ -209,6 +209,8 @@ target_sources(leveldb
         "cc/nova_cc_server.cpp"
         "cc/nova_cc_server.h"
 
+        cc/nova_rtable.cpp
+        cc/nova_rtable.h
         bench_memtable/memtable_worker.cpp
         bench_memtable/memtable_worker.h
         cc/db_compaction_thread.cpp
@@ -267,8 +269,7 @@ target_sources(leveldb
 #        mc/nova_sstable.cpp
 #        mc/nova_sstable.h
 
-        cc/nova_rtable.cpp
-        cc/nova_rtable.h
+
 
         bench/bench_common.h
         bench/mock_rtable.h

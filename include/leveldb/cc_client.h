@@ -39,6 +39,8 @@ namespace leveldb {
         CC_RTABLE_WRITE_SSTABLE = 'q',
         CC_RTABLE_WRITE_SSTABLE_RESPONSE = 'r',
         CC_RTABLE_PERSIST_RESPONSE = 't',
+        CC_DC_READ_STATS = 'u',
+        CC_DC_READ_STATS_RESPONSE = 's',
     };
 
     struct CCRequestContext {
@@ -53,11 +55,19 @@ namespace leveldb {
         uint64_t wr_id = 0;
         uint32_t rtable_id = 0;
         std::vector<RTableHandle> rtable_handles;
+
+        uint64_t dc_queue_depth;
+        uint64_t dc_pending_read_bytes;
+        uint64_t dc_pending_write_bytes;
     };
 
     struct CCResponse {
         uint32_t rtable_id = 0;
         std::vector<RTableHandle> rtable_handles;
+
+        uint64_t dc_queue_depth;
+        uint64_t dc_pending_read_bytes;
+        uint64_t dc_pending_write_bytes;
     };
 
     enum RDMAAsyncRequestType : char {
@@ -66,6 +76,7 @@ namespace leveldb {
         RDMA_ASYNC_REQ_CLOSE_LOG = 'c',
         RDMA_ASYNC_REQ_WRITE_DATA_BLOCKS = 'd',
         RDMA_ASYNC_REQ_DELETE_TABLES = 'e',
+        RDMA_ASYNC_READ_DC_STATS = 'f',
     };
 
     struct RDMAAsyncClientRequestTask {
@@ -118,6 +129,8 @@ namespace leveldb {
 
         virtual uint32_t
         InitiateCloseLogFile(const std::string &log_file_name) = 0;
+
+        virtual uint32_t InitiateReadDCStats(uint32_t server_id) = 0;
 
         virtual bool OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                             int remote_server_id, char *buf,
