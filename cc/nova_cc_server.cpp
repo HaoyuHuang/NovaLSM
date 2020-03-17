@@ -179,6 +179,7 @@ namespace nova {
                             task.remote_server_id = remote_server_id;
                             task.cc_server_thread_id = thread_id_;
                             task.dc_req_id = dc_req_id;
+                            task.is_meta_blocks = context.is_meta_blocks;
                             leveldb::SSTableRTablePair pair = {};
                             pair.rtable_id = context.rtable_id;
                             pair.sstable_id = context.sstable_id;
@@ -269,10 +270,18 @@ namespace nova {
                     processed = true;
                 } else if (buf[0] ==
                            leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
-                    uint32_t msg_size = 1;
+                    uint32_t msg_size = 2;
                     std::string dbname;
                     uint64_t file_number;
                     uint32_t size;
+                    bool is_meta_blocks = false;
+
+                    if (buf[1] == 'm') {
+                        is_meta_blocks = true;
+                    } else {
+                        RDMA_ASSERT(buf[1] == 'd');
+                        is_meta_blocks = false;
+                    }
 
                     msg_size += leveldb::DecodeStr(buf + msg_size, &dbname);
                     file_number = leveldb::DecodeFixed64(buf + msg_size);
@@ -282,14 +291,15 @@ namespace nova {
                     std::string table_name = leveldb::TableFileName(dbname,
                                                                     file_number);
                     uint64_t rtable_off = current_rtable_->AllocateBuf(
-                            table_name, size);
+                            table_name, size, is_meta_blocks);
                     if (rtable_off == UINT64_MAX) {
                         // overflow.
                         // close.
                         current_rtable_ = rtable_manager_->CreateNewRTable(
                                 thread_id_);
                         rtable_off = current_rtable_->AllocateBuf(table_name,
-                                                                  size);
+                                                                  size,
+                                                                  is_meta_blocks);
                     }
 
                     char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
@@ -309,6 +319,7 @@ namespace nova {
                     context.rtable_offset = rtable_off;
                     context.sstable_id = leveldb::TableFileName(dbname,
                                                                 file_number);
+                    context.is_meta_blocks = is_meta_blocks;
                     context.size = size;
                     request_context_map_[req_id] = context;
 
@@ -422,7 +433,7 @@ namespace nova {
                                     pair.rtable_id, pair.sstable_id);
 
                         leveldb::BlockHandle h = rtable->Handle(
-                                pair.sstable_id);
+                                pair.sstable_id, task.is_meta_blocks);
                         leveldb::RTableHandle rh = {};
                         rh.server_id = NovaConfig::config->my_server_id;
                         rh.rtable_id = pair.rtable_id;

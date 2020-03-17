@@ -99,6 +99,7 @@ namespace leveldb {
         std::string dbname;
         uint64_t file_number;
         uint32_t write_size;
+        bool is_meta_blocks;
 
         CCResponse *response = nullptr;
     };
@@ -115,7 +116,8 @@ namespace leveldb {
                                       uint32_t *rtable_id,
                                       char *buf,
                                       const std::string &dbname,
-                                      uint64_t file_number, uint32_t size) = 0;
+                                      uint64_t file_number, uint32_t size,
+                                      bool is_meta_blocks) = 0;
 
         virtual uint32_t
         InitiateDeleteTables(uint32_t server_id,

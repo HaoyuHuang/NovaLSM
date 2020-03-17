@@ -73,6 +73,10 @@ namespace leveldb {
             num_data_blocks_ = num_data_blocks;
         }
 
+        RTableHandle meta_block_handle() {
+            return meta_block_handle_;
+        }
+
         std::vector<RTableHandle> rhs() {
             std::vector<RTableHandle> rhs;
             for (int i = 0; i < status_.size(); i++) {
@@ -114,6 +118,7 @@ namespace leveldb {
         std::vector<int> nblocks_in_group_;
         std::vector<DCStatsStatus> dc_stats_status_;
         std::vector<PersistStatus> status_;
+        RTableHandle meta_block_handle_;
     };
 
     class NovaCCRandomAccessFile : public CCRandomAccessFile {

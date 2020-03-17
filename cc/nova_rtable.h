@@ -27,11 +27,11 @@ namespace leveldb {
         void Persist();
 
         uint64_t AllocateBuf(const std::string &sstable_id,
-                             uint32_t size);
+                             uint32_t size, bool is_meta_blocks);
 
         void MarkOffsetAsWritten(uint64_t offset);
 
-        BlockHandle Handle(const std::string &sstable_id);
+        BlockHandle Handle(const std::string &sstable_id, bool is_meta_blocks);
 
         void DeleteSSTable(const std::string &sstable_id);
 
@@ -48,6 +48,7 @@ namespace leveldb {
             uint64_t offset;
             uint32_t size;
             bool written_to_mem;
+            bool is_meta_blocks;
         };
 
         struct SSTablePersistStatus {
@@ -58,12 +59,15 @@ namespace leveldb {
         struct BatchWrite {
             BlockHandle mem_handle = {};
             std::string sstable;
+            bool is_meta_blocks;
         };
 
         Env *env_ = nullptr;
         ReadWriteFile *file_ = nullptr;
 
-        std::map<std::string, SSTablePersistStatus> sstable_offset_;
+        std::map<std::string, SSTablePersistStatus> sstable_data_block_offset_;
+        std::map<std::string, SSTablePersistStatus> sstable_meta_block_offset_;
+
         std::list<AllocatedBuf> allocated_bufs_;
         bool is_full_ = false;
         bool sealed_ = false;

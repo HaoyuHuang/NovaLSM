@@ -77,6 +77,7 @@ namespace leveldb {
             // Make sure WRITEs are complete before we persist them.
             cc_file->WaitForPersistingDataBlocks();
             uint32_t new_file_size = cc_file->Finalize();
+            meta->meta_block_handle = cc_file->meta_block_handle();
             meta->data_block_group_handles = cc_file->rhs();
             meta->converted_file_size = new_file_size;
 

@@ -23,7 +23,7 @@ namespace leveldb {
     uint32_t NovaBlockCCClient::InitiateRTableWriteDataBlocks(
             uint32_t server_id, uint32_t thread_id, uint32_t *rtable_id,
             char *buf, const std::string &dbname, uint64_t file_number,
-            uint32_t size) {
+            uint32_t size, bool is_meta_blocks) {
         RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_WRITE_DATA_BLOCKS;
@@ -34,6 +34,7 @@ namespace leveldb {
         task.file_number = file_number;
         task.write_size = size;
         task.sem = &sem_;
+        task.is_meta_blocks = is_meta_blocks;
 
         uint32_t reqid = req_id_;
         CCResponse *response = new CCResponse;
@@ -254,23 +255,23 @@ namespace leveldb {
                                                          char *buf,
                                                          const std::string &dbname,
                                                          uint64_t file_number,
-                                                         uint32_t size) {
+                                                         uint32_t size, bool is_meta_blocks) {
         RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
-        if (server_id == nova::NovaConfig::config->my_server_id) {
-            std::string sstable_id = TableFileName(dbname, file_number);
-            NovaRTable *active_rtable = rtable_manager_->active_rtable(
-                    thread_id);
-            uint64_t offset = active_rtable->AllocateBuf(
-                    sstable_id, size);
-            if (offset == UINT64_MAX) {
-                active_rtable = rtable_manager_->CreateNewRTable(thread_id);
-                offset = active_rtable->AllocateBuf(sstable_id, size);
-            }
-            memcpy((char *) (offset), buf, size);
-            active_rtable->MarkOffsetAsWritten(offset);
-            *rtable_id = active_rtable->rtable_id();
-            return 0;
-        }
+//        if (server_id == nova::NovaConfig::config->my_server_id) {
+//            std::string sstable_id = TableFileName(dbname, file_number);
+//            NovaRTable *active_rtable = rtable_manager_->active_rtable(
+//                    thread_id);
+//            uint64_t offset = active_rtable->AllocateBuf(
+//                    sstable_id, size);
+//            if (offset == UINT64_MAX) {
+//                active_rtable = rtable_manager_->CreateNewRTable(thread_id);
+//                offset = active_rtable->AllocateBuf(sstable_id, size);
+//            }
+//            memcpy((char *) (offset), buf, size);
+//            active_rtable->MarkOffsetAsWritten(offset);
+//            *rtable_id = active_rtable->rtable_id();
+//            return 0;
+//        }
 
         uint32_t req_id = current_req_id_;
         CCRequestContext context = {};
@@ -278,8 +279,13 @@ namespace leveldb {
         context.req_type = CCRequestType::CC_RTABLE_WRITE_SSTABLE;
 
         char *send_buf = rdma_store_->GetSendBuf(server_id);
-        uint32_t msg_size = 1;
+        uint32_t msg_size = 2;
         send_buf[0] = CCRequestType::CC_RTABLE_WRITE_SSTABLE;
+        if (is_meta_blocks) {
+            send_buf[1] = 'm';
+        } else {
+            send_buf[1] = 'd';
+        }
         msg_size += EncodeStr(send_buf + msg_size, dbname);
         EncodeFixed64(send_buf + msg_size, file_number);
         msg_size += 8;

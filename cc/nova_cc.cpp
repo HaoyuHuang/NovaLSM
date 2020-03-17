@@ -242,7 +242,7 @@ namespace leveldb {
                         scatter_dcs[group_id], thread_id_, &rtable_id,
                         backing_mem_ + offset,
                         dbname_, file_number_,
-                        size);
+                        size, false);
                 RDMA_LOG(rdmaio::DEBUG)
                     << fmt::format(
                             "t[{}]: Initiate WRITE data blocks s:{} req:{} db:{} fn:{}",
@@ -425,6 +425,22 @@ namespace leveldb {
                     new_meta_handle.offset(), new_meta_handle.size(),
                     new_idx_handle.offset(), new_idx_handle.size());
 
+        uint32_t server_id =
+                rand_r(rand_seed_) % nova::NovaConfig::config->servers.size();
+        if (server_id == nova::NovaConfig::config->my_server_id) {
+            server_id =
+                    (server_id + 1) % nova::NovaConfig::config->servers.size();
+        }
+        uint32_t req_id = client->InitiateRTableWriteDataBlocks(server_id,
+                                                                thread_id_,
+                                                                nullptr,
+                                                                backing_mem_ +
+                                                                rewrite_start_offset,
+                                                                dbname_,
+                                                                file_number_,
+                                                                new_file_size, /*is_meta_blocks=*/
+                                                                true);
+
         WritableFile *writable_file;
         EnvFileMetadata meta = {};
         s = env_->NewWritableFile(fname_, meta, &writable_file);
@@ -441,6 +457,13 @@ namespace leveldb {
         RDMA_ASSERT(s.ok());
         delete writable_file;
         writable_file = nullptr;
+
+        client->Wait();
+        CCResponse response = {};
+        RDMA_ASSERT(client->IsDone(req_id, &response, nullptr));
+        RDMA_ASSERT(response.rtable_handles.size() == 1)
+            << fmt::format("{} {}", req_id, response.rtable_handles.size());
+        meta_block_handle_ = response.rtable_handles[0];
         return new_file_size;
     }
 

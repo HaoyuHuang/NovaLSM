@@ -83,6 +83,7 @@ namespace leveldb {
             uint64_t file_size;
             uint64_t converted_file_size;
             InternalKey smallest, largest;
+            RTableHandle meta_block_handle;
             std::vector<RTableHandle> data_block_group_handles;
         };
 
@@ -325,6 +326,23 @@ namespace leveldb {
                 pair.sstable_id = TableFileName(dbname_, meta.number);
                 pair.rtable_id = handles[i].rtable_id;
                 server_pairs[handles[i].server_id].push_back(pair);
+            }
+
+            {
+                auto &it = server_pairs[meta.meta_block_handle.server_id];
+                bool found = false;
+                for (auto &rtable : it) {
+                    if (rtable.rtable_id == meta.meta_block_handle.rtable_id) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    SSTableRTablePair pair = {};
+                    pair.sstable_id = TableFileName(dbname_, meta.number);
+                    pair.rtable_id = meta.meta_block_handle.rtable_id;
+                    it.push_back(pair);
+                }
             }
             it = compacted_tables_.erase(it);
         }
@@ -572,6 +590,7 @@ namespace leveldb {
                              meta.file_size,
                              meta.converted_file_size, meta.smallest,
                              meta.largest, FileCompactionStatus::NONE,
+                             meta.meta_block_handle,
                              meta.data_block_group_handles);
                 edit.SetPrevLogNumber(0);
             }
@@ -798,6 +817,7 @@ namespace leveldb {
                                f->converted_file_size,
                                f->smallest,
                                f->largest, FileCompactionStatus::NONE,
+                               f->meta_block_handle,
                                f->data_block_group_handles);
             Version *new_version = new Version(versions_,
                                                versions_->version_id_seq_.fetch_add(
@@ -1001,6 +1021,7 @@ namespace leveldb {
             MemWritableFile *out = compact->output_files[i];
             auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
             output.converted_file_size = mem_file->Finalize();
+            output.meta_block_handle = mem_file->meta_block_handle();
             output.data_block_group_handles = mem_file->rhs();
 
             delete mem_file;
@@ -1029,6 +1050,7 @@ namespace leveldb {
                                                  out.converted_file_size,
                                                  out.smallest, out.largest,
                                                  status,
+                                                 out.meta_block_handle,
                                                  out.data_block_group_handles);
         }
         mutex_.Lock();

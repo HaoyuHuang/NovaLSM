@@ -125,7 +125,7 @@ namespace leveldb {
     }
 
     uint64_t NovaRTable::AllocateBuf(const std::string &sstable,
-                                     uint32_t size) {
+                                     uint32_t size, bool is_meta_blocks) {
         mutex_.lock();
         if (is_full_ || current_mem_offset_ + size > allocated_mem_size_) {
             is_full_ = true;
@@ -139,7 +139,13 @@ namespace leveldb {
         handle.set_offset(off);
         handle.set_size(size);
 
-        RDMA_ASSERT(sstable_offset_.find(sstable) == sstable_offset_.end());
+        if (is_meta_blocks) {
+            RDMA_ASSERT(sstable_meta_block_offset_.find(sstable) ==
+                        sstable_meta_block_offset_.end());
+        } else {
+            RDMA_ASSERT(sstable_data_block_offset_.find(sstable) ==
+                        sstable_data_block_offset_.end());
+        }
 
         current_mem_offset_ += size;
         AllocatedBuf allocated_buf = {};
@@ -147,6 +153,7 @@ namespace leveldb {
         allocated_buf.offset = off;
         allocated_buf.size = size;
         allocated_buf.written_to_mem = false;
+        allocated_buf.is_meta_blocks = is_meta_blocks;
         allocated_bufs_.push_back(allocated_buf);
         file_size_ += size;
         mutex_.unlock();
@@ -169,19 +176,30 @@ namespace leveldb {
                 buf++;
                 continue;
             }
-            RDMA_ASSERT(sstable_offset_.find(buf->sstable_id) ==
-                        sstable_offset_.end());
+            RDMA_ASSERT(sstable_data_block_offset_.find(buf->sstable_id) ==
+                        sstable_data_block_offset_.end());
 
-            SSTablePersistStatus &s = sstable_offset_[buf->sstable_id];
-            s.disk_handle.set_offset(current_disk_offset_);
-            s.disk_handle.set_size(buf->size);
+            if (buf->is_meta_blocks) {
+                RDMA_ASSERT(sstable_meta_block_offset_.find(buf->sstable_id) ==
+                            sstable_meta_block_offset_.end());
+                SSTablePersistStatus &s = sstable_meta_block_offset_[buf->sstable_id];
+                s.disk_handle.set_offset(current_disk_offset_);
+                s.disk_handle.set_size(buf->size);
+                s.persisted = false;
+            } else {
+                RDMA_ASSERT(sstable_data_block_offset_.find(buf->sstable_id) ==
+                            sstable_data_block_offset_.end());
+                SSTablePersistStatus &s = sstable_data_block_offset_[buf->sstable_id];
+                s.disk_handle.set_offset(current_disk_offset_);
+                s.disk_handle.set_size(buf->size);
+                s.persisted = false;
+            }
 
             BlockHandle mem_handle = {};
             mem_handle.set_offset(buf->offset);
             mem_handle.set_size(buf->size);
             diskoff_memoff_[current_disk_offset_] = mem_handle;
 
-            s.persisted = false;
             persisting_cnt += 1;
             current_disk_offset_ += buf->size;
 
@@ -189,6 +207,7 @@ namespace leveldb {
             bw.mem_handle.set_offset(buf->offset);
             bw.mem_handle.set_size(buf->size);
             bw.sstable = buf->sstable_id;
+            bw.is_meta_blocks = buf->is_meta_blocks;
             written_mem_blocks_.push_back(bw);
             buf = allocated_bufs_.erase(buf);
         }
@@ -239,10 +258,17 @@ namespace leveldb {
 
             mutex_.lock();
             for (int j = persisted_i; j < i; j++) {
-                RDMA_ASSERT(
-                        sstable_offset_.find(writes[j].sstable) !=
-                        sstable_offset_.end());
-                sstable_offset_[writes[j].sstable].persisted = true;
+                if (writes[j].is_meta_blocks) {
+                    RDMA_ASSERT(
+                            sstable_meta_block_offset_.find(writes[j].sstable) !=
+                            sstable_meta_block_offset_.end());
+                    sstable_meta_block_offset_[writes[j].sstable].persisted = true;
+                } else {
+                    RDMA_ASSERT(
+                            sstable_data_block_offset_.find(writes[j].sstable) !=
+                            sstable_data_block_offset_.end());
+                    sstable_data_block_offset_[writes[j].sstable].persisted = true;
+                }
                 persisting_cnt -= 1;
             }
             mutex_.unlock();
@@ -265,10 +291,17 @@ namespace leveldb {
 
         mutex_.lock();
         for (int j = persisted_i; j < writes.size(); j++) {
-            RDMA_ASSERT(
-                    sstable_offset_.find(writes[j].sstable) !=
-                    sstable_offset_.end());
-            sstable_offset_[writes[j].sstable].persisted = true;
+            if (writes[j].is_meta_blocks) {
+                RDMA_ASSERT(
+                        sstable_meta_block_offset_.find(writes[j].sstable) !=
+                        sstable_meta_block_offset_.end());
+                sstable_meta_block_offset_[writes[j].sstable].persisted = true;
+            } else {
+                RDMA_ASSERT(
+                        sstable_data_block_offset_.find(writes[j].sstable) !=
+                        sstable_data_block_offset_.end());
+                sstable_data_block_offset_[writes[j].sstable].persisted = true;
+            }
             persisting_cnt -= 1;
         }
         mutex_.unlock();
@@ -286,14 +319,24 @@ namespace leveldb {
 
         mutex_.lock();
         Seal();
-        auto it = sstable_offset_.find(sstable_id);
-        RDMA_ASSERT(it != sstable_offset_.end());
-        RDMA_ASSERT(it->second.persisted);
+        {
+            auto it = sstable_data_block_offset_.find(sstable_id);
+            RDMA_ASSERT(it != sstable_data_block_offset_.end());
+            RDMA_ASSERT(it->second.persisted);
+            int n = sstable_data_block_offset_.erase(sstable_id);
+            RDMA_ASSERT(n == 1);
+        }
+        {
+            auto it = sstable_meta_block_offset_.find(sstable_id);
+            RDMA_ASSERT(it != sstable_meta_block_offset_.end());
+            RDMA_ASSERT(it->second.persisted);
+            int n = sstable_meta_block_offset_.erase(sstable_id);
+            RDMA_ASSERT(n == 1);
+        }
 
-        int n = sstable_offset_.erase(sstable_id);
-        RDMA_ASSERT(n == 1);
-
-        if (sstable_offset_.empty() && is_full_ && allocated_bufs_.empty() &&
+        if (sstable_data_block_offset_.empty() &&
+            sstable_meta_block_offset_.empty() && is_full_ &&
+            allocated_bufs_.empty() &&
             persisting_cnt == 0 && sealed_) {
             if (!deleted_) {
                 deleted_ = true;
@@ -355,21 +398,33 @@ namespace leveldb {
         backing_mem_ = nullptr;
     }
 
-    BlockHandle NovaRTable::Handle(const std::string &sstable_id) {
+    BlockHandle
+    NovaRTable::Handle(const std::string &sstable_id, bool is_meta_blocks) {
         BlockHandle handle = {};
         while (true) {
             mutex_.lock();
-            auto it = sstable_offset_.find(sstable_id);
-            RDMA_ASSERT(it != sstable_offset_.end());
-            SSTablePersistStatus &s = it->second;
-            if (s.persisted) {
-                handle = s.disk_handle;
+            if (is_meta_blocks) {
+                auto it = sstable_meta_block_offset_.find(sstable_id);
+                RDMA_ASSERT(it != sstable_meta_block_offset_.end());
+                SSTablePersistStatus &s = it->second;
+                if (s.persisted) {
+                    handle = s.disk_handle;
+                    mutex_.unlock();
+                    break;
+                }
+            } else {
+                auto it = sstable_data_block_offset_.find(sstable_id);
+                RDMA_ASSERT(it != sstable_data_block_offset_.end());
+                SSTablePersistStatus &s = it->second;
+                if (s.persisted) {
+                    handle = s.disk_handle;
+                    mutex_.unlock();
+                    break;
+                }
                 mutex_.unlock();
-                break;
             }
-            mutex_.unlock();
+            return handle;
         }
-        return handle;
     }
 
     void NovaRTableManager::ReadDataBlock(
@@ -383,7 +438,8 @@ namespace leveldb {
         mutex_.lock();
         NovaRTable *rtable = active_rtables_[thread_id];
         RDMA_ASSERT(rtable)
-            << fmt::format("Active RTable of thread {} is null.", thread_id);
+            << fmt::format("Active RTable of thread {} is null.",
+                           thread_id);
         mutex_.unlock();
         return rtable;
     }
@@ -397,7 +453,8 @@ namespace leveldb {
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format("Create a new RTable {} for thread {}", id,
                            thread_id);
-        RDMA_ASSERT(id < MAX_NUM_RTABLES) << fmt::format("Too many RTables");
+        RDMA_ASSERT(id < MAX_NUM_RTABLES)
+            << fmt::format("Too many RTables");
         NovaRTable *rtable = new NovaRTable(id, env_,
                                             fmt::format("{}/rtable-{}",
                                                         rtable_path_, id),
@@ -420,7 +477,8 @@ namespace leveldb {
                                          leveldb::MemManager *mem_manager,
                                          const std::string &rtable_path,
                                          uint32_t rtable_size,
-                                         uint32_t nservers, uint32_t nranges) :
+                                         uint32_t nservers, uint32_t
+                                         nranges) :
             env_(env), mem_manager_(mem_manager), rtable_path_(rtable_path),
             rtable_size_(rtable_size) {
     }

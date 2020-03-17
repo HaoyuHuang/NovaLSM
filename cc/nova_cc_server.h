@@ -29,6 +29,7 @@ namespace nova {
         leveldb::RTableHandle rtable_handle = {};
         char *rdma_buf = nullptr;
         uint64_t cc_mr_offset = 0;
+        bool is_meta_blocks;
 
         // Persist request
         std::vector<leveldb::SSTableRTablePair> persist_pairs;
@@ -60,6 +61,7 @@ namespace nova {
         uint64_t rtable_offset;
         uint32_t size;
         std::string sstable_id;
+        bool is_meta_blocks;
     };
 
     class NovaCCServer : public NovaMsgCallback, public leveldb::CCServer {

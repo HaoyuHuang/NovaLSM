@@ -114,7 +114,7 @@ namespace leveldb {
         InternalKey smallest;  // Smallest internal key served by table
         InternalKey largest;   // Largest internal key served by table
         FileCompactionStatus compaction_status;
-
+        RTableHandle meta_block_handle;
         std::vector<RTableHandle> data_block_group_handles;
     };
 

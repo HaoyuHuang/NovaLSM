@@ -45,7 +45,7 @@ namespace leveldb {
                                       uint32_t *rtable_id, char *buf,
                                       const std::string &dbname,
                                       uint64_t file_number,
-                                      uint32_t size) override;
+                                      uint32_t size, bool is_meta_blocks) override;
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
@@ -119,7 +119,7 @@ namespace leveldb {
                                       uint32_t *rtable_id, char *buf,
                                       const std::string &dbname,
                                       uint64_t file_number,
-                                      uint32_t size) override;
+                                      uint32_t size, bool is_meta_blocks) override;
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,

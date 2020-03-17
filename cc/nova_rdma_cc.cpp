@@ -83,14 +83,16 @@ namespace nova {
                     ctx.req_id = cc_client_->InitiateRTableWriteDataBlocks(
                             task.server_id, task.thread_id,
                             nullptr, task.write_buf, task.dbname,
-                            task.file_number, task.write_size);
+                            task.file_number, task.write_size,
+                            task.is_meta_blocks);
                     break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_DELETE_TABLES:
                     ctx.req_id = cc_client_->InitiateDeleteTables(
                             task.server_id, task.rtable_ids);
                     break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_READ_DC_STATS:
-                    ctx.req_id = cc_client_->InitiateReadDCStats(task.server_id);
+                    ctx.req_id = cc_client_->InitiateReadDCStats(
+                            task.server_id);
                     break;
             }
             pending_reqs_.push_back(ctx);

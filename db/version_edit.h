@@ -60,6 +60,7 @@ namespace leveldb {
                      uint64_t converted_file_size,
                      const InternalKey &smallest, const InternalKey &largest,
                      FileCompactionStatus status,
+                     RTableHandle meta_block_handle,
                      const std::vector<RTableHandle> &data_block_group_handles) {
             FileMetaData f;
             f.memtable_id = memtable_id;
@@ -69,6 +70,7 @@ namespace leveldb {
             f.smallest = smallest;
             f.largest = largest;
             f.compaction_status = status;
+            f.meta_block_handle = meta_block_handle;
             f.data_block_group_handles = data_block_group_handles;
             new_files_.emplace_back(std::make_pair(level, f));
         }

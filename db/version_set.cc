@@ -1255,6 +1255,7 @@ namespace leveldb {
                 edit.AddFile(level, 0, f->number, f->file_size,
                              f->converted_file_size, f->smallest,
                              f->largest, FileCompactionStatus::NONE,
+                             f->meta_block_handle,
                              f->data_block_group_handles);
             }
         }
