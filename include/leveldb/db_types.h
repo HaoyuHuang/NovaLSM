@@ -38,6 +38,11 @@ namespace leveldb {
         uint32_t rtable_id;
     };
 
+    struct MemTableLogFilePair {
+        uint32_t memtable_id;
+        uint32_t log_file_id;
+    };
+
     typedef uint64_t SequenceNumber;
 
     // Value types encoded as the last component of internal keys.

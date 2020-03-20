@@ -261,7 +261,7 @@ namespace leveldb {
             uint32_t partition_id = 0;
             std::vector<uint32_t> imm_slots;
             std::queue<uint32_t> available_slots;
-            std::vector<uint32_t> closed_log_files;
+            std::vector<uint32_t> closed_memtable_ids;
             port::CondVar background_work_finished_signal_ GUARDED_BY(mutex);
         };
 

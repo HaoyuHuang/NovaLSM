@@ -28,6 +28,12 @@ namespace nova {
         RANDOM
     };
 
+    enum LogRecordPolicy {
+        SHARED_LOG_FILE,
+        EXCLUSIVE_LOG_FILE,
+        NONE
+    };
+
     class NovaConfig {
     public:
         bool enable_load_data;
@@ -36,6 +42,7 @@ namespace nova {
         vector<Host> servers;
         int my_server_id;
         uint64_t load_default_value_size;
+        uint64_t log_record_size;
         int max_msg_size;
 
         std::string db_path;
@@ -50,7 +57,7 @@ namespace nova {
         uint64_t sstable_size;
         std::string rtable_path;
 
-        bool use_multiple_disks;
+        uint64_t log_file_size;
 
         uint64_t mem_pool_size_gb;
         uint32_t num_mem_partitions;
@@ -58,6 +65,7 @@ namespace nova {
         uint64_t nnovabuf;
 
         ScatterPolicy  scatter_policy;
+        LogRecordPolicy  log_record_policy;
 
         void add_tid_mapping() {
             std::lock_guard<std::mutex> l(m);
@@ -180,7 +188,7 @@ namespace nova {
 
         vector<Host> cc_servers;
         vector<Host> dc_servers;
-        int num_conn_workers;
+        int num_client_workers;
         int num_conn_async_workers;
         int num_compaction_workers;
         int num_rdma_compaction_workers;

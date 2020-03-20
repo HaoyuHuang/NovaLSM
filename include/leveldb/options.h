@@ -237,7 +237,9 @@ namespace leveldb {
 
         uint64_t hash = 0;
         // For replicating log records.
-        uint64_t thread_id;
+        uint64_t client_worker_id;
+        char *local_rdma_log_record_backing_mem;
+        std::vector<uint64_t> dc_rdma_log_bufs;
         CCClient *dc_client = nullptr;
     };
 

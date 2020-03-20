@@ -17,7 +17,73 @@ namespace leveldb {
 
     NovaBlockCCClient::NovaBlockCCClient(uint32_t client_id) {
         sem_init(&sem_, 0, 0);
-        current_cc_id_ = client_id;
+        current_rdma_worker_id_ = client_id;
+    }
+
+    uint32_t NovaBlockCCClient::InitiateSetupLogRecordBuf(uint32_t cc_id,
+                                                          uint32_t cc_client_worker_id,
+                                                          uint32_t log_record_size,
+                                                          uint32_t dc_id) {
+        RDMAAsyncClientRequestTask task = {};
+        task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_SETUP_LOG_BUF;
+        task.dc_id = dc_id;
+        task.cc_id = cc_id;
+        task.size = log_record_size;
+        task.cc_client_worker_id = cc_client_worker_id;
+        task.sem = &sem_;
+
+        uint32_t reqid = req_id_;
+        CCResponse *response = new CCResponse;
+        req_response[reqid] = response;
+        task.response = response;
+        AddAsyncTask(task);
+
+        req_id_++;
+        return reqid;
+    }
+
+    uint32_t NovaBlockCCClient::InitiateCloseLogFiles(uint32_t cc_id,
+                                                      uint32_t dbid,
+                                                      uint32_t dc_id,
+                                                      std::vector<MemTableLogFilePair> log_file_ids) {
+        RDMAAsyncClientRequestTask task = {};
+        task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_DELETE_LOG_FILES;
+        task.cc_id = cc_id;
+        task.dbid = dbid;
+        task.dc_id = dc_id;
+        task.log_file_ids = log_file_ids;
+        task.sem = nullptr;
+        AddAsyncTask(task);
+        return 0;
+    }
+
+    uint32_t NovaBlockCCClient::InitiateSyncLogRecord(uint32_t cc_id,
+                                                      uint32_t cc_worker_id,
+                                                      uint32_t dbid,
+                                                      uint32_t memtable_id,
+                                                      const leveldb::Slice &log_record,
+                                                      uint32_t dc_id,
+                                                      uint64_t remote_dc_offset,
+                                                      char *rdma_log_record_backing_mem) {
+        RDMAAsyncClientRequestTask task = {};
+        task.type = RDMAAsyncRequestType::RDMA_ASYNC_SYNC_LOG_RECORD;
+        task.cc_id = cc_id;
+        task.cc_client_worker_id = cc_worker_id;
+        task.dbid = dbid;
+        task.memtable_id = memtable_id;
+        task.log_record = log_record;
+        task.dc_id = dc_id;
+        task.remote_dc_offset = remote_dc_offset;
+        task.rdma_log_record_backing_mem = rdma_log_record_backing_mem;
+        task.sem = &sem_;
+
+        uint32_t reqid = req_id_;
+        CCResponse *response = new CCResponse;
+        req_response[reqid] = response;
+        task.response = response;
+        AddAsyncTask(task);
+        req_id_++;
+        return reqid;
     }
 
     uint32_t NovaBlockCCClient::InitiateRTableWriteDataBlocks(
@@ -89,8 +155,9 @@ namespace leveldb {
 
     void NovaBlockCCClient::AddAsyncTask(
             const leveldb::RDMAAsyncClientRequestTask &task) {
-        current_cc_id_ = (current_cc_id_ + 1) % ccs_.size();
-        ccs_[current_cc_id_]->AddTask(task);
+        current_rdma_worker_id_ =
+                (current_rdma_worker_id_ + 1) % rdma_workers_.size();
+        rdma_workers_[current_rdma_worker_id_]->AddTask(task);
     }
 
     uint32_t NovaBlockCCClient::InitiateRTableReadDataBlock(
@@ -248,6 +315,90 @@ namespace leveldb {
         return req_id;
     }
 
+    uint32_t
+    NovaCCClient::InitiateSetupLogRecordBuf(uint32_t cc_id,
+                                            uint32_t cc_client_worker_id,
+                                            uint32_t log_record_size,
+                                            uint32_t dc_id) {
+        uint32_t req_id = current_req_id_;
+        CCRequestContext context = {};
+        context.done = false;
+        context.req_type = CCRequestType::CC_SETUP_LOG_RECORD_BUF;
+
+        char *send_buf = rdma_store_->GetSendBuf(dc_id);
+        uint32_t msg_size = 1;
+        send_buf[0] = CCRequestType::CC_SETUP_LOG_RECORD_BUF;
+        EncodeFixed32(send_buf + msg_size, cc_id);
+        msg_size += 4;
+        EncodeFixed32(send_buf + msg_size, cc_client_worker_id);
+        msg_size += 4;
+        EncodeFixed32(send_buf + msg_size, log_record_size);
+        msg_size += 4;
+        rdma_store_->PostSend(send_buf, msg_size, dc_id, req_id);
+        request_context_[req_id] = context;
+        IncrementReqId();
+
+        rdma_store_->FlushPendingSends(dc_id);
+        RDMA_LOG(DEBUG)
+            << fmt::format(
+                    "dcclient[{}]: Setup Log record buf cc:{} t:{} size:{} dc:{} req:{}",
+                    cc_client_id_, cc_id, cc_client_worker_id, log_record_size,
+                    dc_id, req_id);
+        return req_id;
+    };
+
+    uint32_t NovaCCClient::InitiateSyncLogRecord(uint32_t cc_id,
+                                                 uint32_t cc_client_worker_id,
+                                                 uint32_t dbid,
+                                                 uint32_t memtable_id,
+                                                 const leveldb::Slice &log_record,
+                                                 uint32_t dc_id,
+                                                 uint64_t remote_dc_offset,
+                                                 char *rdma_log_record_backing_mem) {
+        uint32_t req_id = current_req_id_;
+        CCRequestContext context = {};
+        context.done = false;
+        context.req_type = CCRequestType::CC_SYNC_LOG_RECORD;
+
+        // This is an RDMA WRITE. Encode the request id into the payload.
+        uint32_t msg_size = 0;
+        leveldb::EncodeFixed32(rdma_log_record_backing_mem, req_id);
+        msg_size += 4;
+        leveldb::EncodeFixed32(rdma_log_record_backing_mem + msg_size, cc_id);
+        msg_size += 4;
+        leveldb::EncodeFixed32(rdma_log_record_backing_mem + msg_size,
+                               cc_client_worker_id);
+        msg_size += 4;
+        leveldb::EncodeFixed32(rdma_log_record_backing_mem + msg_size, dbid);
+        msg_size += 4;
+        leveldb::EncodeFixed32(rdma_log_record_backing_mem + msg_size,
+                               memtable_id);
+        msg_size += 4;
+        leveldb::EncodeFixed32(rdma_log_record_backing_mem + msg_size,
+                               log_record.size());
+        msg_size += 4;
+        memcpy(rdma_log_record_backing_mem + msg_size, log_record.data(),
+               log_record.size());
+        msg_size += log_record.size();
+
+        RDMA_ASSERT(msg_size < nova::NovaConfig::config->log_record_size);
+
+        uint32_t imm_data = (uint32_t) 1 << 31;
+        imm_data |= cc_client_worker_id;
+        rdma_store_->PostWrite(rdma_log_record_backing_mem, msg_size, dc_id,
+                               remote_dc_offset, false, imm_data);
+        request_context_[req_id] = context;
+        IncrementReqId();
+        rdma_store_->FlushPendingSends(dc_id);
+        RDMA_LOG(DEBUG)
+            << fmt::format(
+                    "dcclient[{}]: Sync log record buf:cc:{} t:{} dbid:{} mid:{} dcid:{} dcoffset:{} req:{}",
+                    cc_client_id_, cc_id, cc_client_worker_id, dbid,
+                    memtable_id,
+                    dc_id, remote_dc_offset, req_id);
+        return req_id;
+    }
+
 
     uint32_t NovaCCClient::InitiateRTableWriteDataBlocks(uint32_t server_id,
                                                          uint32_t thread_id,
@@ -255,7 +406,8 @@ namespace leveldb {
                                                          char *buf,
                                                          const std::string &dbname,
                                                          uint64_t file_number,
-                                                         uint32_t size, bool is_meta_blocks) {
+                                                         uint32_t size,
+                                                         bool is_meta_blocks) {
         RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
 //        if (server_id == nova::NovaConfig::config->my_server_id) {
 //            std::string sstable_id = TableFileName(dbname, file_number);
@@ -319,6 +471,32 @@ namespace leveldb {
         return 0;
     }
 
+    uint32_t NovaCCClient::InitiateCloseLogFiles(uint32_t cc_id,
+                                                 uint32_t dbid,
+                                                 uint32_t dc_id,
+                                                 std::vector<MemTableLogFilePair> log_file_ids) {
+        char *sendbuf = rdma_store_->GetSendBuf(dc_id);
+        uint32_t msg_size = 1;
+        sendbuf[0] = leveldb::CCRequestType::CC_DELETE_LOG_FILES;
+        leveldb::EncodeFixed32(sendbuf + msg_size, cc_id);
+        msg_size += 4;
+        leveldb::EncodeFixed32(sendbuf + msg_size, dbid);
+        msg_size += 4;
+        leveldb::EncodeFixed32(sendbuf + msg_size, log_file_ids.size());
+        msg_size += 4;
+
+        for (MemTableLogFilePair log_file_id : log_file_ids) {
+            leveldb::EncodeFixed32(sendbuf + msg_size, log_file_id.memtable_id);
+            msg_size += 4;
+            leveldb::EncodeFixed32(sendbuf + msg_size, log_file_id.log_file_id);
+            msg_size += 4;
+        }
+        rdma_store_->PostSend(sendbuf, msg_size, dc_id, 0);
+        RDMA_LOG(DEBUG) << fmt::format(
+                    "dcclient[{}]: Close log files cc:{} db:{} dc:{}",
+                    cc_client_id_, cc_id, dbid, dc_id);
+    }
+
     bool NovaCCClient::IsDone(uint32_t req_id, CCResponse *response,
                               uint64_t *timeout) {
         // Poll both queues.
@@ -339,6 +517,8 @@ namespace leveldb {
         if (context_it->second.done) {
             if (response) {
                 response->rtable_id = context_it->second.rtable_id;
+                response->log_file_id = context_it->second.log_file_id;
+                response->rdma_log_buf = context_it->second.rdma_log_buf_offset;
                 response->rtable_handles = context_it->second.rtable_handles;
                 response->dc_queue_depth = context_it->second.dc_queue_depth;
                 response->dc_pending_read_bytes = context_it->second.dc_pending_read_bytes;
@@ -454,6 +634,17 @@ namespace leveldb {
                                 buf + 17);
                         context.done = true;
                         processed = true;
+                    } else if (buf[0] ==
+                               CCRequestType::CC_SETUP_LOG_RECORD_BUF_RESPONSE) {
+                        context.rdma_log_buf_offset = leveldb::DecodeFixed64(
+                                buf + 1);
+                        context.done = true;
+                        processed = true;
+                    } else if (buf[0] ==
+                               CCRequestType::CC_SYNC_LOG_RECORD_RESPONSE) {
+                        context.log_file_id = leveldb::DecodeFixed32(buf + 1);
+                        context.done = true;
+                        processed = true;
                     }
                 }
                 if (buf[0] ==
@@ -472,5 +663,4 @@ namespace leveldb {
         }
         return processed;
     }
-
 }

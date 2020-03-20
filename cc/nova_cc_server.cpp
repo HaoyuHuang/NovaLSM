@@ -27,25 +27,29 @@ namespace nova {
 
     NovaCCServer::NovaCCServer(rdmaio::RdmaCtrl *rdma_ctrl,
                                NovaMemManager *mem_manager,
+                               NovaLogManager *nova_log_manager,
                                leveldb::NovaRTableManager *rtable_manager,
                                LogFileManager *log_manager, uint32_t thread_id,
                                bool is_compaction_thread)
             : rdma_ctrl_(rdma_ctrl),
               mem_manager_(mem_manager),
+              nova_sync_log_manager_(nova_log_manager),
               rtable_manager_(rtable_manager),
               log_manager_(log_manager), thread_id_(thread_id),
               is_compaction_thread_(is_compaction_thread) {
         if (is_compaction_thread) {
             current_rtable_ = rtable_manager_->CreateNewRTable(thread_id_);
+        } else {
+            current_log_file_ = nova_sync_log_manager_->CreateNewLogFile();
         }
-        current_worker_id_ = thread_id;
+        current_storage_id_ = thread_id;
     }
 
     void NovaCCServer::AddCompleteTasks(
             const std::vector<nova::NovaServerCompleteTask> &tasks) {
         mutex_.lock();
         for (auto &task : tasks) {
-            async_cq_.push_back(task);
+            storage_cq_.push_back(task);
         }
         mutex_.unlock();
     }
@@ -53,14 +57,14 @@ namespace nova {
     void NovaCCServer::AddCompleteTask(
             const nova::NovaServerCompleteTask &task) {
         mutex_.lock();
-        async_cq_.push_back(task);
+        storage_cq_.push_back(task);
         mutex_.unlock();
     }
 
-    void NovaCCServer::AddAsyncTask(const nova::NovaServerAsyncTask &task) {
-        current_worker_id_ = current_worker_id_ % async_workers_.size();
-        async_workers_[current_worker_id_]->AddTask(task);
-        current_worker_id_ += 1;
+    void NovaCCServer::AddAsyncTask(const nova::NovaDCStorageWorkerTask &task) {
+        current_storage_id_ = current_storage_id_ % storage_workers_.size();
+        storage_workers_[current_storage_id_]->AddTask(task);
+        current_storage_id_ += 1;
 
 //        async_workers_[task.rtable_id % async_workers_.size()]->AddTask(task);
 //        task.rtable_id % async_workers_.size();
@@ -69,9 +73,9 @@ namespace nova {
     int NovaCCServer::PullAsyncCQ() {
         int nworks = 0;
         mutex_.lock();
-        nworks = async_cq_.size();
-        while (!async_cq_.empty()) {
-            auto &task = async_cq_.front();
+        nworks = storage_cq_.size();
+        while (!storage_cq_.empty()) {
+            auto &task = storage_cq_.front();
             if (task.request_type ==
                 leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS) {
                 char *sendbuf = rdma_store_->GetSendBuf(task.remote_server_id);
@@ -100,10 +104,17 @@ namespace nova {
                 }
                 rdma_store_->PostSend(sendbuf, msg_size, task.remote_server_id,
                                       task.dc_req_id);
+            } else if (task.request_type ==
+                       leveldb::CCRequestType::CC_SYNC_LOG_RECORD) {
+                char *sendbuf = rdma_store_->GetSendBuf(task.remote_server_id);
+                sendbuf[0] = leveldb::CCRequestType::CC_SYNC_LOG_RECORD_RESPONSE;
+                leveldb::EncodeFixed32(sendbuf + 1, task.log_file_id);
+                rdma_store_->PostSend(sendbuf, 9, task.remote_server_id,
+                                      task.dc_req_id);
             } else {
                 RDMA_ASSERT(false);
             }
-            async_cq_.pop_front();
+            storage_cq_.pop_front();
             RDMA_LOG(DEBUG) << fmt::format(
                         "CCServer[{}]: Completed Request ss:{} req:{} type:{}",
                         thread_id_, task.remote_server_id, task.dc_req_id,
@@ -150,6 +161,79 @@ namespace nova {
                 break;
             case IBV_WC_RECV:
             case IBV_WC_RECV_RDMA_WITH_IMM:
+                bool is_sync_log_record = ((imm_data >> 31) == 1);
+
+                if (is_sync_log_record) {
+                    // sync log record.
+                    uint32_t mask = ~((uint32_t) 1 << 31);
+                    uint32_t cc_worker_id_imm = imm_data & mask;
+                    RDMA_ASSERT(cc_worker_id_imm <
+                                nova::NovaCCConfig::cc_config->num_client_workers);
+                    char *log_buf = nova_sync_log_manager_->rdma_log_buf(
+                            remote_server_id, cc_worker_id_imm);
+                    RDMA_ASSERT(log_buf);
+                    uint32_t msg_size = 0;
+                    uint32_t req_id = leveldb::DecodeFixed32(
+                            log_buf + msg_size);
+                    msg_size += 4;
+                    uint32_t cc_id = leveldb::DecodeFixed32(log_buf + msg_size);
+                    msg_size += 4;
+                    uint32_t cc_worker_id = leveldb::DecodeFixed32(
+                            log_buf + msg_size);
+                    msg_size += 4;
+                    uint32_t dbid = leveldb::DecodeFixed32(log_buf
+                                                           + msg_size);
+                    msg_size += 4;
+                    uint32_t memtable_id = leveldb::DecodeFixed32(
+                            log_buf + msg_size);
+                    msg_size += 4;
+                    uint32_t log_record_size = leveldb::DecodeFixed32(
+                            log_buf + msg_size);
+                    msg_size += log_record_size;
+
+                    RDMA_ASSERT(cc_id == remote_server_id);
+                    RDMA_ASSERT(cc_worker_id == cc_worker_id_imm);
+                    RequestContext context = {};
+                    context.request_type = leveldb::CCRequestType::CC_SYNC_LOG_RECORD;
+                    request_context_map_[req_id] = context;
+
+                    // Determine the log file id to persist this log record.
+                    uint32_t log_file_id = 0;
+                    LogRecord record = {};
+                    record.memtable_id.cc_id = cc_id;
+                    record.memtable_id.db_id = dbid;
+                    record.memtable_id.memtable_id = memtable_id;
+                    record.log_record = log_buf;
+                    record.log_record_size = msg_size;
+
+                    if (NovaConfig::config->log_record_policy ==
+                        LogRecordPolicy::SHARED_LOG_FILE) {
+                        RDMA_ASSERT(current_log_file_);
+                        if (!current_log_file_->ReserveSpaceForLogRecord(record)) {
+                            current_log_file_ = nova_sync_log_manager_->CreateNewLogFile();
+                        }
+                        log_file_id = current_log_file_->log_file_id();
+                    } else {
+                        // one log file per table.
+                        auto log_file = nova_sync_log_manager_->log_file(
+                                record.memtable_id);
+                        RDMA_ASSERT(log_file);
+                        RDMA_ASSERT(
+                                log_file->ReserveSpaceForLogRecord(record));
+                        log_file_id = log_file->log_file_id();
+                    }
+                    NovaDCStorageWorkerTask task = {};
+                    task.request_type = leveldb::CCRequestType::CC_SYNC_LOG_RECORD;
+                    task.remote_server_id = cc_id;
+                    task.log_file_id = log_file_id;
+                    task.cc_rdma_thread_id = thread_id_;
+                    task.dc_req_id = req_id;
+                    task.memtable_id = record.memtable_id;
+                    task.log_record = leveldb::Slice(log_buf, msg_size);
+                    AddAsyncTask(task);
+                    break;
+                }
+
                 uint32_t dc_req_id = imm_data;
                 uint64_t req_id = to_req_id(remote_server_id, dc_req_id);
 
@@ -174,10 +258,10 @@ namespace nova {
                                         context.rtable_offset, dc_req_id,
                                         req_id);
 
-                            NovaServerAsyncTask task = {};
+                            NovaDCStorageWorkerTask task = {};
                             task.request_type = leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE;
                             task.remote_server_id = remote_server_id;
-                            task.cc_server_thread_id = thread_id_;
+                            task.cc_rdma_thread_id = thread_id_;
                             task.dc_req_id = dc_req_id;
                             task.is_meta_blocks = context.is_meta_blocks;
                             leveldb::SSTableRTablePair pair = {};
@@ -191,7 +275,55 @@ namespace nova {
                     }
                 }
 
-                if (buf[0] == leveldb::CCRequestType::CC_DC_READ_STATS) {
+                if (buf[0] == leveldb::CCRequestType::CC_DELETE_LOG_FILES) {
+                    uint32_t msg_size = 1;
+                    uint32_t cc_id = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
+                    uint32_t dbid = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
+                    uint32_t npairs = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
+
+                    std::map<uint32_t, std::vector<MemTableIdentifier>> log_memtables;
+                    for (int i = 0; i < npairs; i++) {
+                        uint32_t logid = leveldb::DecodeFixed32(buf + msg_size);
+                        msg_size += 4;
+                        uint32_t memtableid = leveldb::DecodeFixed32(
+                                buf + msg_size);
+                        msg_size += 4;
+
+                        MemTableIdentifier id = {};
+                        id.cc_id = cc_id;
+                        id.db_id = dbid;
+                        id.memtable_id = memtableid;
+                        log_memtables[logid].push_back(id);
+                    }
+                    for (auto &it : log_memtables) {
+                        auto log_file = nova_sync_log_manager_->log_file(
+                                it.first);
+                        RDMA_ASSERT(log_file);
+                        log_file->DeleteMemTables(it.second);
+                    }
+                } else if (buf[0] ==
+                           leveldb::CCRequestType::CC_SETUP_LOG_RECORD_BUF) {
+                    uint32_t msg_size = 1;
+                    uint32_t cc_id = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
+                    uint32_t cc_worker_id = leveldb::DecodeFixed32(
+                            buf + msg_size);
+                    msg_size += 4;
+                    uint32_t log_buf_size = leveldb::DecodeFixed32(
+                            buf + msg_size);
+                    char *rdma_buf = nova_sync_log_manager_->rdma_log_buf(cc_id,
+                                                                          cc_worker_id);
+                    char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
+                    sendbuf[0] =
+                            leveldb::CCRequestType::CC_SETUP_LOG_RECORD_BUF_RESPONSE;
+                    leveldb::EncodeFixed64(sendbuf + 1, (uint64_t) (rdma_buf));
+                    rdma_store_->PostSend(sendbuf, 9, remote_server_id,
+                                          dc_req_id);
+                    processed = true;
+                } else if (buf[0] == leveldb::CCRequestType::CC_DC_READ_STATS) {
                     char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
                     sendbuf[0] =
                             leveldb::CCRequestType::CC_DC_READ_STATS_RESPONSE;
@@ -246,9 +378,9 @@ namespace nova {
                     char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, scid);
                     RDMA_ASSERT(rdma_buf);
 
-                    NovaServerAsyncTask task = {};
+                    NovaDCStorageWorkerTask task = {};
                     task.dc_req_id = dc_req_id;
-                    task.cc_server_thread_id = thread_id_;
+                    task.cc_rdma_thread_id = thread_id_;
                     task.remote_server_id = remote_server_id;
                     task.request_type = leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS;
                     task.rtable_id = rtable_id;
@@ -365,15 +497,17 @@ namespace nova {
     }
 
 
-    NovaCCServerAsyncWorker::NovaCCServerAsyncWorker(
+    NovaDCStorageWorker::NovaDCStorageWorker(
             leveldb::NovaRTableManager *rtable_manager,
+            NovaLogManager *log_manager,
             std::vector<NovaCCServer *> cc_servers) : rtable_manager_(
-            rtable_manager), cc_servers_(cc_servers) {
+            rtable_manager), log_manager_(log_manager),
+                                                      cc_servers_(cc_servers) {
         sem_init(&sem_, 0, 0);
     }
 
-    void NovaCCServerAsyncWorker::AddTask(
-            const nova::NovaServerAsyncTask &task) {
+    void NovaDCStorageWorker::AddTask(
+            const nova::NovaDCStorageWorkerTask &task) {
         mutex_.lock();
         queue_.push_back(task);
         mutex_.unlock();
@@ -381,7 +515,7 @@ namespace nova {
         sem_post(&sem_);
     }
 
-    void NovaCCServerAsyncWorker::Start() {
+    void NovaDCStorageWorker::Start() {
         RDMA_LOG(DEBUG) << "CC server worker started";
 
         nova::NovaConfig::config->add_tid_mapping();
@@ -389,7 +523,7 @@ namespace nova {
         while (is_running_) {
             sem_wait(&sem_);
 
-            std::vector<NovaServerAsyncTask> tasks;
+            std::vector<NovaDCStorageWorkerTask> tasks;
             mutex_.lock();
 
             while (!queue_.empty()) {
@@ -404,11 +538,13 @@ namespace nova {
             }
 
             std::map<uint32_t, std::vector<NovaServerCompleteTask>> t_tasks;
+            std::set<uint32_t> log_files;
             for (auto &task : tasks) {
                 NovaServerCompleteTask ct = {};
                 ct.remote_server_id = task.remote_server_id;
                 ct.dc_req_id = task.dc_req_id;
                 ct.request_type = task.request_type;
+                ct.log_file_id = task.log_file_id;
 
                 ct.rdma_buf = task.rdma_buf;
                 ct.cc_mr_offset = task.cc_mr_offset;
@@ -441,6 +577,9 @@ namespace nova {
                         rh.size = h.size();
                         ct.rtable_handles.push_back(rh);
                     }
+                } else if (task.request_type ==
+                           leveldb::CCRequestType::CC_SYNC_LOG_RECORD) {
+                    log_files.insert(task.log_file_id);
                 } else {
                     RDMA_ASSERT(false);
                 }
@@ -448,12 +587,20 @@ namespace nova {
                 RDMA_LOG(DEBUG)
                     << fmt::format(
                             "CCWorker: Working on t:{} ss:{} req:{} type:{}",
-                            task.cc_server_thread_id, ct.remote_server_id,
+                            task.cc_rdma_thread_id, ct.remote_server_id,
                             ct.dc_req_id,
                             ct.request_type);
-                t_tasks[task.cc_server_thread_id].push_back(ct);
+                t_tasks[task.cc_rdma_thread_id].push_back(ct);
             }
 
+            if (!log_files.empty()) {
+                for (auto &log_file_id : log_files) {
+                    NovaLogFile *log_file = log_manager_->log_file(
+                            log_file_id);
+                    RDMA_ASSERT(log_file);
+                    log_file->PersistLogRecords();
+                }
+            }
             for (auto &it : t_tasks) {
                 cc_servers_[it.first]->AddCompleteTasks(it.second);
             }

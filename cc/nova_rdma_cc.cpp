@@ -61,6 +61,27 @@ namespace nova {
             ctx.sem = task.sem;
             ctx.response = task.response;
             switch (task.type) {
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_SYNC_LOG_RECORD:
+                    ctx.req_id = cc_client_->InitiateSyncLogRecord(task.cc_id,
+                                                                   task.cc_client_worker_id,
+                                                                   task.dbid,
+                                                                   task.memtable_id,
+                                                                   task.log_record,
+                                                                   task.dc_id,
+                                                                   task.remote_dc_offset,
+                                                                   task.rdma_log_record_backing_mem);
+                    break;
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_DELETE_LOG_FILES:
+                    ctx.req_id = cc_client_->InitiateCloseLogFiles(task.cc_id,
+                                                                   task.dbid,
+                                                                   task.dc_id,
+                                                                   task.log_file_ids);
+                    break;
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_SETUP_LOG_BUF:
+                    ctx.req_id = cc_client_->InitiateSetupLogRecordBuf(
+                            task.cc_id, task.cc_client_worker_id, task.size,
+                            task.dc_id);
+                    break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_READ:
                     ctx.req_id = cc_client_->InitiateRTableReadDataBlock(
                             task.rtable_handle,

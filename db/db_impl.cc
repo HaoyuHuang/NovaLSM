@@ -1480,7 +1480,7 @@ namespace leveldb {
         RDMA_ASSERT(dc);
         dc->set_dbid(dbid);
         options.dc_client->InitiateReplicateLogRecords(
-                logfile, options.thread_id,
+                logfile, options.client_worker_id,
                 WriteBatchInternal::Contents(updates));
 
         for (const auto &file : closed_files) {
@@ -1529,7 +1529,8 @@ namespace leveldb {
                     RDMA_ASSERT(imms_[next_imm_slot] == nullptr);
                     imms_[next_imm_slot] = table;
                     uint32_t memtable_id = memtable_id_seq_.fetch_add(1);
-                    partition->closed_log_files.push_back(table->memtableid());
+                    partition->closed_memtable_ids.push_back(
+                            table->memtableid());
                     table = new MemTable(internal_comparator_, memtable_id,
                                          db_profiler_);
                     RDMA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
@@ -1551,32 +1552,73 @@ namespace leveldb {
         if (table_locator_ != nullptr) {
             table_locator_->Insert(key, options.hash, table->memtableid());
         }
-        std::vector<uint32_t> closed_log_files(partition->closed_log_files);
-        partition->closed_log_files.clear();
+        std::vector<uint32_t> closed_memtable_ids(
+                partition->closed_memtable_ids);
+        partition->closed_memtable_ids.clear();
         partition->mutex.Unlock();
 
         if (schedule_compaction) {
-            MaybeScheduleCompaction(options.thread_id + 1000,
+            MaybeScheduleCompaction(options.client_worker_id + 1000,
                                     imms_[next_imm_slot], partition_id,
                                     next_imm_slot, options.rand_seed);
         }
 
-        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
-        RDMA_ASSERT(dc);
-        dc->set_dbid(dbid_);
-//        leveldb::WriteBatch batch;
-//        batch.Put(key, value);
-//        WriteBatchInternal::Contents(&batch);
-        options.dc_client->InitiateReplicateLogRecords(
-                fmt::format("{}-{}-{}", server_id_, dbid_, memtable_id),
-                options.thread_id, value);
-        for (const auto &file : closed_log_files) {
-            options.dc_client->InitiateCloseLogFile(
-                    fmt::format("{}-{}-{}", server_id_, dbid_, file));
+        if (!options.local_write) {
+            auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
+            RDMA_ASSERT(dc);
+            dc->set_dbid(dbid_);
+            uint32_t dc_index = memtable_id %
+                                nova::NovaCCConfig::cc_config->dc_servers.size();
+            if (nova::NovaConfig::config->log_record_policy ==
+                nova::LogRecordPolicy::SHARED_LOG_FILE) {
+                // Scatter log records to a random DC.
+                dc_index = rand_r(options.rand_seed) %
+                           nova::NovaCCConfig::cc_config->dc_servers.size();
+            }
+            uint32_t dc_id = nova::NovaCCConfig::cc_config->dc_servers[dc_index].server_id;
+            uint32_t req_id = dc->InitiateSyncLogRecord(
+                    nova::NovaConfig::config->my_server_id, options.client_worker_id,
+                    dbid_, memtable_id, value, dc_id,
+                    options.dc_rdma_log_bufs[dc_index],
+                    options.local_rdma_log_record_backing_mem);
+            // Synchronous replication.
+            dc->Wait();
+            CCResponse response;
+            RDMA_ASSERT(dc->IsDone(req_id, &response, nullptr));
+            // Remember this log file id.
+            versions_->mid_table_mapping_[memtable_id].SetLogFileId(dc_id,
+                                                                    response.log_file_id);
+            std::map<uint32_t, std::map<uint32_t, std::vector<uint32_t>>> dc_log_tables;
+            for (const auto &close_id : closed_memtable_ids) {
+                auto files = versions_->mid_table_mapping_[close_id].log_files();
+                for (auto &it : files) {
+                    for (auto &log_file_id : it.second) {
+                        dc_log_tables[it.first][log_file_id].push_back(
+                                close_id);
+                    }
+                }
+            }
+
+            for (auto &dc_it : dc_log_tables) {
+                std::vector<MemTableLogFilePair> pairs;
+                for (auto &it : dc_it.second) {
+                    uint32_t log_file_id = it.first;
+                    for (auto &table_id : it.second) {
+                        MemTableLogFilePair pair = {};
+                        pair.log_file_id = log_file_id;
+                        pair.memtable_id = table_id;
+                        pairs.push_back(pair);
+                    }
+                }
+                dc->InitiateCloseLogFiles(
+                        nova::NovaConfig::config->my_server_id, dbid_,
+                        dc_it.first, pairs);
+            }
         }
-        RDMA_LOG(rdmaio::DEBUG)
-            << fmt::format("#### Put key {} in table {}", key.ToString(),
-                           memtable_id);
+
+//        RDMA_LOG(rdmaio::DEBUG)
+//            << fmt::format("#### Put key {} in table {}", key.ToString(),
+//                           memtable_id);
         return true;
     }
 

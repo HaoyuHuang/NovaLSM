@@ -45,13 +45,34 @@ namespace leveldb {
                                       uint32_t *rtable_id, char *buf,
                                       const std::string &dbname,
                                       uint64_t file_number,
-                                      uint32_t size, bool is_meta_blocks) override;
+                                      uint32_t size,
+                                      bool is_meta_blocks) override;
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
                                     uint64_t thread_id,
                                     const Slice &slice) override;
 
+        uint32_t
+        InitiateSetupLogRecordBuf(uint32_t cc_id,
+                                  uint32_t cc_client_worker_id,
+                                  uint32_t log_record_size, uint32_t dc_id) override;
+
+        uint32_t
+        InitiateSyncLogRecord(uint32_t cc_id,
+                              uint32_t cc_worker_id,
+                              uint32_t dbid,
+                              uint32_t memtable_id,
+                              const Slice &log_record,
+                              uint32_t dc_id,
+                              uint64_t remote_dc_offset,
+                              char *rdma_log_record_backing_mem) override;
+
+        uint32_t
+        InitiateCloseLogFiles(uint32_t cc_id,
+                              uint32_t dbid,
+                              uint32_t dc_id,
+                              std::vector<MemTableLogFilePair> log_file_ids) override;
 
         uint32_t
         InitiateCloseLogFile(const std::string &log_file_name) override;
@@ -69,7 +90,7 @@ namespace leveldb {
         IsDone(uint32_t req_id, CCResponse *response,
                uint64_t *timeout) override;
 
-        std::vector<nova::NovaRDMAComputeComponent *> ccs_;
+        std::vector<nova::NovaRDMAComputeComponent *> rdma_workers_;
 
         void set_dbid(uint32_t dbid) {
             dbid_ = dbid;
@@ -80,10 +101,11 @@ namespace leveldb {
         }
 
     private:
-        std::map<uint32_t, CCResponse*> req_response;
+        std::map<uint32_t, CCResponse *> req_response;
 
         void AddAsyncTask(const RDMAAsyncClientRequestTask &task);
-        uint32_t current_cc_id_ = 0;
+
+        uint32_t current_rdma_worker_id_ = 0;
         uint32_t req_id_ = 0;
         uint32_t dbid_ = 0;
         sem_t sem_;
@@ -106,6 +128,22 @@ namespace leveldb {
         }
 
         uint32_t
+        InitiateSetupLogRecordBuf(uint32_t cc_id,
+                                  uint32_t cc_client_worker_id,
+                                  uint32_t size, uint32_t dc_id) override;
+
+
+        uint32_t
+        InitiateSyncLogRecord(uint32_t cc_id,
+                              uint32_t cc_client_worker_id,
+                              uint32_t dbid,
+                              uint32_t memtable_id,
+                              const Slice &log_record,
+                              uint32_t dc_id,
+                              uint64_t remote_dc_offset,
+                              char *rdma_log_record_backing_mem) override;
+
+        uint32_t
         InitiateDeleteTables(uint32_t server_id,
                              const std::vector<SSTableRTablePair> &rtable_ids) override;
 
@@ -119,12 +157,19 @@ namespace leveldb {
                                       uint32_t *rtable_id, char *buf,
                                       const std::string &dbname,
                                       uint64_t file_number,
-                                      uint32_t size, bool is_meta_blocks) override;
+                                      uint32_t size,
+                                      bool is_meta_blocks) override;
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
                                     uint64_t thread_id,
                                     const Slice &slice) override;
+
+        uint32_t
+        InitiateCloseLogFiles(uint32_t cc_id,
+                              uint32_t dbid,
+                              uint32_t dc_id,
+                              std::vector<MemTableLogFilePair> log_file_ids) override;
 
         uint32_t InitiateReadDCStats(uint32_t server_id) override;
 

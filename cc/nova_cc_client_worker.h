@@ -98,9 +98,9 @@ namespace nova {
         std::vector<NovaRDMAComputeComponent *> workers;
     };
 
-    class NovaCCConnWorker {
+    class NovaCCClientWorker {
     public:
-        NovaCCConnWorker(int thread_id)
+        NovaCCClientWorker(int thread_id)
                 :
                 thread_id_(thread_id) {
             RDMA_LOG(INFO) << "memstore[" << thread_id << "]: "
@@ -123,6 +123,8 @@ namespace nova {
         std::mutex mutex_;
 
         std::vector<leveldb::DB *> dbs_;
+        char *local_rdma_log_record_backing_mem_ = nullptr;
+        std::vector<uint64_t> dc_log_buf_offsets_;
         struct event_base *base = nullptr;
 
         leveldb::NovaBlockCCClient *cc_client_;

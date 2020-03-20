@@ -24,9 +24,8 @@
 #include <assert.h>
 #include <csignal>
 #include <gflags/gflags.h>
-#include <db/filename.h>
-#include <util/env_posix.h>
-#include <dc/nova_dc_server.h>
+#include "db/filename.h"
+#include "util/env_posix.h"
 
 using namespace std;
 using namespace rdmaio;
@@ -85,6 +84,8 @@ DEFINE_uint32(cc_log_buf_size, 0, "log buffer size");
 DEFINE_uint32(cc_rtable_size_mb, 0, "RTable size");
 DEFINE_bool(cc_multiple_disks, false, "");
 DEFINE_string(cc_scatter_policy, "random", "random/stats");
+DEFINE_string(cc_log_record_policy, "shared", "shared/exclusive/none");
+DEFINE_uint32(cc_log_max_file_size_mb, 0, "max log file size");
 
 void start(NovaCCNICServer *server) {
     server->Start();
@@ -168,11 +169,13 @@ int main(int argc, char *argv[]) {
 
     for (int i = 0; i < NovaCCConfig::cc_config->cc_servers.size(); i++) {
         Host host = NovaCCConfig::cc_config->cc_servers[i];
-        RDMA_LOG(INFO) << fmt::format("cc: {}:{}:{}", host.server_id, host.ip, host.port);
+        RDMA_LOG(INFO)
+            << fmt::format("cc: {}:{}:{}", host.server_id, host.ip, host.port);
     }
     for (int i = 0; i < NovaCCConfig::cc_config->dc_servers.size(); i++) {
         Host host = NovaCCConfig::cc_config->dc_servers[i];
-        RDMA_LOG(INFO) << fmt::format("dc: {}:{}:{}", host.server_id, host.ip, host.port);
+        RDMA_LOG(INFO)
+            << fmt::format("dc: {}:{}:{}", host.server_id, host.ip, host.port);
     }
 
 
@@ -180,7 +183,7 @@ int main(int argc, char *argv[]) {
 
     NovaCCConfig::ReadFragments(FLAGS_cc_config_path,
                                 &NovaCCConfig::cc_config->fragments);
-    NovaCCConfig::cc_config->num_conn_workers = FLAGS_cc_num_conn_workers;
+    NovaCCConfig::cc_config->num_client_workers = FLAGS_cc_num_conn_workers;
     NovaCCConfig::cc_config->num_conn_async_workers = FLAGS_cc_num_async_workers;
     NovaCCConfig::cc_config->num_cc_server_workers = FLAGS_cc_num_cc_server_workers;
     NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
@@ -193,7 +196,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->log_buf_size = FLAGS_cc_log_buf_size;
     NovaConfig::config->rtable_size = FLAGS_cc_rtable_size_mb * 1024 * 1024;
     NovaConfig::config->sstable_size = FLAGS_cc_sstable_size_mb * 1024 * 1024;
-    NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
+    NovaConfig::config->log_record_size = FLAGS_use_fixed_value_size + 1024;
 
     if (FLAGS_cc_scatter_policy == "random") {
         NovaConfig::config->scatter_policy = ScatterPolicy::RANDOM;
@@ -201,7 +204,19 @@ int main(int argc, char *argv[]) {
         NovaConfig::config->scatter_policy = ScatterPolicy::SCATTER_DC_STATS;
     }
 
+    if (FLAGS_cc_log_record_policy == "shared") {
+        NovaConfig::config->log_record_policy = LogRecordPolicy::SHARED_LOG_FILE;
+        NovaConfig::config->log_file_size =
+                FLAGS_cc_log_max_file_size_mb * 1024 * 1024;
+    } else if (FLAGS_cc_log_record_policy == "none") {
+        NovaConfig::config->log_record_policy = LogRecordPolicy::NONE;
+        NovaConfig::config->log_file_size = 0;
+    } else {
+        NovaConfig::config->log_record_policy = LogRecordPolicy::EXCLUSIVE_LOG_FILE;
+        NovaConfig::config->log_file_size = 0;
+    }
     NovaCCConfig::cc_config->enable_table_locator = FLAGS_cc_enable_table_locator;
+
 
     RDMA_ASSERT(FLAGS_cc_rtable_size_mb > std::max(FLAGS_cc_sstable_size_mb,
                                                    FLAGS_cc_write_buffer_size_mb));

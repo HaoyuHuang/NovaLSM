@@ -41,6 +41,12 @@ namespace leveldb {
         CC_RTABLE_PERSIST_RESPONSE = 't',
         CC_DC_READ_STATS = 'u',
         CC_DC_READ_STATS_RESPONSE = 's',
+        CC_SETUP_LOG_RECORD_BUF = 'v',
+        CC_SETUP_LOG_RECORD_BUF_RESPONSE = 'w',
+        CC_SYNC_LOG_RECORD = 'x',
+        CC_SYNC_LOG_RECORD_RESPONSE = 'y',
+        CC_DELETE_LOG_FILES = 'z',
+
     };
 
     struct CCRequestContext {
@@ -56,6 +62,9 @@ namespace leveldb {
         uint32_t rtable_id = 0;
         std::vector<RTableHandle> rtable_handles;
 
+        uint32_t log_file_id = 0;
+
+        uint64_t rdma_log_buf_offset;
         uint64_t dc_queue_depth;
         uint64_t dc_pending_read_bytes;
         uint64_t dc_pending_write_bytes;
@@ -64,6 +73,10 @@ namespace leveldb {
     struct CCResponse {
         uint32_t rtable_id = 0;
         std::vector<RTableHandle> rtable_handles;
+
+        uint32_t log_file_id = 0;
+
+        uint64_t rdma_log_buf = 0;
 
         uint64_t dc_queue_depth;
         uint64_t dc_pending_read_bytes;
@@ -77,6 +90,9 @@ namespace leveldb {
         RDMA_ASYNC_REQ_WRITE_DATA_BLOCKS = 'd',
         RDMA_ASYNC_REQ_DELETE_TABLES = 'e',
         RDMA_ASYNC_READ_DC_STATS = 'f',
+        RDMA_ASYNC_REQ_SETUP_LOG_BUF = 'g',
+        RDMA_ASYNC_REQ_DELETE_LOG_FILES = 'h',
+        RDMA_ASYNC_SYNC_LOG_RECORD = 'i',
     };
 
     struct RDMAAsyncClientRequestTask {
@@ -100,6 +116,17 @@ namespace leveldb {
         uint64_t file_number;
         uint32_t write_size;
         bool is_meta_blocks;
+
+        uint32_t cc_id;
+        uint32_t cc_client_worker_id;
+        uint32_t dc_id;
+        uint64_t remote_dc_offset;
+        char *rdma_log_record_backing_mem;
+
+        // Delete log files.
+        uint32_t dbid;
+        uint32_t memtable_id;
+        std::vector<MemTableLogFilePair> log_file_ids;
 
         CCResponse *response = nullptr;
     };
@@ -127,6 +154,28 @@ namespace leveldb {
         InitiateReplicateLogRecords(const std::string &log_file_name,
                                     uint64_t thread_id,
                                     const Slice &slice) = 0;
+
+        virtual uint32_t
+        InitiateSetupLogRecordBuf(uint32_t cc_id,
+                                  uint32_t cc_client_worker_id,
+                                  uint32_t log_record_size, uint32_t dc_id) = 0;
+
+
+        virtual uint32_t
+        InitiateSyncLogRecord(uint32_t cc_id,
+                              uint32_t cc_worker_id,
+                              uint32_t dbid,
+                              uint32_t memtable_id,
+                              const Slice &log_record,
+                              uint32_t dc_id,
+                              uint64_t remote_dc_offset,
+                              char *rdma_log_record_backing_mem) = 0;
+
+        virtual uint32_t
+        InitiateCloseLogFiles(uint32_t cc_id,
+                              uint32_t dbid,
+                              uint32_t dc_id,
+                              std::vector<MemTableLogFilePair> log_file_ids) = 0;
 
 
         virtual uint32_t

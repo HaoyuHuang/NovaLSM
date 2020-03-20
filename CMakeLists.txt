@@ -123,7 +123,7 @@ endif (BUILD_SHARED_LIBS)
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
 
-add_library(leveldb "")
+add_library(leveldb "" cc/nova_log_manager.cpp cc/nova_log_manager.h)
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
@@ -202,8 +202,6 @@ target_sources(leveldb
         "util/env_mem.cc"
         "util/env_mem.h"
         "util/env_posix.h"
-        "dc/nova_dc.cpp"
-        "dc/nova_dc.h"
         "cc/nova_cc_client.cpp"
         "cc/nova_cc_client.h"
         "cc/nova_cc_server.cpp"
@@ -232,8 +230,8 @@ target_sources(leveldb
         nova/nova_msg_parser.h
         cc/nova_cc_nic_server.cpp
         cc/nova_cc_nic_server.h
-        cc/nova_cc_conn_worker.cpp
-        cc/nova_cc_conn_worker.h
+        cc/nova_cc_client_worker.cpp
+        cc/nova_cc_client_worker.h
         nova/nova_common.cpp
         nova/nova_common.h
         nova/nova_msg_callback.h
@@ -245,10 +243,6 @@ target_sources(leveldb
         nova/linked_list.h
         mc/nova_chained_hashtable.cpp
         mc/nova_chained_hashtable.h
-#        mc/mc.cpp
-#        mc/mc.h
-#        mc/worker.cpp
-#        mc/worker.h
         log/nova_log.cpp
         log/nova_log.h
         cc/nova_cc_log_writer.cc
@@ -259,15 +253,6 @@ target_sources(leveldb
         cc/nova_rdma_cc.h
         cc/nova_cc.cpp
         cc/nova_cc.h
-
-        dc/nova_dc_server.cpp
-        dc/nova_dc_server.h
-#
-#        mc/nova_mc_wb_worker.cpp
-#        mc/nova_mc_wb_worker.h
-#
-#        mc/nova_sstable.cpp
-#        mc/nova_sstable.h
 
 
 

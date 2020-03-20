@@ -113,6 +113,10 @@ namespace leveldb {
 
         void SetFlushed(const std::string& dbname, uint64_t l0_file_number);
 
+        void SetLogFileId(uint32_t dc_id, uint32_t log_file_id);
+
+        std::map<uint32_t, std::set<uint32_t>> log_files();
+
         MemTable *Ref(uint64_t *l0_fn);
 
         void Unref(const std::string& dbname);
@@ -120,6 +124,7 @@ namespace leveldb {
         bool memtable_flushed_ = false;
         uint64_t l0_file_number = 0;
         std::mutex mutex;
+        std::set<uint64_t> dc_log_file_ids;
         MemTable *memtable = nullptr;
     };
 

@@ -443,15 +443,10 @@ namespace leveldb {
         writable_file = nullptr;
 
         if (PERSIST_META_BLOCKS_TO_RTABLE) {
-            uint32_t server_id =
-                    rand_r(rand_seed_) %
-                    nova::NovaConfig::config->servers.size();
-            if (server_id == nova::NovaConfig::config->my_server_id) {
-                server_id =
-                        (server_id + 1) %
-                        nova::NovaConfig::config->servers.size();
-            }
-            uint32_t req_id = client->InitiateRTableWriteDataBlocks(server_id,
+            uint32_t dc_id = rand_r(rand_seed_) %
+                                   nova::NovaCCConfig::cc_config->dc_servers.size();
+            dc_id = nova::NovaCCConfig::cc_config->dc_servers[dc_id].server_id;
+            uint32_t req_id = client->InitiateRTableWriteDataBlocks(dc_id,
                                                                     thread_id_,
                                                                     nullptr,
                                                                     backing_mem_ +

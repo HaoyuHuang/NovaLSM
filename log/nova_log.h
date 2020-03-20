@@ -14,45 +14,6 @@
 
 namespace nova {
 
-    class LogRecord {
-    public:
-        leveldb::Slice backing_mem;
-        GlobalSSTableHandle table_handle;
-        leveldb::ValueType type;
-        leveldb::Slice key;
-        leveldb::Slice value;
-
-        leveldb::Status Encode(char *data);
-
-        leveldb::Status Decode(char *data);
-    };
-
-    class LogFile {
-    public:
-        struct TableIndex {
-            GlobalSSTableHandle handle;
-            uint32_t file_offset;
-            uint32_t nrecords;
-        };
-
-        LogFile(GlobalLogFileHandle handle, char *backing_mem,
-                uint64_t file_size);
-
-        void AddIndex(const TableIndex &index) {
-            table_index_.push_back(index);
-        }
-
-        const std::vector<TableIndex> &table_index() {
-            return table_index_;
-        }
-
-    private:
-        GlobalLogFileHandle handle_;
-        char *backing_mem_;
-        uint64_t file_size_;
-        std::vector<TableIndex> table_index_;
-    };
-
     class LogFileManager {
     public:
         LogFileManager(NovaMemManager *mem_manager);

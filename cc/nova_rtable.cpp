@@ -421,8 +421,8 @@ namespace leveldb {
                     mutex_.unlock();
                     break;
                 }
-                mutex_.unlock();
             }
+            mutex_.unlock();
         }
         return handle;
     }

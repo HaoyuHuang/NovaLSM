@@ -10,7 +10,7 @@
 #include "mc/nova_sstable.h"
 #include "leveldb/db_types.h"
 #include "mc/nova_mem_manager.h"
-#include "nova_cc_conn_worker.h"
+#include "nova_cc_client_worker.h"
 #include "nova/nova_config.h"
 #include "nova/nova_rdma_store.h"
 #include "nova/nova_rdma_rc_store.h"
@@ -21,7 +21,7 @@
 #include "mc/nova_mc_wb_worker.h"
 
 namespace nova {
-    class NovaCCConnWorker;
+    class NovaCCClientWorker;
 
     class NovaCCLoadThread {
     public:
@@ -65,17 +65,18 @@ namespace nova {
         std::vector<leveldb::DB *> dbs_;
         NovaMemManager *mem_manager;
         LogFileManager *log_manager;
+        NovaLogManager *nova_log_manager;
 
-        std::vector<NovaCCConnWorker *> conn_workers;
-        std::vector<NovaRDMAComputeComponent *> async_workers;
+        std::vector<NovaCCClientWorker *> client_workers;
+        std::vector<NovaRDMAComputeComponent *> rdma_foreground_workers;
         std::vector<NovaRDMAComputeComponent *> async_compaction_workers;
 
-        std::vector<NovaCCServerAsyncWorker *> cc_server_workers;
+        std::vector<NovaDCStorageWorker *> cc_server_workers;
         std::vector<leveldb::EnvBGThread *> bgs;
 
         struct event_base *base;
-        int current_conn_worker_id_;
-        vector<thread> conn_worker_threads;
+        int current_client_worker_id_;
+        vector<thread> client_worker_threads;
         vector<thread> cc_workers;
         vector<thread> compaction_workers;
         std::vector<std::thread> cc_server_async_workers;
