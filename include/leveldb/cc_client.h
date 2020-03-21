@@ -106,7 +106,7 @@ namespace leveldb {
 
         std::string log_file_name;
         uint64_t thread_id;
-        Slice log_record;
+        std::vector<Slice> log_records;
 
         uint32_t server_id;
         std::vector<SSTableRTablePair> rtable_ids;
@@ -166,7 +166,7 @@ namespace leveldb {
                               uint32_t cc_worker_id,
                               uint32_t dbid,
                               uint32_t memtable_id,
-                              const Slice &log_record,
+                              const std::vector<Slice> &log_records,
                               uint32_t dc_id,
                               uint64_t remote_dc_offset,
                               char *rdma_log_record_backing_mem) = 0;

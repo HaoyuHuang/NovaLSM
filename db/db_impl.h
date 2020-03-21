@@ -258,6 +258,7 @@ namespace leveldb {
             };
             MemTable *memtable;
             port::Mutex mutex;
+            std::list<Writer*> writers;
             uint32_t partition_id = 0;
             std::vector<uint32_t> imm_slots;
             std::queue<uint32_t> available_slots;

@@ -63,7 +63,7 @@ namespace leveldb {
                               uint32_t cc_worker_id,
                               uint32_t dbid,
                               uint32_t memtable_id,
-                              const Slice &log_record,
+                              const std::vector<Slice> &log_records,
                               uint32_t dc_id,
                               uint64_t remote_dc_offset,
                               char *rdma_log_record_backing_mem) override;
@@ -138,7 +138,7 @@ namespace leveldb {
                               uint32_t cc_client_worker_id,
                               uint32_t dbid,
                               uint32_t memtable_id,
-                              const Slice &log_record,
+                              const std::vector<Slice> &log_records,
                               uint32_t dc_id,
                               uint64_t remote_dc_offset,
                               char *rdma_log_record_backing_mem) override;

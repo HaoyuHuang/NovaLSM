@@ -196,7 +196,8 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->log_buf_size = FLAGS_cc_log_buf_size;
     NovaConfig::config->rtable_size = FLAGS_cc_rtable_size_mb * 1024 * 1024;
     NovaConfig::config->sstable_size = FLAGS_cc_sstable_size_mb * 1024 * 1024;
-    NovaConfig::config->log_record_size = FLAGS_use_fixed_value_size + 1024;
+    NovaConfig::config->log_record_size =
+            (FLAGS_use_fixed_value_size * FLAGS_cc_num_conn_workers) + 200;
 
     if (FLAGS_cc_scatter_policy == "random") {
         NovaConfig::config->scatter_policy = ScatterPolicy::RANDOM;

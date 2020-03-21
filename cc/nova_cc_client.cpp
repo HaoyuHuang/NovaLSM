@@ -61,7 +61,7 @@ namespace leveldb {
                                                       uint32_t cc_worker_id,
                                                       uint32_t dbid,
                                                       uint32_t memtable_id,
-                                                      const leveldb::Slice &log_record,
+                                                      const std::vector<Slice> &log_records,
                                                       uint32_t dc_id,
                                                       uint64_t remote_dc_offset,
                                                       char *rdma_log_record_backing_mem) {
@@ -71,7 +71,7 @@ namespace leveldb {
         task.cc_client_worker_id = cc_worker_id;
         task.dbid = dbid;
         task.memtable_id = memtable_id;
-        task.log_record = log_record;
+        task.log_records = log_records;
         task.dc_id = dc_id;
         task.remote_dc_offset = remote_dc_offset;
         task.rdma_log_record_backing_mem = rdma_log_record_backing_mem;
@@ -184,7 +184,7 @@ namespace leveldb {
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD;
         task.log_file_name = log_file_name;
         task.thread_id = thread_id;
-        task.log_record = slice;
+        task.log_records.push_back(slice);
         task.sem = &sem_;
         AddAsyncTask(task);
 
@@ -351,7 +351,7 @@ namespace leveldb {
                                                  uint32_t cc_client_worker_id,
                                                  uint32_t dbid,
                                                  uint32_t memtable_id,
-                                                 const leveldb::Slice &log_record,
+                                                 const std::vector<Slice> &log_records,
                                                  uint32_t dc_id,
                                                  uint64_t remote_dc_offset,
                                                  char *rdma_log_record_backing_mem) {
@@ -374,12 +374,19 @@ namespace leveldb {
         leveldb::EncodeFixed32(rdma_log_record_backing_mem + msg_size,
                                memtable_id);
         msg_size += 4;
+
+        uint32_t log_records_size = 0;
+        for (auto log : log_records) {
+            log_records_size += log.size();
+        }
         leveldb::EncodeFixed32(rdma_log_record_backing_mem + msg_size,
-                               log_record.size());
+                               log_records_size);
         msg_size += 4;
-        memcpy(rdma_log_record_backing_mem + msg_size, log_record.data(),
-               log_record.size());
-        msg_size += log_record.size();
+        for (auto log : log_records) {
+            memcpy(rdma_log_record_backing_mem + msg_size, log.data(),
+                   log.size());
+            msg_size += log.size();
+        }
 
         RDMA_ASSERT(msg_size < nova::NovaConfig::config->log_record_size);
 

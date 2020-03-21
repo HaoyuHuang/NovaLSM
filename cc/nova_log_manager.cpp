@@ -107,7 +107,9 @@ namespace nova {
         uint32_t scid = mem_manager->slabclassid(0, log_buf_size);
         for (int i = 0; i < nccs; i++) {
             for (int j = 0; j < nworkers; j++) {
-                init_log_bufs_[i][j] = mem_manager->ItemAlloc(0, scid);
+                char *buf = mem_manager->ItemAlloc(0, scid);
+                RDMA_ASSERT(buf);
+                init_log_bufs_[i][j] = buf;
             }
         }
     }

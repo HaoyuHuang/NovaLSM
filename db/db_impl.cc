@@ -67,10 +67,12 @@ namespace leveldb {
 // Information kept for every waiting writer
     struct DBImpl::Writer {
         explicit Writer(port::Mutex *mu)
-                : batch(nullptr), sync(false), done(false), cv(mu) {}
+                : sync(false), done(false), cv(mu) {}
 
         Status status;
-        WriteBatch *batch;
+        Slice key;
+        Slice value;
+        uint64_t sequence;
         bool sync;
         bool done;
         port::CondVar cv;
@@ -1494,7 +1496,21 @@ namespace leveldb {
                        uint32_t partition_id,
                        bool should_wait, uint64_t last_sequence) {
         MemTablePartition *partition = active_memtables_[partition_id];
-        partition->mutex.Lock();
+        Writer w(&partition->mutex);
+        w.key = key;
+        w.value = value;
+        w.sequence = last_sequence;
+        w.done = false;
+
+        MutexLock lock(&partition->mutex);
+        partition->writers.push_back(&w);
+        while (!w.done && &w != partition->writers.front()) {
+            w.cv.Wait();
+        }
+        if (w.done) {
+            return true;
+        }
+
         MemTable *table = nullptr;
         bool wait = false;
         bool schedule_compaction = false;
@@ -1548,21 +1564,20 @@ namespace leveldb {
         }
 
         uint32_t memtable_id = table->memtableid();
-        table->Add(last_sequence, ValueType::kTypeValue, key, value);
-        if (table_locator_ != nullptr) {
-            table_locator_->Insert(key, options.hash, table->memtableid());
-        }
         std::vector<uint32_t> closed_memtable_ids(
                 partition->closed_memtable_ids);
         partition->closed_memtable_ids.clear();
-        partition->mutex.Unlock();
 
-        if (schedule_compaction) {
-            MaybeScheduleCompaction(options.client_worker_id + 1000,
-                                    imms_[next_imm_slot], partition_id,
-                                    next_imm_slot, options.rand_seed);
+        std::vector<Slice> keys;
+        std::vector<Slice> values;
+        std::vector<uint64_t > sequence_numbers;
+        for (auto writer : partition->writers) {
+            keys.push_back(writer->key);
+            values.push_back(writer->value);
+            sequence_numbers.push_back(writer->sequence);
         }
 
+        partition->mutex.Unlock();
         if (!options.local_write) {
             auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
             RDMA_ASSERT(dc);
@@ -1577,8 +1592,9 @@ namespace leveldb {
             }
             uint32_t dc_id = nova::NovaCCConfig::cc_config->dc_servers[dc_index].server_id;
             uint32_t req_id = dc->InitiateSyncLogRecord(
-                    nova::NovaConfig::config->my_server_id, options.client_worker_id,
-                    dbid_, memtable_id, value, dc_id,
+                    nova::NovaConfig::config->my_server_id,
+                    options.client_worker_id,
+                    dbid_, memtable_id, values, dc_id,
                     options.dc_rdma_log_bufs[dc_index],
                     options.local_rdma_log_record_backing_mem);
             // Synchronous replication.
@@ -1588,6 +1604,7 @@ namespace leveldb {
             // Remember this log file id.
             versions_->mid_table_mapping_[memtable_id].SetLogFileId(dc_id,
                                                                     response.log_file_id);
+
             std::map<uint32_t, std::map<uint32_t, std::vector<uint32_t>>> dc_log_tables;
             for (const auto &close_id : closed_memtable_ids) {
                 auto files = versions_->mid_table_mapping_[close_id].log_files();
@@ -1616,6 +1633,40 @@ namespace leveldb {
             }
         }
 
+        // Build batches of write.
+        for (int i = 0; i < keys.size(); i++) {
+            table->Add(sequence_numbers[i], ValueType::kTypeValue, keys[i],
+                       values[i]);
+            if (table_locator_ != nullptr) {
+                table_locator_->Insert(keys[i], options.hash,
+                                       table->memtableid());
+            }
+        }
+
+        if (schedule_compaction) {
+            MaybeScheduleCompaction(options.client_worker_id + 1000,
+                                    imms_[next_imm_slot], partition_id,
+                                    next_imm_slot, options.rand_seed);
+        }
+
+        partition->mutex.Lock();
+
+        while (true) {
+            Writer *ready = partition->writers.front();
+            partition->writers.pop_front();
+            if (ready != &w) {
+                ready->done = true;
+                ready->cv.Signal();
+            } else {
+                break;
+            }
+        }
+
+        // Notify new head of write queue
+        if (!partition->writers.empty()) {
+            partition->writers.front()->cv.Signal();
+        }
+
 //        RDMA_LOG(rdmaio::DEBUG)
 //            << fmt::format("#### Put key {} in table {}", key.ToString(),
 //                           memtable_id);
@@ -1627,21 +1678,23 @@ namespace leveldb {
         uint64_t last_sequence = versions_->last_sequence_.fetch_add(1);
         uint32_t partition_id =
                 rand_r(options.rand_seed) % active_memtables_.size();
-        if (options_.num_memtable_partitions > 1) {
-            int tries = 2;
-            int i = 0;
-            while (i < tries) {
-                if (Write(options, key, val, partition_id, false,
-                          last_sequence)) {
-                    return Status::OK();
-                }
-                i++;
-                partition_id = (partition_id + 1) % active_memtables_.size();
-            }
-        }
-        partition_id = (partition_id + 1) % active_memtables_.size();
         RDMA_ASSERT(
-                Write(options, key, val, partition_id, true, last_sequence));
+                Write(options, key, val, partition_id, true,
+                      last_sequence));
+//
+//        if (options_.num_memtable_partitions > 1) {
+//            int tries = 2;
+//            int i = 0;
+//            while (i < tries) {
+//                if (Write(options, key, val, partition_id, false,
+//                          last_sequence)) {
+//                    return Status::OK();
+//                }
+//                i++;
+//                partition_id = (partition_id + 1) % active_memtables_.size();
+//            }
+//        }
+//        partition_id = (partition_id + 1) % active_memtables_.size();
         return Status::OK();
     }
 
@@ -1679,7 +1732,8 @@ namespace leveldb {
                 if (stats_[level].micros > 0 || files > 0) {
                     snprintf(buf, sizeof(buf),
                              "%3d %8d %8.0f %9.0f %8.0f %9.0f\n", level,
-                             files, versions_->NumLevelBytes(level) / 1048576.0,
+                             files,
+                             versions_->NumLevelBytes(level) / 1048576.0,
                              stats_[level].micros / 1e6,
                              stats_[level].bytes_read / 1048576.0,
                              stats_[level].bytes_written / 1048576.0);
@@ -1712,7 +1766,8 @@ namespace leveldb {
     }
 
     void
-    DBImpl::GetApproximateSizes(const Range *range, int n, uint64_t *sizes) {
+    DBImpl::GetApproximateSizes(const Range *range, int n,
+                                uint64_t *sizes) {
         // TODO(opt): better implementation
         MutexLock l(&mutex_);
         Version *v = versions_->current();
@@ -1743,10 +1798,12 @@ namespace leveldb {
         return Write(opt, key, Slice());
     }
 
-    DB::~DB() = default;
+    DB::~DB() =
+    default;
 
     Status
-    DB::Open(const Options &options, const std::string &dbname, DB **dbptr) {
+    DB::Open(const Options &options, const std::string &dbname,
+             DB **dbptr) {
         *dbptr = nullptr;
 
         DBImpl *impl = new DBImpl(options, dbname);
@@ -1763,10 +1820,12 @@ namespace leveldb {
                     LogFileName(dbname, new_log_number),
                     {.level = -1},
                     &lfile);
-            impl->current_log_file_name_ = LogFileName(dbname, new_log_number);
+            impl->current_log_file_name_ = LogFileName(dbname,
+                                                       new_log_number);
             if (s.ok()) {
                 edit.SetLogNumber(new_log_number);
-                impl->active_memtables_.resize(options.num_memtable_partitions);
+                impl->active_memtables_.resize(
+                        options.num_memtable_partitions);
                 impl->imms_.resize(options.num_memtables -
                                    options.num_memtable_partitions);
 
@@ -1782,11 +1841,13 @@ namespace leveldb {
                                      options.num_memtable_partitions;
                 uint32_t slot_id = 0;
                 for (int i = 0; i < options.num_memtable_partitions; i++) {
-                    uint64_t memtable_id = impl->memtable_id_seq_.fetch_add(1);
+                    uint64_t memtable_id = impl->memtable_id_seq_.fetch_add(
+                            1);
 
-                    MemTable *table = new MemTable(impl->internal_comparator_,
-                                                   memtable_id,
-                                                   impl->db_profiler_);
+                    MemTable *table = new MemTable(
+                            impl->internal_comparator_,
+                            memtable_id,
+                            impl->db_profiler_);
                     RDMA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
                     impl->versions_->mid_table_mapping_[memtable_id].SetMemTable(
                             table);
@@ -1800,7 +1861,8 @@ namespace leveldb {
                     }
                     impl->active_memtables_[i]->imm_slots.resize(slots);
                     for (int j = 0; j < slots; j++) {
-                        impl->active_memtables_[i]->imm_slots[j] = slot_id + j;
+                        impl->active_memtables_[i]->imm_slots[j] =
+                                slot_id + j;
                         impl->active_memtables_[i]->available_slots.push(
                                 slot_id + j);
                     }
@@ -1820,7 +1882,8 @@ namespace leveldb {
             }
         }
         if (s.ok() && save_manifest) {
-            edit.SetPrevLogNumber(0);  // No older logs needed after recovery.
+            edit.SetPrevLogNumber(
+                    0);  // No older logs needed after recovery.
             edit.SetLogNumber(0);
             Version *v = new Version(impl->versions_,
                                      impl->versions_->version_id_seq_.fetch_add(
@@ -1840,7 +1903,8 @@ namespace leveldb {
         return s;
     }
 
-    Snapshot::~Snapshot() = default;
+    Snapshot::~Snapshot() =
+    default;
 
     Status DestroyDB(const std::string &dbname, const Options &options) {
         Env *env = options.env;
@@ -1859,14 +1923,17 @@ namespace leveldb {
             FileType type;
             for (size_t i = 0; i < filenames.size(); i++) {
                 if (ParseFileName(filenames[i], &number, &type) &&
-                    type != kDBLockFile) {  // Lock file will be deleted at end
-                    Status del = env->DeleteFile(dbname + "/" + filenames[i]);
+                    type !=
+                    kDBLockFile) {  // Lock file will be deleted at end
+                    Status del = env->DeleteFile(
+                            dbname + "/" + filenames[i]);
                     if (result.ok() && !del.ok()) {
                         result = del;
                     }
                 }
             }
-            env->UnlockFile(lock);  // Ignore error since state is already gone
+            env->UnlockFile(
+                    lock);  // Ignore error since state is already gone
             env->DeleteFile(lockname);
             env->DeleteDir(
                     dbname);  // Ignore error in case dir contains other files
