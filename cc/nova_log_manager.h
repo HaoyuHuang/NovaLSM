@@ -10,6 +10,7 @@
 #include <vector>
 #include "mc/nova_mem_manager.h"
 #include "leveldb/env.h"
+#include "nova/nova_common.h"
 #include <set>
 #include <atomic>
 
@@ -17,31 +18,8 @@
 
 
 namespace nova {
-    struct MemTableIdentifier {
-        uint32_t cc_id;
-        uint32_t db_id;
-        uint32_t memtable_id;
-
-        bool operator<(const MemTableIdentifier &id2)  const {
-            if (cc_id < id2.cc_id) {
-                return true;
-            } else if (cc_id > id2.cc_id) {
-                return false;
-            }
-            if (db_id < id2.db_id) {
-                return true;
-            } else if (db_id > id2.db_id) {
-                return false;
-            }
-            if (memtable_id < id2.memtable_id) {
-                return true;
-            }
-            return false;
-        }
-    };
-
     struct LogRecord {
-        MemTableIdentifier memtable_id;
+        leveldb::MemTableIdentifier memtable_id;
         const char *log_record;
         uint32_t log_record_size;
     };
@@ -55,7 +33,7 @@ namespace nova {
 
         void PersistLogRecords();
 
-        void DeleteMemTables(const std::vector<MemTableIdentifier> &ids);
+        void DeleteMemTables(const std::vector<leveldb::MemTableIdentifier> &ids);
 
         uint32_t log_file_id() {
             return log_file_id_;
@@ -70,7 +48,7 @@ namespace nova {
         uint64_t max_file_size_;
         uint64_t current_file_size_;
         std::vector<LogRecord> pending_log_records_;
-        std::set<MemTableIdentifier> memtables;
+        std::set<leveldb::MemTableIdentifier> memtables;
         leveldb::WritableFile *writable_file_;
         bool is_full_ = false;
         bool seal_ = false;
@@ -78,9 +56,9 @@ namespace nova {
         std::mutex mutex_;
     };
 
-    class NovaLogManager {
+    class PersistentLogManager {
     public:
-        NovaLogManager(leveldb::Env *env, uint64_t max_file_size,
+        PersistentLogManager(leveldb::Env *env, uint64_t max_file_size,
                        NovaMemManager *mem_manager,
                        const std::string& log_file_path,
                        uint32_t nccs,
@@ -88,7 +66,7 @@ namespace nova {
 
         NovaLogFile *CreateNewLogFile();
 
-        NovaLogFile *log_file(MemTableIdentifier memtable_id);
+        NovaLogFile *log_file(leveldb::MemTableIdentifier memtable_id);
 
         NovaLogFile *log_file(uint32_t log_file_id);
 
@@ -103,7 +81,7 @@ namespace nova {
         std::string log_file_path_;
         std::mutex mutex_;
         std::atomic_int_fast32_t log_file_id_seq_;
-        std::map<MemTableIdentifier, NovaLogFile *> memtableid_log_file_id_map_;
+        std::map<leveldb::MemTableIdentifier, NovaLogFile *> memtableid_log_file_id_map_;
         NovaLogFile *log_files[MAX_NUM_LOG_FILES];
         char ***init_log_bufs_;
     };

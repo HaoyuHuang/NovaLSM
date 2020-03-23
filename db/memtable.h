@@ -26,7 +26,8 @@ namespace leveldb {
         // is zero and the caller must call Ref() at least once.
         explicit MemTable(const InternalKeyComparator &comparator,
                           uint32_t memtable_id,
-                          DBProfiler *db_profiler);
+                          DBProfiler *db_profiler,
+                          MemManager *mem_manager = nullptr);
 
         MemTable(const MemTable &) = delete;
 
@@ -77,6 +78,8 @@ namespace leveldb {
             return flushed_meta_;
         }
 
+        uint32_t nentries_ = 0;
+
         ~MemTable();  // Private since only Unref() should be used to delete it
     private:
         friend class MemTableIterator;
@@ -102,7 +105,7 @@ namespace leveldb {
         int refs_;
 //        std::mutex mutex_;
         uint32_t memtable_id_;
-        Arena arena_;
+        Arena *arena_;
         Table table_;
         FileMetaData flushed_meta_;
     };
@@ -111,7 +114,7 @@ namespace leveldb {
     public:
         void SetMemTable(MemTable *mem);
 
-        void SetFlushed(const std::string& dbname, uint64_t l0_file_number);
+        void SetFlushed(const std::string &dbname, uint64_t l0_file_number);
 
         void SetLogFileId(uint32_t dc_id, uint32_t log_file_id);
 
@@ -119,7 +122,7 @@ namespace leveldb {
 
         MemTable *Ref(uint64_t *l0_fn);
 
-        void Unref(const std::string& dbname);
+        void Unref(const std::string &dbname);
 
         bool memtable_flushed_ = false;
         uint64_t l0_file_number = 0;

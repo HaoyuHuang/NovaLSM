@@ -17,7 +17,7 @@
 #include <semaphore.h>
 #include <list>
 #include <cc/nova_cc_client.h>
-#include "log/nova_log.h"
+#include "log/nova_in_memory_log_manager.h"
 #include "nova_cc_log_writer.h"
 #include "nova_cc_server.h"
 #include "nova/nova_config.h"
@@ -61,6 +61,8 @@ namespace nova {
             return vc;
         }
 
+        std::atomic_bool is_running_;
+
     private:
         int ProcessQueue();
 
@@ -74,7 +76,6 @@ namespace nova {
         std::list<RequestCtx> pending_reqs_;
         RdmaCtrl *rdma_ctrl_ = nullptr;
         NovaMemManager *mem_manager_ = nullptr;
-        bool is_running_ = false;
         std::vector<leveldb::DB *> dbs_;
         leveldb::port::Mutex mutex_;
         std::list<leveldb::RDMAAsyncClientRequestTask> queue_;

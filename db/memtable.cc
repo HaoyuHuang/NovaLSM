@@ -24,14 +24,18 @@ namespace leveldb {
 
     MemTable::MemTable(const InternalKeyComparator &comparator,
                        uint32_t memtable_id,
-                       DBProfiler *db_profiler)
+                       DBProfiler *db_profiler, MemManager *mem_manager)
             : comparator_(comparator), memtable_id_(memtable_id), refs_(0),
-              table_(comparator_, &arena_),
+              arena_(new Arena(mem_manager)),
+              table_(comparator_, arena_),
               db_profiler_(db_profiler) {}
 
-    MemTable::~MemTable() { assert(refs_ == 0); }
+    MemTable::~MemTable() {
+        assert(refs_ == 0);
+        delete arena_;
+    }
 
-    size_t MemTable::ApproximateMemoryUsage() { return arena_.MemoryUsage(); }
+    size_t MemTable::ApproximateMemoryUsage() { return arena_->MemoryUsage(); }
 
     int MemTable::KeyComparator::operator()(const char *aptr,
                                             const char *bptr) const {
@@ -128,7 +132,7 @@ namespace leveldb {
         const size_t encoded_len = VarintLength(internal_key_size) +
                                    internal_key_size + VarintLength(val_size) +
                                    val_size;
-        char *buf = arena_.Allocate(encoded_len);
+        char *buf = arena_->Allocate(encoded_len);
         char *p = EncodeVarint32(buf, internal_key_size);
         memcpy(p, key.data(), key_size);
         p += key_size;
@@ -138,6 +142,7 @@ namespace leveldb {
         memcpy(p, value.data(), val_size);
         assert(p + val_size == buf + encoded_len);
         table_.Insert(buf);
+        nentries_ += 1;
     }
 
     bool MemTable::Get(const LookupKey &key, std::string *value, Status *s) {

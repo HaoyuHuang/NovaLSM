@@ -14,7 +14,7 @@ namespace leveldb {
 // "*dest" must remain live while this Writer is in use.
         RDMALogWriter::RDMALogWriter(nova::NovaRDMAStore *store, char *rnic_buf,
                                      MemManager *mem_manager,
-                                     nova::LogFileManager *log_manager)
+                                     nova::InMemoryLogFileManager *log_manager)
                 : store_(store), rnic_buf_(rnic_buf), mem_manager_(mem_manager),
                   log_manager_(log_manager) {
             write_result_ = new WriteState[nova::NovaConfig::config->servers.size()];
@@ -25,12 +25,14 @@ namespace leveldb {
             }
         }
 
-        char *RDMALogWriter::Init(const std::string &log_file_name,
-                                  uint64_t thread_id, const Slice &slice) {
-            auto it = logfile_last_buf_.find(log_file_name);
+        char *RDMALogWriter::Init(MemTableIdentifier memtable_id,
+                                  uint64_t thread_id,
+                                  const std::vector<LevelDBLogRecord> &log_records,
+                                  uint32_t size) {
+            auto it = logfile_last_buf_.find(memtable_id);
             if (it == logfile_last_buf_.end()) {
                 LogFileBuf *buf = new LogFileBuf[nova::NovaConfig::config->servers.size()];
-                logfile_last_buf_.insert(std::make_pair(log_file_name, buf));
+                logfile_last_buf_.insert(std::make_pair(memtable_id, buf));
                 for (int i = 0;
                      i <
                      nova::NovaConfig::config->servers.size(); i++) {
@@ -44,30 +46,37 @@ namespace leveldb {
 
             // Add to local memory.
             int myid = nova::NovaConfig::config->my_server_id;
-            LogFileBuf &buf = logfile_last_buf_[log_file_name][myid];
+            LogFileBuf &buf = logfile_last_buf_[memtable_id][myid];
             char *b = nullptr;
-            if (buf.base == 0 || buf.offset + slice.size() >= buf.size) {
+            if (buf.base == 0) {
                 uint32_t scid = mem_manager_->slabclassid(thread_id,
                                                           nova::NovaConfig::config->log_buf_size);
                 b = mem_manager_->ItemAlloc(thread_id, scid);
-                log_manager_->Add(thread_id, log_file_name, b);
+                RDMA_ASSERT(b);
+                log_manager_->Add(thread_id, memtable_id, b);
                 buf.base = (uint64_t) (b);
                 buf.offset = 0;
                 buf.size = nova::NovaConfig::config->log_buf_size;
             } else {
                 b = (char *) buf.base + buf.offset;
             }
-            memcpy(b, slice.data(), slice.size());
-            buf.offset += slice.size();
+            RDMA_ASSERT(buf.offset + size < buf.size)
+                << fmt::format("{}:{}:{}", buf.offset, buf.size, size);
+            uint32_t encoded_size = nova::EncodeLogRecords(b, log_records);
+            RDMA_ASSERT(encoded_size == size);
+            buf.offset += size;
             return b;
         }
 
         void RDMALogWriter::AckAllocLogBuf(int remote_sid, uint64_t offset,
                                            uint64_t size) {
             write_result_[remote_sid].result = WriteResult::ALLOC_SUCCESS;
-            logfile_last_buf_[current_log_file_][remote_sid].base = offset;
-            logfile_last_buf_[current_log_file_][remote_sid].size = size;
-            logfile_last_buf_[current_log_file_][remote_sid].offset = 0;
+            logfile_last_buf_[current_memtable_id_][remote_sid].base = offset;
+            logfile_last_buf_[current_memtable_id_][remote_sid].size = size;
+            logfile_last_buf_[current_memtable_id_][remote_sid].offset = 0;
+            // Remember the offset and size in log manager.
+            log_manager_->AddReplica(current_memtable_id_, remote_sid, offset,
+                                     size);
         }
 
         bool RDMALogWriter::AckWriteSuccess(int remote_sid, uint64_t wr_id) {
@@ -97,18 +106,15 @@ namespace leveldb {
         }
 
         Status
-        RDMALogWriter::AddRecord(const std::string &log_file_name,
+        RDMALogWriter::AddRecord(MemTableIdentifier memtable_id,
                                  uint64_t thread_id,
-                                 const Slice &slice) {
+                                 const std::vector<LevelDBLogRecord> &log_records) {
+            current_memtable_id_ = memtable_id;
             int nreplicas = 0;
-            uint32_t sid;
-            uint32_t db_index;
-            nova::ParseDBIndexFromFile(log_file_name, &sid, &db_index);
-            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
-
-            char *rnic_buf = Init(log_file_name, thread_id, slice);
-            current_log_file_ = log_file_name;
-
+            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[memtable_id.db_id];
+            uint32_t log_record_size = nova::LogRecordsSize(log_records);
+            char *rnic_buf = Init(memtable_id, thread_id, log_records,
+                                  log_record_size);
             if (frag->cc_server_ids.size() == 1) {
                 return Status::OK();
             }
@@ -122,30 +128,27 @@ namespace leveldb {
 
                 nreplicas++;
 
-                auto &it = logfile_last_buf_[log_file_name];
+                auto &it = logfile_last_buf_[memtable_id];
                 if (it[remote_server_id].base == 0 ||
-                    (it[remote_server_id].offset + slice.size() >
+                    (it[remote_server_id].offset + log_record_size >
                      it[remote_server_id].size)) {
                     // Allocate a new buf.
                     char *send_buf = store_->GetSendBuf(remote_server_id);
                     char *buf = send_buf;
+                    uint32_t msg_size = 1;
                     buf[0] = CCRequestType::CC_ALLOCATE_LOG_BUFFER;
-                    buf++;
-                    leveldb::EncodeFixed32(buf, log_file_name.size());
-                    buf += 4;
-                    memcpy(buf, log_file_name.data(), log_file_name.size());
+                    msg_size += nova::EncodeMemTableId(buf + msg_size,
+                                                       memtable_id);
                     write_result_[remote_server_id].result = WriteResult::WAIT_FOR_ALLOC;
-                    store_->PostSend(
-                            send_buf, 1 + 4 + log_file_name.size(),
-                            remote_server_id, 0);
+                    store_->PostSend(send_buf, msg_size, remote_server_id, 0);
                 } else {
                     // WRITE.
                     write_result_[remote_server_id].rdma_wr_id = store_->PostWrite(
-                            rnic_buf, slice.size(), remote_server_id,
+                            rnic_buf, log_record_size, remote_server_id,
                             it[remote_server_id].base +
                             it[remote_server_id].offset,
                             false, 0);
-                    it[remote_server_id].offset += slice.size();
+                    it[remote_server_id].offset += log_record_size;
                     write_result_[remote_server_id].result = WriteResult::WAIT_FOR_WRITE;
                 }
             }
@@ -179,14 +182,14 @@ namespace leveldb {
                         case WriteResult::WAIT_FOR_WRITE:
                             break;
                         case WriteResult::ALLOC_SUCCESS:
-                            it = logfile_last_buf_[current_log_file_];
+                            it = logfile_last_buf_[memtable_id];
                             write_result_[remote_server_id].rdma_wr_id = store_->PostWrite(
-                                    rnic_buf, slice.size(),
+                                    rnic_buf, log_record_size,
                                     remote_server_id,
                                     it[remote_server_id].base +
                                     it[remote_server_id].offset, /*is_remote_offset=*/
                                     false, 0);
-                            it[remote_server_id].offset += slice.size();
+                            it[remote_server_id].offset += log_record_size;
                             write_result_[remote_server_id].result = WriteResult::WAIT_FOR_WRITE;
                             post_write = true;
                             break;
@@ -206,15 +209,12 @@ namespace leveldb {
             return Status::OK();
         }
 
-        Status RDMALogWriter::CloseLogFile(const std::string &log_file_name) {
-            uint32_t sid;
-            uint32_t db_index;
-            nova::ParseDBIndexFromFile(log_file_name, &sid, &db_index);
-            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
+        Status RDMALogWriter::CloseLogFile(MemTableIdentifier memtable_id) {
+            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[memtable_id.db_id];
 
-            delete logfile_last_buf_[log_file_name];
-            logfile_last_buf_.erase(log_file_name);
-            log_manager_->DeleteLogBuf(log_file_name);
+            delete logfile_last_buf_[memtable_id];
+            logfile_last_buf_.erase(memtable_id);
+            log_manager_->DeleteLogBuf(memtable_id);
             for (int i = 0; i < frag->cc_server_ids.size(); i++) {
                 uint32_t remote_server_id = frag->cc_server_ids[i];
                 if (remote_server_id ==
@@ -224,12 +224,12 @@ namespace leveldb {
 
                 char *send_buf = store_->GetSendBuf(remote_server_id);
                 char *buf = send_buf;
+                uint32_t msg_size = 1;
                 buf[0] = CCRequestType::CC_DELETE_LOG_FILE;
-                buf++;
-                leveldb::EncodeStr(buf, log_file_name);
-                store_->PostSend(send_buf, 1 + 4 + log_file_name.size(),
-                                 remote_server_id, 0);
+                msg_size += nova::EncodeMemTableId(buf + msg_size, memtable_id);
+                store_->PostSend(send_buf, msg_size, remote_server_id, 0);
             }
+            log_manager_->RemoveMemTable(memtable_id);
             return Status::OK();
         }
     }

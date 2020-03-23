@@ -20,6 +20,35 @@ namespace leveldb {
         uint64_t size;
     };
 
+    struct MemTableIdentifier {
+        uint32_t cc_id;
+        uint32_t db_id;
+        uint32_t memtable_id;
+
+        bool operator<(const MemTableIdentifier &id2) const {
+            if (cc_id < id2.cc_id) {
+                return true;
+            } else if (cc_id > id2.cc_id) {
+                return false;
+            }
+            if (db_id < id2.db_id) {
+                return true;
+            } else if (db_id > id2.db_id) {
+                return false;
+            }
+            if (memtable_id < id2.memtable_id) {
+                return true;
+            }
+            return false;
+        }
+    };
+
+    struct LevelDBLogRecord {
+        Slice key;
+        Slice value;
+        uint64_t sequence_number;
+    };
+
     enum CCRequestType : char {
         CC_RTABLE_READ_BLOCKS = 'a',
         CC_READ_BLOCKS = 'b',
@@ -36,6 +65,7 @@ namespace leveldb {
         CC_DELETE_LOG_FILE = 'm',
         CC_DELETE_LOG_FILE_SUCC = 'n',
         CC_DELETE_TABLES = 'o',
+        CC_READ_IN_MEMORY_LOG_FILE = 'p',
         CC_RTABLE_WRITE_SSTABLE = 'q',
         CC_RTABLE_WRITE_SSTABLE_RESPONSE = 'r',
         CC_RTABLE_PERSIST_RESPONSE = 't',
@@ -93,6 +123,7 @@ namespace leveldb {
         RDMA_ASYNC_REQ_SETUP_LOG_BUF = 'g',
         RDMA_ASYNC_REQ_DELETE_LOG_FILES = 'h',
         RDMA_ASYNC_SYNC_LOG_RECORD = 'i',
+        RDMA_ASYNC_READ_LOG_FILE = 'j',
     };
 
     struct RDMAAsyncClientRequestTask {
@@ -104,9 +135,8 @@ namespace leveldb {
         uint32_t size;
         char *result = nullptr;
 
-        std::string log_file_name;
         uint64_t thread_id;
-        std::vector<Slice> log_records;
+        std::vector<leveldb::LevelDBLogRecord> log_records;
 
         uint32_t server_id;
         std::vector<SSTableRTablePair> rtable_ids;
@@ -126,6 +156,7 @@ namespace leveldb {
         // Delete log files.
         uint32_t dbid;
         uint32_t memtable_id;
+        MemTableIdentifier memtable_identifier;
         std::vector<MemTableLogFilePair> log_file_ids;
 
         CCResponse *response = nullptr;
@@ -151,9 +182,9 @@ namespace leveldb {
                              const std::vector<SSTableRTablePair> &rtable_ids) = 0;
 
         virtual uint32_t
-        InitiateReplicateLogRecords(const std::string &log_file_name,
+        InitiateReplicateLogRecords(MemTableIdentifier memtable_id,
                                     uint64_t thread_id,
-                                    const Slice &slice) = 0;
+                                    const std::vector<LevelDBLogRecord> &log_records) = 0;
 
         virtual uint32_t
         InitiateSetupLogRecordBuf(uint32_t cc_id,
@@ -172,6 +203,10 @@ namespace leveldb {
                               char *rdma_log_record_backing_mem) = 0;
 
         virtual uint32_t
+        InitiateReadInMemoryLogFile(char *local_buf, uint32_t remote_server_id,
+                                    uint64_t remote_offset, uint64_t size) = 0;
+
+        virtual uint32_t
         InitiateCloseLogFiles(uint32_t cc_id,
                               uint32_t dbid,
                               uint32_t dc_id,
@@ -179,7 +214,7 @@ namespace leveldb {
 
 
         virtual uint32_t
-        InitiateCloseLogFile(const std::string &log_file_name) = 0;
+        InitiateCloseLogFile(MemTableIdentifier memtable_id) = 0;
 
         virtual uint32_t InitiateReadDCStats(uint32_t server_id) = 0;
 

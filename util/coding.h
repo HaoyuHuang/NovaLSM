@@ -92,6 +92,13 @@ namespace leveldb {
         return 4 + src.size();
     }
 
+    inline uint32_t EncodeSlice(char *dst, const Slice &src) {
+        EncodeFixed32(dst, src.size());
+        dst += 4;
+        memcpy(dst, src.data(), src.size());
+        return 4 + src.size();
+    }
+
     inline void EncodeFixed64(char *dst, uint64_t value) {
         uint8_t *const buffer = reinterpret_cast<uint8_t *>(dst);
 
@@ -163,6 +170,12 @@ namespace leveldb {
         uint32_t size = DecodeFixed32(src);
         result->append(src + 4, size);
         return size + 4;
+    }
+
+    inline Slice DecodeSlice(const char *src) {
+        uint32_t size = DecodeFixed32(src);
+        Slice slice(src + 4, size);
+        return slice;
     }
 
 // Internal routine for use by fallback path of GetVarint32Ptr

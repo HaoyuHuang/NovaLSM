@@ -31,7 +31,7 @@ namespace nova {
     }
 
     void NovaLogFile::DeleteMemTables(
-            const std::vector<nova::MemTableIdentifier> &ids) {
+            const std::vector<leveldb::MemTableIdentifier> &ids) {
         mutex_.lock();
         if (deleted_) {
             mutex_.unlock();
@@ -90,7 +90,7 @@ namespace nova {
     }
 
 
-    NovaLogManager::NovaLogManager(leveldb::Env *env, uint64_t max_file_size,
+    PersistentLogManager::PersistentLogManager(leveldb::Env *env, uint64_t max_file_size,
                                    nova::NovaMemManager *mem_manager,
                                    const std::string &log_file_path,
                                    uint32_t nccs, uint32_t nworkers,
@@ -114,7 +114,7 @@ namespace nova {
         }
     }
 
-    NovaLogFile *NovaLogManager::CreateNewLogFile() {
+    NovaLogFile *PersistentLogManager::CreateNewLogFile() {
         uint32_t log_file_id = log_file_id_seq_.fetch_add(1);
         RDMA_ASSERT(log_file_id < MAX_NUM_LOG_FILES);
         NovaLogFile *file = new NovaLogFile
@@ -125,12 +125,12 @@ namespace nova {
         return file;
     }
 
-    NovaLogFile *NovaLogManager::log_file(uint32_t log_file_id) {
+    NovaLogFile *PersistentLogManager::log_file(uint32_t log_file_id) {
         return log_files[log_file_id];
     }
 
-    NovaLogFile *NovaLogManager::log_file(
-            nova::MemTableIdentifier memtable_id) {
+    NovaLogFile *PersistentLogManager::log_file(
+            leveldb::MemTableIdentifier memtable_id) {
         NovaLogFile *file = nullptr;
         mutex_.lock();
         auto it = memtableid_log_file_id_map_.find(memtable_id);

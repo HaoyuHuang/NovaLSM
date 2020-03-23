@@ -37,8 +37,6 @@ namespace nova {
         void VerifyLoad();
 
     private:
-
-
         uint64_t LoadDataWithRangePartition();
 
         std::vector<NovaRDMAComputeComponent *> async_workers_;
@@ -46,6 +44,26 @@ namespace nova {
         std::vector<leveldb::DB *> dbs_;
         uint32_t tid_;
         std::set<uint32_t> assigned_dbids_;
+    };
+
+    class NovaCCRecoveryThread {
+    public:
+        NovaCCRecoveryThread(
+                uint32_t client_id,
+                std::vector<NovaRDMAComputeComponent *> &async_workers,
+                NovaMemManager *mem_manager);
+
+        void Recover();
+        sem_t sem_;
+        uint32_t recovered_log_records = 0;
+        uint64_t recovery_time = 0;
+        uint64_t new_memtable_time = 0;
+        std::vector<char *> log_replicas_;
+    private:
+
+        uint32_t client_id_ = 0;
+        std::vector<NovaRDMAComputeComponent *> async_workers_;
+        NovaMemManager *mem_manager_;
     };
 
 
@@ -64,8 +82,8 @@ namespace nova {
 
         std::vector<leveldb::DB *> dbs_;
         NovaMemManager *mem_manager;
-        LogFileManager *log_manager;
-        NovaLogManager *nova_log_manager;
+        InMemoryLogFileManager *in_memory_log_manager;
+        PersistentLogManager *persistent_log_manager;
 
         std::vector<NovaCCClientWorker *> client_workers;
         std::vector<NovaRDMAComputeComponent *> rdma_foreground_workers;

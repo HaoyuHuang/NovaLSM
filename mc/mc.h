@@ -19,7 +19,7 @@
 #include "leveldb/table.h"
 #include "table/format.h"
 
-#include "log/nova_log.h"
+#include "log/nova_in_memory_log_manager.h"
 #include "nova_mem_manager.h"
 #include "worker.h"
 

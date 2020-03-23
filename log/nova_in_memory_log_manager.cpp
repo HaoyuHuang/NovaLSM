@@ -5,10 +5,10 @@
 //
 
 #include "nova/nova_config.h"
-#include "nova_log.h"
+#include "nova_in_memory_log_manager.h"
 
 namespace nova {
-    LogFileManager::LogFileManager(
+    InMemoryLogFileManager::InMemoryLogFileManager(
             nova::NovaMemManager *mem_manager) : mem_manager_(mem_manager) {
         server_db_log_files_ = new DBLogFiles **[NovaConfig::config->servers.size()];
         uint32_t nranges = NovaCCConfig::cc_config->fragments.size() /
@@ -21,19 +21,36 @@ namespace nova {
         }
     }
 
-    void LogFileManager::Add(uint64_t thread_id, const std::string &log_file,
-                             char *buf) {
-        uint32_t sid;
-        uint32_t db_index;
-        ParseDBIndexFromFile(log_file, &sid, &db_index);
+    void InMemoryLogFileManager::AddReplica(
+            leveldb::MemTableIdentifier memtable_id, uint32_t server_id,
+            uint64_t offset, uint32_t size) {
+        mutex_.lock();
+        InMemoryReplica replica = {};
+        replica.server_id = server_id;
+        replica.offset = offset;
+        replica.size = size;
+        memtable_replicas_[memtable_id].push_back(replica);
+        mutex_.unlock();
+    }
 
-        DBLogFiles *db = server_db_log_files_[sid][db_index];
+    void InMemoryLogFileManager::RemoveMemTable(
+            leveldb::MemTableIdentifier memtable_id) {
+        mutex_.lock();
+        memtable_replicas_.erase(memtable_id);
+        mutex_.unlock();
+    }
+
+    void
+    InMemoryLogFileManager::Add(uint64_t thread_id, leveldb::MemTableIdentifier memtable_id,
+                                char *buf) {
+
+        DBLogFiles *db = server_db_log_files_[memtable_id.cc_id][memtable_id.db_id];
         db->mutex_.Lock();
-        auto it = db->logfiles_.find(log_file);
+        auto it = db->logfiles_.find(memtable_id);
         LogRecords *records;
         if (it == db->logfiles_.end()) {
             records = new LogRecords;
-            db->logfiles_[log_file] = records;
+            db->logfiles_[memtable_id] = records;
         } else {
             records = it->second;
         }
@@ -48,21 +65,17 @@ namespace nova {
 //                           log_file, thread_id);
     }
 
-    void LogFileManager::DeleteLogBuf(const std::string &log_file) {
-        uint32_t sid;
-        uint32_t db_index;
-        ParseDBIndexFromFile(log_file, &sid, &db_index);
-
-        DBLogFiles *db = server_db_log_files_[sid][db_index];
+    void InMemoryLogFileManager::DeleteLogBuf(leveldb::MemTableIdentifier memtable_id) {
+        DBLogFiles *db = server_db_log_files_[memtable_id.cc_id][memtable_id.db_id];
 
         db->mutex_.Lock();
-        auto it = db->logfiles_.find(log_file);
+        auto it = db->logfiles_.find(memtable_id);
         if (it == db->logfiles_.end()) {
             db->mutex_.Unlock();
             return;
         }
         LogRecords *records = it->second;
-        db->logfiles_.erase(log_file);
+        db->logfiles_.erase(memtable_id);
         db->mutex_.Unlock();
 
         for (const auto &it : records->backing_mems) {

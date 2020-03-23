@@ -13,7 +13,7 @@
 #include "nova/nova_rdma_rc_store.h"
 #include "mc/nova_mem_manager.h"
 #include "nova_log_manager.h"
-#include "log/nova_log.h"
+#include "log/nova_in_memory_log_manager.h"
 #include "nova_rtable.h"
 
 namespace nova {
@@ -33,7 +33,7 @@ namespace nova {
 
         // Sync log record request
         uint32_t log_file_id;
-        MemTableIdentifier memtable_id;
+        leveldb::MemTableIdentifier memtable_id;
         leveldb::Slice log_record;
 
         // Persist request
@@ -77,9 +77,9 @@ namespace nova {
     public:
         NovaCCServer(rdmaio::RdmaCtrl *rdma_ctrl,
                      NovaMemManager *mem_manager,
-                     NovaLogManager *nova_log_manager,
+                     PersistentLogManager *nova_log_manager,
                      leveldb::NovaRTableManager *rtable_manager,
-                     LogFileManager *log_manager,
+                     InMemoryLogFileManager *log_manager,
                      uint32_t thread_id, bool is_compaction_thread);
 
         bool
@@ -105,8 +105,8 @@ namespace nova {
         uint32_t thread_id_;
         rdmaio::RdmaCtrl *rdma_ctrl_;
         NovaMemManager *mem_manager_;
-        LogFileManager *log_manager_;
-        NovaLogManager *nova_sync_log_manager_;
+        InMemoryLogFileManager *log_manager_;
+        PersistentLogManager *nova_sync_log_manager_;
         leveldb::NovaRTableManager *rtable_manager_;
         leveldb::NovaRTable *current_rtable_ = nullptr;
 
@@ -124,7 +124,7 @@ namespace nova {
     class NovaDCStorageWorker {
     public:
         NovaDCStorageWorker(leveldb::NovaRTableManager *rtable_manager,
-                                NovaLogManager *log_manager,
+                                PersistentLogManager *log_manager,
                                 std::vector<NovaCCServer *> cc_servers);
 
         void AddTask(const NovaDCStorageWorkerTask &task);
@@ -132,7 +132,7 @@ namespace nova {
         void Start();
 
     private:
-        NovaLogManager *log_manager_;
+        PersistentLogManager *log_manager_;
         leveldb::NovaRTableManager *rtable_manager_;
         std::vector<NovaCCServer *> cc_servers_;
 

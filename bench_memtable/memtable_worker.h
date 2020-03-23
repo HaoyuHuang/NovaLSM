@@ -28,6 +28,7 @@ namespace leveldb {
                  const Slice &value) override;
 
     private:
+        uint32_t ninserted_ = 0;
         std::vector<leveldb::MemTable *> active_memtables_;
         std::vector<std::mutex*> mutexs_;
         uint64_t memtable_size_;

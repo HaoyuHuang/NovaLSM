@@ -4,6 +4,7 @@
 // Copyright (c) 2020 University of Southern California. All rights reserved.
 //
 
+#include <fmt/core.h>
 #include "memtable_worker.h"
 
 namespace {
@@ -61,6 +62,8 @@ namespace leveldb {
         mutexs_[partition_id]->lock();
         MemTable *table = active_memtables_[partition_id];
         if (table->ApproximateMemoryUsage() > memtable_size_) {
+            RDMA_LOG(rdmaio::INFO) << fmt::format("Create a new MemTable {}", ninserted_);
+            ninserted_ = 0;
             table->Unref();
             auto cmp = new YCSBKeyComparator();
             leveldb::InternalKeyComparator *comp = new leveldb::InternalKeyComparator(
@@ -70,6 +73,7 @@ namespace leveldb {
             active_memtables_[partition_id] = table;
         }
         table->Add(seq, type, key, value);
+        ninserted_ ++;
         mutexs_[partition_id]->unlock();
     }
 

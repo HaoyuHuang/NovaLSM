@@ -44,6 +44,25 @@ namespace nova {
         std::atomic_int_fast64_t dc_queue_depth;
     };
 
+    uint32_t
+    EncodeMemTableId(char *buf, leveldb::MemTableIdentifier memtable_id);
+
+    uint32_t
+    DecodeMemTableId(char *buf, leveldb::MemTableIdentifier *memtable_id);
+
+    uint32_t
+    LogRecordsSize(const std::vector<leveldb::LevelDBLogRecord> &log_records);
+
+    uint32_t
+    EncodeLogRecords(char *buf,
+                     const std::vector<leveldb::LevelDBLogRecord> &log_records);
+
+    uint32_t DecodeLogRecords(char *buf, uint32_t size,
+                              std::vector<leveldb::LevelDBLogRecord> *log_records);
+
+    uint32_t DecodeLogRecord(char *buf,
+            leveldb::LevelDBLogRecord *log_record);
+
     extern nova::DCStats dc_stats;
 
     enum NovaRDMAPartitionMode {

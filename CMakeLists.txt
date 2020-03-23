@@ -243,8 +243,8 @@ target_sources(leveldb
         nova/linked_list.h
         mc/nova_chained_hashtable.cpp
         mc/nova_chained_hashtable.h
-        log/nova_log.cpp
-        log/nova_log.h
+        log/nova_in_memory_log_manager.cpp
+        log/nova_in_memory_log_manager.h
         cc/nova_cc_log_writer.cc
         cc/nova_cc_log_writer.h
         nova/nova_client_sock.cpp

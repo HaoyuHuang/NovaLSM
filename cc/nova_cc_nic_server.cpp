@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include "db/memtable.h"
 
 #include "leveldb/cache.h"
 #include "leveldb/write_batch.h"
@@ -20,6 +21,11 @@
 
 namespace nova {
     namespace {
+        uint64_t time_diff(timeval t1, timeval t2) {
+            return (t2.tv_sec - t1.tv_sec) * 1000000 +
+                   (t2.tv_usec - t1.tv_usec);
+        }
+
         class YCSBKeyComparator : public leveldb::Comparator {
         public:
             //   if a < b: negative result
@@ -139,10 +145,12 @@ namespace nova {
         std::vector<CCFragment *> &frags = NovaCCConfig::cc_config->fragments;
 
         unsigned int rand_seed = tid_;
-
         int pivot = 0;
         int i = pivot;
         int loaded_frags = 0;
+        leveldb::NovaBlockCCClient *client = new leveldb::NovaBlockCCClient(
+                tid_);
+        client->rdma_workers_ = async_workers_;
         while (loaded_frags < frags.size()) {
             if (frags[i]->cc_server_id !=
                 NovaConfig::config->my_server_id) {
@@ -163,7 +171,7 @@ namespace nova {
             RDMA_LOG(INFO) << fmt::format("t[{}] Insert range {} to {}", tid_,
                                           frags[i]->range.key_start,
                                           frags[i]->range.key_end);
-            for (uint64_t j = frags[i]->range.key_end;
+            for (uint64_t j = frags[i]->range.key_end - 1;
                  j >= frags[i]->range.key_start; j--) {
                 auto v = static_cast<char>((j % 10) + 'a');
 
@@ -171,10 +179,10 @@ namespace nova {
                 std::string val(
                         NovaConfig::config->load_default_value_size, v);
                 leveldb::WriteOptions option;
-                option.sync = true;
-                option.local_write = true;
                 option.hash = j;
                 option.rand_seed = &rand_seed;
+                option.client_worker_id = 0;
+                option.dc_client = client;
                 leveldb::Status s = db->Put(option, key, val);
                 RDMA_ASSERT(s.ok());
                 loaded_keys++;
@@ -266,6 +274,63 @@ namespace nova {
         gettimeofday(&end, nullptr);
 
         throughput = puts / std::max((int) (end.tv_sec - start.tv_sec), 1);
+    }
+
+    NovaCCRecoveryThread::NovaCCRecoveryThread(
+            uint32_t client_id,
+            std::vector<nova::NovaRDMAComputeComponent *> &async_workers,
+            nova::NovaMemManager *mem_manager)
+            : client_id_(client_id), async_workers_(async_workers),
+              mem_manager_(mem_manager) {
+        sem_init(&sem_, 0, 0);
+    }
+
+    void NovaCCRecoveryThread::Recover() {
+        sem_wait(&sem_);
+        if (log_replicas_.empty()) {
+            return;
+        }
+        RDMA_LOG(INFO) << fmt::format("t{}: started memtables:{}", client_id_,
+                                      log_replicas_.size());
+        timeval start{};
+        gettimeofday(&start, nullptr);
+
+        std::vector<leveldb::MemTable *> memtables;
+        leveldb::InternalKeyComparator ik(new YCSBKeyComparator);
+        for (int i = 0; i < log_replicas_.size(); i++) {
+            leveldb::MemTable *memtable = new leveldb::MemTable(ik, 0, nullptr,
+                                                                mem_manager_);
+            memtables.push_back(memtable);
+        }
+
+        timeval new_memtable_end{};
+        gettimeofday(&new_memtable_end, nullptr);
+        new_memtable_time = time_diff(start, new_memtable_end);
+
+        for (int i = 0; i < log_replicas_.size(); i++) {
+            char *buf = log_replicas_[i];
+            leveldb::MemTable *memtable = memtables[i];
+
+            leveldb::LevelDBLogRecord record;
+            uint32_t record_size = DecodeLogRecord(buf, &record);
+            while (record_size != 0) {
+                memtable->Add(record.sequence_number,
+                              leveldb::ValueType::kTypeValue, record.key,
+                              record.value);
+                recovered_log_records += 1;
+                buf += record_size;
+                record_size = DecodeLogRecord(buf, &record);
+            }
+//            RDMA_LOG(INFO)
+//                << fmt::format("t{}: completed one table", client_id_);
+            RDMA_ASSERT(memtable->nentries_ == 15732);
+        }
+
+        RDMA_ASSERT(memtables.size() == log_replicas_.size());
+
+        timeval end{};
+        gettimeofday(&end, nullptr);
+        recovery_time = time_diff(start, end);
     }
 
     void NovaCCNICServer::LoadData() {
@@ -376,11 +441,12 @@ namespace nova {
         char *cache_buf = buf + nrdma_buf_cc();
 
         uint32_t num_mem_partitions = 0;
-        if (ndbs == 1) {
-            num_mem_partitions = 1;
-        } else {
-            num_mem_partitions = 4;
-        }
+//        if (ndbs == 1) {
+//            num_mem_partitions = 1;
+//        } else {
+//            num_mem_partitions = 4;
+//        }
+        num_mem_partitions = 1;
         NovaConfig::config->num_mem_partitions = num_mem_partitions;
         uint64_t slab_size_mb = std::max(
                 NovaConfig::config->sstable_size / 1024 / 1024,
@@ -391,7 +457,7 @@ namespace nova {
                                          num_mem_partitions,
                                          NovaConfig::config->mem_pool_size_gb,
                                          slab_size_mb);
-        log_manager = new LogFileManager(mem_manager);
+        in_memory_log_manager = new InMemoryLogFileManager(mem_manager);
 
         NovaConfig::config->add_tid_mapping();
 
@@ -447,13 +513,13 @@ namespace nova {
                 env, mem_manager, NovaConfig::config->rtable_path,
                 NovaConfig::config->rtable_size,
                 NovaConfig::config->servers.size(), nranges);
-        nova_log_manager = new NovaLogManager(env,
-                                              NovaConfig::config->log_file_size,
-                                              mem_manager,
-                                              NovaConfig::config->rtable_path,
-                                              NovaCCConfig::cc_config->cc_servers.size(),
-                                              NovaCCConfig::cc_config->num_client_workers,
-                                              NovaConfig::config->log_record_size);
+        persistent_log_manager = new PersistentLogManager(env,
+                                                          NovaConfig::config->log_file_size,
+                                                          mem_manager,
+                                                          NovaConfig::config->rtable_path,
+                                                          NovaCCConfig::cc_config->cc_servers.size(),
+                                                          NovaCCConfig::cc_config->num_client_workers,
+                                                          NovaConfig::config->log_record_size);
 
         int worker_id = 0;
         // the first bit is request type:
@@ -514,9 +580,9 @@ namespace nova {
             RDMA_ASSERT(rnic_buf) << "Running out of memory";
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
                                                                    mem_manager,
-                                                                   nova_log_manager,
+                                                                   persistent_log_manager,
                                                                    rtable_manager,
-                                                                   log_manager,
+                                                                   in_memory_log_manager,
                                                                    worker_id,
                                                                    false);
             leveldb::CCClient *dc_client = new leveldb::NovaCCClient(worker_id,
@@ -527,7 +593,7 @@ namespace nova {
                                                                              store,
                                                                              rnic_buf,
                                                                              mem_manager,
-                                                                             log_manager),
+                                                                             in_memory_log_manager),
                                                                      lower_client_req_id,
                                                                      upper_client_req_id,
                                                                      cc_server);
@@ -587,9 +653,9 @@ namespace nova {
             RDMA_ASSERT(rnic_buf) << "Running out of memory";
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
                                                                    mem_manager,
-                                                                   nova_log_manager,
+                                                                   persistent_log_manager,
                                                                    rtable_manager,
-                                                                   log_manager,
+                                                                   in_memory_log_manager,
                                                                    worker_id,
                                                                    true);
             leveldb::CCClient *dc_client = new leveldb::NovaCCClient(worker_id,
@@ -600,7 +666,7 @@ namespace nova {
                                                                              store,
                                                                              rnic_buf,
                                                                              mem_manager,
-                                                                             log_manager),
+                                                                             in_memory_log_manager),
                                                                      lower_client_req_id,
                                                                      upper_client_req_id,
                                                                      cc_server);
@@ -641,7 +707,7 @@ namespace nova {
         for (int i = 0;
              i < NovaCCConfig::cc_config->num_cc_server_workers; i++) {
             NovaDCStorageWorker *worker = new NovaDCStorageWorker(
-                    rtable_manager, nova_log_manager, cc_servers);
+                    rtable_manager, persistent_log_manager, cc_servers);
             cc_server_workers.push_back(worker);
         }
 
@@ -750,6 +816,153 @@ namespace nova {
         if (NovaConfig::config->enable_load_data) {
             LoadData();
         }
+
+        if (NovaConfig::config->measure_recovery_duration &&
+            NovaConfig::config->my_server_id == 0) {
+            std::vector<NovaCCRecoveryThread *> recovery_threads;
+            for (int i = 0;
+                 i < NovaConfig::config->number_of_recovery_threads; i++) {
+                NovaCCRecoveryThread *thread = new NovaCCRecoveryThread(
+                        i,
+                        rdma_foreground_workers,
+                        mem_manager);
+                recovery_threads.push_back(thread);
+            }
+
+            // Pin each recovery thread to a core.
+            std::vector<std::thread> threads;
+            for (int i = 0; i < recovery_threads.size(); i++) {
+                threads.emplace_back(&NovaCCRecoveryThread::Recover,
+                                     recovery_threads[i]);
+                cpu_set_t cpuset;
+                CPU_ZERO(&cpuset);
+                CPU_SET(i, &cpuset);
+                int rc = pthread_setaffinity_np(threads[i].native_handle(),
+                                                sizeof(cpu_set_t), &cpuset);
+                RDMA_ASSERT(rc == 0) << rc;
+            }
+
+            timeval start = {};
+            gettimeofday(&start, nullptr);
+
+            leveldb::NovaBlockCCClient *client = new leveldb::NovaBlockCCClient(
+                    0);
+            client->rdma_workers_ = rdma_foreground_workers;
+            std::vector<InMemoryReplica> all_replicas;
+            std::map<leveldb::MemTableIdentifier, std::vector<InMemoryReplica>> &memtables = in_memory_log_manager->memtable_replicas_;
+            for (auto &it : in_memory_log_manager->memtable_replicas_) {
+                RDMA_LOG(INFO) << fmt::format("{}-{}-{}-{}", it.first.cc_id,
+                                              it.first.db_id,
+                                              it.first.memtable_id,
+                                              it.second.size());
+                all_replicas.push_back(it.second[0]);
+            }
+
+            std::vector<char *> rdma_bufs;
+            std::vector<uint32_t> reqs;
+            for (auto &replica : all_replicas) {
+                uint32_t scid = mem_manager->slabclassid(0,
+                                                         NovaConfig::config->log_buf_size);
+                char *rdma_buf = mem_manager->ItemAlloc(0, scid);
+                RDMA_ASSERT(rdma_buf);
+                rdma_bufs.push_back(rdma_buf);
+
+                // TODO: Issue RDMA READs.
+                uint32_t reqid = client->InitiateReadInMemoryLogFile(rdma_buf,
+                                                                     replica.server_id,
+                                                                     replica.offset,
+                                                                     replica.size);
+                reqs.push_back(reqid);
+            }
+
+            // Wait for all RDMA READ to complete.
+            for (auto &replica : all_replicas) {
+                client->Wait();
+            }
+
+            for (int i = 0; i < reqs.size(); i++) {
+                leveldb::CCResponse response;
+                RDMA_ASSERT(client->IsDone(reqs[i], &response, nullptr));
+            }
+
+            timeval rdma_read_complete{};
+            gettimeofday(&rdma_read_complete, nullptr);
+
+            // put all rdma foreground to sleep.
+            for (int i = 0; i < rdma_foreground_workers.size(); i++) {
+                rdma_foreground_workers[i]->is_running_ = false;
+            }
+
+            for (int i = 0; i < async_compaction_workers.size(); i++) {
+                async_compaction_workers[i]->is_running_ = false;
+            }
+
+            // Divide.
+            uint32_t memtable_per_thread = all_replicas.size() /
+                                           NovaConfig::config->number_of_recovery_threads;
+            if (all_replicas.size() <
+                NovaConfig::config->number_of_recovery_threads) {
+                memtable_per_thread = 1;
+            }
+            RDMA_LOG(INFO)
+                << fmt::format(
+                        "Start recovery: memtables:{} memtable_per_thread:{}",
+                        all_replicas.size(),
+                        memtable_per_thread);
+
+            std::vector<char *> replicas;
+            uint32_t thread_id = 0;
+            for (int i = 0; i < all_replicas.size(); i++) {
+                if (replicas.size() == memtable_per_thread) {
+                    recovery_threads[thread_id]->log_replicas_ = replicas;
+                    replicas.clear();
+                    thread_id += 1;
+                }
+                replicas.push_back(rdma_bufs[i]);
+            }
+
+            if (!replicas.empty()) {
+                recovery_threads[thread_id]->log_replicas_ = replicas;
+            }
+
+            for (int i = 0;
+                 i < NovaConfig::config->number_of_recovery_threads; i++) {
+                sem_post(&recovery_threads[i]->sem_);
+            }
+            RDMA_LOG(INFO)
+                << fmt::format("Start recovery: recovery threads:{}",
+                               recovery_threads.size());
+            for (int i = 0; i < recovery_threads.size(); i++) {
+                threads[i].join();
+            }
+
+            timeval end = {};
+            gettimeofday(&end, nullptr);
+
+            uint32_t recovered_log_records = 0;
+            for (int i = 0; i < recovery_threads.size(); i++) {
+                auto recovery = recovery_threads[i];
+                recovered_log_records += recovery->recovered_log_records;
+
+                RDMA_LOG(INFO)
+                    << fmt::format("recovery duration of {}: {},{},{},{}",
+                                   i,
+                                   recovery->log_replicas_.size(),
+                                   recovery->recovered_log_records,
+                                   recovery->new_memtable_time,
+                                   recovery->recovery_time);
+            }
+            RDMA_LOG(INFO)
+                << fmt::format("Total recovery duration: {},{},{},{},{}",
+                               all_replicas.size(),
+                               recovered_log_records,
+                               time_diff(start, rdma_read_complete),
+                               time_diff(rdma_read_complete, end),
+                               time_diff(start, end));
+            // Terminate.
+            RDMA_ASSERT(false);
+        }
+
 
         for (auto db : dbs_) {
             db->StartTracing();

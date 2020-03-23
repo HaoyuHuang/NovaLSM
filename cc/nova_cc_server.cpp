@@ -27,9 +27,10 @@ namespace nova {
 
     NovaCCServer::NovaCCServer(rdmaio::RdmaCtrl *rdma_ctrl,
                                NovaMemManager *mem_manager,
-                               NovaLogManager *nova_log_manager,
+                               PersistentLogManager *nova_log_manager,
                                leveldb::NovaRTableManager *rtable_manager,
-                               LogFileManager *log_manager, uint32_t thread_id,
+                               InMemoryLogFileManager *log_manager,
+                               uint32_t thread_id,
                                bool is_compaction_thread)
             : rdma_ctrl_(rdma_ctrl),
               mem_manager_(mem_manager),
@@ -209,7 +210,8 @@ namespace nova {
                     if (NovaConfig::config->log_record_policy ==
                         LogRecordPolicy::SHARED_LOG_FILE) {
                         RDMA_ASSERT(current_log_file_);
-                        if (!current_log_file_->ReserveSpaceForLogRecord(record)) {
+                        if (!current_log_file_->ReserveSpaceForLogRecord(
+                                record)) {
                             current_log_file_ = nova_sync_log_manager_->CreateNewLogFile();
                         }
                         log_file_id = current_log_file_->log_file_id();
@@ -284,7 +286,7 @@ namespace nova {
                     uint32_t npairs = leveldb::DecodeFixed32(buf + msg_size);
                     msg_size += 4;
 
-                    std::map<uint32_t, std::vector<MemTableIdentifier>> log_memtables;
+                    std::map<uint32_t, std::vector<leveldb::MemTableIdentifier>> log_memtables;
                     for (int i = 0; i < npairs; i++) {
                         uint32_t logid = leveldb::DecodeFixed32(buf + msg_size);
                         msg_size += 4;
@@ -292,7 +294,7 @@ namespace nova {
                                 buf + msg_size);
                         msg_size += 4;
 
-                        MemTableIdentifier id = {};
+                        leveldb::MemTableIdentifier id = {};
                         id.cc_id = cc_id;
                         id.db_id = dbid;
                         id.memtable_id = memtableid;
@@ -462,14 +464,14 @@ namespace nova {
                     processed = true;
                 } else if (buf[0] ==
                            leveldb::CCRequestType::CC_ALLOCATE_LOG_BUFFER) {
-                    uint32_t size = leveldb::DecodeFixed32(buf + 1);
-                    std::string log_file(buf + 5, size);
+                    leveldb::MemTableIdentifier memtable_id = {};
+                    DecodeMemTableId(buf + 1, &memtable_id);
                     uint32_t slabclassid = mem_manager_->slabclassid(thread_id_,
                                                                      nova::NovaConfig::config->log_buf_size);
                     char *buf = mem_manager_->ItemAlloc(thread_id_,
                                                         slabclassid);
                     RDMA_ASSERT(buf) << "Running out of memory";
-                    log_manager_->Add(thread_id_, log_file, buf);
+                    log_manager_->Add(thread_id_, memtable_id, buf);
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     send_buf[0] = leveldb::CCRequestType::CC_ALLOCATE_LOG_BUFFER_SUCC;
                     leveldb::EncodeFixed64(send_buf + 1, (uint64_t) buf);
@@ -478,17 +480,19 @@ namespace nova {
                     rdma_store_->PostSend(send_buf, 1 + 8 + 8, remote_server_id,
                                           0);
                     RDMA_LOG(DEBUG) << fmt::format(
-                                "dc[{}]: Allocate log buffer for file {}.",
-                                thread_id_, log_file);
+                                "dc[{}]: Allocate log buffer for file {}-{}-{} {}.",
+                                thread_id_, memtable_id.cc_id,
+                                memtable_id.db_id, memtable_id.memtable_id, (uint64_t) buf);
                     processed = true;
                 } else if (buf[0] ==
                            leveldb::CCRequestType::CC_DELETE_LOG_FILE) {
-                    uint32_t size = leveldb::DecodeFixed32(buf + 1);
-                    std::string log_file(buf + 5, size);
-                    log_manager_->DeleteLogBuf(log_file);
+                    leveldb::MemTableIdentifier memtable_id = {};
+                    DecodeMemTableId(buf + 1, &memtable_id);
+                    log_manager_->DeleteLogBuf(memtable_id);
                     RDMA_LOG(DEBUG) << fmt::format(
-                                "dc[{}]: Delete log buffer for file {}.",
-                                thread_id_, log_file);
+                                "dc[{}]: Delete log buffer for file {}-{}-{}.",
+                                thread_id_, memtable_id.cc_id,
+                                memtable_id.db_id, memtable_id.memtable_id);
                     processed = true;
                 }
                 break;
@@ -499,7 +503,7 @@ namespace nova {
 
     NovaDCStorageWorker::NovaDCStorageWorker(
             leveldb::NovaRTableManager *rtable_manager,
-            NovaLogManager *log_manager,
+            PersistentLogManager *log_manager,
             std::vector<NovaCCServer *> cc_servers) : rtable_manager_(
             rtable_manager), log_manager_(log_manager),
                                                       cc_servers_(cc_servers) {

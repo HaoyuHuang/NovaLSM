@@ -17,7 +17,7 @@
 #include "nova/nova_rdma_rc_store.h"
 #include "cc/nova_cc_log_writer.h"
 
-#include "log/nova_log.h"
+#include "log/nova_in_memory_log_manager.h"
 #include "nova_rtable.h"
 #include "nova_rdma_cc.h"
 
@@ -36,6 +36,11 @@ namespace leveldb {
                              const std::vector<SSTableRTablePair> &rtable_ids) override;
 
         uint32_t
+        InitiateReadInMemoryLogFile(char *local_buf, uint32_t remote_server_id,
+                                    uint64_t remote_offset,
+                                    uint64_t size) override;
+
+        uint32_t
         InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
                                     uint64_t offset, uint32_t size,
                                     char *result) override;
@@ -49,14 +54,15 @@ namespace leveldb {
                                       bool is_meta_blocks) override;
 
         uint32_t
-        InitiateReplicateLogRecords(const std::string &log_file_name,
+        InitiateReplicateLogRecords(MemTableIdentifier memtable_id,
                                     uint64_t thread_id,
-                                    const Slice &slice) override;
+                                    const std::vector<LevelDBLogRecord> &log_records) override;
 
         uint32_t
         InitiateSetupLogRecordBuf(uint32_t cc_id,
                                   uint32_t cc_client_worker_id,
-                                  uint32_t log_record_size, uint32_t dc_id) override;
+                                  uint32_t log_record_size,
+                                  uint32_t dc_id) override;
 
         uint32_t
         InitiateSyncLogRecord(uint32_t cc_id,
@@ -75,7 +81,7 @@ namespace leveldb {
                               std::vector<MemTableLogFilePair> log_file_ids) override;
 
         uint32_t
-        InitiateCloseLogFile(const std::string &log_file_name) override;
+        InitiateCloseLogFile(MemTableIdentifier memtable_id) override;
 
         uint32_t InitiateReadDCStats(uint32_t server_id) override;
 
@@ -134,6 +140,11 @@ namespace leveldb {
 
 
         uint32_t
+        InitiateReadInMemoryLogFile(char *local_buf, uint32_t remote_server_id,
+                                    uint64_t remote_offset,
+                                    uint64_t size) override;
+
+        uint32_t
         InitiateSyncLogRecord(uint32_t cc_id,
                               uint32_t cc_client_worker_id,
                               uint32_t dbid,
@@ -161,9 +172,9 @@ namespace leveldb {
                                       bool is_meta_blocks) override;
 
         uint32_t
-        InitiateReplicateLogRecords(const std::string &log_file_name,
+        InitiateReplicateLogRecords(MemTableIdentifier memtable_id,
                                     uint64_t thread_id,
-                                    const Slice &slice) override;
+                                    const std::vector<LevelDBLogRecord> &log_records) override;
 
         uint32_t
         InitiateCloseLogFiles(uint32_t cc_id,
@@ -174,7 +185,7 @@ namespace leveldb {
         uint32_t InitiateReadDCStats(uint32_t server_id) override;
 
         uint32_t
-        InitiateCloseLogFile(const std::string &log_file_name) override;
+        InitiateCloseLogFile(MemTableIdentifier memtable_id) override;
 
         bool OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                     int remote_server_id, char *buf,

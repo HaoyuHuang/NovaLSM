@@ -31,6 +31,7 @@ namespace nova {
     enum LogRecordPolicy {
         SHARED_LOG_FILE,
         EXCLUSIVE_LOG_FILE,
+        IN_MEMORY_LOG,
         NONE
     };
 
@@ -38,6 +39,9 @@ namespace nova {
     public:
         bool enable_load_data;
         bool enable_rdma;
+        bool measure_recovery_duration;
+
+        uint32_t number_of_recovery_threads;
 
         vector<Host> servers;
         int my_server_id;
@@ -64,8 +68,8 @@ namespace nova {
         char *nova_buf;
         uint64_t nnovabuf;
 
-        ScatterPolicy  scatter_policy;
-        LogRecordPolicy  log_record_policy;
+        ScatterPolicy scatter_policy;
+        LogRecordPolicy log_record_policy;
 
         void add_tid_mapping() {
             std::lock_guard<std::mutex> l(m);

@@ -86,6 +86,8 @@ DEFINE_bool(cc_multiple_disks, false, "");
 DEFINE_string(cc_scatter_policy, "random", "random/stats");
 DEFINE_string(cc_log_record_policy, "shared", "shared/exclusive/none");
 DEFINE_uint32(cc_log_max_file_size_mb, 0, "max log file size");
+DEFINE_bool(cc_test_recovery, false, "recovery");
+DEFINE_uint32(cc_num_recovery_threads, 32, "recovery");
 
 void start(NovaCCNICServer *server) {
     server->Start();
@@ -180,7 +182,8 @@ int main(int argc, char *argv[]) {
 
 
     NovaConfig::config->my_server_id = FLAGS_server_id;
-
+    NovaConfig::config->measure_recovery_duration = FLAGS_cc_test_recovery;
+    NovaConfig::config->number_of_recovery_threads = FLAGS_cc_num_recovery_threads;
     NovaCCConfig::ReadFragments(FLAGS_cc_config_path,
                                 &NovaCCConfig::cc_config->fragments);
     NovaCCConfig::cc_config->num_client_workers = FLAGS_cc_num_conn_workers;
@@ -212,6 +215,11 @@ int main(int argc, char *argv[]) {
     } else if (FLAGS_cc_log_record_policy == "none") {
         NovaConfig::config->log_record_policy = LogRecordPolicy::NONE;
         NovaConfig::config->log_file_size = 0;
+    } else if (FLAGS_cc_log_record_policy == "inmemory") {
+        NovaConfig::config->log_record_policy = LogRecordPolicy::IN_MEMORY_LOG;
+        NovaConfig::config->log_file_size = 0;
+        NovaConfig::config->log_buf_size =
+                (FLAGS_cc_write_buffer_size_mb + 1) * 1024 * 1024;
     } else {
         NovaConfig::config->log_record_policy = LogRecordPolicy::EXCLUSIVE_LOG_FILE;
         NovaConfig::config->log_file_size = 0;

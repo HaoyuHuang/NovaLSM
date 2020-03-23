@@ -6,25 +6,36 @@
 
 namespace leveldb {
 
-    static const int kBlockSize = 4096;
+    static const int kBlockSize = 18874368;
 
-    Arena::Arena()
+    Arena::Arena(MemManager *mem_manager)
             : alloc_ptr_(nullptr), alloc_bytes_remaining_(0),
-              memory_usage_(0) {}
+              memory_usage_(0), mem_manager_(mem_manager) {
+        if (mem_manager) {
+            AllocateFallback(kBlockSize);
+        }
+    }
 
     Arena::~Arena() {
-        for (size_t i = 0; i < blocks_.size(); i++) {
-            delete[] blocks_[i];
+        if (mem_manager_) {
+            for (size_t i = 0; i < blocks_.size(); i++) {
+                uint32_t scid = mem_manager_->slabclassid(0, kBlockSize);
+                mem_manager_->FreeItem(0, blocks_[i], scid);
+            }
+        } else {
+            for (size_t i = 0; i < blocks_.size(); i++) {
+                delete[] blocks_[i];
+            }
         }
     }
 
     char *Arena::AllocateFallback(size_t bytes) {
-        if (bytes > kBlockSize / 4) {
-            // Object is more than a quarter of our block size.  Allocate it separately
-            // to avoid wasting too much space in leftover bytes.
-            char *result = AllocateNewBlock(bytes);
-            return result;
-        }
+//        if (bytes > kBlockSize / 4) {
+//            // Object is more than a quarter of our block size.  Allocate it separately
+//            // to avoid wasting too much space in leftover bytes.
+//            char *result = AllocateNewBlock(bytes);
+//            return result;
+//        }
 
         // We waste the remaining space in the current block.
         alloc_ptr_ = AllocateNewBlock(kBlockSize);
@@ -58,10 +69,16 @@ namespace leveldb {
     }
 
     char *Arena::AllocateNewBlock(size_t block_bytes) {
-        char *result = new char[block_bytes];
-        blocks_.push_back(result);
-        memory_usage_.fetch_add(block_bytes + sizeof(char *),
-                                std::memory_order_relaxed);
+        char *result;
+        if (mem_manager_) {
+            uint32_t scid = mem_manager_->slabclassid(0, block_bytes);
+            result = mem_manager_->ItemAlloc(0, scid);
+        } else {
+            result = new char[block_bytes];
+            blocks_.push_back(result);
+            memory_usage_.fetch_add(block_bytes + sizeof(char *),
+                                    std::memory_order_relaxed);
+        }
         return result;
     }
 

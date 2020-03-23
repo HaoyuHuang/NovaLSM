@@ -7,12 +7,13 @@
 #ifndef LEVELDB_NOVA_CC_LOG_WRITER_H
 #define LEVELDB_NOVA_CC_LOG_WRITER_H
 
+#include "nova/nova_common.h"
 #include "mc/nova_mem_manager.h"
 #include "leveldb/status.h"
 #include "leveldb/slice.h"
 #include "leveldb/log_writer.h"
 #include "nova/nova_rdma_store.h"
-#include "log/nova_log.h"
+#include "log/nova_in_memory_log_manager.h"
 
 namespace leveldb {
 
@@ -20,19 +21,20 @@ namespace leveldb {
 
         class RDMALogWriter {
         public:
-            RDMALogWriter(nova::NovaRDMAStore *store, char *rnic_buf, MemManager *mem_manager,
-            nova::LogFileManager *log_manager);
+            RDMALogWriter(nova::NovaRDMAStore *store, char *rnic_buf,
+                          MemManager *mem_manager,
+                          nova::InMemoryLogFileManager *log_manager);
 
             Status
-            AddRecord(const std::string &log_file_name,
+            AddRecord(MemTableIdentifier memtable_id,
                       uint64_t thread_id,
-                      const Slice &slice);
+                      const std::vector<LevelDBLogRecord> &log_records);
 
             void AckAllocLogBuf(int remote_sid, uint64_t offset, uint64_t size);
 
             bool AckWriteSuccess(int remote_sid, uint64_t rdma_wr_id);
 
-            Status CloseLogFile(const std::string &log_file_name);
+            Status CloseLogFile(MemTableIdentifier memtable_id);
 
         private:
             struct LogFileBuf {
@@ -41,17 +43,18 @@ namespace leveldb {
                 uint64_t size;
             };
 
-            char* Init(const std::string &log_file_name,uint64_t thread_id, const Slice &slice);
+            char *Init(MemTableIdentifier memtable_id, uint64_t thread_id,
+                       const std::vector<LevelDBLogRecord> &log_records, uint32_t size);
 
             nova::NovaRDMAStore *store_;
-            std::map<std::string, LogFileBuf *> logfile_last_buf_;
+            std::map<MemTableIdentifier, LogFileBuf *> logfile_last_buf_;
 
             enum WriteResult {
                 NONE = 0,
                 WAIT_FOR_ALLOC = 1,
                 ALLOC_SUCCESS = 2,
                 WAIT_FOR_WRITE = 3,
-                WRITE_SUCESS =4,
+                WRITE_SUCESS = 4,
             };
 
             struct WriteState {
@@ -62,11 +65,11 @@ namespace leveldb {
             std::string write_result_str(WriteResult wr);
 
             MemManager *mem_manager_;
-            nova::LogFileManager *log_manager_;
+            nova::InMemoryLogFileManager *log_manager_;
 
             char *rnic_buf_;
             uint32_t rnic_buf_size_;
-            std::string current_log_file_;
+            MemTableIdentifier current_memtable_id_;
             WriteState *write_result_;
         };
 

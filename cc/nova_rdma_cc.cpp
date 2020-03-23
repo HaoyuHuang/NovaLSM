@@ -61,12 +61,18 @@ namespace nova {
             ctx.sem = task.sem;
             ctx.response = task.response;
             switch (task.type) {
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_READ_LOG_FILE:
+                    ctx.req_id = cc_client_->InitiateReadInMemoryLogFile(
+                            task.rdma_log_record_backing_mem, task.server_id,
+                            task.remote_dc_offset, task.size);
+                    break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_SYNC_LOG_RECORD:
                     ctx.req_id = cc_client_->InitiateSyncLogRecord(task.cc_id,
                                                                    task.cc_client_worker_id,
                                                                    task.dbid,
                                                                    task.memtable_id,
-                                                                   task.log_records,
+                            // TODO
+                                                                   {},
                                                                    task.dc_id,
                                                                    task.remote_dc_offset,
                                                                    task.rdma_log_record_backing_mem);
@@ -92,13 +98,13 @@ namespace nova {
                     break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_CLOSE_LOG:
                     ctx.req_id = cc_client_->InitiateCloseLogFile(
-                            task.log_file_name);
+                            task.memtable_identifier);
                     break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD:
                     ctx.req_id = cc_client_->InitiateReplicateLogRecords(
-                            task.log_file_name,
+                            task.memtable_identifier,
                             task.thread_id,
-                            task.log_records[0]);
+                            task.log_records);
                     break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_WRITE_DATA_BLOCKS:
                     ctx.req_id = cc_client_->InitiateRTableWriteDataBlocks(
@@ -145,7 +151,7 @@ namespace nova {
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
             if (should_sleep) {
-                usleep(timeout);
+//                usleep(timeout);
             }
             int n = 0;
             n += rdma_store_->PollSQ();
@@ -171,9 +177,9 @@ namespace nova {
                                             uint64_t wr_id,
                                             int remote_server_id,
                                             char *buf, uint32_t imm_data) {
-        if (opcode == IBV_WC_SEND || opcode == IBV_WC_RDMA_READ) {
-            return true;
-        }
+//        if (opcode == IBV_WC_SEND || opcode == IBV_WC_RDMA_READ) {
+//            return true;
+//        }
         bool processed_by_client = cc_client_->OnRecv(opcode, wr_id,
                                                       remote_server_id, buf,
                                                       imm_data);

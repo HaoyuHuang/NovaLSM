@@ -40,8 +40,12 @@ namespace leveldb {
         background_work_mutex_.Unlock();
 
         rand_seed_ = thread_id_ + 100000;
-
         RDMA_LOG(rdmaio::INFO) << "Compaction workers started";
+
+        if (nova::NovaConfig::config->measure_recovery_duration) {
+            return;
+        }
+
         while (is_running_) {
             sem_wait(&signal);
 
@@ -63,7 +67,7 @@ namespace leveldb {
                 db_tasks[task.db].push_back(task);
             }
 
-            for (auto& it : db_tasks) {
+            for (auto &it : db_tasks) {
                 auto db = reinterpret_cast<DB *>(it.first);
                 db->PerformCompaction(this, it.second);
             }

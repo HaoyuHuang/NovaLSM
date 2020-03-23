@@ -85,6 +85,90 @@ namespace nova {
         return (g_seed >> 16) & 0x7FFF;
     }
 
+    uint32_t
+    EncodeMemTableId(char *buf, leveldb::MemTableIdentifier memtable_id) {
+        leveldb::EncodeFixed32(buf, memtable_id.cc_id);
+        leveldb::EncodeFixed32(buf + 4, memtable_id.db_id);
+        leveldb::EncodeFixed32(buf + 8, memtable_id.memtable_id);
+        return 12;
+    }
+
+    uint32_t
+    DecodeMemTableId(char *buf, leveldb::MemTableIdentifier *memtable_id) {
+        memtable_id->cc_id = leveldb::DecodeFixed32(buf);
+        memtable_id->db_id = leveldb::DecodeFixed32(buf + 4);
+        memtable_id->memtable_id = leveldb::DecodeFixed32(buf + 8);
+    }
+
+    uint32_t
+    LogRecordsSize(const std::vector<leveldb::LevelDBLogRecord> &log_records) {
+        uint32_t size = 0;
+        for (auto &record : log_records) {
+            size += 4;
+            size += 4;
+            size += record.key.size();
+            size += 4;
+            size += record.value.size();
+            size += 8;
+        }
+        return size;
+    }
+
+    uint32_t
+    EncodeLogRecords(char *buf,
+                     const std::vector<leveldb::LevelDBLogRecord> &log_records) {
+        uint32_t size = 0;
+        for (auto &record : log_records) {
+            uint32_t record_size =
+                    4 + record.key.size() + 4 + record.value.size() + 8;
+            leveldb::EncodeFixed32(buf + size, record_size);
+            size += 4;
+            size += leveldb::EncodeSlice(buf + size, record.key);
+            size += leveldb::EncodeSlice(buf + size, record.value);
+            leveldb::EncodeFixed64(buf + size, record.sequence_number);
+            size += 8;
+        }
+        return size;
+    }
+
+    uint32_t DecodeLogRecords(char *buf, uint32_t size,
+                              std::vector<leveldb::LevelDBLogRecord> *log_records) {
+        uint32_t read_size = 0;
+        while (read_size < size) {
+            uint32_t record_size = leveldb::DecodeFixed32(buf + read_size);
+            read_size += 4;
+            if (record_size == 0) {
+                break;
+            }
+
+            leveldb::LevelDBLogRecord record = {};
+            record.key = leveldb::DecodeSlice(buf + read_size);
+            read_size += (4 + record.key.size());
+            record.value = leveldb::DecodeSlice(buf + read_size);
+            read_size += (4 + record.value.size());
+            record.sequence_number = leveldb::DecodeFixed64(buf + read_size);
+            read_size += 8;
+            log_records->push_back(record);
+        }
+    }
+
+    uint32_t DecodeLogRecord(char *buf,
+                             leveldb::LevelDBLogRecord *log_record) {
+        uint32_t read_size = 0;
+        uint32_t record_size = leveldb::DecodeFixed32(buf + read_size);
+        read_size += 4;
+        if (record_size == 0) {
+            return 0;
+        }
+        log_record->key = leveldb::DecodeSlice(buf + read_size);
+        read_size += (4 + log_record->key.size());
+        log_record->value = leveldb::DecodeSlice(buf + read_size);
+        read_size += (4 + log_record->value.size());
+        log_record->sequence_number = leveldb::DecodeFixed64(buf + read_size);
+        read_size += 8;
+        return read_size;
+    }
+
 
     uint64_t tab_hash(const char *key, size_t len) {
         // a large prime number

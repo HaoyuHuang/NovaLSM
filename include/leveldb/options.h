@@ -183,6 +183,8 @@ namespace leveldb {
         // Many applications will benefit from passing the result of
         // NewBloomFilterPolicy() here.
         const FilterPolicy *filter_policy = nullptr;
+
+        MemManager *mem_manager = nullptr;
     };
 
 // Options that control read operations

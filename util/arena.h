@@ -10,12 +10,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <leveldb/db_types.h>
 
 namespace leveldb {
 
     class Arena {
     public:
-        Arena();
+        Arena(MemManager *mem_manager);
 
         Arena(const Arena &) = delete;
 
@@ -36,6 +37,8 @@ namespace leveldb {
         }
 
     private:
+        MemManager *mem_manager_;
+
         char *AllocateFallback(size_t bytes);
 
         char *AllocateNewBlock(size_t block_bytes);
