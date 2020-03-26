@@ -203,8 +203,8 @@ int main(int argc, char *argv[]) {
 
     NovaCCConfig::cc_config->enable_table_locator = FLAGS_cc_enable_table_locator;
 
-    RDMA_ASSERT(FLAGS_cc_rtable_size_mb > std::max(FLAGS_cc_sstable_size_mb,
-                                                   FLAGS_cc_write_buffer_size_mb));
+//    RDMA_ASSERT(FLAGS_cc_rtable_size_mb > std::max(FLAGS_cc_sstable_size_mb,
+//                                                   FLAGS_cc_write_buffer_size_mb));
     InitializeCC();
     return 0;
 }

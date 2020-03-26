@@ -14,7 +14,7 @@
 #include "leveldb/env.h"
 #include "leveldb/table.h"
 
-#define PERSIST_META_BLOCKS_TO_RTABLE false
+#define PERSIST_META_BLOCKS_TO_RTABLE true
 
 namespace leveldb {
 

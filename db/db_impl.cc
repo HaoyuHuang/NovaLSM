@@ -1561,19 +1561,19 @@ namespace leveldb {
                                     next_imm_slot, options.rand_seed);
         }
 
-        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
-        RDMA_ASSERT(dc);
-        dc->set_dbid(dbid_);
-//        leveldb::WriteBatch batch;
-//        batch.Put(key, value);
-//        WriteBatchInternal::Contents(&batch);
-        options.dc_client->InitiateReplicateLogRecords(
-                fmt::format("{}-{}-{}", server_id_, dbid_, memtable_id),
-                options.thread_id, value);
-        for (const auto &file : closed_log_files) {
-            options.dc_client->InitiateCloseLogFile(
-                    fmt::format("{}-{}-{}", server_id_, dbid_, file));
-        }
+//        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
+//        RDMA_ASSERT(dc);
+//        dc->set_dbid(dbid_);
+////        leveldb::WriteBatch batch;
+////        batch.Put(key, value);
+////        WriteBatchInternal::Contents(&batch);
+//        options.dc_client->InitiateReplicateLogRecords(
+//                fmt::format("{}-{}-{}", server_id_, dbid_, memtable_id),
+//                options.thread_id, value);
+//        for (const auto &file : closed_log_files) {
+//            options.dc_client->InitiateCloseLogFile(
+//                    fmt::format("{}-{}-{}", server_id_, dbid_, file));
+//        }
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format("#### Put key {} in table {}", key.ToString(),
                            memtable_id);
