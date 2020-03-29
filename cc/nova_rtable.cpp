@@ -126,6 +126,10 @@ namespace leveldb {
 
     uint64_t NovaRTable::AllocateBuf(const std::string &sstable,
                                      uint32_t size, bool is_meta_blocks) {
+        RDMA_ASSERT(size <= allocated_mem_size_) << "exceed maximum rtable size "
+                                                << size << ","
+                                                << allocated_mem_size_;
+
         mutex_.lock();
         if (is_full_ || current_mem_offset_ + size > allocated_mem_size_) {
             is_full_ = true;

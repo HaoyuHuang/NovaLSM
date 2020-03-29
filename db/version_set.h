@@ -26,7 +26,7 @@
 #include "port/thread_annotations.h"
 #include "memtable.h"
 
-#define MAX_LIVE_MEMTABLES 100000
+#define MAX_LIVE_MEMTABLES 1000000
 
 namespace leveldb {
 

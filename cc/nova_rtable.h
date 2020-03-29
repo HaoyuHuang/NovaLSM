@@ -12,7 +12,7 @@
 #include "leveldb/env.h"
 #include "table/format.h"
 
-#define MAX_NUM_RTABLES 100000
+#define MAX_NUM_RTABLES 1000000
 
 namespace leveldb {
 

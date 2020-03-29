@@ -191,7 +191,7 @@ int main(int argc, char *argv[]) {
 
     NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks = FLAGS_cc_rtable_num_servers_scatter_data_blocks;
     NovaConfig::config->log_buf_size = FLAGS_cc_log_buf_size;
-    NovaConfig::config->rtable_size = FLAGS_cc_rtable_size_mb * 1024 * 1024;
+    NovaConfig::config->rtable_size = FLAGS_cc_rtable_size_mb * 1024;
     NovaConfig::config->sstable_size = FLAGS_cc_sstable_size_mb * 1024 * 1024;
     NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
 
