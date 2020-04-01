@@ -25,7 +25,9 @@ namespace nova {
 
     enum ScatterPolicy {
         SCATTER_DC_STATS,
-        RANDOM
+        RANDOM,
+        POWER_OF_TWO,
+        POWER_OF_THREE
     };
 
     class NovaConfig {

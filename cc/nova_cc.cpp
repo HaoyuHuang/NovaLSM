@@ -171,15 +171,47 @@ namespace leveldb {
 
         auto client = reinterpret_cast<NovaBlockCCClient *> (cc_client_);
         int scatter_dcs[nblocks_in_group_.size()];
-
-        // Pull stats from all DCs.
+        std::vector<uint32_t> dc_ids;
         if (nova::NovaConfig::config->scatter_policy ==
-            nova::ScatterPolicy::SCATTER_DC_STATS) {
+            nova::ScatterPolicy::POWER_OF_TWO) {
+            uint32_t start_dc_id = rand_r(rand_seed_) %
+                                   nova::NovaCCConfig::cc_config->dc_servers.size();
+            for (int i = 0; i < 2; i++) {
+                dc_ids.push_back(start_dc_id);
+                start_dc_id = (start_dc_id + 1) %
+                              nova::NovaCCConfig::cc_config->dc_servers.size();
+            }
+        } else if (nova::NovaConfig::config->scatter_policy ==
+                   nova::ScatterPolicy::POWER_OF_THREE) {
+            uint32_t start_dc_id = rand_r(rand_seed_) %
+                                   nova::NovaCCConfig::cc_config->dc_servers.size();
+            for (int i = 0; i < 3; i++) {
+                dc_ids.push_back(start_dc_id);
+                start_dc_id = (start_dc_id + 1) %
+                              nova::NovaCCConfig::cc_config->dc_servers.size();
+            }
+        } else if (nova::NovaConfig::config->scatter_policy ==
+                   nova::ScatterPolicy::SCATTER_DC_STATS) {
             for (int i = 0;
                  i < nova::NovaCCConfig::cc_config->dc_servers.size(); i++) {
-                uint32_t server_id = nova::NovaCCConfig::cc_config->dc_servers[i].server_id;
-                uint32_t req_id = client->InitiateReadDCStats(
-                        nova::NovaCCConfig::cc_config->dc_servers[i].server_id);
+                dc_ids.push_back(i);
+            }
+        } else {
+            // Random.
+            uint32_t start_dc_id = rand_r(rand_seed_) %
+                                   nova::NovaCCConfig::cc_config->dc_servers.size();
+            for (int i = 0; i < nblocks_in_group_.size(); i++) {
+                scatter_dcs[i] = nova::NovaCCConfig::cc_config->dc_servers[start_dc_id].server_id;
+                start_dc_id = (start_dc_id + 1) %
+                              nova::NovaCCConfig::cc_config->dc_servers.size();
+            }
+        }
+
+        if (!dc_ids.empty()) {
+            for (int i = 0;
+                 i < dc_ids.size(); i++) {
+                uint32_t server_id = nova::NovaCCConfig::cc_config->dc_servers[dc_ids[i]].server_id;
+                uint32_t req_id = client->InitiateReadDCStats(server_id);
                 DCStatsStatus status;
                 status.remote_dc_id = server_id;
                 status.req_id = req_id;
@@ -202,15 +234,6 @@ namespace leveldb {
                       dc_stats_comparator);
             for (int i = 0; i < nblocks_in_group_.size(); i++) {
                 scatter_dcs[i] = dc_stats_status_[i].remote_dc_id;
-            }
-        } else {
-            // Random.
-            uint32_t start_dc_id = rand_r(rand_seed_) %
-                                   nova::NovaCCConfig::cc_config->dc_servers.size();
-            for (int i = 0; i < nblocks_in_group_.size(); i++) {
-                scatter_dcs[i] = nova::NovaCCConfig::cc_config->dc_servers[start_dc_id].server_id;
-                start_dc_id = (start_dc_id + 1) %
-                              nova::NovaCCConfig::cc_config->dc_servers.size();
             }
         }
 

@@ -698,6 +698,13 @@ namespace nova {
             db->StartTracing();
         }
 
+        stat_thread_ = new NovaStatThread;
+        stat_thread_->cc_server_workers_ = cc_server_workers;
+        stat_thread_->bgs_ = bgs;
+        stat_thread_->async_workers_ = async_workers;
+        stat_thread_->async_compaction_workers_ = async_compaction_workers;
+        stats_t_.emplace_back(std::thread(&NovaStatThread::Start, stat_thread_));
+
         // Start connection threads in the end after we have loaded all data.
         for (int i = 0;
              i <

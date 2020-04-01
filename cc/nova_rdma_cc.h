@@ -53,6 +53,7 @@ namespace nova {
         leveldb::CCClient *cc_client_ = nullptr;
         NovaCCServer *cc_server_ = nullptr;
         uint64_t thread_id_ = 0;
+        std::atomic_int_fast64_t stat_tasks_;
 
         bool verify_complete() {
             mutex_.Lock();

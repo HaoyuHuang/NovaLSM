@@ -69,6 +69,7 @@ namespace nova {
 
         std::vector<RDMAWRITEDiskWorker *> async_workers_;
         std::list<ServerWorkerCompleteTask> async_cq_;
+        MockRTable *rtable_;
 
         uint32_t processed_number_of_req_ = 0;
     private:

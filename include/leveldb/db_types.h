@@ -28,7 +28,7 @@ namespace leveldb {
             return 4 + 4 + 8 + 4;
         }
 
-        void EncodeHandle(char *buf);
+        void EncodeHandle(char *buf) const;
 
         void DecodeHandle(const char *buf);
     };

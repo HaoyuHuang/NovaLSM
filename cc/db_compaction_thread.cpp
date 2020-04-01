@@ -55,6 +55,8 @@ namespace leveldb {
             background_work_queue_.clear();
             background_work_mutex_.Unlock();
 
+            num_tasks_ += tasks.size();
+
 //            auto db = reinterpret_cast<DB *>(tasks[0].db);
 //            db->PerformCompaction(this, tasks);
 

@@ -23,34 +23,50 @@ namespace nova {
                 fmt::format("{}/rtable-{}", table_path_, rtable_id_), meta,
                 &writable_file_);
         RDMA_ASSERT(s.ok()) << s.ToString();
-        live_files_.push_back(rtable_id_);
+    }
+
+
+    bool MockRTable::Read(uint64_t size) {
+        if (live_files_.size() <= 0) {
+            return false;
+        }
+
+        auto file = live_fds_[rand() % live_fds_.size()];
+        uint64_t offset = rand() % (max_rtable_size_ - 4096);
+        leveldb::Slice result;
+        RDMA_ASSERT(file->Read({}, offset, 4096, &result, buf).ok());
     }
 
     void MockRTable::CreateNewFile() {
-        if (size_ > max_rtable_size_) {
-            rtable_id_ += 1;
+        if (size_ >= max_rtable_size_) {
+
 //            writable_file_->Sync();
-            leveldb::Status s = writable_file_->Close();
-            RDMA_ASSERT(s.ok()) << s.ToString();
+//            leveldb::Status s = writable_file_->Close();
+//            RDMA_ASSERT(s.ok()) << s.ToString();
 
+            live_files_.push_back(rtable_id_);
+            live_fds_.push_back(writable_file_);
 
+            rtable_id_ += 1;
             leveldb::EnvFileMetadata meta = {};
-            s = env_->NewReadWriteFile(
+            leveldb::Status s = env_->NewReadWriteFile(
                     fmt::format("{}/rtable-{}", table_path_, rtable_id_), meta,
                     &writable_file_);
             RDMA_ASSERT(s.ok()) << s.ToString();
 
-            live_files_.push_back(rtable_id_);
             size_ = 0;
         }
 
 
         if (live_files_.size() == max_num_rtables_) {
             uint32_t id = live_files_.front();
+            auto file = live_fds_.front();
+            file->Close();
             leveldb::Status s = env_->DeleteFile(
                     fmt::format("{}/rtable-{}", table_path_, id));
             RDMA_ASSERT(s.ok()) << s.ToString();
-            live_files_.pop_front();
+            live_files_.erase(live_files_.begin());
+            live_fds_.erase(live_fds_.begin());
         }
 
     }

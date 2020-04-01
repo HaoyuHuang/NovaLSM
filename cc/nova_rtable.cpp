@@ -4,6 +4,7 @@
 // Copyright (c) 2020 University of Southern California. All rights reserved.
 //
 #include <fmt/core.h>
+#include <leveldb/cache.h>
 #include "db/filename.h"
 
 #include "nova_rtable.h"
@@ -15,7 +16,7 @@ namespace leveldb {
 
 //    nova::DCStats dc_stats;
 
-    void RTableHandle::EncodeHandle(char *buf) {
+    void RTableHandle::EncodeHandle(char *buf) const {
         EncodeFixed32(buf, server_id);
         EncodeFixed32(buf + 4, rtable_id);
         EncodeFixed64(buf + 8, offset);
@@ -126,9 +127,10 @@ namespace leveldb {
 
     uint64_t NovaRTable::AllocateBuf(const std::string &sstable,
                                      uint32_t size, bool is_meta_blocks) {
-        RDMA_ASSERT(size <= allocated_mem_size_) << "exceed maximum rtable size "
-                                                << size << ","
-                                                << allocated_mem_size_;
+        RDMA_ASSERT(size <= allocated_mem_size_)
+            << "exceed maximum rtable size "
+            << size << ","
+            << allocated_mem_size_;
 
         mutex_.lock();
         if (is_full_ || current_mem_offset_ + size > allocated_mem_size_) {
@@ -165,12 +167,13 @@ namespace leveldb {
         return (uint64_t) (backing_mem_) + off;
     }
 
-    void NovaRTable::Persist() {
+    uint64_t NovaRTable::Persist() {
+        uint64_t persisted_bytes = 0;
         mutex_.lock();
         if (allocated_bufs_.empty()) {
             Seal();
             mutex_.unlock();
-            return;
+            return persisted_bytes;
         }
 
         // sequential IOs to disk.
@@ -230,7 +233,7 @@ namespace leveldb {
 
         if (writes.empty()) {
             persist_mutex_.unlock();
-            return;
+            return persisted_bytes;
         }
 
 
@@ -248,6 +251,7 @@ namespace leveldb {
             // persist offset -> size.
             nova::dc_stats.dc_queue_depth += 1;
             nova::dc_stats.dc_pending_disk_writes += size;
+            persisted_bytes += size;
 
             Status s = file_->Append(Slice(backing_mem_ + offset, size));
             RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
@@ -283,6 +287,7 @@ namespace leveldb {
         // Persist the last range.
         nova::dc_stats.dc_queue_depth += 1;
         nova::dc_stats.dc_pending_disk_writes += size;
+        persisted_bytes += size;
 
         Status s = file_->Append(Slice(backing_mem_ + offset, size));
         RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
@@ -315,6 +320,7 @@ namespace leveldb {
         Seal();
         mutex_.unlock();
         persist_mutex_.unlock();
+        return persisted_bytes;
     }
 
     void NovaRTable::DeleteSSTable(const std::string &sstable_id) {
@@ -432,11 +438,39 @@ namespace leveldb {
         return handle;
     }
 
+    static void DeleteCachedBlock(const Slice &key, void *value) {
+        char *block = reinterpret_cast<char *>(value);
+        delete block;
+    }
+
     void NovaRTableManager::ReadDataBlock(
             const leveldb::RTableHandle &rtable_handle, uint64_t offset,
             uint32_t size, char *scratch) {
-        NovaRTable *rtable = rtables_[rtable_handle.rtable_id];
-        rtable->Read(offset, size, scratch);
+        if (!block_cache_) {
+            NovaRTable *rtable = rtables_[rtable_handle.rtable_id];
+            rtable->Read(offset, size, scratch);
+            return;
+        }
+
+        char cache_key_buffer[RTableHandle::HandleSize()];
+        rtable_handle.EncodeHandle(cache_key_buffer);
+        Slice key(cache_key_buffer, sizeof(cache_key_buffer));
+        auto cache_handle = block_cache_->Lookup(key);
+        if (cache_handle != nullptr) {
+            auto block = reinterpret_cast<char *>(block_cache_->Value(
+                    cache_handle));
+            memcpy(scratch, block, rtable_handle.size);
+        } else {
+            NovaRTable *rtable = rtables_[rtable_handle.rtable_id];
+            rtable->Read(offset, size, scratch);
+            char *block = new char[size];
+            memcpy(block, scratch, size);
+            cache_handle = block_cache_->Insert(key, block,
+                                                size,
+                                                &DeleteCachedBlock);
+
+        }
+        block_cache_->Release(cache_handle);
     }
 
     NovaRTable *NovaRTableManager::active_rtable(uint32_t thread_id) {
@@ -486,5 +520,6 @@ namespace leveldb {
                                          nranges) :
             env_(env), mem_manager_(mem_manager), rtable_path_(rtable_path),
             rtable_size_(rtable_size) {
+//        block_cache_ = leveldb::NewLRUCache(32 * 1024 * 1024);
     }
 }

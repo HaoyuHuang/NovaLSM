@@ -20,6 +20,8 @@ namespace nova {
 
         void Persist(char *buf, uint64_t size);
 
+        bool Read(uint64_t size);
+
     private:
         void CreateNewFile();
 
@@ -32,7 +34,10 @@ namespace nova {
         uint32_t rtable_id_ = 0;
         leveldb::Env *env_;
         leveldb::ReadWriteFile *writable_file_ = nullptr;
-        std::list<uint32_t> live_files_;
+        std::vector<uint32_t> live_files_;
+        std::vector<leveldb::ReadWriteFile *> live_fds_;
+        char buf[4096];
+
     };
 }
 

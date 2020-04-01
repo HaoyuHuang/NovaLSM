@@ -154,6 +154,18 @@ int main(int argc, char *argv[]) {
         lower_req_id = 1;
     }
 
+    uint32_t scid = mem_manager->slabclassid(0,
+                                             16 * 1024 * 1024);
+    char *buf = mem_manager->ItemAlloc(0, scid);
+    RDMA_ASSERT(buf);
+
+    mkdirs(FLAGS_table_path.c_str());
+    MockRTable *rtable = new MockRTable(env, FLAGS_table_path, 16 * 1024 * 1024,
+                                        100);
+    for (int i = 0; i < 100; i++) {
+        rtable->Persist(buf, 16 * 1024 * 1024);
+    }
+
     char *rdma_worker_buf = rdma_buf;
     for (int worker_id = 0;
          worker_id < FLAGS_num_write_workers; worker_id++) {
@@ -180,6 +192,7 @@ int main(int argc, char *argv[]) {
                 FLAGS_max_run_time, FLAGS_write_size_kb,
                 FLAGS_is_local_disk_bench, FLAGS_disk_horizontal_scalability,
                 FLAGS_server_id);
+        server_worker->rtable_ = rtable;
         store = new NovaRDMARCStore(rdma_worker_buf, worker_id, endpoints,
                                     FLAGS_rdma_max_num_sends,
                                     FLAGS_rdma_max_msg_size,

@@ -24,7 +24,7 @@ namespace leveldb {
 
         Status Read(uint64_t offset, uint32_t size, char *scratch);
 
-        void Persist();
+        uint64_t Persist();
 
         uint64_t AllocateBuf(const std::string &sstable_id,
                              uint32_t size, bool is_meta_blocks);
@@ -118,6 +118,7 @@ namespace leveldb {
         uint32_t current_rtable_id_ = 1;
         NovaRTable *active_rtables_[64];
         NovaRTable *rtables_[MAX_NUM_RTABLES];
+        leveldb::Cache *block_cache_ = nullptr;
         std::mutex mutex_;
     };
 

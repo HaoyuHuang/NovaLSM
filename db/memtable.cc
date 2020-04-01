@@ -196,7 +196,7 @@ namespace leveldb {
         uint32_t mid = memtable->memtableid();
         uint32_t refs = memtable->Unref();
         if (refs <= 0) {
-            RDMA_LOG(rdmaio::INFO)
+            RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("flush delete db-{} mid-{}", dbname, mid);
             delete memtable;
             memtable = nullptr;
@@ -224,7 +224,7 @@ namespace leveldb {
         uint32_t mid = memtable->memtableid();
         uint32_t refs = memtable->Unref();
         if (refs == 0) {
-            RDMA_LOG(rdmaio::INFO) << fmt::format("unref delete db-{} mid-{}", dbname, mid);
+            RDMA_LOG(rdmaio::DEBUG) << fmt::format("unref delete db-{} mid-{}", dbname, mid);
             delete memtable;
             memtable = nullptr;
         }

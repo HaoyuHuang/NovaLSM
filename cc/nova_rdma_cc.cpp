@@ -56,6 +56,8 @@ namespace nova {
         }
         mutex_.Unlock();
 
+        stat_tasks_ += queue.size();
+
         for (const leveldb::RDMAAsyncClientRequestTask &task : queue) {
             RequestCtx ctx = {};
             ctx.sem = task.sem;

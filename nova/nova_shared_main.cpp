@@ -197,6 +197,10 @@ int main(int argc, char *argv[]) {
 
     if (FLAGS_cc_scatter_policy == "random") {
         NovaConfig::config->scatter_policy = ScatterPolicy::RANDOM;
+    } else if (FLAGS_cc_scatter_policy == "power_of_two") {
+        NovaConfig::config->scatter_policy = ScatterPolicy::POWER_OF_TWO;
+    } else if (FLAGS_cc_scatter_policy == "power_of_three") {
+        NovaConfig::config->scatter_policy = ScatterPolicy::POWER_OF_THREE;
     } else {
         NovaConfig::config->scatter_policy = ScatterPolicy::SCATTER_DC_STATS;
     }

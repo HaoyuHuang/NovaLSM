@@ -117,11 +117,16 @@ namespace nova {
 
         void Start();
 
+        std::atomic_int_fast32_t stat_tasks_;
+        std::atomic_int_fast64_t stat_read_bytes_;
+        std::atomic_int_fast64_t stat_write_bytes_;
+
     private:
         leveldb::NovaRTableManager *rtable_manager_;
         std::vector<NovaCCServer *> cc_servers_;
 
         bool is_running_ = true;
+
         std::mutex mutex_;
         std::list<NovaServerAsyncTask> queue_;
         sem_t sem_;

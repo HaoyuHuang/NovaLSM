@@ -181,10 +181,11 @@ namespace leveldb {
         VersionSet *vset_;  // VersionSet to which this Version belongs
         Version *next_;     // Next version in linked list
         Version *prev_;     // Previous version in linked list
-        int refs_;          // Number of live refs to this version
+        int refs_ = 0;          // Number of live refs to this version
 
         // List of files per level
         std::vector<FileMetaData *> files_[config::kNumLevels];
+//        std::map<uint64_t, FileMetaData*> fn_files_;
         FileMetaData* fn_files_[MAX_LIVE_MEMTABLES];
         std::set<uint64_t> skip_tables_for_compaction_;
 

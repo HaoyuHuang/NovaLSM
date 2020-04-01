@@ -760,7 +760,7 @@ namespace leveldb {
 //        } else {
 //
 //        }
-        bool compacted = BackgroundCompaction(bg_thread, tasks);
+        bool compacted = CompactMemTable(bg_thread, tasks);
         if (compacted) {
             versions_->LevelSummary(bg_thread->thread_id());
         }
@@ -1519,8 +1519,8 @@ namespace leveldb {
                     }
 
                     Log(options_.info_log,
-                        "Current memtable full; Make room waiting... pid-%u\n",
-                        partition_id);
+                        "Current memtable full; Make room waiting... pid-%u-tid-%lu\n",
+                        partition_id, options.thread_id);
                     // Try a different table.
                     partition->background_work_finished_signal_.Wait();
                     wait = true;
@@ -1539,12 +1539,15 @@ namespace leveldb {
                     schedule_compaction = true;
                     if (wait) {
                         Log(options_.info_log,
-                            "Make room; resuming... pid-%u\n", partition_id);
+                            "Make room; resuming... pid-%u-tid-%lu\n",
+                            partition_id, options.thread_id);
                     }
                     break;
                 }
             }
         }
+
+
 
         uint32_t memtable_id = table->memtableid();
         table->Add(last_sequence, ValueType::kTypeValue, key, value);

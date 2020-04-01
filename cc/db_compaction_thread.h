@@ -51,7 +51,7 @@ namespace leveldb {
         sem_t signal;
         std::vector <CompactionTask> background_work_queue_
         GUARDED_BY(background_work_mutex_);
-        uint32_t num_tasks_ = 0;
+        std::atomic_int_fast32_t num_tasks_;
 
         MemManager *mem_manager_ = nullptr;
         bool is_running_ = false;

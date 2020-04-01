@@ -19,6 +19,7 @@
 #include "nova_cc.h"
 #include "cc/db_compaction_thread.h"
 #include "mc/nova_mc_wb_worker.h"
+#include "nova_cc_stat_thread.h"
 
 namespace nova {
     class NovaCCConnWorker;
@@ -72,6 +73,8 @@ namespace nova {
 
         std::vector<NovaCCServerAsyncWorker *> cc_server_workers;
         std::vector<leveldb::EnvBGThread *> bgs;
+        NovaStatThread *stat_thread_;
+        vector<std::thread> stats_t_;
 
         struct event_base *base;
         int current_conn_worker_id_;

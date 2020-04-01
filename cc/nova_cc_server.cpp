@@ -103,11 +103,11 @@ namespace nova {
             } else {
                 RDMA_ASSERT(false);
             }
-            async_cq_.pop_front();
             RDMA_LOG(DEBUG) << fmt::format(
                         "CCServer[{}]: Completed Request ss:{} req:{} type:{}",
                         thread_id_, task.remote_server_id, task.dc_req_id,
                         task.request_type);
+            async_cq_.pop_front();
         }
         mutex_.unlock();
         if (nworks > 0) {
@@ -375,6 +375,10 @@ namespace nova {
     void NovaCCServerAsyncWorker::AddTask(
             const nova::NovaServerAsyncTask &task) {
         mutex_.lock();
+        stat_tasks_ += 1;
+        if (task.request_type == leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS) {
+
+        }
         queue_.push_back(task);
         mutex_.unlock();
 
@@ -405,6 +409,7 @@ namespace nova {
 
             std::map<uint32_t, std::vector<NovaServerCompleteTask>> t_tasks;
             for (auto &task : tasks) {
+                stat_tasks_ += 1;
                 NovaServerCompleteTask ct = {};
                 ct.remote_server_id = task.remote_server_id;
                 ct.dc_req_id = task.dc_req_id;
@@ -420,14 +425,15 @@ namespace nova {
                                                    task.rtable_handle.offset,
                                                    task.rtable_handle.size,
                                                    task.rdma_buf);
+                    stat_read_bytes_ += task.rtable_handle.size;
                 } else if (task.request_type ==
                            leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
                     RDMA_ASSERT(task.persist_pairs.size() == 1);
                     for (auto &pair : task.persist_pairs) {
                         leveldb::NovaRTable *rtable = rtable_manager_->rtable(
                                 pair.rtable_id);
-                        rtable->Persist();
-
+                        uint64_t persisted_bytes = rtable->Persist();
+                        stat_write_bytes_ += persisted_bytes;
                         RDMA_LOG(DEBUG) << fmt::format(
                                     "Persisting rtable {} for sstable {}",
                                     pair.rtable_id, pair.sstable_id);

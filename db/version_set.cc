@@ -71,8 +71,8 @@ namespace leveldb {
         assert(refs_ == 0);
 
         // Remove from linked list
-        prev_->next_ = next_;
-        next_->prev_ = prev_;
+//        prev_->next_ = next_;
+//        next_->prev_ = prev_;
 
         // Drop references to files
         for (int level = 0; level < config::kNumLevels; level++) {
@@ -699,7 +699,8 @@ namespace leveldb {
     public:
         // Initialize a builder with the files from *base and other info from *vset
         Builder(VersionSet *vset, Version *base) : vset_(vset), base_(base) {
-            vset->versions_[base->version_id_].Ref();
+            Version* v= vset->versions_[base->version_id_].Ref();
+            RDMA_ASSERT(v == base);
             BySmallestKey cmp;
             cmp.internal_comparator = &vset_->icmp_;
             for (int level = 0; level < config::kNumLevels; level++) {
@@ -722,7 +723,7 @@ namespace leveldb {
                     FileMetaData *f = to_unref[i];
                     f->refs--;
                     if (f->refs <= 0) {
-                        delete f;
+//                        delete f;
                     }
                 }
             }
@@ -884,10 +885,10 @@ namespace leveldb {
         current_ = v;
 
         // Append to linked list
-        v->prev_ = dummy_versions_.prev_;
-        v->next_ = &dummy_versions_;
-        v->prev_->next_ = v;
-        v->next_->prev_ = v;
+//        v->prev_ = dummy_versions_.prev_;
+//        v->next_ = &dummy_versions_;
+//        v->prev_->next_ = v;
+//        v->next_->prev_ = v;
 
         versions_[v->version_id_].SetVersion(v);
         current_version_id_.store(v->version_id_);
@@ -913,7 +914,7 @@ namespace leveldb {
             builder.Apply(edit);
             builder.SaveTo(v);
         }
-        Finalize(v);
+//        Finalize(v);
         AppendVersion(v);
         log_number_ = edit->log_number_;
         prev_log_number_ = edit->prev_log_number_;
@@ -2016,14 +2017,15 @@ namespace leveldb {
 
     void AtomicVersion::Unref(const std::string &dbname) {
         mutex.lock();
-        RDMA_ASSERT(version);
-        uint32_t vid = version->version_id();
-        uint32_t refs = version->Unref();
-        if (refs == 0) {
-            RDMA_LOG(rdmaio::INFO)
-                << fmt::format("delete db-{} vid-{}", dbname, vid);
-            delete version;
-            version = nullptr;
+        if (version) {
+            uint32_t vid = version->version_id();
+            uint32_t refs = version->Unref();
+            if (refs <= 0) {
+//                RDMA_LOG(rdmaio::INFO)
+//                    << fmt::format("delete vid-{}", vid);
+                delete version;
+                version = nullptr;
+            }
         }
         mutex.unlock();
     }

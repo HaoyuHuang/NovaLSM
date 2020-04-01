@@ -85,19 +85,31 @@ namespace nova {
         RDMA_LOG(INFO) << fmt::format("worker[{}]: Started", thread_id_);
 
         if (is_local_disk_bench_) {
-            uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                      write_size_kb_ *
-                                                      1024);
-            char *buf = mem_manager_->ItemAlloc(thread_id_, scid);
-            RDMA_ASSERT(buf);
+//            uint32_t scid = mem_manager_->slabclassid(thread_id_,
+//                                                      write_size_kb_ *
+//                                                      1024);
+//            char *buf = mem_manager_->ItemAlloc(thread_id_, scid);
+//            RDMA_ASSERT(buf);
+//
+//            std::string path = fmt::format("{}/{}", table_path_, thread_id_);
+//            mkdirs(path.c_str());
+//            MockRTable *rtable = new MockRTable(env_, path, rtable_size_,
+//                                                max_num_rtables_);
 
-            std::string path = fmt::format("{}/{}", table_path_, thread_id_);
-            mkdirs(path.c_str());
-            MockRTable *rtable = new MockRTable(env_, path, rtable_size_,
-                                                max_num_rtables_);
+
 
             while (true) {
-                rtable->Persist(buf, write_size_kb_ * 1024);
+                rtable_->Read(4096);
+//                int read = rand() % 100;
+//                if (read <= 1) {
+//                    rtable->Persist(buf, write_size_kb_ * 1024);
+//                } else {
+//                    if () {
+//
+//                    } else {
+//                        rtable->Persist(buf, write_size_kb_ * 1024);
+//                    }
+//                }
 
 //                ServerWorkerAsyncTask task = {};
 //                task.local_buf = buf;
