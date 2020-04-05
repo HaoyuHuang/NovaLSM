@@ -58,6 +58,10 @@ namespace leveldb {
 
             Mutex &operator=(const Mutex &) = delete;
 
+            bool TryLock() {
+                return mu_.try_lock();
+            }
+
             void Lock() EXCLUSIVE_LOCK_FUNCTION() {
 //                unsigned long queue_me;
                 mu_.lock();

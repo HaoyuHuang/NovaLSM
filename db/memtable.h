@@ -117,11 +117,15 @@ namespace leveldb {
 
         void Unref(const std::string& dbname);
 
-        bool memtable_flushed_ = false;
-        uint64_t l0_file_number = 0;
-        std::mutex mutex;
-        MemTable *memtable = nullptr;
+        bool is_immutable_ = false;
+        bool is_flushed_ = false;
+        uint64_t l0_file_number_ = 0;
+        std::mutex mutex_;
+        MemTable *memtable_ = nullptr;
     };
+
+
+
 
 }  // namespace leveldb
 

@@ -13,6 +13,7 @@
 #include <vector>
 #include <map>
 #include <mutex>
+#include "port/port.h"
 
 #include "slice.h"
 
@@ -180,6 +181,13 @@ namespace leveldb {
         virtual void
         RemoveSSTables(const std::string &dbname,
                        const std::vector<uint64_t> &file_number) = 0;
+    };
+
+    class MemTablePool {
+    public:
+        port::CondVar ** range_cond_vars_;
+        uint32_t num_available_memtables_ = 0;
+        std::mutex mutex_;
     };
 }
 

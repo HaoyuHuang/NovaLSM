@@ -50,6 +50,7 @@ namespace nova {
         };
 
         leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
+                                    leveldb::MemTablePool *memtable_pool,
                                     std::vector<leveldb::EnvBGThread *> bg_threads) {
             leveldb::EnvOptions env_option;
             env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_MEM;
@@ -58,6 +59,7 @@ namespace nova {
             leveldb::DB *db;
             leveldb::Options options;
             options.block_cache = cache;
+            options.memtable_pool = memtable_pool;
             if (NovaCCConfig::cc_config->write_buffer_size_mb > 0) {
                 options.write_buffer_size =
                         (uint64_t) (
@@ -418,10 +420,18 @@ namespace nova {
                     1024;
             row_cache = leveldb::NewLRUCache(row_cache_size);
         }
-
+        leveldb::MemTablePool *pool = new leveldb::MemTablePool;
+        pool->num_available_memtables_ =
+                NovaCCConfig::cc_config->num_memtables;
         for (int db_index = 0; db_index < ndbs; db_index++) {
-            dbs_.push_back(CreateDatabase(db_index, block_cache, bgs));
+            dbs_.push_back(CreateDatabase(db_index, block_cache, pool, bgs));
         }
+        pool->range_cond_vars_ = new leveldb::port::CondVar *[dbs_.size()];
+        for (int db_index = 0; db_index < ndbs; db_index++) {
+            pool->range_cond_vars_[db_index] = nullptr;
+            dbs_[db_index]->dbs_ = dbs_;
+        }
+
         leveldb::EnvOptions env_option;
         env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
         leveldb::PosixEnv *env = new leveldb::PosixEnv;
@@ -703,7 +713,8 @@ namespace nova {
         stat_thread_->bgs_ = bgs;
         stat_thread_->async_workers_ = async_workers;
         stat_thread_->async_compaction_workers_ = async_compaction_workers;
-        stats_t_.emplace_back(std::thread(&NovaStatThread::Start, stat_thread_));
+        stats_t_.emplace_back(
+                std::thread(&NovaStatThread::Start, stat_thread_));
 
         // Start connection threads in the end after we have loaded all data.
         for (int i = 0;

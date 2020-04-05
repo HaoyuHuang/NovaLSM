@@ -128,9 +128,7 @@ namespace leveldb {
 
         DBProfiler *db_profiler_ = nullptr;
 
-        bool Write(const WriteOptions &options, const Slice &key,
-                   const Slice &value, uint32_t partition_id, bool should_wait,
-                   uint64_t last_sequence);
+        void StealMemTable(const WriteOptions &options);
 
         // Information for a manual compaction
         struct ManualCompaction {
@@ -191,8 +189,7 @@ namespace leveldb {
         void RecordBackgroundError(const Status &s);
 
         void MaybeScheduleCompaction(
-                uint32_t thread_id, MemTable *imm, uint32_t partition_id,
-                uint32_t imm_slot,
+                MemTable * imm,
                 unsigned int *rand_seed) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
@@ -238,6 +235,14 @@ namespace leveldb {
         // Lock over the persistent DB state.  Non-null iff successfully acquired.
         FileLock *db_lock_;
 
+        // Range lock.
+        port::Mutex range_lock_;
+        port::CondVar memtable_available_signal_;
+
+        uint32_t pinned_memtable_id_ = 0;
+        bool can_create_a_new_pinned_memtable_ = false;
+
+
         // State below is protected by mutex_
         port::Mutex mutex_;
         std::atomic<bool> shutting_down_;
@@ -246,29 +251,11 @@ namespace leveldb {
 
         std::atomic_int_fast32_t memtable_id_seq_ ;
         std::atomic_int_fast32_t bg_thread_id_seq_;
+
         // key -> memtable-id.
-        struct TableLocation {
-            uint32_t memtable_id = 0;
-        };
         TableLocator *table_locator_ = nullptr;
 
-        struct MemTablePartition {
-            MemTablePartition() : background_work_finished_signal_(&mutex) {
-
-            };
-            MemTable *memtable;
-            port::Mutex mutex;
-            uint32_t partition_id = 0;
-            std::vector<uint32_t> imm_slots;
-            std::queue<uint32_t> available_slots;
-            std::vector<uint32_t> closed_log_files;
-            port::CondVar background_work_finished_signal_ GUARDED_BY(mutex);
-        };
-
-        std::vector<MemTablePartition *> active_memtables_ GUARDED_BY(mutex_);
-
-        std::vector<MemTable *> imms_ GUARDED_BY(
-                mutex_);  // Memtable being compacted
+        std::vector<MemTable*> active_memtables_;
 
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
@@ -289,6 +276,7 @@ namespace leveldb {
         CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
         std::string current_log_file_name_ GUARDED_BY(mutex_);
         std::list<std::string> closed_log_files_  GUARDED_BY(mutex_);
+        uint64_t processed_writes_ = 0;
     };
 
 // Sanitize db options.  The caller should delete result.info_log if

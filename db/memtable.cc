@@ -177,57 +177,59 @@ namespace leveldb {
     }
 
     void AtomicMemTable::SetMemTable(leveldb::MemTable *mem) {
-        mutex.lock();
-        l0_file_number = 0;
-        memtable_flushed_ = false;
-        RDMA_ASSERT(!memtable);
-        memtable = mem;
-        memtable->Ref();
-        mutex.unlock();
+        mutex_.lock();
+        l0_file_number_ = 0;
+        is_flushed_ = false;
+        is_immutable_ = false;
+        RDMA_ASSERT(!memtable_);
+        memtable_ = mem;
+        memtable_->Ref();
+        mutex_.unlock();
     }
 
     void AtomicMemTable::SetFlushed(const std::string &dbname, uint64_t l0fn) {
-        mutex.lock();
-        RDMA_ASSERT(!memtable_flushed_);
-        RDMA_ASSERT(l0_file_number == 0);
-        l0_file_number = l0fn;
-        memtable_flushed_ = true;
-        RDMA_ASSERT(memtable);
-        uint32_t mid = memtable->memtableid();
-        uint32_t refs = memtable->Unref();
+        mutex_.lock();
+        RDMA_ASSERT(!is_flushed_);
+        RDMA_ASSERT(l0_file_number_ == 0);
+        RDMA_ASSERT(is_immutable_);
+        l0_file_number_ = l0fn;
+        is_flushed_ = true;
+        RDMA_ASSERT(memtable_);
+        uint32_t mid = memtable_->memtableid();
+        uint32_t refs = memtable_->Unref();
         if (refs <= 0) {
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("flush delete db-{} mid-{}", dbname, mid);
-            delete memtable;
-            memtable = nullptr;
+            delete memtable_;
+            memtable_ = nullptr;
         }
-        mutex.unlock();
+        mutex_.unlock();
     }
 
     MemTable *AtomicMemTable::Ref(uint64_t *l0_fn) {
         MemTable *mem = nullptr;
-        mutex.lock();
-        if (memtable != nullptr && !memtable_flushed_) {
-            mem = memtable;
-            memtable->Ref();
+        mutex_.lock();
+        if (memtable_ != nullptr && !is_flushed_) {
+            mem = memtable_;
+            memtable_->Ref();
         }
         if (l0_fn) {
-            *l0_fn = l0_file_number;
+            *l0_fn = l0_file_number_;
         }
-        mutex.unlock();
+        mutex_.unlock();
         return mem;
     }
 
     void AtomicMemTable::Unref(const std::string& dbname) {
-        mutex.lock();
-        RDMA_ASSERT(memtable);
-        uint32_t mid = memtable->memtableid();
-        uint32_t refs = memtable->Unref();
+        mutex_.lock();
+        RDMA_ASSERT(memtable_);
+        uint32_t mid = memtable_->memtableid();
+        uint32_t refs = memtable_->Unref();
         if (refs == 0) {
             RDMA_LOG(rdmaio::DEBUG) << fmt::format("unref delete db-{} mid-{}", dbname, mid);
-            delete memtable;
-            memtable = nullptr;
+            delete memtable_;
+            memtable_ = nullptr;
         }
-        mutex.unlock();
+        mutex_.unlock();
     }
 }  // namespace leveldb

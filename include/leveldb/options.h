@@ -183,6 +183,8 @@ namespace leveldb {
         // Many applications will benefit from passing the result of
         // NewBloomFilterPolicy() here.
         const FilterPolicy *filter_policy = nullptr;
+
+        MemTablePool *memtable_pool;
     };
 
 // Options that control read operations
@@ -239,6 +241,8 @@ namespace leveldb {
         // For replicating log records.
         uint64_t thread_id;
         CCClient *dc_client = nullptr;
+
+        uint64_t total_writes = 0;
     };
 
 }  // namespace leveldb

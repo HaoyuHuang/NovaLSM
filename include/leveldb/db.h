@@ -162,6 +162,8 @@ namespace leveldb {
 
         virtual void PerformCompaction(EnvBGThread *bg_thread,
                                        const std::vector<CompactionTask> &tasks) = 0;
+
+        std::vector<DB*> dbs_;
     };
 
 // Destroy the contents of the specified database.

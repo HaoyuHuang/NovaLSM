@@ -305,6 +305,7 @@ namespace nova {
         option.thread_id = worker->thread_id_;
         option.rand_seed = &worker->rand_seed;
         option.hash = key;
+        option.total_writes = worker->stats.nputs * NovaCCConfig::cc_config->num_conn_workers;
         CCFragment *frag = NovaCCConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
 
