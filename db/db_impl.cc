@@ -637,11 +637,11 @@ namespace leveldb {
         RDMA_ASSERT(options_.memtable_pool->num_available_memtables_ <
                     nova::NovaCCConfig::cc_config->num_memtables - dbs_.size());
         for (int i = 0; i < dbs_.size(); i++) {
-            if (!options_.memtable_pool->range_cond_vars_[i]) {
-                continue;
-            }
+//            if (!options_.memtable_pool->range_cond_vars_[i]) {
+//                continue;
+//            }
             options_.memtable_pool->range_cond_vars_[i]->SignalAll();
-            options_.memtable_pool->range_cond_vars_[i] = nullptr;
+//            options_.memtable_pool->range_cond_vars_[i] = nullptr;
         }
         options_.memtable_pool->mutex_.unlock();
 
@@ -1591,7 +1591,7 @@ namespace leveldb {
                     options_.memtable_pool->num_available_memtables_ -= 1;
                 } else {
                     // Add to wait queue.
-                    options_.memtable_pool->range_cond_vars_[dbid_] = &memtable_available_signal_;
+//                    options_.memtable_pool->range_cond_vars_[dbid_] = &memtable_available_signal_;
                 }
                 options_.memtable_pool->mutex_.unlock();
             }
@@ -1637,6 +1637,9 @@ namespace leveldb {
         }
 
         if (wait) {
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("db[{}]: Insert {} resume",
+                               dbid_, key.ToString());
             Log(options_.info_log,
                 "Make room; resuming... tid-%lu\n", options.thread_id);
         }
@@ -1769,6 +1772,7 @@ namespace leveldb {
         impl->active_memtables_.push_back(new_table);
         RDMA_ASSERT(options.memtable_pool->num_available_memtables_ >= 1);
         options.memtable_pool->num_available_memtables_ -= 1;
+        options.memtable_pool->range_cond_vars_[impl->dbid_] = &impl->memtable_available_signal_;
         impl->pinned_memtable_id_ = memtable_id;
         impl->can_create_a_new_pinned_memtable_ = false;
         impl->versions_->mid_table_mapping_[memtable_id].SetMemTable(

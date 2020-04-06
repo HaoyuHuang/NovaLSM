@@ -423,12 +423,11 @@ namespace nova {
         leveldb::MemTablePool *pool = new leveldb::MemTablePool;
         pool->num_available_memtables_ =
                 NovaCCConfig::cc_config->num_memtables;
+        pool->range_cond_vars_ = new leveldb::port::CondVar *[ndbs];
         for (int db_index = 0; db_index < ndbs; db_index++) {
             dbs_.push_back(CreateDatabase(db_index, block_cache, pool, bgs));
         }
-        pool->range_cond_vars_ = new leveldb::port::CondVar *[dbs_.size()];
         for (int db_index = 0; db_index < ndbs; db_index++) {
-            pool->range_cond_vars_[db_index] = nullptr;
             dbs_[db_index]->dbs_ = dbs_;
         }
 
