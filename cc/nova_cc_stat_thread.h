@@ -15,6 +15,7 @@ namespace nova {
     public:
         void Start();
 
+        std::vector<leveldb::DB*> dbs_;
         std::vector<NovaRDMAComputeComponent *> async_workers_;
         std::vector<NovaRDMAComputeComponent *> async_compaction_workers_;
         std::vector<NovaCCServerAsyncWorker *> cc_server_workers_;

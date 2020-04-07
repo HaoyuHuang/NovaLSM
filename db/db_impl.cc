@@ -607,15 +607,6 @@ namespace leveldb {
         Version *v = new Version(versions_,
                                  versions_->version_id_seq_.fetch_add(1));
         mutex_.Lock();
-//            Log(options_.info_log,
-//                "bg[%lu]: Level-0 table #%llu pid-%u mem-%u acquired lock",
-//                bg_thread->thread_id(),
-//                (unsigned long long) meta.number, task.memtable_partition_id,
-//                imm->memtableid());
-//            CompactionStats stats;
-//            stats.micros = env_->NowMicros() - 0;
-//            stats.bytes_written = meta.file_size;
-//            stats_[level].Add(stats);
         Status s = versions_->LogAndApply(&edit, v);
         RDMA_ASSERT(s.ok());
         mutex_.Unlock();
@@ -624,12 +615,15 @@ namespace leveldb {
         range_lock_.Lock();
         for (auto &task : tasks) {
             MemTable *imm = reinterpret_cast<MemTable *>(task.memtable);
-            if (imm->memtableid() == pinned_memtable_id_) {
-                can_create_a_new_pinned_memtable_ = true;
+            if (imm->is_pinned_) {
+                number_of_available_pinned_memtables_++;
+                RDMA_ASSERT(number_of_available_pinned_memtables_ <=
+                            min_memtables_);
             } else {
                 num_available += 1;
             }
         }
+        number_of_immutable_memtables_ -= tasks.size();
         range_lock_.Unlock();
 
         options_.memtable_pool->mutex_.lock();
@@ -637,11 +631,7 @@ namespace leveldb {
         RDMA_ASSERT(options_.memtable_pool->num_available_memtables_ <
                     nova::NovaCCConfig::cc_config->num_memtables - dbs_.size());
         for (int i = 0; i < dbs_.size(); i++) {
-//            if (!options_.memtable_pool->range_cond_vars_[i]) {
-//                continue;
-//            }
             options_.memtable_pool->range_cond_vars_[i]->SignalAll();
-//            options_.memtable_pool->range_cond_vars_[i] = nullptr;
         }
         options_.memtable_pool->mutex_.unlock();
 
@@ -736,14 +726,17 @@ namespace leveldb {
 
     void DBImpl::MaybeScheduleCompaction(MemTable *imm,
                                          unsigned int *rand_seed) {
-        uint32_t i = bg_thread_id_seq_.fetch_add(1, std::memory_order_relaxed) %
+        uint32_t i = EnvBGThread::bg_thread_id_seq.fetch_add(1,
+                                                             std::memory_order_relaxed) %
                      bg_threads_.size();
         RDMA_LOG(rdmaio::DEBUG)
-            << fmt::format("db[{}]: !!!!!!!!!!!!!!!!!!!!!Schedule flush {}",
-                           dbid_, imm->memtableid());
+            << fmt::format(
+                    "db[{}]: !!!!!!!!!!!!!!!!!!!!!Schedule flush {} on {}",
+                    dbid_, imm->memtableid(), i);
         CompactionTask task = {};
         task.db = this;
         task.memtable = imm;
+        task.memtable_size_mb = imm->ApproximateMemoryUsage() / 1024 / 1024;
         if (bg_threads_[i]->Schedule(task)) {
 //            Log(options_.info_log,
 //                "t[%u]: Schedule compaction on thread %lu: pid-%u-mid-%u",
@@ -1319,6 +1312,7 @@ namespace leveldb {
 
     Status DBImpl::Get(const ReadOptions &options, const Slice &key,
                        std::string *value) {
+        number_of_gets_ += 1;
         Status s = Status::OK();
         std::string tmp;
         SequenceNumber snapshot = kMaxSequenceNumber;
@@ -1335,6 +1329,7 @@ namespace leveldb {
                 << options.hash;
             LookupKey lkey(key, snapshot);
             if (memtable != nullptr) {
+                number_of_memtable_hits_ += 1;
                 RDMA_ASSERT(memtable->memtableid() == memtableid);
                 RDMA_ASSERT(memtable->Get(lkey, value, &s))
                     << fmt::format("key:{} memtable:{} s:{}",
@@ -1451,33 +1446,48 @@ namespace leveldb {
                         dbid_,
                         steal_from_range->dbid_,
                         steal_from_range->active_memtables_.size());
+
+            double expected_share =
+                    (double) steal_from_range->processed_writes_ /
+                    (double) options.total_writes;
+            double actual_share =
+                    (double) (steal_from_range->number_of_active_memtables_ +
+                              steal_from_range->number_of_immutable_memtables_)
+                    /
+                    (double) nova::NovaCCConfig::cc_config->num_memtables;
+
             if (steal_from_range->active_memtables_.size() > 1 &&
-                processed_writes_ > steal_from_range->processed_writes_ &&
-                active_memtables_.size() + 1 <
-                steal_from_range->active_memtables_.size()) {
+                processed_writes_ >=
+                (double) (steal_from_range->processed_writes_) * 1.1 &&
+                actual_share > expected_share) {
                 uint32_t memtable_index = rand_r(options.rand_seed) %
                                           steal_from_range->active_memtables_.size();
+
                 MemTable *steal_table = steal_from_range->active_memtables_[memtable_index];
                 AtomicMemTable *steal_atomic_table = &steal_from_range->versions_->mid_table_mapping_[steal_table->memtableid()];
-                steal_atomic_table->mutex_.lock();
-                if (!steal_atomic_table->is_immutable_) {
-                    steal_atomic_table->is_immutable_ = true;
+                if (steal_atomic_table->mutex_.try_lock()) {
+                    if (!steal_atomic_table->is_immutable_) {
+                        number_of_steals_ += 1;
+                        steal_atomic_table->is_immutable_ = true;
+                        RDMA_LOG(rdmaio::DEBUG)
+                            << fmt::format(
+                                    "db[{}]: Steal memtable {} from range {}",
+                                    dbid_,
+                                    steal_table->memtableid(),
+                                    steal_from_range->dbid_);
+                        steal_from_range->active_memtables_.erase(
+                                steal_from_range->active_memtables_.begin() +
+                                memtable_index);
 
-                    RDMA_LOG(rdmaio::INFO)
-                        << fmt::format(
-                                "db[{}]: Steal memtable {} from range {}",
-                                dbid_,
-                                steal_table->memtableid(),
-                                steal_from_range->dbid_);
+                        steal_from_range->number_of_active_memtables_ -= 1;
+                        steal_from_range->number_of_immutable_memtables_ += 1;
 
-                    steal_from_range->active_memtables_.erase(
-                            steal_from_range->active_memtables_.begin() +
-                            memtable_index);
-                    steal_from_range->MaybeScheduleCompaction(
-                            steal_table, options.rand_seed);
-                    steal_success = true;
+                        steal_from_range->MaybeScheduleCompaction(
+                                steal_table, options.rand_seed);
+                        steal_success = true;
+                    }
+                    steal_atomic_table->mutex_.unlock();
                 }
-                steal_atomic_table->mutex_.unlock();
             }
             steal_from_range->range_lock_.Unlock();
             if (steal_success) {
@@ -1490,8 +1500,6 @@ namespace leveldb {
                          const Slice &val) {
         uint64_t last_sequence = versions_->last_sequence_.fetch_add(1);
         uint32_t rand_local_index = rand_r(options.rand_seed);
-        uint32_t grow_prob = rand_r(options.rand_seed);
-        double prob = grow_prob / (double) RAND_MAX;
 
         std::vector<MemTable *> full_memtables;
         AtomicMemTable *atomic_memtable = nullptr;
@@ -1499,14 +1507,20 @@ namespace leveldb {
         bool all_busy = true;
 
         range_lock_.Lock();
-        double myshare =
+        double expected_share =
                 (double) processed_writes_ / (double) options.total_writes;
-
+        double actual_share = 0;
         processed_writes_ += 1;
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format("db[{}]: Insert {} tables:{}", dbid_, key.ToString(),
                            active_memtables_.size());
+        AtomicMemTable *emptiest_memtable = nullptr;
+        uint64_t smallest_size = UINT64_MAX;
+        int emptiest_index = 0;
         while (true) {
+            emptiest_memtable = nullptr;
+            smallest_size = UINT64_MAX;
+            emptiest_index = -1;
             int number_of_retries = std::min((size_t) 3,
                                              active_memtables_.size());
             for (int i = 0; i < number_of_retries; i++) {
@@ -1516,6 +1530,14 @@ namespace leveldb {
                 RDMA_ASSERT(table);
                 uint32_t memtableid = table->memtableid();
                 atomic_memtable = &versions_->mid_table_mapping_[memtableid];
+
+                uint64_t ms = atomic_memtable->nentries_;
+                if (ms < smallest_size &&
+                    !atomic_memtable->is_immutable_) {
+                    emptiest_memtable = atomic_memtable;
+                    smallest_size = ms;
+                    emptiest_index = rand_local_index;
+                }
 
                 if (!atomic_memtable->mutex_.try_lock()) {
                     atomic_memtable = nullptr;
@@ -1531,20 +1553,35 @@ namespace leveldb {
                     full_memtables.push_back(table);
                     active_memtables_.erase(
                             active_memtables_.begin() + rand_local_index);
+                    number_of_active_memtables_ -= 1;
+                    number_of_immutable_memtables_ += 1;
                     atomic_memtable->mutex_.unlock();
                     atomic_memtable = nullptr;
+
+                    if (emptiest_index == rand_local_index) {
+                        smallest_size = UINT64_MAX;
+                        emptiest_index = -1;
+                        emptiest_memtable = nullptr;
+                    }
                     continue;
                 }
                 break;
             }
 
             if (atomic_memtable) {
+                number_of_puts_no_wait_ += 1;
                 range_lock_.Unlock();
                 break;
             }
 
-            if (all_busy && prob >= myshare &&
+            actual_share = (double) (number_of_active_memtables_ +
+                                     number_of_immutable_memtables_)
+                           /
+                           (double) nova::NovaCCConfig::cc_config->num_memtables;
+
+            if (all_busy && actual_share >= expected_share &&
                 !active_memtables_.empty()) {
+                number_of_wait_due_to_contention_ += 1;
                 // wait on another random table.
                 rand_local_index =
                         (rand_local_index + 1) % active_memtables_.size();
@@ -1560,11 +1597,20 @@ namespace leveldb {
                     atomic_memtable->memtable_->ApproximateMemoryUsage() >
                     options_.write_buffer_size) {
                     atomic_memtable->is_immutable_ = true;
-                    full_memtables.push_back(table);
+                    full_memtables.push_back(atomic_memtable->memtable_);
                     active_memtables_.erase(
                             active_memtables_.begin() + rand_local_index);
                     atomic_memtable->mutex_.unlock();
                     atomic_memtable = nullptr;
+
+                    number_of_active_memtables_ -= 1;
+                    number_of_immutable_memtables_ += 1;
+
+                    if (emptiest_index == rand_local_index) {
+                        smallest_size = UINT64_MAX;
+                        emptiest_index = -1;
+                        emptiest_memtable = nullptr;
+                    }
                 }
             }
 
@@ -1580,30 +1626,30 @@ namespace leveldb {
             bool has_available_memtable = false;
             bool pin = false;
 
-            if (can_create_a_new_pinned_memtable_) {
+            if (number_of_available_pinned_memtables_ > 0) {
                 has_available_memtable = true;
                 pin = true;
-                can_create_a_new_pinned_memtable_ = false;
+                number_of_available_pinned_memtables_--;
             } else {
-                options_.memtable_pool->mutex_.lock();
-                if (options_.memtable_pool->num_available_memtables_ > 0) {
-                    has_available_memtable = true;
-                    options_.memtable_pool->num_available_memtables_ -= 1;
-                } else {
-                    // Add to wait queue.
-//                    options_.memtable_pool->range_cond_vars_[dbid_] = &memtable_available_signal_;
+                if (actual_share < expected_share) {
+                    options_.memtable_pool->mutex_.lock();
+                    if (options_.memtable_pool->num_available_memtables_ > 0) {
+                        has_available_memtable = true;
+                        options_.memtable_pool->num_available_memtables_ -= 1;
+                    }
+                    options_.memtable_pool->mutex_.unlock();
                 }
-                options_.memtable_pool->mutex_.unlock();
             }
 
             if (has_available_memtable) {
+                number_of_active_memtables_ += 1;
                 uint32_t memtable_id = memtable_id_seq_.fetch_add(1);
-                if (pin) {
-                    pinned_memtable_id_ = memtable_id;
-                }
                 MemTable *new_table = new MemTable(internal_comparator_,
                                                    memtable_id,
                                                    db_profiler_);
+                if (pin) {
+                    new_table->is_pinned_ = true;
+                }
                 RDMA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
                 versions_->mid_table_mapping_[memtable_id].SetMemTable(
                         new_table);
@@ -1619,12 +1665,36 @@ namespace leveldb {
                 break;
             } else {
                 StealMemTable(options);
-
                 for (auto imm : full_memtables) {
                     MaybeScheduleCompaction(imm, options.rand_seed);
                 }
                 full_memtables.clear();
 
+                if (emptiest_memtable) {
+                    atomic_memtable = emptiest_memtable;
+                    atomic_memtable->mutex_.lock();
+                    RDMA_ASSERT(atomic_memtable->memtable_);
+                    RDMA_ASSERT(!atomic_memtable->is_flushed_);
+                    if (atomic_memtable->is_immutable_ ||
+                        atomic_memtable->memtable_->ApproximateMemoryUsage() >
+                        options_.write_buffer_size) {
+                        atomic_memtable->is_immutable_ = true;
+                        full_memtables.push_back(atomic_memtable->memtable_);
+                        active_memtables_.erase(
+                                active_memtables_.begin() + emptiest_index);
+                        atomic_memtable->mutex_.unlock();
+                        atomic_memtable = nullptr;
+
+                        number_of_active_memtables_ -= 1;
+                        number_of_immutable_memtables_ += 1;
+                    }
+                }
+
+                if (atomic_memtable) {
+                    range_lock_.Unlock();
+                    break;
+                }
+                number_of_puts_wait_++;
                 RDMA_LOG(rdmaio::DEBUG)
                     << fmt::format("db[{}]: Insert {} wait for pool",
                                    dbid_, key.ToString());
@@ -1651,6 +1721,7 @@ namespace leveldb {
         // Insert
         atomic_memtable->memtable_->Add(last_sequence, ValueType::kTypeValue,
                                         key, val);
+        atomic_memtable->nentries_ += 1;
         if (table_locator_ != nullptr) {
             table_locator_->Insert(key, options.hash,
                                    atomic_memtable->memtable_->memtableid());
@@ -1763,21 +1834,34 @@ namespace leveldb {
 
         DBImpl *impl = new DBImpl(options, dbname);
         impl->mutex_.Lock();
+        uint32_t memtable_id = 0;
+        MemTable *new_table = nullptr;
+        for (int i = 0; i < impl->min_memtables_; i++) {
+            memtable_id = impl->memtable_id_seq_.fetch_add(1);
+            new_table = new MemTable(impl->internal_comparator_,
+                                     memtable_id,
+                                     impl->db_profiler_);
+            new_table->is_pinned_ = true;
+            RDMA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
+            impl->active_memtables_.push_back(new_table);
+            RDMA_ASSERT(options.memtable_pool->num_available_memtables_ >= 1);
+            options.memtable_pool->num_available_memtables_ -= 1;
+            impl->versions_->mid_table_mapping_[memtable_id].SetMemTable(
+                    new_table);
+        }
 
-        uint32_t memtable_id = impl->memtable_id_seq_.fetch_add(1);
-        MemTable *new_table = new MemTable(impl->internal_comparator_,
-                                           memtable_id,
-                                           impl->db_profiler_);
-        RDMA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
-        impl->active_memtables_.push_back(new_table);
-        RDMA_ASSERT(options.memtable_pool->num_available_memtables_ >= 1);
-        options.memtable_pool->num_available_memtables_ -= 1;
         options.memtable_pool->range_cond_vars_[impl->dbid_] = &impl->memtable_available_signal_;
-        impl->pinned_memtable_id_ = memtable_id;
-        impl->can_create_a_new_pinned_memtable_ = false;
-        impl->versions_->mid_table_mapping_[memtable_id].SetMemTable(
-                new_table);
+        impl->number_of_available_pinned_memtables_ = 0;
 
+        impl->number_of_active_memtables_ = 1;
+        impl->number_of_memtable_hits_ = 0;
+        impl->number_of_gets_ = 0;
+        impl->number_of_wait_due_to_contention_ = 0;
+        impl->number_of_steals_ = 0;
+        impl->number_of_immutable_memtables_ = 0;
+        impl->processed_writes_ = 0;
+        impl->number_of_puts_no_wait_ = 0;
+        impl->number_of_puts_wait_ = 0;
         VersionEdit edit;
         // Recover handles create_if_missing, error_if_exists
         bool save_manifest = false;

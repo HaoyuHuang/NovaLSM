@@ -712,6 +712,7 @@ namespace nova {
         stat_thread_->bgs_ = bgs;
         stat_thread_->async_workers_ = async_workers;
         stat_thread_->async_compaction_workers_ = async_compaction_workers;
+        stat_thread_->dbs_ = dbs_;
         stats_t_.emplace_back(
                 std::thread(&NovaStatThread::Start, stat_thread_));
 

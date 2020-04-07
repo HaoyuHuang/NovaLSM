@@ -274,6 +274,8 @@ namespace nova {
         return true;
     }
 
+    std::atomic_int_fast32_t total_writes;
+
     bool process_socket_put(int fd, Connection *conn) {
         // Stats.
         NovaCCConnWorker *worker = (NovaCCConnWorker *) conn->worker;
@@ -305,7 +307,7 @@ namespace nova {
         option.thread_id = worker->thread_id_;
         option.rand_seed = &worker->rand_seed;
         option.hash = key;
-        option.total_writes = worker->stats.nputs * NovaCCConfig::cc_config->num_conn_workers;
+        option.total_writes = worker->stats.nputs * NovaCCConfig::cc_config->num_conn_workers;// total_writes.fetch_add(1, std::memory_order_relaxed) + 1;
         CCFragment *frag = NovaCCConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
 

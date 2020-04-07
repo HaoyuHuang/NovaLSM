@@ -7,10 +7,14 @@
 #ifndef LEVELDB_ENV_BG_THREAD_H
 #define LEVELDB_ENV_BG_THREAD_H
 
+#include <atomic>
+
 #include "leveldb/export.h"
 #include "leveldb/status.h"
 #include "leveldb/cc_client.h"
 #include "leveldb/db_types.h"
+
+#define BUCKET_SIZE 18
 
 namespace leveldb {
 
@@ -18,6 +22,7 @@ namespace leveldb {
         void *db;
         void *memtable;
         uint32_t range_id;
+        uint32_t memtable_size_mb = 0;
     };
 
     class LEVELDB_EXPORT EnvBGThread {
@@ -41,6 +46,10 @@ namespace leveldb {
         virtual bool IsInitialized() = 0;
 
         virtual unsigned int* rand_seed() = 0;
+
+        static std::atomic_int_fast32_t bg_thread_id_seq;
+
+        std::atomic_int_fast32_t memtable_size[BUCKET_SIZE];
     };
 }
 

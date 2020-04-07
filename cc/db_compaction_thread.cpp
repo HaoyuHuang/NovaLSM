@@ -11,6 +11,9 @@ namespace leveldb {
     NovaCCCompactionThread::NovaCCCompactionThread(MemManager *mem_manager)
             : mem_manager_(mem_manager) {
         sem_init(&signal, 0, 0);
+        for (int i = 0 ; i < BUCKET_SIZE; i++) {
+            memtable_size[i] = 0;
+        }
     }
 
     bool NovaCCCompactionThread::Schedule(const CompactionTask &task) {
@@ -63,6 +66,7 @@ namespace leveldb {
             std::map<void *, std::vector<CompactionTask>> db_tasks;
             for (auto &task : tasks) {
                 db_tasks[task.db].push_back(task);
+                memtable_size[task.memtable_size_mb] += 1;
             }
 
             for (auto& it : db_tasks) {

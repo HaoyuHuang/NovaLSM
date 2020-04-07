@@ -97,6 +97,88 @@ namespace nova {
             }
             output += "\n";
 
+            output += "active-memtables:";
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += std::to_string(dbs_[i]->number_of_active_memtables_);
+                output += ",";
+            }
+            output += "\n";
+
+            output += "immutable-memtables:";
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += std::to_string(
+                        dbs_[i]->number_of_immutable_memtables_);
+                output += ",";
+            }
+            output += "\n";
+
+            output += "steals:";
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += std::to_string(dbs_[i]->number_of_steals_);
+                output += ",";
+            }
+            output += "\n";
+
+            output += "puts:";
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += std::to_string(dbs_[i]->processed_writes_);
+                output += ",";
+            }
+            output += "\n";
+
+            output += "wait-due-to-contention:";
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += std::to_string(
+                        dbs_[i]->number_of_wait_due_to_contention_);
+                output += ",";
+            }
+            output += "\n";
+
+            output += "gets:";
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += std::to_string(dbs_[i]->number_of_gets_);
+                output += ",";
+            }
+            output += "\n";
+
+            output += "hits:";
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += std::to_string(dbs_[i]->number_of_memtable_hits_);
+                output += ",";
+            }
+            output += "\n";
+
+            int flushed_memtable_size[BUCKET_SIZE];
+            for (int j = 0; j < BUCKET_SIZE; j++) {
+                flushed_memtable_size[j] = 0;
+            }
+            output += "memtable-hist:";
+            for (int i = 0; i < bgs_.size(); i++) {
+                for (int j = 0; j < BUCKET_SIZE; j++) {
+                    flushed_memtable_size[j] += bgs_[i]->memtable_size[j];
+                }
+            }
+
+            for (int j = 0; j < BUCKET_SIZE; j++) {
+                output += std::to_string(flushed_memtable_size[j]);
+                output += ",";
+            }
+            output += "\n";
+
+            output += "puts-no-wait:";
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += std::to_string(dbs_[i]->number_of_puts_no_wait_);
+                output += ",";
+            }
+            output += "\n";
+
+            output += "puts-wait:";
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += std::to_string(dbs_[i]->number_of_puts_wait_);
+                output += ",";
+            }
+            output += "\n";
+
             RDMA_LOG(INFO) << fmt::format("stats: \n{}", output);
             output.clear();
         }

@@ -78,6 +78,8 @@ namespace leveldb {
         }
 
         ~MemTable();  // Private since only Unref() should be used to delete it
+
+        bool is_pinned_ = false;
     private:
         friend class MemTableIterator;
 
@@ -122,6 +124,7 @@ namespace leveldb {
         uint64_t l0_file_number_ = 0;
         std::mutex mutex_;
         MemTable *memtable_ = nullptr;
+        uint32_t nentries_ = 0;
     };
 
 

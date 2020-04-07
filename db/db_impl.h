@@ -189,12 +189,13 @@ namespace leveldb {
         void RecordBackgroundError(const Status &s);
 
         void MaybeScheduleCompaction(
-                MemTable * imm,
+                MemTable *imm,
                 unsigned int *rand_seed) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         bool
-        BackgroundCompaction(EnvBGThread *bg_thread, const std::vector<CompactionTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
+        BackgroundCompaction(EnvBGThread *bg_thread,
+                             const std::vector<CompactionTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         void CleanupCompaction(CompactionState *compact)
@@ -239,8 +240,8 @@ namespace leveldb {
         port::Mutex range_lock_;
         port::CondVar memtable_available_signal_;
 
-        uint32_t pinned_memtable_id_ = 0;
-        bool can_create_a_new_pinned_memtable_ = false;
+        int number_of_available_pinned_memtables_ = 2;
+        const int min_memtables_ = 2;
 
 
         // State below is protected by mutex_
@@ -249,13 +250,11 @@ namespace leveldb {
 
         std::vector<EnvBGThread *> bg_threads_;
 
-        std::atomic_int_fast32_t memtable_id_seq_ ;
-        std::atomic_int_fast32_t bg_thread_id_seq_;
+        std::atomic_int_fast32_t memtable_id_seq_;
 
         // key -> memtable-id.
         TableLocator *table_locator_ = nullptr;
-
-        std::vector<MemTable*> active_memtables_;
+        std::vector<MemTable *> active_memtables_;
 
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
@@ -276,7 +275,6 @@ namespace leveldb {
         CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
         std::string current_log_file_name_ GUARDED_BY(mutex_);
         std::list<std::string> closed_log_files_  GUARDED_BY(mutex_);
-        uint64_t processed_writes_ = 0;
     };
 
 // Sanitize db options.  The caller should delete result.info_log if

@@ -5,6 +5,7 @@
 #ifndef STORAGE_LEVELDB_INCLUDE_DB_H_
 #define STORAGE_LEVELDB_INCLUDE_DB_H_
 
+#include <atomic>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -164,6 +165,16 @@ namespace leveldb {
                                        const std::vector<CompactionTask> &tasks) = 0;
 
         std::vector<DB*> dbs_;
+
+        uint64_t number_of_memtable_hits_;
+        uint64_t number_of_gets_;
+        uint64_t number_of_active_memtables_;
+        uint64_t number_of_immutable_memtables_;
+        uint64_t number_of_steals_;
+        uint64_t number_of_wait_due_to_contention_;
+        uint64_t processed_writes_;
+        uint64_t number_of_puts_no_wait_;
+        uint64_t number_of_puts_wait_;
     };
 
 // Destroy the contents of the specified database.

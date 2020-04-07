@@ -86,6 +86,8 @@ DEFINE_uint32(cc_rtable_size_mb, 0, "RTable size");
 DEFINE_bool(cc_multiple_disks, false, "");
 DEFINE_string(cc_scatter_policy, "random", "random/stats");
 
+std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
+
 void start(NovaCCNICServer *server) {
     server->Start();
 }
@@ -207,6 +209,7 @@ int main(int argc, char *argv[]) {
 
     NovaCCConfig::cc_config->enable_table_locator = FLAGS_cc_enable_table_locator;
 
+    leveldb::EnvBGThread::bg_thread_id_seq = 0;
 //    RDMA_ASSERT(FLAGS_cc_rtable_size_mb > std::max(FLAGS_cc_sstable_size_mb,
 //                                                   FLAGS_cc_write_buffer_size_mb));
     InitializeCC();
