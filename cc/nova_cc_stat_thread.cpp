@@ -41,6 +41,7 @@ namespace nova {
         }
 
         std::string output;
+        int flushed_memtable_size[BUCKET_SIZE];
         while (true) {
             usleep(10000000);
             output = "frdma:";
@@ -148,7 +149,6 @@ namespace nova {
             }
             output += "\n";
 
-            int flushed_memtable_size[BUCKET_SIZE];
             for (int j = 0; j < BUCKET_SIZE; j++) {
                 flushed_memtable_size[j] = 0;
             }

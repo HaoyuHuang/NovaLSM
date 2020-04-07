@@ -166,15 +166,15 @@ namespace leveldb {
 
         std::vector<DB*> dbs_;
 
-        uint64_t number_of_memtable_hits_;
-        uint64_t number_of_gets_;
-        uint64_t number_of_active_memtables_;
-        uint64_t number_of_immutable_memtables_;
-        uint64_t number_of_steals_;
-        uint64_t number_of_wait_due_to_contention_;
-        uint64_t processed_writes_;
-        uint64_t number_of_puts_no_wait_;
-        uint64_t number_of_puts_wait_;
+        uint64_t number_of_memtable_hits_ = 0;
+        uint64_t number_of_gets_ = 0;
+        uint64_t number_of_active_memtables_ = 0;
+        uint64_t number_of_immutable_memtables_ = 0;
+        uint64_t number_of_steals_ = 0;
+        uint64_t number_of_wait_due_to_contention_ = 0;
+        uint64_t processed_writes_ = 0;
+        uint64_t number_of_puts_no_wait_ = 0;
+        uint64_t number_of_puts_wait_ = 0;
     };
 
 // Destroy the contents of the specified database.

@@ -101,7 +101,7 @@ namespace leveldb {
 
         DBProfiler *db_profiler_ = nullptr;
         KeyComparator comparator_;
-        int refs_;
+        int refs_ = 0;
 //        std::mutex mutex_;
         uint32_t memtable_id_;
         Arena arena_;

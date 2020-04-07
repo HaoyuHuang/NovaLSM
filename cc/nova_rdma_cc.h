@@ -34,6 +34,7 @@ namespace nova {
                                  NovaMemManager *mem_manager,
                                  const std::vector<leveldb::DB *> &dbs) :
                 rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager), dbs_(dbs) {
+            stat_tasks_ = 0;
             sem_init(&sem_, 0, 0);
         }
 

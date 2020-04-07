@@ -77,6 +77,9 @@ namespace leveldb {
         Status Write(const WriteOptions &options, const Slice &key,
                      const Slice &value) override;
 
+        Status WriteOneRange(const WriteOptions &options, const Slice &key,
+                             const Slice &value);
+
         Status Get(const ReadOptions &options, const Slice &key,
                    std::string *value) override;
 
@@ -121,6 +124,13 @@ namespace leveldb {
                                const std::vector<CompactionTask> &tasks) override;
 
     private:
+        // Compact the in-memory write buffer to disk.  Switches to a new
+        // log-file/memtable and writes a new descriptor iff successful.
+        // Errors are recorded in bg_error_.
+        bool CompactMemTableOneRange(EnvBGThread *bg_thread,
+                                     const std::vector<CompactionTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
+                mutex_);
+
         friend class DB;
 
         struct CompactionState;
@@ -254,7 +264,7 @@ namespace leveldb {
 
         // key -> memtable-id.
         TableLocator *table_locator_ = nullptr;
-        std::vector<MemTable *> active_memtables_;
+        std::vector<AtomicMemTable *> active_memtables_;
 
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 

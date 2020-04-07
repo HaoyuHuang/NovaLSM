@@ -369,6 +369,9 @@ namespace nova {
             leveldb::NovaRTableManager *rtable_manager,
             std::vector<NovaCCServer *> cc_servers) : rtable_manager_(
             rtable_manager), cc_servers_(cc_servers) {
+        stat_tasks_ = 0;
+        stat_read_bytes_ = 0;
+        stat_write_bytes_ = 0;
         sem_init(&sem_, 0, 0);
     }
 
