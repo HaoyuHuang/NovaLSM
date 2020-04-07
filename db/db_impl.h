@@ -254,7 +254,7 @@ namespace leveldb {
 
         // key -> memtable-id.
         TableLocator *table_locator_ = nullptr;
-        std::vector<MemTable *> active_memtables_;
+        std::vector<AtomicMemTable *> active_memtables_;
 
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
