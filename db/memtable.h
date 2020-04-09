@@ -103,7 +103,7 @@ namespace leveldb {
         KeyComparator comparator_;
         int refs_ = 0;
 //        std::mutex mutex_;
-        uint32_t memtable_id_;
+        uint32_t memtable_id_ = 0;
         Arena arena_;
         Table table_;
         FileMetaData flushed_meta_;
@@ -125,6 +125,7 @@ namespace leveldb {
         std::mutex mutex_;
         MemTable *memtable_ = nullptr;
         uint32_t nentries_ = 0;
+        uint32_t number_of_pending_writes_ = 0;
     };
 
 

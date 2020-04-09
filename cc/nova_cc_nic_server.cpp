@@ -430,6 +430,9 @@ namespace nova {
         for (int db_index = 0; db_index < ndbs; db_index++) {
             dbs_[db_index]->dbs_ = dbs_;
         }
+//        if (ndbs > 0) {
+//            RDMA_ASSERT(pool->num_available_memtables_ == 0);
+//        }
 
         leveldb::EnvOptions env_option;
         env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;

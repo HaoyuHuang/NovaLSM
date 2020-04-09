@@ -45,11 +45,14 @@ namespace leveldb {
                                       uint32_t *rtable_id, char *buf,
                                       const std::string &dbname,
                                       uint64_t file_number,
-                                      uint32_t size, bool is_meta_blocks) override;
+                                      uint32_t size,
+                                      bool is_meta_blocks) override;
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
                                     uint64_t thread_id,
+                                    uint32_t db_id,
+                                    uint32_t memtable_id,
                                     const Slice &slice) override;
 
 
@@ -80,9 +83,10 @@ namespace leveldb {
         }
 
     private:
-        std::map<uint32_t, CCResponse*> req_response;
+        std::map<uint32_t, CCResponse *> req_response;
 
         void AddAsyncTask(const RDMAAsyncClientRequestTask &task);
+
         uint32_t current_cc_id_ = 0;
         uint32_t req_id_ = 0;
         uint32_t dbid_ = 0;
@@ -119,11 +123,14 @@ namespace leveldb {
                                       uint32_t *rtable_id, char *buf,
                                       const std::string &dbname,
                                       uint64_t file_number,
-                                      uint32_t size, bool is_meta_blocks) override;
+                                      uint32_t size,
+                                      bool is_meta_blocks) override;
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
                                     uint64_t thread_id,
+                                    uint32_t db_id,
+                                    uint32_t memtable_id,
                                     const Slice &slice) override;
 
         uint32_t InitiateReadDCStats(uint32_t server_id) override;

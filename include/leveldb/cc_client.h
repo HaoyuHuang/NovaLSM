@@ -90,6 +90,8 @@ namespace leveldb {
 
         std::string log_file_name;
         uint64_t thread_id;
+        uint32_t dbid;
+        uint32_t memtable_id;
         Slice log_record;
 
         uint32_t server_id;
@@ -126,6 +128,8 @@ namespace leveldb {
         virtual uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
                                     uint64_t thread_id,
+                                    uint32_t db_id,
+                                    uint32_t memtable_id,
                                     const Slice &slice) = 0;
 
 

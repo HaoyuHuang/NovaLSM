@@ -310,6 +310,7 @@ namespace nova {
         option.total_writes = worker->stats.nputs * NovaCCConfig::cc_config->num_conn_workers;// total_writes.fetch_add(1, std::memory_order_relaxed) + 1;
         CCFragment *frag = NovaCCConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
+        RDMA_ASSERT(db);
 
         leveldb::Status status = db->Put(option, dbkey, dbval);
 //        RDMA_LOG(DEBUG) << "############### CC worker processed task "

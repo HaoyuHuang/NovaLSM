@@ -80,6 +80,12 @@ namespace leveldb {
         Status WriteOneRange(const WriteOptions &options, const Slice &key,
                              const Slice &value);
 
+        bool WriteOneRange(const leveldb::WriteOptions &options,
+                           const leveldb::Slice &key,
+                           const leveldb::Slice &value,
+                           uint32_t partition_id,
+                           bool should_wait, uint64_t last_sequence);
+
         Status Get(const ReadOptions &options, const Slice &key,
                    std::string *value) override;
 
@@ -199,7 +205,8 @@ namespace leveldb {
         void RecordBackgroundError(const Status &s);
 
         void MaybeScheduleCompaction(
-                MemTable *imm,
+                uint32_t thread_id, MemTable *imm, uint32_t partition_id,
+                uint32_t imm_slot,
                 unsigned int *rand_seed) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
@@ -266,6 +273,25 @@ namespace leveldb {
         TableLocator *table_locator_ = nullptr;
         std::vector<AtomicMemTable *> active_memtables_;
 
+        struct MemTablePartition {
+            MemTablePartition() : background_work_finished_signal_(&mutex) {
+
+            };
+            MemTable *memtable;
+            port::Mutex mutex;
+            uint32_t partition_id = 0;
+            std::vector<uint32_t> imm_slots;
+            std::queue<uint32_t> available_slots;
+            std::vector<uint32_t> closed_log_files;
+            port::CondVar background_work_finished_signal_ GUARDED_BY(mutex);
+        };
+
+        std::vector<MemTablePartition *> partitioned_active_memtables_ GUARDED_BY(
+                mutex_);
+
+        std::vector<MemTable *> partitioned_imms_ GUARDED_BY(
+                mutex_);  // Memtable being compacted
+
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
         SnapshotList snapshots_ GUARDED_BY(mutex_);
@@ -284,7 +310,7 @@ namespace leveldb {
 
         CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
         std::string current_log_file_name_ GUARDED_BY(mutex_);
-        std::list<std::string> closed_log_files_  GUARDED_BY(mutex_);
+        std::list<uint32_t> closed_log_files_  GUARDED_BY(range_lock_);
     };
 
 // Sanitize db options.  The caller should delete result.info_log if

@@ -89,6 +89,13 @@ namespace leveldb {
 
     void NovaBlockCCClient::AddAsyncTask(
             const leveldb::RDMAAsyncClientRequestTask &task) {
+        if (task.type == RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD) {
+            uint64_t id = (static_cast<uint64_t >(task.dbid) << 32) |
+                          task.memtable_id;
+            ccs_[id % ccs_.size()]->AddTask(task);
+            return;
+        }
+
         current_cc_id_ = (current_cc_id_ + 1) % ccs_.size();
         ccs_[current_cc_id_]->AddTask(task);
     }
@@ -112,11 +119,14 @@ namespace leveldb {
 
     uint32_t NovaBlockCCClient::InitiateReplicateLogRecords(
             const std::string &log_file_name, uint64_t thread_id,
+            uint32_t db_id, uint32_t memtable_id,
             const leveldb::Slice &slice) {
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD;
         task.log_file_name = log_file_name;
         task.thread_id = thread_id;
+        task.dbid = db_id;
+        task.memtable_id = memtable_id;
         task.log_record = slice;
         task.sem = &sem_;
         AddAsyncTask(task);
@@ -255,7 +265,8 @@ namespace leveldb {
                                                          char *buf,
                                                          const std::string &dbname,
                                                          uint64_t file_number,
-                                                         uint32_t size, bool is_meta_blocks) {
+                                                         uint32_t size,
+                                                         bool is_meta_blocks) {
         RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
 //        if (server_id == nova::NovaConfig::config->my_server_id) {
 //            std::string sstable_id = TableFileName(dbname, file_number);
@@ -308,6 +319,7 @@ namespace leveldb {
 
     uint32_t NovaCCClient::InitiateReplicateLogRecords(
             const std::string &log_file_name, uint64_t thread_id,
+            uint32_t db_id, uint32_t memtable_id,
             const leveldb::Slice &slice) {
         rdma_log_writer_->AddRecord(log_file_name, thread_id, slice);
         return 0;

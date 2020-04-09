@@ -19,10 +19,12 @@
 namespace leveldb {
 
     struct CompactionTask {
-        void *db;
-        void *memtable;
-        uint32_t range_id;
+        void *db = nullptr;
+        void *memtable = nullptr;
+        uint32_t range_id = 0;
         uint32_t memtable_size_mb = 0;
+        uint32_t memtable_partition_id = 0;
+        uint32_t imm_slot = 0;
     };
 
     class LEVELDB_EXPORT EnvBGThread {

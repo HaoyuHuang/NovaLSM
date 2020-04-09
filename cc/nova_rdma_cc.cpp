@@ -79,6 +79,8 @@ namespace nova {
                     ctx.req_id = cc_client_->InitiateReplicateLogRecords(
                             task.log_file_name,
                             task.thread_id,
+                            task.dbid,
+                            task.memtable_id,
                             task.log_record);
                     break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_WRITE_DATA_BLOCKS:
