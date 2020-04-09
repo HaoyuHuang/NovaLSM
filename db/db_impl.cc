@@ -1880,6 +1880,7 @@ namespace leveldb {
                     new_table->is_pinned_ = true;
                 }
                 RDMA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
+                atomic_memtable = &versions_->mid_table_mapping_[memtable_id];
                 versions_->mid_table_mapping_[memtable_id].SetMemTable(
                         new_table);
                 atomic_memtable = &versions_->mid_table_mapping_[memtable_id];
@@ -2088,7 +2089,6 @@ namespace leveldb {
         *dbptr = nullptr;
         DBImpl *impl = new DBImpl(options, dbname);
         impl->mutex_.Lock();
-
         if (nova::NovaCCConfig::cc_config->db_fragment.size() > 1) {
             for (int i = 0; i < impl->min_memtables_; i++) {
                 uint32_t memtable_id = impl->memtable_id_seq_.fetch_add(1);
@@ -2164,7 +2164,6 @@ namespace leveldb {
         }
 
         impl->number_of_available_pinned_memtables_ = 0;
-
         impl->number_of_active_memtables_ = impl->min_memtables_;
         impl->number_of_memtable_hits_ = 0;
         impl->number_of_gets_ = 0;

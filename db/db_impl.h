@@ -272,7 +272,6 @@ namespace leveldb {
         // key -> memtable-id.
         TableLocator *table_locator_ = nullptr;
         std::vector<AtomicMemTable *> active_memtables_;
-
         struct MemTablePartition {
             MemTablePartition() : background_work_finished_signal_(&mutex) {
 
