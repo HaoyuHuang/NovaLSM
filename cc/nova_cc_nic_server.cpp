@@ -708,6 +708,14 @@ namespace nova {
 
         for (auto db : dbs_) {
             db->StartTracing();
+
+            db->processed_writes_ = 0;
+            db->number_of_puts_no_wait_ = 0;
+            db->number_of_puts_wait_ = 0;
+            db->number_of_steals_ = 0;
+            db->number_of_wait_due_to_contention_ = 0;
+            db->number_of_gets_ = 0;
+            db->number_of_memtable_hits_ = 0;
         }
 
         stat_thread_ = new NovaStatThread;

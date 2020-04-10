@@ -32,7 +32,7 @@ namespace leveldb {
         // Returns an estimate of the total memory usage of data allocated
         // by the arena.
         size_t MemoryUsage() const {
-            return memory_usage_.load(std::memory_order_relaxed);
+            return memory_usage_;
         }
 
     private:
@@ -41,8 +41,8 @@ namespace leveldb {
         char *AllocateNewBlock(size_t block_bytes);
 
         // Allocation state
-        char *alloc_ptr_;
-        size_t alloc_bytes_remaining_;
+        char *alloc_ptr_ = nullptr;
+        size_t alloc_bytes_remaining_ = 0;
 
         // Array of new[] allocated memory blocks
         std::vector<char *> blocks_;
@@ -51,7 +51,7 @@ namespace leveldb {
         //
         // TODO(costan): This member is accessed via atomics, but the others are
         //               accessed without any locking. Is this OK?
-        std::atomic<size_t> memory_usage_;
+        size_t memory_usage_ = 0;
     };
 
     inline char *Arena::Allocate(size_t bytes) {

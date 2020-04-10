@@ -307,7 +307,8 @@ namespace nova {
         option.thread_id = worker->thread_id_;
         option.rand_seed = &worker->rand_seed;
         option.hash = key;
-        option.total_writes = worker->stats.nputs * NovaCCConfig::cc_config->num_conn_workers;// total_writes.fetch_add(1, std::memory_order_relaxed) + 1;
+        option.total_writes = total_writes.fetch_add(1, std::memory_order_relaxed) + 1;
+//        worker->stats.nputs * NovaCCConfig::cc_config->num_conn_workers;//
         CCFragment *frag = NovaCCConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
         RDMA_ASSERT(db);
@@ -497,7 +498,7 @@ namespace nova {
         store->conn_mu.lock();
         store->nconns += store->conn_queue.size();
         if (store->conn_queue.size() != 0) {
-            RDMA_LOG(INFO) << "memstore[" << store->thread_id_ << "]: conns "
+            RDMA_LOG(DEBUG) << "memstore[" << store->thread_id_ << "]: conns "
                            << store->nconns;
         }
         for (int i = 0; i < store->conn_queue.size(); i++) {
@@ -547,20 +548,20 @@ namespace nova {
             fprintf(stderr, "Can't allocate event base\n");
             exit(1);
         }
-        RDMA_LOG(INFO) << "Using Libevent with backend method "
+        RDMA_LOG(DEBUG) << "Using Libevent with backend method "
                        << event_base_get_method(base);
         const int f = event_base_get_features(base);
         if ((f & EV_FEATURE_ET)) {
-            RDMA_LOG(INFO) << "Edge-triggered events are supported.";
+            RDMA_LOG(DEBUG) << "Edge-triggered events are supported.";
         }
 
         if ((f & EV_FEATURE_O1)) {
-            RDMA_LOG(INFO) <<
+            RDMA_LOG(DEBUG) <<
                            "O(1) event notification is supported.";
         }
 
         if ((f & EV_FEATURE_FDS)) {
-            RDMA_LOG(INFO) << "All FD types are supported.";
+            RDMA_LOG(DEBUG) << "All FD types are supported.";
         }
 
         /* Timer event for new connection */

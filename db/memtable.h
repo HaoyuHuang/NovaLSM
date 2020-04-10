@@ -119,6 +119,7 @@ namespace leveldb {
 
         void Unref(const std::string& dbname);
 
+        bool locked = false;
         bool is_immutable_ = false;
         bool is_flushed_ = false;
         uint64_t l0_file_number_ = 0;
