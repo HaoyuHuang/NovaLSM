@@ -7,230 +7,198 @@
 #include "nova/nova_config.h"
 #include "nova_cc_log_writer.h"
 
+
 namespace leveldb {
-    namespace log {
-        // Create a writer that will append data to "*dest".
+
+
+    // Create a writer that will append data to "*dest".
 // "*dest" must be initially empty.
 // "*dest" must remain live while this Writer is in use.
-        RDMALogWriter::RDMALogWriter(nova::NovaRDMAStore *store, char *rnic_buf,
-                                     MemManager *mem_manager,
-                                     nova::LogFileManager *log_manager)
-                : store_(store), rnic_buf_(rnic_buf), mem_manager_(mem_manager),
-                  log_manager_(log_manager) {
-            write_result_ = new WriteState[nova::NovaConfig::config->servers.size()];
+    RDMALogWriter::RDMALogWriter(nova::NovaRDMAStore *store,
+                                 MemManager *mem_manager,
+                                 nova::LogFileManager *log_manager)
+            : store_(store), mem_manager_(mem_manager),
+              log_manager_(log_manager) {
+    }
+
+    void RDMALogWriter::Init(const std::string &log_file_name,
+                             uint64_t thread_id, const Slice &slice,
+                             char *backing_buf) {
+        auto it = logfile_last_buf_.find(log_file_name);
+        if (it == logfile_last_buf_.end()) {
+            LogFileMetadata meta = {};
+            meta.stoc_bufs = new LogFileBuf[nova::NovaConfig::config->servers.size()];
+
             for (int i = 0;
-                 i < nova::NovaConfig::config->servers.size(); i++) {
-                write_result_[i].result = WriteResult::NONE;
-                write_result_[i].rdma_wr_id = 0;
+                 i <
+                 nova::NovaConfig::config->servers.size(); i++) {
+                meta.stoc_bufs[i].base = 0;
+                meta.stoc_bufs[i].offset = 0;
+                meta.stoc_bufs[i].size = 0;
+            }
+            logfile_last_buf_[log_file_name] = meta;
+        }
+        memcpy(backing_buf, slice.data(), slice.size());
+    }
+
+    void RDMALogWriter::AckAllocLogBuf(const std::string &log_file_name,
+                                       int stoc_server_id, uint64_t offset,
+                                       uint64_t size,
+                                       char *backing_mem,
+                                       uint32_t log_record_size,
+                                       uint32_t client_req_id,
+                                       WriteState *replicate_log_record_states) {
+        replicate_log_record_states[stoc_server_id].result = WriteResult::ALLOC_SUCCESS;
+        auto meta = &logfile_last_buf_[log_file_name];
+        meta->stoc_bufs[stoc_server_id].base = offset;
+        meta->stoc_bufs[stoc_server_id].size = size;
+        meta->stoc_bufs[stoc_server_id].offset = 0;
+        meta->stoc_bufs[stoc_server_id].is_initializing = false;
+
+        char *sendbuf = store_->GetSendBuf(stoc_server_id);
+        sendbuf[0] = leveldb::CCRequestType::CC_REPLICATE_LOG_RECORDS;
+        leveldb::EncodeFixed32(sendbuf + 1, client_req_id);
+        replicate_log_record_states[stoc_server_id].rdma_wr_id = store_->PostWrite(
+                backing_mem, log_record_size,
+                stoc_server_id,
+                meta->stoc_bufs[stoc_server_id].base +
+                meta->stoc_bufs[stoc_server_id].offset, /*is_remote_offset=*/
+                false, 0);
+        meta->stoc_bufs[stoc_server_id].offset += log_record_size;
+        replicate_log_record_states[stoc_server_id].result = WriteResult::WAIT_FOR_WRITE;
+    }
+
+    bool RDMALogWriter::AckWriteSuccess(const std::string &log_file_name,
+                                        int remote_sid, uint64_t wr_id,
+                                        WriteState *replicate_log_record_states) {
+        WriteState &state = replicate_log_record_states[remote_sid];
+        if (state.rdma_wr_id == wr_id &&
+            state.result == WriteResult::WAIT_FOR_WRITE) {
+            state.result = WriteResult::WRITE_SUCESS;
+            return true;
+        }
+        return false;
+    }
+
+    bool
+    RDMALogWriter::AddRecord(const std::string &log_file_name,
+                             uint64_t thread_id,
+                             uint32_t dbid,
+                             uint32_t memtableid,
+                             char *rdma_backing_buf,
+                             const Slice &slice,
+                             uint32_t client_req_id,
+                             WriteState *replicate_log_record_states) {
+        nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid];
+        Init(log_file_name, thread_id, slice, rdma_backing_buf);
+        if (frag->log_replica_stoc_ids.empty()) {
+            return true;
+        }
+
+        // If one of the log buf is intiializing, return false.
+        for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
+            uint32_t stoc_server_id = nova::NovaCCConfig::cc_config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
+            auto &it = logfile_last_buf_[log_file_name];
+            if (it.stoc_bufs[stoc_server_id].is_initializing) {
+                return false;
             }
         }
 
-        char *RDMALogWriter::Init(const std::string &log_file_name,
-                                  uint64_t thread_id, const Slice &slice) {
-            auto it = logfile_last_buf_.find(log_file_name);
-            if (it == logfile_last_buf_.end()) {
-                LogFileBuf *buf = new LogFileBuf[nova::NovaConfig::config->servers.size()];
-                logfile_last_buf_.insert(std::make_pair(log_file_name, buf));
-                for (int i = 0;
-                     i <
-                     nova::NovaConfig::config->servers.size(); i++) {
-                    buf[i] = {
-                            .base = 0,
-                            .offset = 0,
-                            .size = 0
-                    };
-                }
-            }
-
-            // Add to local memory.
-            int myid = nova::NovaConfig::config->my_server_id;
-            LogFileBuf &buf = logfile_last_buf_[log_file_name][myid];
-            char *b = nullptr;
-            if (buf.base == 0 || buf.offset + slice.size() >= buf.size) {
-                uint32_t scid = mem_manager_->slabclassid(thread_id,
-                                                          nova::NovaConfig::config->log_buf_size);
-                b = mem_manager_->ItemAlloc(thread_id, scid);
-                log_manager_->Add(thread_id, log_file_name, b);
-                buf.base = (uint64_t) (b);
-                buf.offset = 0;
-                buf.size = nova::NovaConfig::config->log_buf_size;
-            } else {
-                b = (char *) buf.base + buf.offset;
-            }
-            memcpy(b, slice.data(), slice.size());
-            buf.offset += slice.size();
-            return b;
-        }
-
-        void RDMALogWriter::AckAllocLogBuf(int remote_sid, uint64_t offset,
-                                           uint64_t size) {
-            write_result_[remote_sid].result = WriteResult::ALLOC_SUCCESS;
-            logfile_last_buf_[current_log_file_][remote_sid].base = offset;
-            logfile_last_buf_[current_log_file_][remote_sid].size = size;
-            logfile_last_buf_[current_log_file_][remote_sid].offset = 0;
-        }
-
-        bool RDMALogWriter::AckWriteSuccess(int remote_sid, uint64_t wr_id) {
-            WriteState &state = write_result_[remote_sid];
-            if (state.rdma_wr_id == wr_id &&
-                state.result == WriteResult::WAIT_FOR_WRITE) {
-                state.result = WriteResult::WRITE_SUCESS;
-                return true;
-            }
-            return false;
-        }
-
-        std::string RDMALogWriter::write_result_str(
-                leveldb::log::RDMALogWriter::WriteResult wr) {
-            switch (wr) {
-                case NONE:
-                    return "none";
-                case WAIT_FOR_ALLOC:
-                    return "wait_for_alloc";
-                case ALLOC_SUCCESS:
-                    return "alloc_success";
-                case WAIT_FOR_WRITE:
-                    return "wait_for_write";
-                case WRITE_SUCESS:
-                    return "write_success";
-            }
-        }
-
-        Status
-        RDMALogWriter::AddRecord(const std::string &log_file_name,
-                                 uint64_t thread_id,
-                                 const Slice &slice) {
-            int nreplicas = 0;
-            uint32_t sid;
-            uint32_t db_index;
-            nova::ParseDBIndexFromFile(log_file_name, &sid, &db_index);
-            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
-
-            char *rnic_buf = Init(log_file_name, thread_id, slice);
-            current_log_file_ = log_file_name;
-
-            if (frag->cc_server_ids.size() == 1) {
-                return Status::OK();
-            }
-
-            for (int i = 0; i < frag->cc_server_ids.size(); i++) {
-                uint32_t remote_server_id = frag->cc_server_ids[i];
-                if (remote_server_id ==
-                    nova::NovaConfig::config->my_server_id) {
-                    continue;
-                }
-
-                nreplicas++;
-
-                auto &it = logfile_last_buf_[log_file_name];
-                if (it[remote_server_id].base == 0 ||
-                    (it[remote_server_id].offset + slice.size() >
-                     it[remote_server_id].size)) {
-                    // Allocate a new buf.
-                    char *send_buf = store_->GetSendBuf(remote_server_id);
-                    char *buf = send_buf;
-                    buf[0] = CCRequestType::CC_ALLOCATE_LOG_BUFFER;
-                    buf++;
-                    leveldb::EncodeFixed32(buf, log_file_name.size());
-                    buf += 4;
-                    memcpy(buf, log_file_name.data(), log_file_name.size());
-                    write_result_[remote_server_id].result = WriteResult::WAIT_FOR_ALLOC;
-                    store_->PostSend(
-                            send_buf, 1 + 4 + log_file_name.size(),
-                            remote_server_id, 0);
-                } else {
-                    // WRITE.
-                    write_result_[remote_server_id].rdma_wr_id = store_->PostWrite(
-                            rnic_buf, slice.size(), remote_server_id,
-                            it[remote_server_id].base +
-                            it[remote_server_id].offset,
-                            false, 0);
-                    it[remote_server_id].offset += slice.size();
-                    write_result_[remote_server_id].result = WriteResult::WAIT_FOR_WRITE;
-                }
-            }
-
-            store_->FlushPendingSends();
-
-            // Pull all pending writes.
-            int n = 0;
-            while (true) {
-                int acks = 0;
-                LogFileBuf *it = nullptr;
-                bool post_write = false;
-
-                // We need to poll both queues here since a live lock may occur when a remote thread S issue requests to myself while I have a pending request to S.
-                store_->PollSQ();
-                store_->PollRQ();
-
-                n++;
-                for (int i = 0; i < frag->cc_server_ids.size(); i++) {
-                    uint32_t remote_server_id = frag->cc_server_ids[i];
-                    if (remote_server_id ==
-                        nova::NovaConfig::config->my_server_id) {
-                        continue;
-                    }
-
-                    switch (write_result_[remote_server_id].result) {
-                        case WriteResult::NONE:
-                            break;
-                        case WriteResult::WAIT_FOR_ALLOC:
-                            break;
-                        case WriteResult::WAIT_FOR_WRITE:
-                            break;
-                        case WriteResult::ALLOC_SUCCESS:
-                            it = logfile_last_buf_[current_log_file_];
-                            write_result_[remote_server_id].rdma_wr_id = store_->PostWrite(
-                                    rnic_buf, slice.size(),
-                                    remote_server_id,
-                                    it[remote_server_id].base +
-                                    it[remote_server_id].offset, /*is_remote_offset=*/
-                                    false, 0);
-                            it[remote_server_id].offset += slice.size();
-                            write_result_[remote_server_id].result = WriteResult::WAIT_FOR_WRITE;
-                            post_write = true;
-                            break;
-                        case WriteResult::WRITE_SUCESS:
-                            acks++;
-                            break;
-                    }
-                }
-
-                if (post_write) {
-                    store_->FlushPendingSends();
-                }
-                if (acks == nreplicas) {
-                    break;
-                }
-            }
-            return Status::OK();
-        }
-
-        Status RDMALogWriter::CloseLogFile(const std::string &log_file_name) {
-            uint32_t sid;
-            uint32_t db_index;
-            nova::ParseDBIndexFromFile(log_file_name, &sid, &db_index);
-            nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[db_index];
-
-            delete logfile_last_buf_[log_file_name];
-            logfile_last_buf_.erase(log_file_name);
-            log_manager_->DeleteLogBuf(log_file_name);
-            for (int i = 0; i < frag->cc_server_ids.size(); i++) {
-                uint32_t remote_server_id = frag->cc_server_ids[i];
-                if (remote_server_id ==
-                    nova::NovaConfig::config->my_server_id) {
-                    continue;
-                }
-
-                char *send_buf = store_->GetSendBuf(remote_server_id);
+        for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
+            uint32_t stoc_server_id = nova::NovaCCConfig::cc_config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
+            auto &it = logfile_last_buf_[log_file_name];
+            if (it.stoc_bufs[stoc_server_id].base == 0) {
+                it.stoc_bufs[stoc_server_id].is_initializing = true;
+                // Allocate a new buf.
+                char *send_buf = store_->GetSendBuf(stoc_server_id);
                 char *buf = send_buf;
-                buf[0] = CCRequestType::CC_DELETE_LOG_FILE;
+                buf[0] = CCRequestType::CC_ALLOCATE_LOG_BUFFER;
                 buf++;
-                leveldb::EncodeStr(buf, log_file_name);
-                store_->PostSend(send_buf, 1 + 4 + log_file_name.size(),
-                                 remote_server_id, 0);
+                leveldb::EncodeFixed32(buf, log_file_name.size());
+                buf += 4;
+                memcpy(buf, log_file_name.data(), log_file_name.size());
+                replicate_log_record_states[stoc_server_id].result = WriteResult::WAIT_FOR_ALLOC;
+                store_->PostSend(
+                        send_buf, 1 + 4 + log_file_name.size(),
+                        stoc_server_id, client_req_id);
+            } else {
+                RDMA_ASSERT(!it.stoc_bufs[stoc_server_id].is_initializing);
+                RDMA_ASSERT(
+                        it.stoc_bufs[stoc_server_id].offset + slice.size() <=
+                        it.stoc_bufs[stoc_server_id].size);
+                // WRITE.
+                char *sendbuf = store_->GetSendBuf(stoc_server_id);
+                sendbuf[0] = leveldb::CCRequestType::CC_REPLICATE_LOG_RECORDS;
+                leveldb::EncodeFixed32(sendbuf + 1, client_req_id);
+                replicate_log_record_states[stoc_server_id].rdma_wr_id = store_->PostWrite(
+                        rdma_backing_buf, slice.size(), stoc_server_id,
+                        it.stoc_bufs[stoc_server_id].base +
+                        it.stoc_bufs[stoc_server_id].offset,
+                        false, 0);
+                it.stoc_bufs[stoc_server_id].offset += slice.size();
+                replicate_log_record_states[stoc_server_id].result = WriteResult::WAIT_FOR_WRITE;
             }
-            return Status::OK();
+            store_->FlushPendingSends(stoc_server_id);
         }
+        return true;
+    }
+
+    bool RDMALogWriter::CheckCompletion(const std::string &log_file_name,
+                                        uint64_t thread_id, uint32_t dbid,
+                                        uint32_t memtableid,
+                                        uint32_t client_req_id,
+                                        char *backing_mem,
+                                        uint32_t log_record_size,
+                                        WriteState *replicate_log_record_states) {
+        nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid];
+        // Pull all pending writes.
+        int acks = 0;
+        int total_states = 0;
+        LogFileMetadata *meta = nullptr;
+        char *sendbuf = nullptr;
+        for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
+            uint32_t stoc_server_id = nova::NovaCCConfig::cc_config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
+            switch (replicate_log_record_states[stoc_server_id].result) {
+                case WriteResult::REPLICATE_LOG_RECORD_NONE:
+                    break;
+                case WriteResult::WAIT_FOR_ALLOC:
+                    total_states += 1;
+                    break;
+                case WriteResult::WAIT_FOR_WRITE:
+                    total_states += 1;
+                    break;
+                case WriteResult::ALLOC_SUCCESS:
+                    total_states += 1;
+                    break;
+                case WriteResult::WRITE_SUCESS:
+                    total_states += 1;
+                    acks++;
+                    break;
+            }
+        }
+        RDMA_ASSERT(total_states == frag->log_replica_stoc_ids.size());
+        return acks == frag->log_replica_stoc_ids.size();
+    }
+
+    Status RDMALogWriter::CloseLogFile(const std::string &log_file_name,
+                                       uint32_t dbid, uint32_t client_req_id) {
+        nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid];
+        LogFileMetadata *meta = &logfile_last_buf_[log_file_name];
+        delete meta->stoc_bufs;
+        logfile_last_buf_.erase(log_file_name);
+        log_manager_->DeleteLogBuf(log_file_name);
+        for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
+            uint32_t stoc_server_id = nova::NovaCCConfig::cc_config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
+
+            char *send_buf = store_->GetSendBuf(stoc_server_id);
+            char *buf = send_buf;
+            buf[0] = CCRequestType::CC_DELETE_LOG_FILE;
+            buf++;
+            leveldb::EncodeStr(buf, log_file_name);
+            store_->PostSend(send_buf, 1 + 4 + log_file_name.size(),
+                             stoc_server_id, client_req_id);
+            store_->FlushPendingSends(stoc_server_id);
+        }
+        return Status::OK();
     }
 }

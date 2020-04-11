@@ -204,6 +204,7 @@ namespace leveldb {
         MemManager *mem_manager = nullptr;
 
         CCClient *dc_client = nullptr;
+        char *rdma_backing_mem = nullptr;
 
         uint64_t hash = 0;
 
@@ -243,6 +244,8 @@ namespace leveldb {
         CCClient *dc_client = nullptr;
 
         uint64_t total_writes = 0;
+        char *rdma_backing_mem = nullptr;
+        WriteState *replicate_log_record_states = nullptr;
     };
 
 }  // namespace leveldb

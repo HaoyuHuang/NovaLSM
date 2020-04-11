@@ -110,12 +110,12 @@ namespace nova {
                 if (buf[0] == BenchRequestType::BENCH_ALLOCATE_RESPONSE) {
                     uint64_t remote_offset = leveldb::DecodeFixed64(buf + 1);
                     char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
-                    uint64_t wr_id = rdma_store_->PostWrite(ctx.local_buf,
-                                                            write_size_kb_ *
-                                                            1024,
-                                                            remote_server_id,
-                                                            remote_offset,
-                                                            false, req_id);
+                    rdma_store_->PostWrite(ctx.local_buf,
+                                           write_size_kb_ *
+                                           1024,
+                                           remote_server_id,
+                                           remote_offset,
+                                           false, req_id);
 
                     RDMA_LOG(DEBUG)
                         << fmt::format(

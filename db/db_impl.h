@@ -309,7 +309,7 @@ namespace leveldb {
 
         CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
         std::string current_log_file_name_ GUARDED_BY(mutex_);
-        std::vector<uint32_t> closed_log_files_  GUARDED_BY(range_lock_);
+        std::vector<uint32_t> closed_memtable_log_files_  GUARDED_BY(range_lock_);
     };
 
 // Sanitize db options.  The caller should delete result.info_log if

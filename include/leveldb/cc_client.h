@@ -20,6 +20,21 @@ namespace leveldb {
         uint64_t size;
     };
 
+    enum WriteResult {
+        REPLICATE_LOG_RECORD_NONE = 0,
+        WAIT_FOR_ALLOC = 1,
+        ALLOC_SUCCESS = 2,
+        WAIT_FOR_WRITE = 3,
+        WRITE_SUCESS = 4,
+    };
+
+    struct WriteState {
+        WriteResult result;
+        int rdma_wr_id;
+    };
+
+    std::string write_result_str(WriteResult wr);
+
     enum CCRequestType : char {
         CC_RTABLE_READ_BLOCKS = 'a',
         CC_READ_BLOCKS = 'b',
@@ -41,6 +56,7 @@ namespace leveldb {
         CC_RTABLE_PERSIST_RESPONSE = 't',
         CC_DC_READ_STATS = 'u',
         CC_DC_READ_STATS_RESPONSE = 's',
+        CC_REPLICATE_LOG_RECORDS = 'v',
     };
 
     struct CCRequestContext {
@@ -59,6 +75,15 @@ namespace leveldb {
         uint64_t dc_queue_depth;
         uint64_t dc_pending_read_bytes;
         uint64_t dc_pending_write_bytes;
+
+        // log records.
+        char *log_record_mem = nullptr;
+        uint64_t log_record_size = 0;
+        std::string log_file_name;
+        uint64_t thread_id;
+        uint32_t db_id;
+        uint32_t memtable_id;
+        WriteState *replicate_log_record_states;
     };
 
     struct CCResponse {
@@ -103,6 +128,8 @@ namespace leveldb {
         uint32_t write_size;
         bool is_meta_blocks;
 
+        WriteState *replicate_log_record_states;
+
         CCResponse *response = nullptr;
     };
 
@@ -130,11 +157,14 @@ namespace leveldb {
                                     uint64_t thread_id,
                                     uint32_t db_id,
                                     uint32_t memtable_id,
-                                    const Slice &slice) = 0;
+                                    char *rdma_backing_mem,
+                                    const Slice &slice,
+                                    WriteState *replicate_log_record_states) = 0;
 
 
         virtual uint32_t
-        InitiateCloseLogFile(const std::string &log_file_name) = 0;
+        InitiateCloseLogFile(const std::string &log_file_name,
+                             uint32_t dbid) = 0;
 
         virtual uint32_t InitiateReadDCStats(uint32_t server_id) = 0;
 

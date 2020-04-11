@@ -169,7 +169,7 @@ namespace leveldb {
         uint64_t number_of_memtable_hits_ = 0;
         uint64_t number_of_gets_ = 0;
         uint64_t number_of_active_memtables_ = 0;
-        uint64_t number_of_immutable_memtables_ = 0;
+        std::atomic_int_fast64_t number_of_immutable_memtables_;
         uint64_t number_of_steals_ = 0;
         uint64_t number_of_wait_due_to_contention_ = 0;
         uint64_t processed_writes_ = 0;

@@ -90,14 +90,17 @@ namespace leveldb {
     void NovaBlockCCClient::AddAsyncTask(
             const leveldb::RDMAAsyncClientRequestTask &task) {
         if (task.type == RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD) {
-            uint64_t id = (static_cast<uint64_t >(task.dbid) << 32) |
-                          task.memtable_id;
+            uint64_t id = task.dbid;
+//                    (static_cast<uint64_t >(task.dbid) << 32) |
+//                          task.memtable_id;
             ccs_[id % ccs_.size()]->AddTask(task);
             return;
         }
 
-        current_cc_id_ = (current_cc_id_ + 1) % ccs_.size();
-        ccs_[current_cc_id_]->AddTask(task);
+        uint32_t seq = NovaBlockCCClient::rdma_worker_seq_id_.fetch_add(1,
+                                                                        std::memory_order_relaxed) %
+                       ccs_.size();
+        ccs_[seq]->AddTask(task);
     }
 
     uint32_t NovaBlockCCClient::InitiateRTableReadDataBlock(
@@ -120,7 +123,9 @@ namespace leveldb {
     uint32_t NovaBlockCCClient::InitiateReplicateLogRecords(
             const std::string &log_file_name, uint64_t thread_id,
             uint32_t db_id, uint32_t memtable_id,
-            const leveldb::Slice &slice) {
+            char *rdma_backing_mem,
+            const leveldb::Slice &slice,
+            WriteState *replicate_log_record_states) {
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD;
         task.log_file_name = log_file_name;
@@ -128,22 +133,27 @@ namespace leveldb {
         task.dbid = db_id;
         task.memtable_id = memtable_id;
         task.log_record = slice;
+        task.write_buf = rdma_backing_mem;
+        task.replicate_log_record_states = replicate_log_record_states;
         task.sem = &sem_;
-        AddAsyncTask(task);
 
-        RDMA_ASSERT(sem_wait(&sem_) == 0);
+//        int val = 0;
+//        RDMA_ASSERT(sem_getvalue(&sem_, &val) == 0);
+//        RDMA_ASSERT(val == 0) << fmt::format("{}", val);
+        AddAsyncTask(task);
         return 0;
     }
 
     uint32_t NovaBlockCCClient::InitiateCloseLogFile(
-            const std::string &log_file_name) {
+            const std::string &log_file_name, uint32_t dbid) {
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_CLOSE_LOG;
         task.log_file_name = log_file_name;
-        task.sem = &sem_;
+        task.dbid = dbid;
+//        task.sem = &sem_;
         AddAsyncTask(task);
-
-        RDMA_ASSERT(sem_wait(&sem_) == 0);
+        RDMA_LOG(DEBUG) << fmt::format("Close {}", log_file_name);
+//        RDMA_ASSERT(sem_wait(&sem_) == 0);
         return 0;
     }
 
@@ -320,14 +330,49 @@ namespace leveldb {
     uint32_t NovaCCClient::InitiateReplicateLogRecords(
             const std::string &log_file_name, uint64_t thread_id,
             uint32_t db_id, uint32_t memtable_id,
-            const leveldb::Slice &slice) {
-        rdma_log_writer_->AddRecord(log_file_name, thread_id, slice);
-        return 0;
+            char *rdma_backing_mem,
+            const leveldb::Slice &slice,
+            WriteState *replicate_log_record_states) {
+        uint32_t req_id = current_req_id_;
+        CCRequestContext context = {};
+        context.done = false;
+        context.req_type = CCRequestType::CC_REPLICATE_LOG_RECORDS;
+
+        context.log_file_name = log_file_name;
+        context.thread_id = thread_id;
+        context.db_id = db_id;
+        context.memtable_id = memtable_id;
+        context.replicate_log_record_states = replicate_log_record_states;
+        context.log_record_mem = rdma_backing_mem;
+        context.log_record_size = slice.size();
+        request_context_[req_id] = context;
+
+        bool success = rdma_log_writer_->AddRecord(log_file_name,
+                                    thread_id, db_id,
+                                    memtable_id,
+                                    rdma_backing_mem,
+                                    slice,
+                                    req_id,
+                                    replicate_log_record_states);
+        IncrementReqId();
+        if (!success) {
+            request_context_.erase(req_id);
+            return 0;
+        }
+
+        RDMA_LOG(DEBUG)
+            << fmt::format(
+                    "dcclient[{}]: Replicate log record req:{}",
+                    cc_client_id_, req_id);
+        return req_id;
     }
 
     uint32_t
-    NovaCCClient::InitiateCloseLogFile(const std::string &log_file_name) {
-        rdma_log_writer_->CloseLogFile(log_file_name);
+    NovaCCClient::InitiateCloseLogFile(const std::string &log_file_name,
+                                       uint32_t dbid) {
+        uint32_t req_id = current_req_id_;
+        rdma_log_writer_->CloseLogFile(log_file_name, dbid, req_id);
+        IncrementReqId();
         return 0;
     }
 
@@ -384,14 +429,37 @@ namespace leveldb {
         switch (type) {
             case IBV_WC_SEND:
                 break;
-            case IBV_WC_RDMA_WRITE:
-                if (rdma_log_writer_->AckWriteSuccess(remote_server_id,
-                                                      wr_id)) {
-                    RDMA_LOG(DEBUG) << fmt::format(
-                                "dcclient[{}]: Log record replicated req:{} wr_id:{} first:{}",
-                                cc_client_id_, req_id, wr_id, buf[0]);
-                    processed = true;
+            case IBV_WC_RDMA_WRITE: {
+                if (buf[0] ==
+                    leveldb::CCRequestType::CC_REPLICATE_LOG_RECORDS) {
+                    req_id = leveldb::DecodeFixed32(buf + 1);
+                    auto context_it = request_context_.find(req_id);
+                    RDMA_ASSERT(context_it != request_context_.end()) << req_id;
+                    auto &context = context_it->second;
+                    if (rdma_log_writer_->AckWriteSuccess(context.log_file_name,
+                                                          remote_server_id,
+                                                          wr_id,
+                                                          context.replicate_log_record_states)) {
+                        RDMA_LOG(DEBUG) << fmt::format(
+                                    "dcclient[{}]: Log record replicated req:{} wr_id:{} first:{}",
+                                    cc_client_id_, req_id, wr_id, buf[0]);
+
+                        bool complete = rdma_log_writer_->CheckCompletion(
+                                context.log_file_name,
+                                context.thread_id,
+                                context.db_id,
+                                context.memtable_id,
+                                req_id,
+                                context.log_record_mem,
+                                context.log_record_size,
+                                context.replicate_log_record_states);
+                        if (complete) {
+                            context.done = true;
+                        }
+                        processed = true;
+                    }
                 }
+            }
                 break;
             case IBV_WC_RDMA_READ:
                 break;
@@ -408,7 +476,7 @@ namespace leveldb {
                         uint32_t rtable_id = DecodeFixed32(buf + 1);
                         uint64_t rtable_offset = leveldb::DecodeFixed64(
                                 buf + 5);
-                        uint64_t wr_id = rdma_store_->PostWrite(
+                        rdma_store_->PostWrite(
                                 context.backing_mem,
                                 context.size, remote_server_id,
                                 rtable_offset, false, req_id);
@@ -424,7 +492,7 @@ namespace leveldb {
                         // Waiting for WRITEs.
                         if (nova::IsRDMAWRITEComplete(context.backing_mem,
                                                       context.size)) {
-                            RDMA_ASSERT(buf[0] == '~') << buf[0];
+//                            RDMA_ASSERT(buf[0] == '~') << buf[0];
                             RDMA_LOG(DEBUG) << fmt::format(
                                         "dcclient[{}]: Read RTable blocks complete size:{} req:{}",
                                         cc_client_id_, context.size, req_id);
@@ -466,20 +534,24 @@ namespace leveldb {
                                 buf + 17);
                         context.done = true;
                         processed = true;
+                    } else if (buf[0] ==
+                               CCRequestType::CC_ALLOCATE_LOG_BUFFER_SUCC) {
+                        uint64_t base = leveldb::DecodeFixed64(buf + 1);
+                        uint64_t size = leveldb::DecodeFixed64(buf + 9);
+                        rdma_log_writer_->AckAllocLogBuf(context.log_file_name,
+                                                         remote_server_id, base,
+                                                         size,
+                                                         context.log_record_mem,
+                                                         context.log_record_size,
+                                                         req_id,
+                                                         context.replicate_log_record_states);
+                        RDMA_LOG(DEBUG) << fmt::format(
+                                    "dcclient[{}]: Allocate log buffer success req:{}",
+                                    cc_client_id_, req_id);
+                        processed = true;
                     }
                 }
-                if (buf[0] ==
-                    CCRequestType::CC_ALLOCATE_LOG_BUFFER_SUCC) {
-                    uint64_t base = leveldb::DecodeFixed64(buf + 1);
-                    uint64_t size = leveldb::DecodeFixed64(buf + 9);
-                    rdma_log_writer_->AckAllocLogBuf(remote_server_id, base,
-                                                     size);
 
-                    RDMA_LOG(DEBUG) << fmt::format(
-                                "dcclient[{}]: Allocate log buffer success req:{}",
-                                cc_client_id_, req_id);
-                    processed = true;
-                }
                 break;
         }
         return processed;

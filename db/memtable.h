@@ -126,6 +126,7 @@ namespace leveldb {
         std::mutex mutex_;
         MemTable *memtable_ = nullptr;
         uint32_t nentries_ = 0;
+        uint32_t memtable_size_ = 0;
         uint32_t number_of_pending_writes_ = 0;
     };
 

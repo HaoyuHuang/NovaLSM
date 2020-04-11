@@ -60,6 +60,7 @@ namespace nova {
         uint64_t nnovabuf;
 
         ScatterPolicy  scatter_policy;
+        NovaLogRecordMode log_record_mode;
 
         void add_tid_mapping() {
             std::lock_guard<std::mutex> l(m);
@@ -136,7 +137,7 @@ namespace nova {
 
                 int nreplicas = (tokens.size() - 4);
                 for (int i = 0; i < nreplicas; i++) {
-                    frag->cc_server_ids.push_back(std::stoi(tokens[i + 4]));
+                    frag->log_replica_stoc_ids.push_back(std::stoi(tokens[i + 4]));
                 }
                 frags->push_back(frag);
             }
@@ -150,7 +151,7 @@ namespace nova {
                                                (*frags)[i]->cc_server_id,
                                                (*frags)[i]->dbid,
                                                ToString(
-                                                       (*frags)[i]->cc_server_ids));
+                                                       (*frags)[i]->log_replica_stoc_ids));
             }
         }
 

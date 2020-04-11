@@ -33,6 +33,8 @@ namespace nova {
 #define RDMA_POLL_MIN_TIMEOUT_US 10
 #define RDMA_POLL_MAX_TIMEOUT_US 100
 #define LEVELDB_TABLE_PADDING_SIZE_MB 2
+#define MAX_BLOCK_SIZE 10240
+
 
     using namespace std;
     using namespace rdmaio;
@@ -55,7 +57,8 @@ namespace nova {
     enum NovaLogRecordMode {
         LOG_LOCAL = 0,
         LOG_RDMA = 1,
-        LOG_NIC = 2
+        LOG_NIC = 2,
+        LOG_NONE = 3,
     };
 
     struct RangePartition {
@@ -68,7 +71,7 @@ namespace nova {
         RangePartition range;
         uint32_t dbid;
         uint32_t cc_server_id;
-        std::vector<uint32_t> cc_server_ids;
+        std::vector<uint32_t> log_replica_stoc_ids;
     };
 
     struct DCFragment {

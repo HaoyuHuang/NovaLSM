@@ -58,12 +58,10 @@ namespace nova {
     }
 
     void NovaCCServer::AddAsyncTask(const nova::NovaServerAsyncTask &task) {
-        current_worker_id_ = current_worker_id_ % async_workers_.size();
-        async_workers_[current_worker_id_]->AddTask(task);
-        current_worker_id_ += 1;
-
-//        async_workers_[task.rtable_id % async_workers_.size()]->AddTask(task);
-//        task.rtable_id % async_workers_.size();
+        uint32_t id =
+                cc_server_seq_id_.fetch_add(1, std::memory_order_relaxed) %
+                async_workers_.size();
+        async_workers_[id]->AddTask(task);
     }
 
     int NovaCCServer::PullAsyncCQ() {
@@ -161,7 +159,7 @@ namespace nova {
                         leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
                         if (IsRDMAWRITEComplete((char *) context.rtable_offset,
                                                 context.size)) {
-                            RDMA_ASSERT(buf[0] == '~');
+//                            RDMA_ASSERT(buf[0] == '~');
 
                             rtable_manager_->rtable(
                                     context.rtable_id)->MarkOffsetAsWritten(
@@ -334,17 +332,17 @@ namespace nova {
                     std::string log_file(buf + 5, size);
                     uint32_t slabclassid = mem_manager_->slabclassid(thread_id_,
                                                                      nova::NovaConfig::config->log_buf_size);
-                    char *buf = mem_manager_->ItemAlloc(thread_id_,
-                                                        slabclassid);
-                    RDMA_ASSERT(buf) << "Running out of memory";
-                    log_manager_->Add(thread_id_, log_file, buf);
+                    char *rmda_buf = mem_manager_->ItemAlloc(thread_id_,
+                                                             slabclassid);
+                    RDMA_ASSERT(rmda_buf) << "Running out of memory";
+                    log_manager_->Add(thread_id_, log_file, rmda_buf);
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     send_buf[0] = leveldb::CCRequestType::CC_ALLOCATE_LOG_BUFFER_SUCC;
-                    leveldb::EncodeFixed64(send_buf + 1, (uint64_t) buf);
+                    leveldb::EncodeFixed64(send_buf + 1, (uint64_t) rmda_buf);
                     leveldb::EncodeFixed64(send_buf + 9,
                                            NovaConfig::config->log_buf_size);
                     rdma_store_->PostSend(send_buf, 1 + 8 + 8, remote_server_id,
-                                          0);
+                                          dc_req_id);
                     RDMA_LOG(DEBUG) << fmt::format(
                                 "dc[{}]: Allocate log buffer for file {}.",
                                 thread_id_, log_file);
@@ -379,7 +377,8 @@ namespace nova {
             const nova::NovaServerAsyncTask &task) {
         mutex_.lock();
         stat_tasks_ += 1;
-        if (task.request_type == leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS) {
+        if (task.request_type ==
+            leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS) {
 
         }
         queue_.push_back(task);

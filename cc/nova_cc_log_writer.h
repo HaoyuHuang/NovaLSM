@@ -16,61 +16,82 @@
 
 namespace leveldb {
 
-    namespace log {
 
-        class RDMALogWriter {
-        public:
-            RDMALogWriter(nova::NovaRDMAStore *store, char *rnic_buf, MemManager *mem_manager,
-            nova::LogFileManager *log_manager);
+    class RDMALogWriter {
+    public:
+        RDMALogWriter(nova::NovaRDMAStore *store,
+                      MemManager *mem_manager,
+                      nova::LogFileManager *log_manager);
 
-            Status
-            AddRecord(const std::string &log_file_name,
-                      uint64_t thread_id,
-                      const Slice &slice);
+        bool
+        AddRecord(const std::string &log_file_name,
+                  uint64_t thread_id,
+                  uint32_t dbid,
+                  uint32_t memtableid,
+                  char *rdma_backing_buf,
+                  const Slice &slice,
+                  uint32_t client_req_id,
+                  WriteState *replicate_log_record_states);
 
-            void AckAllocLogBuf(int remote_sid, uint64_t offset, uint64_t size);
+        void AckAllocLogBuf(const std::string &log_file_name, int remote_sid,
+                            uint64_t offset, uint64_t size,
+                            char *backing_mem, uint32_t log_record_size,
+                            uint32_t client_req_id,
+                            WriteState *replicate_log_record_states);
 
-            bool AckWriteSuccess(int remote_sid, uint64_t rdma_wr_id);
+        bool AckWriteSuccess(const std::string &log_file_name, int remote_sid,
+                             uint64_t rdma_wr_id,
+                             WriteState *replicate_log_record_states);
 
-            Status CloseLogFile(const std::string &log_file_name);
+        Status
+        CloseLogFile(const std::string &log_file_name, uint32_t dbid, uint32_t client_req_id);
 
-        private:
-            struct LogFileBuf {
-                uint64_t base;
-                uint64_t offset;
-                uint64_t size;
-            };
+        bool CheckCompletion(const std::string &log_file_name,
+                             uint64_t thread_id,
+                             uint32_t dbid,
+                             uint32_t memtableid,
+                             uint32_t client_req_id,
+                             char *backing_mem,
+                             uint32_t log_record_size,
+                             WriteState *replicate_log_record_states);
 
-            char* Init(const std::string &log_file_name,uint64_t thread_id, const Slice &slice);
+    private:
+        std::string write_result_str(WriteResult wr) {
+            switch (wr) {
+                case REPLICATE_LOG_RECORD_NONE:
+                    return "none";
+                case WAIT_FOR_ALLOC:
+                    return "wait_for_alloc";
+                case ALLOC_SUCCESS:
+                    return "alloc_success";
+                case WAIT_FOR_WRITE:
+                    return "wait_for_write";
+                case WRITE_SUCESS:
+                    return "write_success";
+            }
+        }
 
-            nova::NovaRDMAStore *store_;
-            std::map<std::string, LogFileBuf *> logfile_last_buf_;
-
-            enum WriteResult {
-                NONE = 0,
-                WAIT_FOR_ALLOC = 1,
-                ALLOC_SUCCESS = 2,
-                WAIT_FOR_WRITE = 3,
-                WRITE_SUCESS =4,
-            };
-
-            struct WriteState {
-                WriteResult result;
-                uint64_t rdma_wr_id;
-            };
-
-            std::string write_result_str(WriteResult wr);
-
-            MemManager *mem_manager_;
-            nova::LogFileManager *log_manager_;
-
-            char *rnic_buf_;
-            uint32_t rnic_buf_size_;
-            std::string current_log_file_;
-            WriteState *write_result_;
+        struct LogFileBuf {
+            uint64_t base = 0;
+            uint64_t offset = 0;
+            uint64_t size = 0;
+            bool is_initializing = false;
         };
 
-    }  // namespace log
+        struct LogFileMetadata {
+            LogFileBuf *stoc_bufs = nullptr;
+        };
+
+        void Init(const std::string &log_file_name, uint64_t thread_id,
+                  const Slice &slice, char *backing_buf);
+
+        nova::NovaRDMAStore *store_;
+        std::map<std::string, LogFileMetadata> logfile_last_buf_;
+
+        MemManager *mem_manager_;
+        nova::LogFileManager *log_manager_;
+    };
+
 }  // namespace leveldb
 
 #endif //LEVELDB_NOVA_CC_LOG_WRITER_H

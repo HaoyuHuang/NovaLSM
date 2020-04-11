@@ -53,11 +53,13 @@ namespace leveldb {
                                     uint64_t thread_id,
                                     uint32_t db_id,
                                     uint32_t memtable_id,
-                                    const Slice &slice) override;
+                                    char *rdma_backing_mem,
+                                    const Slice &slice,
+                                    WriteState *replicate_log_record_states) override;
 
 
         uint32_t
-        InitiateCloseLogFile(const std::string &log_file_name) override;
+        InitiateCloseLogFile(const std::string &log_file_name, uint32_t dbid) override;
 
         uint32_t InitiateReadDCStats(uint32_t server_id) override;
 
@@ -82,6 +84,8 @@ namespace leveldb {
             RDMA_ASSERT(sem_wait(&sem_) == 0);
         }
 
+        static std::atomic_int_fast32_t rdma_worker_seq_id_;
+        sem_t sem_;
     private:
         std::map<uint32_t, CCResponse *> req_response;
 
@@ -90,7 +94,7 @@ namespace leveldb {
         uint32_t current_cc_id_ = 0;
         uint32_t req_id_ = 0;
         uint32_t dbid_ = 0;
-        sem_t sem_;
+
     };
 
 
@@ -99,7 +103,7 @@ namespace leveldb {
         NovaCCClient(uint32_t dc_client_id, nova::NovaRDMAStore *rdma_store,
                      nova::NovaMemManager *mem_manager,
                      NovaRTableManager *rtable_manager,
-                     leveldb::log::RDMALogWriter *rdma_log_writer,
+                     leveldb::RDMALogWriter *rdma_log_writer,
                      uint32_t lower_req_id, uint32_t upper_req_id,
                      CCServer *cc_server)
                 : cc_client_id_(dc_client_id), rdma_store_(rdma_store),
@@ -131,12 +135,14 @@ namespace leveldb {
                                     uint64_t thread_id,
                                     uint32_t db_id,
                                     uint32_t memtable_id,
-                                    const Slice &slice) override;
+                                    char *rdma_backing_mem,
+                                    const Slice &slice,
+                                    WriteState *replicate_log_record_states) override;
 
         uint32_t InitiateReadDCStats(uint32_t server_id) override;
 
         uint32_t
-        InitiateCloseLogFile(const std::string &log_file_name) override;
+        InitiateCloseLogFile(const std::string &log_file_name, uint32_t dbid) override;
 
         bool OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                     int remote_server_id, char *buf,
@@ -155,7 +161,7 @@ namespace leveldb {
         nova::NovaMemManager *mem_manager_;
         NovaRTableManager *rtable_manager_;
         CCServer *cc_server_;
-        leveldb::log::RDMALogWriter *rdma_log_writer_ = nullptr;
+        leveldb::RDMALogWriter *rdma_log_writer_ = nullptr;
 
         uint32_t current_req_id_ = 1;
         uint32_t lower_req_id_;

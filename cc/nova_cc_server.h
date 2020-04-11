@@ -86,6 +86,8 @@ namespace nova {
 
         std::vector<NovaCCServerAsyncWorker *> async_workers_;
 
+        static std::atomic_int_fast32_t cc_server_seq_id_;
+
     private:
         bool is_running_ = true;
         bool is_compaction_thread_ = false;

@@ -15,8 +15,6 @@
 #include "db/filename.h"
 #include "nova/nova_config.h"
 
-#define MAX_BLOCK_SIZE 10240
-
 namespace leveldb {
     namespace {
         bool dc_stats_comparator(const DCStatsStatus &s1,
@@ -596,34 +594,26 @@ namespace leveldb {
             *result = Slice(scratch, n);
         } else {
             RDMA_ASSERT(n < MAX_BLOCK_SIZE);
-            char *backing_mem_block = nullptr;
-            int buf_id = -1;
+            char *backing_mem_block = read_options.rdma_backing_mem;
 
+//            DataBlockBuf buf;
             // Search the first available buf.
-            mutex_.lock();
-            for (int i = 0; i < backing_mem_blocks_.size(); i++) {
-                if (!backing_mem_blocks_[i].is_using) {
-                    buf_id = i;
-                    break;
-                }
-            }
+//            mutex_.lock();
 
-            if (buf_id == -1) {
-                uint32_t scid = mem_manager_->slabclassid(
-                        read_options.thread_id,
-                        MAX_BLOCK_SIZE);
-                backing_mem_block = mem_manager_->ItemAlloc(
-                        read_options.thread_id, scid);
-                DataBlockBuf buf = {};
-                buf.is_using = true;
-                buf.thread_id = read_options.thread_id;
-                buf.buf = backing_mem_block;
-                backing_mem_blocks_.emplace_back(buf);
-                buf_id = backing_mem_blocks_.size() - 1;
-            }
-            backing_mem_blocks_[buf_id].is_using = true;
-            backing_mem_block = backing_mem_blocks_[buf_id].buf;
-            mutex_.unlock();
+//            if (backing_mem_blocks_.empty()) {
+//                uint32_t scid = mem_manager_->slabclassid(
+//                        read_options.thread_id,
+//                        MAX_BLOCK_SIZE);
+//                backing_mem_block = mem_manager_->ItemAlloc(
+//                        read_options.thread_id, scid);
+//                buf.thread_id = read_options.thread_id;
+//                buf.buf = backing_mem_block;
+//            } else {
+//                buf = backing_mem_blocks_.front();
+//                backing_mem_block = buf.buf;
+//                backing_mem_blocks_.pop();
+//            }
+//            mutex_.unlock();
             RDMA_ASSERT(backing_mem_block);
             auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(read_options.dc_client);
             dc->set_dbid(dbid_);
@@ -647,10 +637,10 @@ namespace leveldb {
             memcpy(scratch, ptr, n);
             *result = Slice(scratch, n);
 
-            // Return the buf.
-            mutex_.lock();
-            backing_mem_blocks_[buf_id].is_using = false;
-            mutex_.unlock();
+//            // Return the buf.
+//            mutex_.lock();
+//            backing_mem_blocks_.push(buf);
+//            mutex_.unlock();
         }
         return Status::OK();
     }
@@ -667,12 +657,13 @@ namespace leveldb {
             backing_mem_table_ = nullptr;
         }
 
-        for (auto &it : backing_mem_blocks_) {
-            RDMA_ASSERT(!it.is_using);
-            uint32_t scid = mem_manager_->slabclassid(it.thread_id,
-                                                      MAX_BLOCK_SIZE);
-            mem_manager_->FreeItem(it.thread_id, it.buf, scid);
-        }
+//        while (!backing_mem_blocks_.empty()) {
+//            auto it = backing_mem_blocks_.front();
+//            uint32_t scid = mem_manager_->slabclassid(it.thread_id,
+//                                                      MAX_BLOCK_SIZE);
+//            mem_manager_->FreeItem(it.thread_id, it.buf, scid);
+//            backing_mem_blocks_.pop();
+//        }
     }
 
     Status NovaCCRandomAccessFile::Read(const RTableHandle &rtable_handle,

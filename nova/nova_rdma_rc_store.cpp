@@ -183,10 +183,10 @@ namespace nova {
     NovaRDMARCStore::PostSend(const char *localbuf, uint32_t size,
                               int server_id,
                               uint32_t imm_data) {
-        ibv_wr_opcode wr = IBV_WR_SEND;
-        if (imm_data != 0) {
-            wr = IBV_WR_SEND_WITH_IMM;
-        }
+        ibv_wr_opcode wr = IBV_WR_SEND_WITH_IMM;
+//        if (imm_data != 0) {
+//            wr = IBV_WR_SEND_WITH_IMM;
+//        }
         RDMA_ASSERT(size < max_msg_size_);
         return PostRDMASEND(localbuf, wr, size, server_id, 0, 0, false,
                             imm_data);

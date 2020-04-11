@@ -138,8 +138,15 @@ namespace nova {
         gettimeofday(&start, nullptr);
         uint64_t loaded_keys = 0;
         std::vector<CCFragment *> &frags = NovaCCConfig::cc_config->fragments;
+        leveldb::WriteState *state = new leveldb::WriteState[NovaConfig::config->servers.size()];
+        for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
+            state[i].rdma_wr_id = -1;
+            state[i].result = leveldb::WriteResult::REPLICATE_LOG_RECORD_NONE;
+        }
 
         unsigned int rand_seed = tid_;
+        auto client = new leveldb::NovaBlockCCClient(tid_);
+        client->ccs_ = async_workers_;
 
         int pivot = 0;
         int i = pivot;
@@ -171,10 +178,20 @@ namespace nova {
                 std::string key(std::to_string(j));
                 std::string val(
                         NovaConfig::config->load_default_value_size, v);
+
+                for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
+                    state[i].rdma_wr_id = -1;
+                    state[i].result = leveldb::WriteResult::REPLICATE_LOG_RECORD_NONE;
+                }
                 leveldb::WriteOptions option;
                 option.sync = true;
                 option.hash = j;
                 option.rand_seed = &rand_seed;
+                option.dc_client = client;
+                option.thread_id = tid_;
+                option.local_write = true;
+                option.replicate_log_record_states = state;
+
                 leveldb::Status s = db->Put(option, key, val);
                 RDMA_ASSERT(s.ok());
                 loaded_keys++;
@@ -269,14 +286,17 @@ namespace nova {
     }
 
     void NovaCCNICServer::LoadData() {
-        for (int i = 0; i < NovaCCConfig::cc_config->dc_servers.size(); i++) {
-            if (NovaConfig::config->my_server_id ==
-                NovaCCConfig::cc_config->dc_servers[i].server_id) {
-                return;
+        if (!NovaConfig::config->use_multiple_disks) {
+            for (int i = 0;
+                 i < NovaCCConfig::cc_config->dc_servers.size(); i++) {
+                if (NovaConfig::config->my_server_id ==
+                    NovaCCConfig::cc_config->dc_servers[i].server_id) {
+                    return;
+                }
             }
         }
 
-        uint32_t nloading_threads = std::min(32, (int) dbs_.size());
+        uint32_t nloading_threads = std::min(1, (int) dbs_.size());
         RDMA_ASSERT(dbs_.size() >= nloading_threads &&
                     dbs_.size() % nloading_threads == 0);
         uint32_t ndb_per_thread = dbs_.size() / nloading_threads;
@@ -374,12 +394,12 @@ namespace nova {
         char *buf = rdmabuf;
         char *cache_buf = buf + nrdma_buf_cc();
 
-        uint32_t num_mem_partitions = 0;
-        if (ndbs == 1) {
-            num_mem_partitions = 1;
-        } else {
-            num_mem_partitions = 4;
-        }
+        uint32_t num_mem_partitions = 1;
+//        if (ndbs == 1) {
+//            num_mem_partitions = 1;
+//        } else {
+//            num_mem_partitions = 4;
+//        }
         NovaConfig::config->num_mem_partitions = num_mem_partitions;
         uint64_t slab_size_mb = std::max(
                 NovaConfig::config->sstable_size / 1024 / 1024,
@@ -507,10 +527,6 @@ namespace nova {
             }
 
             // Log writers.
-            uint32_t scid = mem_manager->slabclassid(worker_id,
-                                                     NovaConfig::config->log_buf_size);
-            char *rnic_buf = mem_manager->ItemAlloc(worker_id, scid);
-            RDMA_ASSERT(rnic_buf) << "Running out of memory";
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
                                                                    mem_manager,
                                                                    rtable_manager,
@@ -521,9 +537,8 @@ namespace nova {
                                                                      store,
                                                                      mem_manager,
                                                                      rtable_manager,
-                                                                     new leveldb::log::RDMALogWriter(
+                                                                     new leveldb::RDMALogWriter(
                                                                              store,
-                                                                             rnic_buf,
                                                                              mem_manager,
                                                                              log_manager),
                                                                      lower_client_req_id,
@@ -579,10 +594,6 @@ namespace nova {
                 store = new NovaRDMANoopStore();
             }
 
-            uint32_t scid = mem_manager->slabclassid(worker_id,
-                                                     NovaConfig::config->log_buf_size);
-            char *rnic_buf = mem_manager->ItemAlloc(worker_id, scid);
-            RDMA_ASSERT(rnic_buf) << "Running out of memory";
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
                                                                    mem_manager,
                                                                    rtable_manager,
@@ -593,9 +604,8 @@ namespace nova {
                                                                      store,
                                                                      mem_manager,
                                                                      rtable_manager,
-                                                                     new leveldb::log::RDMALogWriter(
+                                                                     new leveldb::RDMALogWriter(
                                                                              store,
-                                                                             rnic_buf,
                                                                              mem_manager,
                                                                              log_manager),
                                                                      lower_client_req_id,
@@ -618,6 +628,10 @@ namespace nova {
             conn_workers.push_back(new NovaCCConnWorker(i));
             conn_workers[i]->set_dbs(dbs_);
             conn_workers[i]->mem_manager_ = mem_manager;
+
+            uint32_t scid = mem_manager->slabclassid(0, MAX_BLOCK_SIZE);
+            conn_workers[i]->rdma_backing_mem = mem_manager->ItemAlloc(0, scid);
+
             conn_workers[i]->cc_client_ = new leveldb::NovaBlockCCClient(i);
             conn_workers[i]->cc_client_->ccs_ = async_workers;
         }

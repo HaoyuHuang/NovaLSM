@@ -621,7 +621,7 @@ namespace leveldb {
             if (no_slots) {
                 p->background_work_finished_signal_.SignalAll();
             }
-            number_of_immutable_memtables_ -= it.second.size();
+            number_of_immutable_memtables_.fetch_add(-it.second.size());
             p->mutex.Unlock();
         }
     }
@@ -693,20 +693,22 @@ namespace leveldb {
             }
         }
         number_of_immutable_memtables_ -= tasks.size();
-        std::vector<uint32_t> closed_log_files(closed_log_files_.begin(),
-                                               closed_log_files_.end());
-        closed_log_files_.clear();
+        std::vector<uint32_t> closed_memtable_log_files(
+                closed_memtable_log_files_.begin(),
+                closed_memtable_log_files_.end());
+        closed_memtable_log_files_.clear();
         range_lock_.Unlock();
 
-        // TODO: Delete these log files.
-
-        //        for (const auto &file : closed_log_files_) {
-//            options.dc_client->InitiateCloseLogFile(
-//                    fmt::format("{}-{}-{}", server_id_, dbid_, file));
-//        }
+        if (nova::NovaConfig::config->log_record_mode ==
+            nova::NovaLogRecordMode::LOG_RDMA) {
+            for (const auto &file : closed_memtable_log_files) {
+                bg_thread->dc_client()->InitiateCloseLogFile(
+                        fmt::format("{}-{}-{}", server_id_, dbid_, file),
+                        dbid_);
+            }
+        }
 
         options_.memtable_pool->mutex_.lock();
-
         options_.memtable_pool->num_available_memtables_ += num_available;
         RDMA_ASSERT(options_.memtable_pool->num_available_memtables_ <
                     nova::NovaCCConfig::cc_config->num_memtables - dbs_.size());
@@ -1556,7 +1558,7 @@ namespace leveldb {
                 if (steal_table->mutex_.try_lock()) {
                     if (steal_table->number_of_pending_writes_ == 0 &&
                         !steal_table->is_immutable_ &&
-                        steal_table->memtable_->ApproximateMemoryUsage() >
+                        steal_table->memtable_size_ >
                         0.5 * options_.write_buffer_size) {
                         number_of_steals_ += 1;
                         steal_table->is_immutable_ = true;
@@ -1640,12 +1642,7 @@ namespace leveldb {
                             table);
                     partition->memtable = table;
                     schedule_compaction = true;
-                    number_of_immutable_memtables_ += 1;
-                    if (wait) {
-                        Log(options_.info_log,
-                            "Make room; resuming... pid-%u-tid-%lu\n",
-                            partition_id, options.thread_id);
-                    }
+                    number_of_immutable_memtables_.fetch_add(1);// += 1;
                     break;
                 }
             }
@@ -1653,6 +1650,11 @@ namespace leveldb {
 
         if (!wait) {
             number_of_puts_no_wait_ += 1;
+        }
+        if (wait) {
+            Log(options_.info_log,
+                "Make room; resuming... pid-%u-tid-%lu\n",
+                partition_id, options.thread_id);
         }
         uint32_t memtable_id = table->memtableid();
         table->Add(last_sequence, ValueType::kTypeValue, key, value);
@@ -1723,19 +1725,22 @@ namespace leveldb {
         AtomicMemTable *emptiest_memtable = nullptr;
         uint64_t smallest_size = UINT64_MAX;
         int emptiest_index = 0;
+
+        uint32_t atomic_memtable_index = 0;
         while (true) {
             emptiest_memtable = nullptr;
             smallest_size = UINT64_MAX;
             emptiest_index = -1;
             all_busy = true;
             atomic_memtable = nullptr;
+            enable_stickness = active_memtables_.size() < 5;
 
             int number_of_retries = std::min((size_t) 3,
                                              active_memtables_.size());
             RDMA_ASSERT(full_memtables.empty());
-            uint32_t rand_local_index = 0;
+            atomic_memtable_index = 0;
             if (!enable_stickness) {
-                rand_local_index = rand_r(options.rand_seed);
+                atomic_memtable_index = rand_r(options.rand_seed);
             }
 
             uint32_t first_memtable_id = 0;
@@ -1743,25 +1748,25 @@ namespace leveldb {
                 first_memtable_id = active_memtables_[0]->memtable_->memtableid();
             }
             for (int i = 0; i < number_of_retries; i++) {
-                rand_local_index =
-                        (rand_local_index + 1) % active_memtables_.size();
+                atomic_memtable_index =
+                        (atomic_memtable_index + 1) % active_memtables_.size();
                 if (i == 1 && enable_stickness) {
-                    rand_local_index = rand_r(options.rand_seed) %
-                                       active_memtables_.size();
-                    if (active_memtables_[rand_local_index]->memtable_->memtableid() ==
+                    atomic_memtable_index = rand_r(options.rand_seed) %
+                                            active_memtables_.size();
+                    if (active_memtables_[atomic_memtable_index]->memtable_->memtableid() ==
                         first_memtable_id) {
-                        rand_local_index =
-                                (rand_local_index + 1) %
+                        atomic_memtable_index =
+                                (atomic_memtable_index + 1) %
                                 active_memtables_.size();
                     }
                 }
 
-                RDMA_ASSERT(rand_local_index < active_memtables_.size())
-                    << fmt::format("{} {} {} {}", rand_local_index,
+                RDMA_ASSERT(atomic_memtable_index < active_memtables_.size())
+                    << fmt::format("{} {} {} {}", atomic_memtable_index,
                                    active_memtables_.size(),
                                    i, number_of_retries);
 
-                atomic_memtable = active_memtables_[rand_local_index];
+                atomic_memtable = active_memtables_[atomic_memtable_index];
                 RDMA_ASSERT(atomic_memtable);
 
                 uint64_t ms = atomic_memtable->nentries_;
@@ -1769,7 +1774,7 @@ namespace leveldb {
                     !atomic_memtable->is_immutable_) {
                     emptiest_memtable = atomic_memtable;
                     smallest_size = ms;
-                    emptiest_index = rand_local_index;
+                    emptiest_index = atomic_memtable_index;
                 }
 
                 if (!atomic_memtable->mutex_.try_lock()) {
@@ -1779,37 +1784,42 @@ namespace leveldb {
                 all_busy = false;
                 RDMA_ASSERT(atomic_memtable->memtable_);
                 RDMA_ASSERT(!atomic_memtable->is_flushed_);
-                if (atomic_memtable->number_of_pending_writes_ == 0 &&
-                    (atomic_memtable->is_immutable_ ||
-                     atomic_memtable->memtable_->ApproximateMemoryUsage() >
-                     options_.write_buffer_size)) {
+                if (atomic_memtable->memtable_size_ >
+                    options_.write_buffer_size ||
+                    atomic_memtable->is_immutable_) {
                     atomic_memtable->is_immutable_ = true;
-                    full_memtables.push_back(atomic_memtable->memtable_);
-                    closed_log_files_.push_back(
-                            atomic_memtable->memtable_->memtableid());
-                    active_memtables_.erase(
-                            active_memtables_.begin() + rand_local_index);
 
-                    number_of_active_memtables_ -= 1;
-                    number_of_immutable_memtables_ += 1;
-                    atomic_memtable->mutex_.unlock();
-                    atomic_memtable = nullptr;
-
-                    if (rand_local_index < emptiest_index) {
-                        emptiest_index -= 1;
-                    }
-
-                    if (emptiest_index == rand_local_index) {
+                    if (emptiest_index == atomic_memtable_index) {
                         smallest_size = UINT64_MAX;
                         emptiest_index = -1;
                         emptiest_memtable = nullptr;
                     }
+
+                    if (atomic_memtable->number_of_pending_writes_ == 0) {
+                        full_memtables.push_back(atomic_memtable->memtable_);
+                        closed_memtable_log_files_.push_back(
+                                atomic_memtable->memtable_->memtableid());
+                        active_memtables_.erase(
+                                active_memtables_.begin() +
+                                atomic_memtable_index);
+
+                        number_of_active_memtables_ -= 1;
+                        number_of_immutable_memtables_ += 1;
+
+                        if (atomic_memtable_index < emptiest_index) {
+                            emptiest_index -= 1;
+                        }
+                    }
+                    atomic_memtable->mutex_.unlock();
+                    atomic_memtable = nullptr;
                     continue;
                 }
                 break;
             }
 
             if (atomic_memtable) {
+                RDMA_ASSERT(atomic_memtable->memtable_->memtableid() ==
+                            active_memtables_[atomic_memtable_index]->memtable_->memtableid());
                 number_of_puts_no_wait_ += 1;
                 range_lock_.Unlock();
                 break;
@@ -1822,49 +1832,52 @@ namespace leveldb {
                 !active_memtables_.empty()) {
                 number_of_wait_due_to_contention_ += 1;
                 // wait on another random table.
-                rand_local_index =
-                        (rand_local_index + 1) % active_memtables_.size();
-                atomic_memtable = active_memtables_[rand_local_index];
+                atomic_memtable_index =
+                        (atomic_memtable_index + 1) % active_memtables_.size();
+                atomic_memtable = active_memtables_[atomic_memtable_index];
                 RDMA_ASSERT(atomic_memtable);
 
                 atomic_memtable->mutex_.lock();
                 RDMA_ASSERT(atomic_memtable->memtable_);
                 RDMA_ASSERT(!atomic_memtable->is_flushed_);
-                if (atomic_memtable->number_of_pending_writes_ == 0 &&
-                    (atomic_memtable->is_immutable_ ||
-                     atomic_memtable->memtable_->ApproximateMemoryUsage() >
-                     options_.write_buffer_size)) {
+
+                if (atomic_memtable->memtable_size_ >
+                    options_.write_buffer_size ||
+                    atomic_memtable->is_immutable_) {
                     atomic_memtable->is_immutable_ = true;
-                    full_memtables.push_back(atomic_memtable->memtable_);
-                    closed_log_files_.push_back(
-                            atomic_memtable->memtable_->memtableid());
-                    active_memtables_.erase(
-                            active_memtables_.begin() + rand_local_index);
-                    atomic_memtable->mutex_.unlock();
-                    atomic_memtable = nullptr;
 
-                    number_of_active_memtables_ -= 1;
-                    number_of_immutable_memtables_ += 1;
-
-                    if (rand_local_index < emptiest_index) {
-                        emptiest_index -= 1;
-                    }
-
-                    if (emptiest_index == rand_local_index) {
+                    if (emptiest_index == atomic_memtable_index) {
                         smallest_size = UINT64_MAX;
                         emptiest_index = -1;
                         emptiest_memtable = nullptr;
                     }
+
+                    if (atomic_memtable->number_of_pending_writes_ == 0) {
+                        full_memtables.push_back(atomic_memtable->memtable_);
+                        closed_memtable_log_files_.push_back(
+                                atomic_memtable->memtable_->memtableid());
+                        active_memtables_.erase(
+                                active_memtables_.begin() +
+                                atomic_memtable_index);
+
+                        number_of_active_memtables_ -= 1;
+                        number_of_immutable_memtables_ += 1;
+
+                        if (atomic_memtable_index < emptiest_index) {
+                            emptiest_index -= 1;
+                        }
+                    }
+                    atomic_memtable->mutex_.unlock();
+                    atomic_memtable = nullptr;
                 }
             }
 
             if (atomic_memtable) {
+                RDMA_ASSERT(atomic_memtable->memtable_->memtableid() ==
+                            active_memtables_[atomic_memtable_index]->memtable_->memtableid());
                 range_lock_.Unlock();
                 break;
             }
-
-            RDMA_LOG(rdmaio::DEBUG)
-                << fmt::format("db[{}]: Insert {} full", dbid_, key.ToString());
 
             // is full.
             bool has_available_memtable = false;
@@ -1878,16 +1891,6 @@ namespace leveldb {
             } else {
                 if (actual_share < expected_share) {
                     options_.memtable_pool->mutex_.lock();
-//                    RDMA_LOG(rdmaio::INFO)
-//                        << fmt::format("db[{}]: {} {} {} {} {}",
-//                                       dbid_,
-//                                       actual_share,
-//                                       expected_share,
-//                                       processed_writes_,
-//                                       options.total_writes,
-//                                       (double) processed_writes_ /
-//                                       (double) options.total_writes);
-
                     if (options_.memtable_pool->num_available_memtables_ > 0) {
                         has_available_memtable = true;
                         options_.memtable_pool->num_available_memtables_ -= 1;
@@ -1913,16 +1916,16 @@ namespace leveldb {
 
                 atomic_memtable->mutex_.lock();
                 range_lock_.Unlock();
-                RDMA_LOG(rdmaio::DEBUG)
-                    << fmt::format(
-                            "db[{}]: Insert {} !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Add memtable {} from pool",
-                            dbid_, key.ToString(), memtable_id);
                 break;
             } else {
-                StealMemTable(options);
+//                if (nova::NovaCCConfig::cc_config->num_memtables >
+//                    2 * dbs_.size()) {
+//                    StealMemTable(options);
+//                }
                 if (emptiest_memtable) {
                     RDMA_ASSERT(emptiest_index >= 0);
                     atomic_memtable = emptiest_memtable;
+
                     atomic_memtable->mutex_.lock();
                     RDMA_ASSERT(atomic_memtable->memtable_);
                     RDMA_ASSERT(!atomic_memtable->is_flushed_);
@@ -1933,33 +1936,31 @@ namespace leveldb {
                                        emptiest_index,
                                        active_memtables_.size());
 
-                    bool success = true;
-                    if (atomic_memtable->number_of_pending_writes_ == 0 &&
-                        (atomic_memtable->is_immutable_ ||
-                         atomic_memtable->memtable_->ApproximateMemoryUsage() >
-                         options_.write_buffer_size)) {
+                    if (atomic_memtable->memtable_size_ >
+                        options_.write_buffer_size ||
+                        atomic_memtable->is_immutable_) {
                         atomic_memtable->is_immutable_ = true;
-                        full_memtables.push_back(atomic_memtable->memtable_);
-                        closed_log_files_.push_back(
-                                atomic_memtable->memtable_->memtableid());
-                        active_memtables_.erase(
-                                active_memtables_.begin() + emptiest_index);
+
+                        if (atomic_memtable->number_of_pending_writes_ == 0) {
+                            full_memtables.push_back(
+                                    atomic_memtable->memtable_);
+                            closed_memtable_log_files_.push_back(
+                                    atomic_memtable->memtable_->memtableid());
+                            active_memtables_.erase(
+                                    active_memtables_.begin() +
+                                    emptiest_index);
+
+                            number_of_active_memtables_ -= 1;
+                            number_of_immutable_memtables_ += 1;
+                        }
 
                         atomic_memtable->mutex_.unlock();
                         atomic_memtable = nullptr;
 
-                        number_of_active_memtables_ -= 1;
-                        number_of_immutable_memtables_ += 1;
-                        success = false;
+                        smallest_size = UINT64_MAX;
+                        emptiest_index = -1;
+                        emptiest_memtable = nullptr;
                     }
-                    RDMA_LOG(rdmaio::DEBUG)
-                        << fmt::format("Insert into empty-{} {} {} {}",
-                                       emptiest_memtable->memtable_->memtableid(),
-                                       emptiest_index, smallest_size, success);
-
-                    smallest_size = UINT64_MAX;
-                    emptiest_index = -1;
-                    emptiest_memtable = nullptr;
                 }
 
                 for (auto imm : full_memtables) {
@@ -1998,28 +1999,30 @@ namespace leveldb {
         RDMA_ASSERT(!atomic_memtable->is_immutable_);
         RDMA_ASSERT(!atomic_memtable->is_flushed_);
         RDMA_ASSERT(atomic_memtable->memtable_);
-        RDMA_LOG(rdmaio::DEBUG)
-            << fmt::format("db[{}]: Insert {} into id-{}",
-                           dbid_, key.ToString(),
-                           atomic_memtable->memtable_->memtableid());
+        atomic_memtable->memtable_size_ += (key.size() + val.size());
 
+        if (nova::NovaConfig::config->log_record_mode ==
+            nova::NovaLogRecordMode::LOG_RDMA && !options.local_write) {
+            // this memtable is selected. Replicate the log records first.
+            // Increment the pending writes counter.
+            atomic_memtable->number_of_pending_writes_ += 1;
+            atomic_memtable->mutex_.unlock();
 
-        // this memtable is selected. Replicate the log records first.
-        // Increment the pending writes counter.
+            auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
+            RDMA_ASSERT(dc);
+            dc->set_dbid(dbid_);
+            options.dc_client->InitiateReplicateLogRecords(
+                    fmt::format("{}-{}-{}", server_id_, dbid_,
+                                atomic_memtable->memtable_->memtableid()),
+                    options.thread_id, dbid_,
+                    atomic_memtable->memtable_->memtableid(),
+                    options.rdma_backing_mem, val,
+                    options.replicate_log_record_states);
+            dc->Wait();
+            atomic_memtable->mutex_.lock();
+            atomic_memtable->number_of_pending_writes_ -= 1;
+        }
 
-//        atomic_memtable->number_of_pending_writes_ += 1;
-//        atomic_memtable->mutex_.unlock();
-//
-//        auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
-//        RDMA_ASSERT(dc);
-//        dc->set_dbid(dbid_);
-//        options.dc_client->InitiateReplicateLogRecords(
-//                fmt::format("{}-{}-{}", server_id_, dbid_,
-//                            atomic_memtable->memtable_->memtableid()),
-//                options.thread_id, val);
-
-//        atomic_memtable->mutex_.lock();
-        // Insert
         atomic_memtable->memtable_->Add(last_sequence, ValueType::kTypeValue,
                                         key, val);
         atomic_memtable->nentries_ += 1;
@@ -2027,7 +2030,36 @@ namespace leveldb {
             table_locator_->Insert(key, options.hash,
                                    atomic_memtable->memtable_->memtableid());
         }
+        uint32_t full_memtable_id = 0;
+        if (atomic_memtable->number_of_pending_writes_ == 0) {
+            if (atomic_memtable->memtable_size_ >
+                options_.write_buffer_size ||
+                atomic_memtable->is_immutable_) {
+                atomic_memtable->is_immutable_ = true;
+                full_memtable_id = atomic_memtable->memtable_->memtableid();
+            }
+        }
         atomic_memtable->mutex_.unlock();
+
+        if (full_memtable_id != 0) {
+            range_lock_.Lock();
+            for (int i = 0; i < active_memtables_.size(); i++) {
+                if (active_memtables_[i]->memtable_->memtableid() ==
+                    full_memtable_id) {
+                    atomic_memtable_index = i;
+
+                    full_memtables.push_back(atomic_memtable->memtable_);
+                    closed_memtable_log_files_.push_back(
+                            atomic_memtable->memtable_->memtableid());
+                    active_memtables_.erase(
+                            active_memtables_.begin() + atomic_memtable_index);
+                    number_of_active_memtables_ -= 1;
+                    number_of_immutable_memtables_ += 1;
+                    break;
+                }
+            }
+            range_lock_.Unlock();
+        }
 
         for (auto imm : full_memtables) {
             MaybeScheduleCompaction(options.thread_id, imm, 0, 0,
@@ -2135,6 +2167,7 @@ namespace leveldb {
         *dbptr = nullptr;
         DBImpl *impl = new DBImpl(options, dbname);
         impl->mutex_.Lock();
+        impl->server_id_ = nova::NovaConfig::config->my_server_id;
         if (nova::NovaCCConfig::cc_config->db_fragment.size() > 1) {
             for (int i = 0; i < impl->min_memtables_; i++) {
                 uint32_t memtable_id = impl->memtable_id_seq_.fetch_add(1);

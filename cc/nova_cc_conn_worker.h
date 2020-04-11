@@ -106,12 +106,21 @@ namespace nova {
             RDMA_LOG(INFO) << "memstore[" << thread_id << "]: "
                            << "create conn thread :" << thread_id;
             rand_seed = thread_id;
+            replicate_log_record_states = new leveldb::WriteState[nova::NovaConfig::config->servers.size()];
+            ResetReplicateState();
         }
 
         void Start();
 
         void set_dbs(const std::vector<leveldb::DB *> &dbs) {
             dbs_ = dbs;
+        }
+
+        void ResetReplicateState() {
+            for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
+                replicate_log_record_states[i].result = leveldb::WriteResult::REPLICATE_LOG_RECORD_NONE;
+                replicate_log_record_states[i].rdma_wr_id = -1;
+            }
         }
 
         timeval start{};
@@ -136,6 +145,9 @@ namespace nova {
         Stats stats;
         Stats prev_stats;
         unsigned int rand_seed = 0;
+
+        char *rdma_backing_mem = nullptr;
+        leveldb::WriteState *replicate_log_record_states;
     };
 }
 

@@ -57,11 +57,12 @@ namespace nova {
         mutex_.Unlock();
 
         stat_tasks_ += queue.size();
-
+        std::vector<leveldb::RDMAAsyncClientRequestTask> failed_tasks;
         for (const leveldb::RDMAAsyncClientRequestTask &task : queue) {
             RequestCtx ctx = {};
             ctx.sem = task.sem;
             ctx.response = task.response;
+            bool failed = false;
             switch (task.type) {
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_READ:
                     ctx.req_id = cc_client_->InitiateRTableReadDataBlock(
@@ -73,7 +74,7 @@ namespace nova {
                     break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_CLOSE_LOG:
                     ctx.req_id = cc_client_->InitiateCloseLogFile(
-                            task.log_file_name);
+                            task.log_file_name, task.dbid);
                     break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD:
                     ctx.req_id = cc_client_->InitiateReplicateLogRecords(
@@ -81,7 +82,13 @@ namespace nova {
                             task.thread_id,
                             task.dbid,
                             task.memtable_id,
-                            task.log_record);
+                            task.write_buf,
+                            task.log_record, task.replicate_log_record_states);
+                    if (ctx.req_id == 0) {
+                        // Failed and must retry.
+                        failed = true;
+                        failed_tasks.push_back(task);
+                    }
                     break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_WRITE_DATA_BLOCKS:
                     ctx.req_id = cc_client_->InitiateRTableWriteDataBlocks(
@@ -99,7 +106,17 @@ namespace nova {
                             task.server_id);
                     break;
             }
-            pending_reqs_.push_back(ctx);
+            if (!failed) {
+                pending_reqs_.push_back(ctx);
+            }
+        }
+
+        if (!failed_tasks.empty()) {
+            mutex_.Lock();
+            for (auto &task : failed_tasks) {
+                queue_.push_back(task);
+            }
+            mutex_.Unlock();
         }
         return queue.size();
     }

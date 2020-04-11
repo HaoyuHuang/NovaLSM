@@ -190,6 +190,7 @@ namespace nova {
         read_options.dc_client = worker->cc_client_;
         read_options.mem_manager = worker->mem_manager_;
         read_options.thread_id = worker->thread_id_;
+        read_options.rdma_backing_mem = worker->rdma_backing_mem;
 
         leveldb::Status s = db->Get(read_options, key, &value);
         RDMA_ASSERT(s.ok())
@@ -300,6 +301,7 @@ namespace nova {
         leveldb::Slice dbkey(ckey, nkey);
         leveldb::Slice dbval(val, nval);
 
+        worker->ResetReplicateState();
         leveldb::WriteOptions option;
         option.dc_client = worker->cc_client_;
         option.sync = true;
@@ -308,14 +310,15 @@ namespace nova {
         option.rand_seed = &worker->rand_seed;
         option.hash = key;
         option.total_writes = total_writes.fetch_add(1, std::memory_order_relaxed) + 1;
+        option.replicate_log_record_states = worker->replicate_log_record_states;
+        option.rdma_backing_mem = worker->rdma_backing_mem;
+
 //        worker->stats.nputs * NovaCCConfig::cc_config->num_conn_workers;//
         CCFragment *frag = NovaCCConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
         RDMA_ASSERT(db);
 
         leveldb::Status status = db->Put(option, dbkey, dbval);
-//        RDMA_LOG(DEBUG) << "############### CC worker processed task "
-//                        << fd << ":" << dbkey.ToString();
         RDMA_ASSERT(status.ok()) << status.ToString();
 
         char *response_buf = conn->buf;
