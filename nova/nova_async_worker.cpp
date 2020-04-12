@@ -15,7 +15,7 @@ namespace nova {
         queue_.push_back(task);
         mutex_.Unlock();
         if (NovaConfig::config->log_record_mode !=
-            NovaLogRecordMode::LOG_RDMA) {
+            leveldb::LOG_RDMA) {
             if (sem_post(&sem_) != 0) {
                 RDMA_LOG(ERROR) << "sem_post error " << strerror(errno);
             }
@@ -33,24 +33,22 @@ namespace nova {
         uint64_t hv = NovaConfig::keyhash(task.key.data(),
                                           task.key.size());
         leveldb::WriteOptions option;
-        option.sync = NovaConfig::config->fsync;
-        switch (NovaConfig::config->log_record_mode) {
-            case LOG_LOCAL:
-                option.local_write = true;
-                break;
-            case LOG_NIC:
-                option.local_write = false;
+        option.log_record_mode = NovaConfig::config->log_record_mode;
+        bool remote_write = false;
+        switch (option.log_record_mode) {
+            case leveldb::LOG_NIC:
+                remote_write = true;
                 option.writer = nic_log_writer_;
                 break;
-            case LOG_RDMA:
-                option.local_write = false;
+            case leveldb::LOG_RDMA:
+                remote_write = true;
                 option.writer = rdma_log_writer_;
                 break;
         }
 
         Fragment *frag = NovaConfig::home_fragment(hv);
         leveldb::DB *db = dbs_[frag->dbid];
-        if (!option.local_write) {
+        if (remote_write) {
             leveldb::WriteBatch batch;
             batch.Put(task.key, task.value);
             db->GenerateLogRecords(option, &batch);
@@ -182,7 +180,7 @@ namespace nova {
     void NovaAsyncWorker::Start() {
         RDMA_LOG(INFO) << "Async worker started";
 
-        if (NovaConfig::config->log_record_mode == NovaLogRecordMode::LOG_NIC) {
+        if (NovaConfig::config->log_record_mode == leveldb::LOG_NIC) {
             for (int server_id = 0;
                  server_id < NovaConfig::config->servers.size(); server_id++) {
                 NovaClientSock *sock = new NovaClientSock();
@@ -208,7 +206,7 @@ namespace nova {
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
             if (NovaConfig::config->log_record_mode ==
-                NovaLogRecordMode::LOG_RDMA) {
+                leveldb::LOG_RDMA) {
                 if (should_sleep) {
                     usleep(timeout);
                 }

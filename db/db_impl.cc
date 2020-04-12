@@ -1370,12 +1370,17 @@ namespace leveldb {
             // into mem_.
             {
                 mutex_.Unlock();
-                if (options.local_write) {
+                bool local_write = options.log_record_mode ==
+                                   NovaLogRecordMode::LOG_DISK_SYNC ||
+                                   options.log_record_mode ==
+                                   NovaLogRecordMode::LOG_DISK_ASYNC;
+                if (local_write) {
                     status = log_->AddRecord(
                             WriteBatchInternal::Contents(write_batch));
                 }
                 bool sync_error = false;
-                if (status.ok() && options.sync) {
+                if (status.ok() && options.log_record_mode ==
+                                   NovaLogRecordMode::LOG_DISK_SYNC) {
                     status = logfile_->Sync();
                     if (!status.ok()) {
                         sync_error = true;
@@ -1528,13 +1533,15 @@ namespace leveldb {
                     break;
                 }
                 // Close the current log file. 
-                closed_log_files_.push_back(current_log_file_name_);
-                current_log_file_name_ = LogFileName(dbname_, new_log_number);
-                delete log_;
-                delete logfile_;
-                logfile_ = lfile;
-                logfile_number_ = new_log_number;
-                log_ = new log::Writer(lfile);
+                if (write_options.log_record_mode != leveldb::LOG_NONE) {
+                    closed_log_files_.push_back(current_log_file_name_);
+                    current_log_file_name_ = LogFileName(dbname_, new_log_number);
+                    delete log_;
+                    delete logfile_;
+                    logfile_ = lfile;
+                    logfile_number_ = new_log_number;
+                    log_ = new log::Writer(lfile);
+                }
                 imm_ = mem_;
                 has_imm_.store(true, std::memory_order_release);
                 mem_ = new MemTable(internal_comparator_, db_profiler_);

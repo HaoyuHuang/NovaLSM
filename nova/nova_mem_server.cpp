@@ -22,8 +22,7 @@ namespace nova {
         int loaded_keys = 0;
         Fragment **frags = NovaConfig::config->fragments;
         leveldb::WriteOptions option;
-        option.sync = NovaConfig::config->fsync;
-
+        option.log_record_mode = leveldb::LOG_NONE;
         for (int i = 0; i < NovaConfig::config->nfragments; i++) {
             if (frags[i]->server_ids[0] != NovaConfig::config->my_server_id) {
                 continue;
@@ -227,7 +226,7 @@ namespace nova {
         }
 
         if (NovaConfig::config->log_record_mode ==
-            NovaLogRecordMode::LOG_RDMA) {
+            leveldb::LOG_RDMA) {
             bool all_initialized = false;
             while (!all_initialized) {
                 all_initialized = true;

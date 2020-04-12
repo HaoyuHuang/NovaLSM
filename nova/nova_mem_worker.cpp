@@ -383,10 +383,14 @@ namespace nova {
         leveldb::Slice dbkey(ckey, nkey);
         leveldb::Slice dbval(val, nval);
 
-        if (NovaConfig::config->log_record_mode == LOG_LOCAL) {
+        bool local_write =
+                NovaConfig::config->log_record_mode == leveldb::LOG_NONE ||
+                NovaConfig::config->log_record_mode == leveldb::LOG_DISK_SYNC ||
+                NovaConfig::config->log_record_mode == leveldb::LOG_DISK_ASYNC;
+
+        if (local_write) {
             leveldb::WriteOptions option;
-            option.sync = NovaConfig::config->fsync;
-            option.local_write = true;
+            option.log_record_mode = NovaConfig::config->log_record_mode;
 
             Fragment *frag = NovaConfig::home_fragment(hv);
             leveldb::DB *db = worker->dbs_[frag->dbid];
@@ -676,7 +680,7 @@ namespace nova {
         RDMA_LOG(INFO) << "memstore[" << thread_id_ << "]: "
                        << "starting mem worker";
 
-        if (NovaConfig::config->log_record_mode == NovaLogRecordMode::LOG_NIC) {
+        if (NovaConfig::config->log_record_mode == leveldb::LOG_NIC) {
             bool all_initialized = false;
             while (!all_initialized) {
                 all_initialized = true;

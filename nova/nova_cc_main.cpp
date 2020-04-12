@@ -238,15 +238,15 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->num_async_workers = FLAGS_num_async_workers;
 
     if (FLAGS_persist_log_records_mode == "disk") {
-        NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_LOCAL;
-        NovaConfig::config->fsync = true;
+        NovaConfig::config->log_record_mode = leveldb::NovaLogRecordMode::LOG_DISK_SYNC;
     } else if (FLAGS_persist_log_records_mode == "mem") {
-        NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_LOCAL;
-        NovaConfig::config->fsync = false;
+        NovaConfig::config->log_record_mode = leveldb::NovaLogRecordMode::LOG_DISK_ASYNC;
     } else if (FLAGS_persist_log_records_mode == "rdma") {
-        NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_RDMA;
+        NovaConfig::config->log_record_mode = leveldb::NovaLogRecordMode::LOG_RDMA;
     } else if (FLAGS_persist_log_records_mode == "nic") {
-        NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_NIC;
+        NovaConfig::config->log_record_mode = leveldb::NovaLogRecordMode::LOG_NIC;
+    } else {
+        NovaConfig::config->log_record_mode = leveldb::NovaLogRecordMode::LOG_NONE;
     }
 
     NovaConfig::config->enable_rdma = FLAGS_enable_rdma;

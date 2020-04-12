@@ -13,6 +13,7 @@
 
 #include "rdma_ctrl.hpp"
 #include "nova_common.h"
+#include "leveldb/options.h"
 
 namespace nova {
     using namespace std;
@@ -22,12 +23,6 @@ namespace nova {
         RANGE = 0,
         HASH = 1,
         DEBUG_RDMA = 2
-    };
-
-    enum NovaLogRecordMode {
-        LOG_LOCAL = 0,
-        LOG_RDMA = 1,
-        LOG_NIC = 2
     };
 
     struct Fragment {
@@ -207,9 +202,8 @@ namespace nova {
         // LevelDB.
         std::string db_path;
         std::string profiler_file_path;
-        bool fsync;
         uint32_t log_buf_size;
-        NovaLogRecordMode log_record_mode;
+        leveldb::NovaLogRecordMode log_record_mode;
 
         NovaRDMAPartitionMode partition_mode;
         int rdma_port;

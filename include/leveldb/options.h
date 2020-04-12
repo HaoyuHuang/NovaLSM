@@ -187,6 +187,14 @@ namespace leveldb {
         const Snapshot *snapshot = nullptr;
     };
 
+    enum NovaLogRecordMode {
+        LOG_DISK_SYNC = 0,
+        LOG_DISK_ASYNC = 1,
+        LOG_RDMA = 2,
+        LOG_NIC = 3,
+        LOG_NONE = 4,
+    };
+
 // Options that control write operations
     struct LEVELDB_EXPORT WriteOptions {
         WriteOptions() = default;
@@ -207,7 +215,7 @@ namespace leveldb {
         // system call followed by "fsync()".
         bool sync = false;
 
-        bool local_write = false;
+        NovaLogRecordMode log_record_mode;
 
         log::Writer *writer = nullptr;
     };
