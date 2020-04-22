@@ -39,6 +39,12 @@ namespace leveldb {
         kSnappyCompression = 0x1
     };
 
+    enum MemTableType {
+        kMemTablePool = 0,
+        kStaticPartition = 1,
+    };
+
+
 // Options to control the behavior of a database (passed to DB::Open)
     struct LEVELDB_EXPORT Options {
         // Create an Options object with default values for all fields.
@@ -55,6 +61,8 @@ namespace leveldb {
         // comparator provided to previous open calls on the same DB.
         const Comparator *comparator;
 
+        double subrange_reorg_sampling_ratio = 1.0;
+
         // Enable tracing accesses.
         bool enable_tracing;
 
@@ -67,6 +75,8 @@ namespace leveldb {
         // If true, an error is raised if the database already exists.
         bool error_if_exists = false;
 
+        bool enable_major = false;
+
         // If true, the implementation will do aggressive checking of the
         // data it is processing and will stop early if it detects any
         // errors.  This may have unforeseen ramifications: for example, a
@@ -74,14 +84,21 @@ namespace leveldb {
         // become unreadable or for the entire DB to become unopenable.
         bool paranoid_checks = false;
 
+        bool prune_memtable_before_flushing = false;
+
         // Use the specified object to interact with the environment,
         // e.g. to read/write files, schedule background work, etc.
         // Default: Env::Default()
         Env *env;
 
         std::vector<EnvBGThread *> bg_threads;
+        EnvBGThread *reorg_thread;
 
         uint32_t num_memtables = 2;
+
+        MemTableType memtable_type;
+
+        bool enable_subranges = false;
 
         uint32_t l0_stop_writes_trigger = 12;
 
@@ -154,7 +171,6 @@ namespace leveldb {
         size_t l0_sstables_per_group = 8;
 
         bool mc_enable_eager_trim_log_records = false;
-
 
 
         // Compress blocks using the specified compression algorithm.  This

@@ -162,7 +162,9 @@ namespace leveldb {
         virtual void CompactRange(const Slice *begin, const Slice *end) = 0;
 
         virtual void PerformCompaction(EnvBGThread *bg_thread,
-                                       const std::vector<CompactionTask> &tasks) = 0;
+                                       const std::vector<EnvBGTask> &tasks) = 0;
+
+        virtual void PerformSubRangeReorganization() = 0;
 
         std::vector<DB*> dbs_;
 

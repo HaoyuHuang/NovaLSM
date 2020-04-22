@@ -30,6 +30,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdlib>
+#include <nova/logging.hpp>
 
 #include "util/arena.h"
 #include "util/random.h"
@@ -65,7 +66,7 @@ namespace leveldb {
         public:
             // Initialize an iterator over the specified list.
             // The returned iterator is not valid.
-            explicit Iterator(const SkipList *list);
+            explicit Iterator(const SkipList *list, uint32_t sampled_puts = 0);
 
             // Returns true iff the iterator is positioned at a valid node.
             bool Valid() const;
@@ -96,6 +97,8 @@ namespace leveldb {
         private:
             const SkipList *list_;
             Node *node_;
+            uint32_t iter_level_;
+            uint32_t sampled_puts_;
             // Intentionally copyable
         };
 
@@ -144,6 +147,8 @@ namespace leveldb {
         // values are ok.
         std::atomic<int> max_height_;  // Height of the entire list
 
+        std::atomic_int_fast32_t nputs_per_level[kMaxHeight];
+
         // Read/written only by Insert().
         Random rnd_;
     };
@@ -151,7 +156,8 @@ namespace leveldb {
 // Implementation details follow
     template<typename Key, class Comparator>
     struct SkipList<Key, Comparator>::Node {
-        explicit Node(const Key &k) : key(k) {}
+        explicit Node(const Key &k) : key(k) {
+        }
 
         Key const key;
 
@@ -197,9 +203,27 @@ namespace leveldb {
     }
 
     template<typename Key, class Comparator>
-    inline SkipList<Key, Comparator>::Iterator::Iterator(const SkipList *list) {
+    inline SkipList<Key, Comparator>::Iterator::Iterator(const SkipList *list,
+                                                         uint32_t sampled_puts) {
         list_ = list;
         node_ = nullptr;
+        sampled_puts_ = sampled_puts;
+        iter_level_ = 0;
+
+        if (sampled_puts_ > 0) {
+            iter_level_ = kMaxHeight - 1;
+            while (iter_level_ >= 0) {
+                uint32_t nputs = list_->nputs_per_level[iter_level_].load(
+                        std::memory_order_relaxed);
+                if (nputs > sampled_puts_) {
+                    break;
+                }
+                iter_level_ -= 1;
+            }
+            if (iter_level_ < 0) {
+                iter_level_ = 0;
+            }
+        }
     }
 
     template<typename Key, class Comparator>
@@ -216,11 +240,12 @@ namespace leveldb {
     template<typename Key, class Comparator>
     inline void SkipList<Key, Comparator>::Iterator::Next() {
         assert(Valid());
-        node_ = node_->Next(0);
+        node_ = node_->Next(iter_level_);
     }
 
     template<typename Key, class Comparator>
     inline void SkipList<Key, Comparator>::Iterator::Prev() {
+        RDMA_ASSERT(sampled_puts_ == 0);
         // Instead of using explicit "prev" links, we just search for the
         // last node that falls before key.
         assert(Valid());
@@ -232,16 +257,18 @@ namespace leveldb {
 
     template<typename Key, class Comparator>
     inline void SkipList<Key, Comparator>::Iterator::Seek(const Key &target) {
+        RDMA_ASSERT(sampled_puts_ == 0);
         node_ = list_->FindGreaterOrEqual(target, nullptr);
     }
 
     template<typename Key, class Comparator>
     inline void SkipList<Key, Comparator>::Iterator::SeekToFirst() {
-        node_ = list_->head_->Next(0);
+        node_ = list_->head_->Next(iter_level_);
     }
 
     template<typename Key, class Comparator>
     inline void SkipList<Key, Comparator>::Iterator::SeekToLast() {
+        RDMA_ASSERT(sampled_puts_ == 0);
         node_ = list_->FindLast();
         if (node_ == list_->head_) {
             node_ = nullptr;
@@ -342,6 +369,7 @@ namespace leveldb {
               rnd_(0xdeadbeef) {
         for (int i = 0; i < kMaxHeight; i++) {
             head_->SetNext(i, nullptr);
+            nputs_per_level[i] = 0;
         }
     }
 
@@ -377,6 +405,7 @@ namespace leveldb {
             x->NoBarrier_SetNext(i, prev[i]->NoBarrier_Next(i));
             prev[i]->SetNext(i, x);
         }
+        nputs_per_level[height].fetch_add(1, std::memory_order_relaxed);
     }
 
     template<typename Key, class Comparator>

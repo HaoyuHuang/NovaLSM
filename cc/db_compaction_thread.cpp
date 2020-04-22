@@ -16,7 +16,7 @@ namespace leveldb {
         }
     }
 
-    bool NovaCCCompactionThread::Schedule(const CompactionTask &task) {
+    bool NovaCCCompactionThread::Schedule(const EnvBGTask &task) {
         background_work_mutex_.Lock();
         background_work_queue_.push_back(task);
         background_work_mutex_.Unlock();
@@ -54,16 +54,20 @@ namespace leveldb {
                 continue;
             }
 
-            std::vector<CompactionTask> tasks(background_work_queue_);
+            std::vector<EnvBGTask> tasks(background_work_queue_);
             background_work_queue_.clear();
             background_work_mutex_.Unlock();
 
             num_tasks_ += tasks.size();
 
-//            auto db = reinterpret_cast<DB *>(tasks[0].db);
-//            db->PerformCompaction(this, tasks);
+            if (tasks.size() == 1 && tasks[0].memtable == nullptr) {
+                // reorg task.
+                auto db = reinterpret_cast<DB *>(tasks[0].db);
+                db->PerformSubRangeReorganization();
+                return;
+            }
 
-            std::map<void *, std::vector<CompactionTask>> db_tasks;
+            std::map<void *, std::vector<EnvBGTask>> db_tasks;
             for (auto &task : tasks) {
                 db_tasks[task.db].push_back(task);
                 memtable_size[task.memtable_size_mb] += 1;

@@ -138,11 +138,11 @@ namespace leveldb {
 
         FileMetaData *file_meta(uint64_t fn);
 
-        void UpdateScore(Compaction *c, const Options &options);
-
         uint32_t version_id() {
             return version_id_;
         }
+
+        void Destroy();
 
         explicit Version(VersionSet *vset, uint32_t version_id)
                 : vset_(vset),
@@ -150,9 +150,11 @@ namespace leveldb {
                   prev_(this),
                   refs_(0),
                   file_to_compact_(nullptr),
-                  file_to_compact_level_(-1), version_id_(version_id) {};
+                  file_to_compact_level_(-1), version_id_(version_id),
+                  compaction_level_(-1), compaction_score_(-1) {};
 
         ~Version();
+
     private:
         friend class Compaction;
 
@@ -163,7 +165,6 @@ namespace leveldb {
         Version(const Version &) = delete;
 
         Version &operator=(const Version &) = delete;
-
 
 
         Iterator *
@@ -186,8 +187,7 @@ namespace leveldb {
         // List of files per level
         std::vector<FileMetaData *> files_[config::kNumLevels];
 //        std::map<uint64_t, FileMetaData*> fn_files_;
-        FileMetaData* fn_files_[MAX_LIVE_MEMTABLES];
-        std::set<uint64_t> skip_tables_for_compaction_;
+        FileMetaData *fn_files_[MAX_LIVE_MEMTABLES];
 
         // Next file to compact based on seek stats.
         FileMetaData *file_to_compact_;
@@ -197,7 +197,11 @@ namespace leveldb {
         // Level that should be compacted next and its compaction score.
         // Score < 1 means compaction is not strictly needed.  These fields
         // are initialized by Finalize().
-        std::vector<CompactionPriority> compaction_levels_;
+        // Level that should be compacted next and its compaction score.
+        // Score < 1 means compaction is not strictly needed.  These fields
+        // are initialized by Finalize().
+        double compaction_score_;
+        int compaction_level_;
     };
 
     class AtomicVersion {
@@ -206,10 +210,11 @@ namespace leveldb {
 
         Version *Ref();
 
-        void Unref(const std::string& dbname);
+        void Unref(const std::string &dbname);
 
         std::mutex mutex;
         Version *version = nullptr;
+        bool deleted = false;
     };
 
     class VersionSet {
@@ -228,7 +233,7 @@ namespace leveldb {
         // current version.  Will release *mu while actually writing to the file.
         // REQUIRES: *mu is held on entry.
         // REQUIRES: no other thread concurrently calls LogAndApply()
-        Status LogAndApply(VersionEdit *edit, Version*new_version);
+        Status LogAndApply(VersionEdit *edit, Version *new_version);
 
         // Recover the last saved descriptor from persistent storage.
         Status Recover(bool *save_manifest);
@@ -307,12 +312,14 @@ namespace leveldb {
         // Returns true iff some level needs a compaction.
         bool NeedsCompaction() const {
             Version *v = current_;
-            return (v->compaction_levels_[0].score >= 1);
+            return v->compaction_score_ >= 1;
         }
 
         // Add all files listed in any live version to *live.
         // May also mutate some internal state.
         void AddLiveFiles(std::set<uint64_t> *live);
+
+        void DeleteObsoleteVersions();
 
         // Return the approximate offset in the database of the data for
         // "key" as of version "v".
@@ -342,9 +349,6 @@ namespace leveldb {
 
         friend class Version;
 
-        static bool
-        compareCompactionPriority(CompactionPriority p1, CompactionPriority p2);
-
         bool
         ReuseManifest(const std::string &dscname, const std::string &dscbase);
 
@@ -359,8 +363,6 @@ namespace leveldb {
                        InternalKey *smallest, InternalKey *largest);
 
         void SetupOtherInputs(Compaction *c);
-
-        void SetupOtherInputsForL0Consolidation(Compaction *c);
 
         // Save current contents to *log
         Status WriteSnapshot(log::Writer *log);

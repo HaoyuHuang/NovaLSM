@@ -73,6 +73,7 @@ namespace nova {
 
         std::vector<NovaCCServerAsyncWorker *> cc_server_workers;
         std::vector<leveldb::EnvBGThread *> bgs;
+        std::vector<leveldb::EnvBGThread *> reorg_bgs;
         NovaStatThread *stat_thread_;
         vector<std::thread> stats_t_;
 
@@ -81,6 +82,7 @@ namespace nova {
         vector<thread> conn_worker_threads;
         vector<thread> cc_workers;
         vector<thread> compaction_workers;
+        vector<thread> reorg_workers;
         std::vector<std::thread> cc_server_async_workers;
     };
 }

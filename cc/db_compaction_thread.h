@@ -19,7 +19,7 @@ namespace leveldb {
     public:
         explicit NovaCCCompactionThread(MemManager *mem_manager);
 
-        bool Schedule(const CompactionTask& task) override;
+        bool Schedule(const EnvBGTask& task) override;
 
         uint64_t thread_id() override { return thread_id_; }
 
@@ -49,7 +49,7 @@ namespace leveldb {
     private:
         port::Mutex background_work_mutex_;
         sem_t signal;
-        std::vector <CompactionTask> background_work_queue_
+        std::vector <EnvBGTask> background_work_queue_
         GUARDED_BY(background_work_mutex_);
         std::atomic_int_fast32_t num_tasks_;
 

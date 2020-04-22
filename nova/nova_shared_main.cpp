@@ -87,12 +87,12 @@ DEFINE_bool(cc_multiple_disks, false, "");
 DEFINE_string(cc_scatter_policy, "random", "random/stats");
 DEFINE_string(cc_log_record_mode, "none", "none/rdma");
 DEFINE_uint32(cc_num_log_replicas, 0, "");
+DEFINE_string(cc_memtable_type, "", "pool/static_partition");
+DEFINE_bool(cc_enable_subrange, false, "");
 
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
 std::atomic_int_fast32_t nova::NovaCCServer::cc_server_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
-
-
 
 void start(NovaCCNICServer *server) {
     server->Start();
@@ -228,6 +228,8 @@ int main(int argc, char *argv[]) {
     NovaCCConfig::cc_config->num_memtables = FLAGS_cc_num_memtables;
     NovaCCConfig::cc_config->num_memtable_partitions = FLAGS_cc_num_memtable_partitions;
     NovaCCConfig::cc_config->cc_l0_stop_write = FLAGS_cc_l0_stop_write;
+    NovaConfig::config->enable_subrange = FLAGS_cc_enable_subrange;
+    NovaConfig::config->memtable_type = FLAGS_cc_memtable_type;
 
     NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks = FLAGS_cc_rtable_num_servers_scatter_data_blocks;
     NovaConfig::config->log_buf_size = FLAGS_cc_rtable_size_mb * 1024;

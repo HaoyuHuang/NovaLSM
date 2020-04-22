@@ -53,6 +53,9 @@ namespace nova {
         std::string rtable_path;
 
         bool use_multiple_disks;
+        bool enable_subrange;
+        std::string memtable_type;
+        bool enable_major_compaction;
 
         uint64_t mem_pool_size_gb;
         uint32_t num_mem_partitions;

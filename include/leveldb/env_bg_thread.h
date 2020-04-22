@@ -18,8 +18,11 @@
 
 namespace leveldb {
 
-    struct CompactionTask {
+    struct EnvBGTask {
         void *db = nullptr;
+
+
+        // flushing memtable related attributes.
         void *memtable = nullptr;
         uint32_t range_id = 0;
         uint32_t memtable_size_mb = 0;
@@ -35,7 +38,7 @@ namespace leveldb {
         // added to the same Env may run concurrently in different threads.
         // I.e., the caller may not assume that background work items are
         // serialized.
-        virtual bool Schedule(const CompactionTask &task) = 0;
+        virtual bool Schedule(const EnvBGTask &task) = 0;
 
         virtual CCClient *dc_client() = 0;
 

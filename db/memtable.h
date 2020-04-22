@@ -59,7 +59,8 @@ namespace leveldb {
         // while the returned iterator is live.  The keys returned by this
         // iterator are internal keys encoded by AppendInternalKey in the
         // db/format.{h,cc} module.
-        Iterator *NewIterator(TraceType trace_type, AccessCaller caller);
+        Iterator *NewIterator(TraceType trace_type, AccessCaller caller,
+                              uint32_t sample_size = 0);
 
         // Add an entry into memtable that maps key to value at the
         // specified sequence number and with the specified type.
@@ -96,13 +97,9 @@ namespace leveldb {
 
         typedef SkipList<const char *, KeyComparator> Table;
 
-
-//        bool delete_ = false;
-
         DBProfiler *db_profiler_ = nullptr;
         KeyComparator comparator_;
         int refs_ = 0;
-//        std::mutex mutex_;
         uint32_t memtable_id_ = 0;
         Arena arena_;
         Table table_;
@@ -113,11 +110,11 @@ namespace leveldb {
     public:
         void SetMemTable(MemTable *mem);
 
-        void SetFlushed(const std::string& dbname, uint64_t l0_file_number);
+        void SetFlushed(const std::string &dbname, uint64_t l0_file_number);
 
         MemTable *Ref(uint64_t *l0_fn);
 
-        void Unref(const std::string& dbname);
+        void Unref(const std::string &dbname);
 
         bool locked = false;
         bool is_immutable_ = false;
@@ -125,12 +122,10 @@ namespace leveldb {
         uint64_t l0_file_number_ = 0;
         std::mutex mutex_;
         MemTable *memtable_ = nullptr;
-        uint32_t nentries_ = 0;
+        std::atomic_int_fast32_t nentries_;
         uint32_t memtable_size_ = 0;
         uint32_t number_of_pending_writes_ = 0;
     };
-
-
 
 
 }  // namespace leveldb

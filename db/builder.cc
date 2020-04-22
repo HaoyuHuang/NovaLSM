@@ -22,6 +22,8 @@ namespace leveldb {
     BuildTable(const std::string &dbname, Env *env, const Options &options,
                TableCache *table_cache, Iterator *iter, FileMetaData *meta,
                EnvBGThread *bg_thread) {
+        // TODO: Prune memtables. Support compacting mulitple memtables.
+
         Status s;
         meta->file_size = 0;
         iter->SeekToFirst();
@@ -85,59 +87,6 @@ namespace leveldb {
             cc_file = nullptr;
             delete file;
             file = nullptr;
-
-//            ReadOptions read_options = {};
-//            read_options.thread_id = bg_thread->thread_id();
-//            read_options.dc_client = bg_thread->dc_client();
-//            read_options.mem_manager = bg_thread->mem_manager();
-//            Cache::Handle *handle = nullptr;
-//            table_cache->FindTable(AccessCaller::kUserIterator, read_options,
-//                                   *meta, meta->number, meta->file_size, 0,
-//                                   &handle);
-
-//            if (cc_file->backing_mem()) {
-//                options.sstable_manager->AddSSTable(dbname,
-//                                                    cc_file->file_number(),
-//                                                    cc_file->thread_id(),
-//                                                    (char *) cc_file->backing_mem(),
-//                                                    cc_file->used_size(),
-//                                                    cc_file->allocated_size(),
-//                        /*async_flush=*/true);
-//            }
-
-            if (s.ok()) {
-                // Verify that the table is usable
-//                ReadOptions read_options = {};
-//                read_options.thread_id = options.bg_thread->thread_id();
-//                read_options.dc_client = options.bg_thread->dc_client();
-//                read_options.mem_manager = options.bg_thread->mem_manager();
-//                Iterator *it = table_cache->NewIterator(
-//                        AccessCaller::kCompaction, read_options,
-//                        *meta,
-//                        meta->number,
-//                        0,
-//                        meta->converted_file_size);
-//                s = it->status();
-//                it->SeekToFirst();
-//                std::string first_key;
-//                leveldb::ParsedInternalKey last_key;
-//                while (it->Valid()) {
-//                    leveldb::ParseInternalKey(it->key(), &last_key);
-//                    if (first_key.empty()) {
-//                        first_key = last_key.user_key.ToString();
-//                    }
-//                    it->Next();
-//                }
-//                RDMA_LOG(rdmaio::DEBUG)
-//                    << fmt::format(
-//                            "Verify new SSTable {} original size {} new size {} range {}:{}",
-//                            meta->number, meta->file_size,
-//                            meta->converted_file_size,
-//                            first_key,
-//                            last_key.user_key.ToString());
-//                RDMA_ASSERT(s.ok());
-//                delete it;
-            }
         }
 
         // Check for input iterator errors

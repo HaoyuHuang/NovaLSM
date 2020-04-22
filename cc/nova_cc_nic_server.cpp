@@ -51,7 +51,8 @@ namespace nova {
 
         leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
                                     leveldb::MemTablePool *memtable_pool,
-                                    std::vector<leveldb::EnvBGThread *> bg_threads) {
+                                    std::vector<leveldb::EnvBGThread *> bg_threads,
+                                    leveldb::EnvBGThread *reorg_thread) {
             leveldb::EnvOptions env_option;
             env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_MEM;
             leveldb::PosixEnv *env = new leveldb::PosixEnv;
@@ -89,6 +90,15 @@ namespace nova {
             options.bg_threads = bg_threads;
             options.enable_tracing = false;
             options.comparator = new YCSBKeyComparator();
+            if (NovaConfig::config->memtable_type == "pool") {
+                options.memtable_type = leveldb::MemTableType::kMemTablePool;
+            } else {
+                options.memtable_type = leveldb::MemTableType::kStaticPartition;
+            }
+            options.enable_subranges = NovaConfig::config->enable_subrange;
+            options.subrange_reorg_sampling_ratio = 1.0;
+            options.reorg_thread = reorg_thread;
+
             leveldb::Logger *log = nullptr;
             std::string db_path = DBName(NovaConfig::config->db_path,
                                          NovaConfig::config->my_server_id,
@@ -445,14 +455,14 @@ namespace nova {
                 NovaCCConfig::cc_config->num_memtables;
         pool->range_cond_vars_ = new leveldb::port::CondVar *[ndbs];
         for (int db_index = 0; db_index < ndbs; db_index++) {
-            dbs_.push_back(CreateDatabase(db_index, block_cache, pool, bgs));
+            auto reorg = new leveldb::NovaCCCompactionThread(mem_manager);
+            reorg_bgs.push_back(reorg);
+            dbs_.push_back(
+                    CreateDatabase(db_index, block_cache, pool, bgs, reorg));
         }
         for (int db_index = 0; db_index < ndbs; db_index++) {
             dbs_[db_index]->dbs_ = dbs_;
         }
-//        if (ndbs > 0) {
-//            RDMA_ASSERT(pool->num_available_memtables_ == 0);
-//        }
 
         leveldb::EnvOptions env_option;
         env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
@@ -657,6 +667,12 @@ namespace nova {
         // Assign workers to cc servers.
         for (int i = 0; i < cc_servers.size(); i++) {
             cc_servers[i]->async_workers_ = cc_server_workers;
+        }
+
+        for (int i = 0; i < reorg_bgs.size(); i++) {
+            auto bg = reinterpret_cast<leveldb::NovaCCCompactionThread *>(reorg_bgs[i]);
+            reorg_workers.emplace_back(&leveldb::NovaCCCompactionThread::Start,
+                                       bg);
         }
 
         // Start the threads.

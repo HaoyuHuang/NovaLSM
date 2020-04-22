@@ -54,8 +54,10 @@ namespace leveldb {
     class MemTableIterator : public Iterator {
     public:
         explicit MemTableIterator(MemTable *table, TraceType trace_type,
-                                  AccessCaller caller) : iter_(
-                &(table->table_)), trace_type_(trace_type), caller_(caller) {
+                                  AccessCaller caller, uint32_t sample_size)
+                : iter_(
+                &(table->table_), sample_size), trace_type_(trace_type),
+                  caller_(caller) {
             if (db_profiler_ != nullptr) {
                 Access access = {
                         .trace_type = trace_type_,
@@ -111,8 +113,9 @@ namespace leveldb {
     };
 
     Iterator *MemTable::NewIterator(TraceType trace_type,
-                                    AccessCaller caller) {
-        return new MemTableIterator(this, trace_type, caller);
+                                    AccessCaller caller,
+                                    uint32_t sample_size) {
+        return new MemTableIterator(this, trace_type, caller, sample_size);
     }
 
     void MemTable::Add(SequenceNumber s, ValueType type, const Slice &key,
@@ -209,7 +212,7 @@ namespace leveldb {
     MemTable *AtomicMemTable::Ref(uint64_t *l0_fn) {
         MemTable *mem = nullptr;
         mutex_.lock();
-        if (memtable_ != nullptr && !is_flushed_) {
+        if (memtable_ != nullptr) {
             mem = memtable_;
             memtable_->Ref();
         }
@@ -220,13 +223,14 @@ namespace leveldb {
         return mem;
     }
 
-    void AtomicMemTable::Unref(const std::string& dbname) {
+    void AtomicMemTable::Unref(const std::string &dbname) {
         mutex_.lock();
         RDMA_ASSERT(memtable_);
         uint32_t mid = memtable_->memtableid();
         uint32_t refs = memtable_->Unref();
         if (refs == 0) {
-            RDMA_LOG(rdmaio::DEBUG) << fmt::format("unref delete db-{} mid-{}", dbname, mid);
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("unref delete db-{} mid-{}", dbname, mid);
             delete memtable_;
             memtable_ = nullptr;
         }

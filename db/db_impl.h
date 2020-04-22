@@ -14,6 +14,7 @@
 #include <list>
 #include <map>
 #include <leveldb/cache.h>
+#include <fmt/core.h>
 
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -25,6 +26,10 @@
 #include "memtable.h"
 
 #define MAX_BUCKETS 10000000
+#define SUBRANGE_WARMUP_NPUTS 1000000
+#define SUBRANGE_MAJOR_REORG_INTERVAL 1000000
+#define SUBRANGE_MINOR_REORG_INTERVAL 100000
+#define SUBRANGE_REORG_INTERVAL 100000
 
 namespace leveldb {
 
@@ -77,14 +82,13 @@ namespace leveldb {
         Status Write(const WriteOptions &options, const Slice &key,
                      const Slice &value) override;
 
-        Status WriteOneRange(const WriteOptions &options, const Slice &key,
-                             const Slice &value);
+        Status WriteStaticPartition(const WriteOptions &options,
+                                    const Slice &key,
+                                    const Slice &val);
 
-        bool WriteOneRange(const leveldb::WriteOptions &options,
-                           const leveldb::Slice &key,
-                           const leveldb::Slice &value,
-                           uint32_t partition_id,
-                           bool should_wait, uint64_t last_sequence);
+        Status WriteSubrange(const WriteOptions &options,
+                             const Slice &key,
+                             const Slice &val);
 
         Status Get(const ReadOptions &options, const Slice &key,
                    std::string *value) override;
@@ -127,14 +131,16 @@ namespace leveldb {
         void RecordReadSample(Slice key);
 
         void PerformCompaction(EnvBGThread *bg_thread,
-                               const std::vector<CompactionTask> &tasks) override;
+                               const std::vector<EnvBGTask> &tasks) override;
+
+        void PerformSubRangeReorganization() override;
 
     private:
         // Compact the in-memory write buffer to disk.  Switches to a new
         // log-file/memtable and writes a new descriptor iff successful.
         // Errors are recorded in bg_error_.
-        bool CompactMemTableOneRange(EnvBGThread *bg_thread,
-                                     const std::vector<CompactionTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
+        bool CompactMemTableStaticPartition(EnvBGThread *bg_thread,
+                                            const std::vector<EnvBGTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         friend class DB;
@@ -190,11 +196,15 @@ namespace leveldb {
         DeleteObsoleteFiles(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
+        void
+        DeleteObsoleteVersions(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
+                mutex_);
+
         // Compact the in-memory write buffer to disk.  Switches to a new
         // log-file/memtable and writes a new descriptor iff successful.
         // Errors are recorded in bg_error_.
         bool CompactMemTable(EnvBGThread *bg_thread,
-                             const std::vector<CompactionTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
+                             const std::vector<EnvBGTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         Status
@@ -211,8 +221,8 @@ namespace leveldb {
                 mutex_);
 
         bool
-        BackgroundCompaction(EnvBGThread *bg_thread,
-                             const std::vector<CompactionTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
+        PerformMajorCompaction(EnvBGThread *bg_thread,
+                               const std::vector<EnvBGTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         void CleanupCompaction(CompactionState *compact)
@@ -260,21 +270,121 @@ namespace leveldb {
         int number_of_available_pinned_memtables_ = 2;
         const int min_memtables_ = 2;
 
-
         // State below is protected by mutex_
         port::Mutex mutex_;
         std::atomic<bool> shutting_down_;
 
-        std::vector<EnvBGThread *> bg_threads_;
+        std::vector<EnvBGThread *> compaction_threads_;
+        EnvBGThread *reorg_thread_;
 
         std::atomic_int_fast32_t memtable_id_seq_;
 
         // key -> memtable-id.
         TableLocator *table_locator_ = nullptr;
+
+        // memtable pool.
         std::vector<AtomicMemTable *> active_memtables_;
+
+        uint64_t last_major_reorg_seq_ = 0;
+
+        struct SubRange {
+            Slice lower;
+            Slice upper;
+            bool lower_inclusive = true;
+            bool upper_inclusive = false;
+            uint64_t ninserts = 0;
+            double rate = 0;
+
+            std::string DebugString() {
+                std::string output;
+                if (lower_inclusive) {
+                    output += "[";
+                } else {
+                    output += "(";
+                }
+                output += lower.ToString();
+                output += ",";
+                output += upper.ToString();
+                if (upper_inclusive) {
+                    output += "]";
+                } else {
+                    output += ")";
+                }
+                output += fmt::format(":{}, {:..{}f}", ninserts, rate);
+                return output;
+            }
+
+            bool
+            IsSmallerThanLower(const Slice &key, const Comparator *comparator) {
+                int comp = comparator->Compare(key, lower);
+                if (comp < 0) {
+                    return true;
+                }
+                if (comp == 0 && !lower_inclusive) {
+                    return true;
+                }
+                return false;
+            }
+
+            bool
+            IsGreaterThanUpper(const Slice &key, const Comparator *comparator) {
+                int comp = comparator->Compare(key, upper);
+                if (comp > 0) {
+                    return true;
+                }
+                if (comp == 0 && !upper_inclusive) {
+                    return true;
+                }
+                return false;
+            }
+
+            bool IsAPoint(const Comparator *comparator) {
+                if (lower_inclusive && upper_inclusive &&
+                    comparator->Compare(lower, upper) == 0) {
+                    return true;
+                }
+                return false;
+            }
+        };
+
+        struct SubRanges {
+            std::vector<SubRange> subranges;
+
+            std::string DebugString() {
+                std::string output;
+                for (int i = 0; i < subranges.size(); i++) {
+                    output += subranges[i].DebugString();
+                    output += ",";
+                }
+                return output;
+            }
+
+            void AssertSubrangeBoundary(const Comparator *comparator) {
+                if (subranges.empty()) {
+                    return;
+                }
+                Slice prior_upper;
+                for (int i = 0; i < subranges.size(); i++) {
+                    SubRange &sr = subranges[i];
+                    RDMA_ASSERT(!sr.IsSmallerThanLower(sr.upper, comparator))
+                        << DebugString();
+                    if (!prior_upper.empty()) {
+                        RDMA_ASSERT(
+                                sr.IsSmallerThanLower(prior_upper, comparator))
+                            << DebugString();
+                    }
+                    prior_upper = sr.upper;
+                }
+            }
+        };
+
+        int BinarySearch(SubRanges *ref, const leveldb::Slice &key);
+
+        std::atomic<SubRanges *> latest_subranges_;
+
+        // static partition.
         struct MemTablePartition {
             MemTablePartition() : background_work_finished_signal_(&mutex) {
-
             };
             MemTable *memtable;
             port::Mutex mutex;
@@ -287,8 +397,7 @@ namespace leveldb {
 
         std::vector<MemTablePartition *> partitioned_active_memtables_ GUARDED_BY(
                 mutex_);
-
-        std::vector<MemTable *> partitioned_imms_ GUARDED_BY(
+        std::vector<uint32_t> partitioned_imms_ GUARDED_BY(
                 mutex_);  // Memtable being compacted
 
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
@@ -309,7 +418,15 @@ namespace leveldb {
 
         CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
         std::string current_log_file_name_ GUARDED_BY(mutex_);
-        std::vector<uint32_t> closed_memtable_log_files_  GUARDED_BY(range_lock_);
+        std::vector<uint32_t> closed_memtable_log_files_  GUARDED_BY(
+                range_lock_);
+
+        bool WriteStaticPartition(const leveldb::WriteOptions &options,
+                                  const leveldb::Slice &key,
+                                  const leveldb::Slice &value,
+                                  uint32_t partition_id,
+                                  bool should_wait, uint64_t last_sequence,
+                                  SubRange *subrange);
     };
 
 // Sanitize db options.  The caller should delete result.info_log if
