@@ -379,7 +379,6 @@ namespace leveldb {
                 }
 
                 edit_.SetComparatorName(icmp_.user_comparator()->Name());
-                edit_.SetLogNumber(0);
                 edit_.SetNextFile(next_file_number_);
                 edit_.SetLastSequence(max_sequence);
 
@@ -388,6 +387,7 @@ namespace leveldb {
                     const TableInfo &t = tables_[i];
                     edit_.AddFile(0, 0, t.meta.number, t.meta.file_size,
                                   t.meta.converted_file_size,
+                                  t.meta.flush_timestamp,
                                   t.meta.smallest,
                                   t.meta.largest,
                                   t.meta.meta_block_handle,
@@ -395,12 +395,12 @@ namespace leveldb {
                 }
 
                 // fprintf(stderr, "NewDescriptor:\n%s\n", edit_.DebugString().c_str());
-                {
-                    log::Writer log(file);
-                    std::string record;
-                    edit_.EncodeTo(&record);
-                    status = log.AddRecord(record);
-                }
+//                {
+//                    log::Writer log(file);
+//                    std::string record;
+//                    edit_.EncodeTo(&record);
+//                    status = log.AddRecord(record);
+//                }
                 if (status.ok()) {
                     status = file->Close();
                 }

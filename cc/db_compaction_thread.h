@@ -15,11 +15,70 @@
 
 namespace leveldb {
 
+    class NovaNoopCompactionThread : public EnvBGThread {
+    public:
+        NovaNoopCompactionThread() {
+            for (int i = 0 ; i < BUCKET_SIZE; i++) {
+                memtable_size[i] = 0;
+            }
+        }
+
+        bool Schedule(const EnvBGTask &task) {
+            std::vector<EnvBGTask> tasks;
+            tasks.push_back(task);
+            db->TestCompact(this, tasks);
+            return true;
+        };
+
+        uint64_t thread_id() override { return thread_id_; }
+
+        uint32_t num_running_tasks() {
+            return 0;
+        };
+
+        CCClient *dc_client() override {
+            return cc_client_;
+        };
+
+        MemManager *mem_manager() override {
+            return mem_manager_;
+        };
+
+        unsigned int *rand_seed() override {
+            return &rand_seed_;
+        }
+
+
+        bool IsInitialized() {
+            return true;
+        };
+
+        void Start() {
+
+        }
+
+        DB *db = nullptr;
+        uint64_t thread_id_ = 0;
+
+        NovaBlockCCClient *cc_client_ = nullptr;
+
+    private:
+        port::Mutex background_work_mutex_;
+        sem_t signal;
+        std::vector<EnvBGTask> background_work_queue_
+        GUARDED_BY(background_work_mutex_);
+        std::atomic_int_fast32_t num_tasks_;
+
+        MemManager *mem_manager_ = nullptr;
+        bool is_running_ = false;
+        unsigned int rand_seed_;
+    };
+
     class NovaCCCompactionThread : public EnvBGThread {
     public:
         explicit NovaCCCompactionThread(MemManager *mem_manager);
 
-        bool Schedule(const EnvBGTask& task) override;
+        bool Schedule(const EnvBGTask &task) override;
 
         uint64_t thread_id() override { return thread_id_; }
 
@@ -33,7 +92,7 @@ namespace leveldb {
             return mem_manager_;
         };
 
-        unsigned int* rand_seed() override {
+        unsigned int *rand_seed() override {
             return &rand_seed_;
         }
 
@@ -49,7 +108,7 @@ namespace leveldb {
     private:
         port::Mutex background_work_mutex_;
         sem_t signal;
-        std::vector <EnvBGTask> background_work_queue_
+        std::vector<EnvBGTask> background_work_queue_
         GUARDED_BY(background_work_mutex_);
         std::atomic_int_fast32_t num_tasks_;
 

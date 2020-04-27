@@ -15,6 +15,8 @@
 #include <map>
 #include <leveldb/cache.h>
 #include <fmt/core.h>
+#include <nova/nova_common.h>
+#include <cc/nova_cc.h>
 
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -93,6 +95,9 @@ namespace leveldb {
         Status Get(const ReadOptions &options, const Slice &key,
                    std::string *value) override;
 
+        void TestCompact(EnvBGThread *bg_thread,
+                         const std::vector<EnvBGTask> &tasks) override;
+
         Iterator *NewIterator(const ReadOptions &) override;
 
         const Snapshot *GetSnapshot() override;
@@ -135,7 +140,40 @@ namespace leveldb {
 
         void PerformSubRangeReorganization() override;
 
+        void QueryDBStats(DBStats *db_stats) override;
+
+        Status Recover() override;
+
+        Status
+        RecoverLogFile(const std::map<std::string, uint64_t> &logfile_buf,
+                       uint32_t *recovered_log_records,
+                       timeval *rdma_read_complete);
+
     private:
+        class NovaCCRecoveryThread {
+        public:
+            NovaCCRecoveryThread(
+                    uint32_t client_id,
+                    std::vector<leveldb::MemTable *> memtables,
+                    MemManager *mem_manager);
+
+            void Recover();
+
+            sem_t sem_;
+            uint32_t recovered_log_records = 0;
+            uint64_t recovery_time = 0;
+            uint64_t new_memtable_time = 0;
+            uint64_t max_sequence_number = 0;
+
+            std::vector<char *> log_replicas_;
+
+
+        private:
+            std::vector<leveldb::MemTable *> memtables_;
+            uint32_t client_id_ = 0;
+            MemManager *mem_manager_;
+        };
+
         // Compact the in-memory write buffer to disk.  Switches to a new
         // log-file/memtable and writes a new descriptor iff successful.
         // Errors are recorded in bg_error_.
@@ -207,10 +245,6 @@ namespace leveldb {
                              const std::vector<EnvBGTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
-        Status
-        RecoverLogFile(uint64_t log_number, bool last_log, bool *save_manifest,
-                       VersionEdit *edit, SequenceNumber *max_sequence)
-        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         void RecordBackgroundError(const Status &s);
 
@@ -250,6 +284,7 @@ namespace leveldb {
         Env *const env_;
         uint32_t server_id_;
         uint32_t dbid_;
+        const Comparator *user_comparator_;
         const InternalKeyComparator internal_comparator_;
         const InternalFilterPolicy internal_filter_policy_;
         const Options options_;  // options_.comparator == &internal_comparator_
@@ -286,6 +321,12 @@ namespace leveldb {
         std::vector<AtomicMemTable *> active_memtables_;
 
         uint64_t last_major_reorg_seq_ = 0;
+        uint64_t last_minor_reorg_seq_ = 0;
+
+        uint32_t num_major_reorgs = 0;
+        uint32_t num_skipped_major_reorgs = 0;
+        uint32_t num_minor_reorgs = 0;
+        uint32_t num_skipped_minor_reorgs = 0;
 
         struct SubRange {
             Slice lower;
@@ -295,22 +336,39 @@ namespace leveldb {
             uint64_t ninserts = 0;
             double rate = 0;
 
+            static Slice Copy(Slice from) {
+                char *c = new char[from.size()];
+                for (int i = 0; i < from.size(); i++) {
+                    c[i] = from[i];
+                }
+                return Slice(c, from.size());
+            }
+
             std::string DebugString() {
                 std::string output;
+                uint64_t low;
+                uint64_t up;
+                nova::str_to_int(lower.data(), &low, lower.size());
+                nova::str_to_int(upper.data(), &up, upper.size());
+
                 if (lower_inclusive) {
                     output += "[";
                 } else {
+                    low++;
                     output += "(";
                 }
                 output += lower.ToString();
                 output += ",";
                 output += upper.ToString();
                 if (upper_inclusive) {
+                    up++;
                     output += "]";
                 } else {
                     output += ")";
                 }
-                output += fmt::format(":{}, {:..{}f}", ninserts, rate);
+
+                output += fmt::format(":{}, {}%, keys={}", ninserts,
+                                      (uint32_t) rate * 100.0, up - low);
                 return output;
             }
 
@@ -347,14 +405,40 @@ namespace leveldb {
             }
         };
 
-        struct SubRanges {
+        class SubRanges {
+        public:
+            ~SubRanges() {
+                for (int i = 0; i < subranges.size(); i++) {
+                    delete subranges[i].lower.data();
+                    delete subranges[i].upper.data();
+                }
+            }
+
+            SubRanges() {}
+
+            SubRanges(const SubRanges &other) {
+                subranges.resize(other.subranges.size());
+                for (int i = 0; i < subranges.size(); i++) {
+                    subranges[i].lower = SubRange::Copy(
+                            other.subranges[i].lower);
+                    subranges[i].upper = SubRange::Copy(
+                            other.subranges[i].upper);
+                    subranges[i].lower_inclusive = other.subranges[i].lower_inclusive;
+                    subranges[i].upper_inclusive = other.subranges[i].upper_inclusive;
+                    subranges[i].ninserts = other.subranges[i].ninserts;
+                }
+            }
+
             std::vector<SubRange> subranges;
 
             std::string DebugString() {
                 std::string output;
+//                output += std::to_string(subranges.size());
+                output += "\n";
                 for (int i = 0; i < subranges.size(); i++) {
+                    output += std::to_string(i) + " ";
                     output += subranges[i].DebugString();
-                    output += ",";
+                    output += "\n";
                 }
                 return output;
             }
@@ -364,16 +448,33 @@ namespace leveldb {
                     return;
                 }
                 Slice prior_upper;
+                bool upper_inclusive;
                 for (int i = 0; i < subranges.size(); i++) {
                     SubRange &sr = subranges[i];
                     RDMA_ASSERT(!sr.IsSmallerThanLower(sr.upper, comparator))
                         << DebugString();
                     if (!prior_upper.empty()) {
-                        RDMA_ASSERT(
-                                sr.IsSmallerThanLower(prior_upper, comparator))
-                            << DebugString();
+                        if (upper_inclusive) {
+                            if (sr.lower_inclusive) {
+                                RDMA_ASSERT(
+                                        sr.IsSmallerThanLower(prior_upper,
+                                                              comparator))
+                                    << DebugString();
+                            } else {
+                                // Must be the same.
+                                RDMA_ASSERT(comparator->Compare(prior_upper,
+                                                                sr.lower) == 0)
+                                    << DebugString();
+                            }
+                        } else {
+                            RDMA_ASSERT(sr.lower_inclusive) << DebugString();
+                            RDMA_ASSERT(comparator->Compare(prior_upper,
+                                                            sr.lower) == 0)
+                                << DebugString();
+                        }
                     }
                     prior_upper = sr.upper;
+                    upper_inclusive = sr.upper_inclusive;
                 }
             }
         };
@@ -427,6 +528,15 @@ namespace leveldb {
                                   uint32_t partition_id,
                                   bool should_wait, uint64_t last_sequence,
                                   SubRange *subrange);
+
+        void PerformSubrangeMajorReorg(SubRanges *latest,
+                                       double total_inserts);
+
+        void PerformSubrangeMinorReorg(int subrange_id, SubRanges *latest,
+                                       double total_inserts);
+
+        NovaCCMemFile *manifest_file_ = nullptr;
+        unsigned int rand_seed_ = 0;
     };
 
 // Sanitize db options.  The caller should delete result.info_log if

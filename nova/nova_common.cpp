@@ -427,4 +427,48 @@ namespace nova {
         str_to_int(key, &hv, nkey);
         return hv;
     }
+
+    uint32_t
+    LogRecordsSize(const leveldb::LevelDBLogRecord &record) {
+        uint32_t size = 0;
+        size += 4;
+        size += 4;
+        size += record.key.size();
+        size += 4;
+        size += record.value.size();
+        size += 8;
+        return size;
+    }
+
+    uint32_t
+    EncodeLogRecord(char *buf,
+                    const leveldb::LevelDBLogRecord &record) {
+        uint32_t size = 0;
+        uint32_t record_size =
+                4 + record.key.size() + 4 + record.value.size() + 8;
+        leveldb::EncodeFixed32(buf + size, record_size);
+        size += 4;
+        size += leveldb::EncodeSlice(buf + size, record.key);
+        size += leveldb::EncodeSlice(buf + size, record.value);
+        leveldb::EncodeFixed64(buf + size, record.sequence_number);
+        size += 8;
+        return size;
+    }
+
+    uint32_t DecodeLogRecord(char *buf,
+                             leveldb::LevelDBLogRecord *log_record) {
+        uint32_t read_size = 0;
+        uint32_t record_size = leveldb::DecodeFixed32(buf + read_size);
+        read_size += 4;
+        if (record_size == 0) {
+            return 0;
+        }
+        log_record->key = leveldb::DecodeSlice(buf + read_size);
+        read_size += (4 + log_record->key.size());
+        log_record->value = leveldb::DecodeSlice(buf + read_size);
+        read_size += (4 + log_record->value.size());
+        log_record->sequence_number = leveldb::DecodeFixed64(buf + read_size);
+        read_size += 8;
+        return read_size;
+    }
 }

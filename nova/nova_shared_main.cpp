@@ -24,9 +24,11 @@
 #include <assert.h>
 #include <csignal>
 #include <gflags/gflags.h>
-#include <db/filename.h>
-#include <util/env_posix.h>
-#include <dc/nova_dc_server.h>
+
+#include "db/filename.h"
+#include "util/env_posix.h"
+#include "dc/nova_dc_server.h"
+#include "db/version_set.h"
 
 using namespace std;
 using namespace rdmaio;
@@ -90,9 +92,17 @@ DEFINE_uint32(cc_num_log_replicas, 0, "");
 DEFINE_string(cc_memtable_type, "", "pool/static_partition");
 DEFINE_bool(cc_enable_subrange, false, "");
 
+DEFINE_double(cc_sampling_ratio, 1, "");
+DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
+DEFINE_string(cc_client_access_pattern, "uniform", "");
+
+DEFINE_bool(cc_test_recovery, false, "recovery");
+DEFINE_uint32(cc_num_recovery_threads, 32, "recovery");
+
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
 std::atomic_int_fast32_t nova::NovaCCServer::cc_server_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
+std::map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 
 void start(NovaCCNICServer *server) {
     server->Start();
@@ -169,6 +179,9 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->db_path = FLAGS_db_path;
     NovaConfig::config->enable_rdma = FLAGS_enable_rdma;
     NovaConfig::config->enable_load_data = FLAGS_enable_load_data;
+
+    NovaConfig::config->measure_recovery_duration = FLAGS_cc_test_recovery;
+    NovaConfig::config->number_of_recovery_threads = FLAGS_cc_num_recovery_threads;
 
     NovaConfig::config->servers = convert_hosts(FLAGS_cc_servers);
     if (FLAGS_cc_multiple_disks) {
@@ -254,6 +267,10 @@ int main(int argc, char *argv[]) {
     }
 
     NovaCCConfig::cc_config->enable_table_locator = FLAGS_cc_enable_table_locator;
+    NovaConfig::config->subrange_sampling_ratio = FLAGS_cc_sampling_ratio;
+    NovaConfig::config->zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
+    NovaConfig::config->ReadZipfianDist();
+    NovaConfig::config->client_access_pattern = FLAGS_cc_client_access_pattern;
 
     leveldb::EnvBGThread::bg_thread_id_seq = 0;
     nova::NovaCCServer::cc_server_seq_id_ = 0;

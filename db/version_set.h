@@ -25,6 +25,7 @@
 #include "port/port.h"
 #include "port/thread_annotations.h"
 #include "memtable.h"
+#include "cc/nova_cc.h"
 
 #define MAX_LIVE_MEMTABLES 100000
 
@@ -134,6 +135,21 @@ namespace leveldb {
         // Return a human readable string that describes this version's contents.
         std::string DebugString() const;
 
+        void QueryStats(DBStats *stats,
+                        const Comparator *user_comparator);
+
+        void ComputeOverlappingFiles(std::map<uint64_t, FileMetaData *> *files,
+                                     std::vector<OverlappingStats> *num_overlapping,
+                                     const Comparator *user_comparator);
+
+
+        void ComputeOverlappingFilesPerTable(
+                std::map<uint64_t, FileMetaData *> *files,
+                std::vector<OverlappingStats> *num_overlapping,
+                const Comparator *user_comparator);
+
+        static std::map<uint64_t, FileMetaData *> last_fnfile;
+
         TableCache *table_cache();
 
         FileMetaData *file_meta(uint64_t fn);
@@ -235,14 +251,14 @@ namespace leveldb {
         // REQUIRES: no other thread concurrently calls LogAndApply()
         Status LogAndApply(VersionEdit *edit, Version *new_version);
 
+        void AppendChangesToManifest(VersionEdit *edit,
+                                     NovaCCMemFile *manifest_file);
+
         // Recover the last saved descriptor from persistent storage.
-        Status Recover(bool *save_manifest);
+        Status Recover(Slice manifest_file);
 
         // Return the current version.
         Version *current() const { return current_; }
-
-        // Return the current manifest file number
-        uint64_t ManifestFileNumber() const { return manifest_file_number_; }
 
         // Allocate and return a new file number
         uint64_t NewFileNumber() {
@@ -277,13 +293,6 @@ namespace leveldb {
 
         // Mark the specified file number as used.
         void MarkFileNumberUsed(uint64_t number);
-
-        // Return the current log file number.
-        uint64_t LogNumber() const { return log_number_; }
-
-        // Return the log file number for the log file that is currently
-        // being compacted, or zero if there is no such log file.
-        uint64_t PrevLogNumber() const { return prev_log_number_; }
 
         // Pick level and inputs for a new compaction.
         // Returns nullptr if there is no compaction to be done.
@@ -342,6 +351,8 @@ namespace leveldb {
         AtomicMemTable mid_table_mapping_[MAX_LIVE_MEMTABLES];
         AtomicVersion versions_[MAX_LIVE_MEMTABLES];
         std::atomic_int_fast32_t version_id_seq_;
+
+        std::mutex manifest_lock_;
     private:
         class Builder;
 
@@ -375,9 +386,6 @@ namespace leveldb {
         TableCache *const table_cache_;
         const InternalKeyComparator icmp_;
         std::atomic_int_fast64_t next_file_number_;
-        uint64_t manifest_file_number_;
-        uint64_t log_number_;
-        uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
 
         // Opened lazily
         WritableFile *descriptor_file_;

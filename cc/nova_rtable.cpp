@@ -30,6 +30,33 @@ namespace leveldb {
         size = DecodeFixed32(buf + 16);
     }
 
+    bool RTableHandle::DecodeHandle(leveldb::Slice *data,
+                                    leveldb::RTableHandle *handle) {
+        if (data->size() < HandleSize()) {
+            return false;
+        }
+
+        handle->DecodeHandle(data->data());
+        *data = Slice(data->data() + HandleSize(), data->size() - HandleSize());
+        return true;
+    }
+
+    bool RTableHandle::DecodeHandles(leveldb::Slice *data,
+                                     std::vector<leveldb::RTableHandle> *handles) {
+        uint32_t size = 0;
+        if (!DecodeFixed32(data, &size)) {
+            return false;
+        }
+        for (int i = 0; i < size; i++) {
+            RTableHandle handle = {};
+            if (!DecodeHandle(data, &handle)) {
+                return false;
+            }
+            handles->push_back(handle);
+        }
+        return true;
+    }
+
     NovaRTable::NovaRTable(uint32_t rtable_id, leveldb::Env *env,
                            std::string rtable_name, MemManager *mem_manager,
                            uint32_t thread_id, uint32_t rtable_size) :
@@ -502,6 +529,37 @@ namespace leveldb {
         mutex_.lock();
         rtables_[id] = rtable;
         active_rtables_[thread_id] = rtable;
+        mutex_.unlock();
+        return rtable;
+    }
+
+    NovaRTable *NovaRTableManager::OpenRTable(uint32_t thread_id,
+                                              std::string &filename) {
+        mutex_.lock();
+        auto rtable_ptr = fn_rtable_map_.find(filename);
+        if (rtable_ptr == fn_rtable_map_.end()) {
+            auto rtable = rtable_ptr->second;
+            mutex_.unlock();
+            return rtable;
+        }
+        // not found.
+        uint32_t id = current_rtable_id_;
+        current_rtable_id_ += 1;
+        mutex_.unlock();
+
+        RDMA_LOG(rdmaio::DEBUG)
+            << fmt::format("Create a new RTable {} for thread {}", id,
+                           thread_id);
+        RDMA_ASSERT(id < MAX_NUM_RTABLES)
+            << fmt::format("Too many RTables");
+        NovaRTable *rtable = new NovaRTable(id, env_,
+                                            filename,
+                                            mem_manager_,
+                                            thread_id, rtable_size_);
+        mutex_.lock();
+        rtables_[id] = rtable;
+        active_rtables_[thread_id] = rtable;
+        fn_rtable_map_[filename] = rtable;
         mutex_.unlock();
         return rtable;
     }

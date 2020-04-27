@@ -17,7 +17,7 @@
 #include <semaphore.h>
 #include <list>
 #include <cc/nova_cc_client.h>
-#include "log/nova_log.h"
+#include "log/nova_in_memory_log_manager.h"
 #include "nova_cc_log_writer.h"
 #include "nova_cc_server.h"
 #include "nova/nova_config.h"
@@ -63,6 +63,9 @@ namespace nova {
             return vc;
         }
 
+        std::atomic_bool should_pause;
+        sem_t sem_;
+
     private:
         int ProcessQueue();
 
@@ -80,7 +83,6 @@ namespace nova {
         std::vector<leveldb::DB *> dbs_;
         leveldb::port::Mutex mutex_;
         std::list<leveldb::RDMAAsyncClientRequestTask> queue_;
-        sem_t sem_;
     };
 }
 

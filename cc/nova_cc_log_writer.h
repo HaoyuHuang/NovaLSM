@@ -12,7 +12,7 @@
 #include "leveldb/slice.h"
 #include "leveldb/log_writer.h"
 #include "nova/nova_rdma_store.h"
-#include "log/nova_log.h"
+#include "log/nova_in_memory_log_manager.h"
 
 namespace leveldb {
 
@@ -21,7 +21,7 @@ namespace leveldb {
     public:
         RDMALogWriter(nova::NovaRDMAStore *store,
                       MemManager *mem_manager,
-                      nova::LogFileManager *log_manager);
+                      nova::InMemoryLogFileManager *log_manager);
 
         bool
         AddRecord(const std::string &log_file_name,
@@ -29,7 +29,7 @@ namespace leveldb {
                   uint32_t dbid,
                   uint32_t memtableid,
                   char *rdma_backing_buf,
-                  const Slice &slice,
+                  const LevelDBLogRecord &log_record,
                   uint32_t client_req_id,
                   WriteState *replicate_log_record_states);
 
@@ -44,7 +44,8 @@ namespace leveldb {
                              WriteState *replicate_log_record_states);
 
         Status
-        CloseLogFile(const std::string &log_file_name, uint32_t dbid, uint32_t client_req_id);
+        CloseLogFile(const std::string &log_file_name, uint32_t dbid,
+                     uint32_t client_req_id);
 
         bool CheckCompletion(const std::string &log_file_name,
                              uint64_t thread_id,
@@ -82,14 +83,16 @@ namespace leveldb {
             LogFileBuf *stoc_bufs = nullptr;
         };
 
-        void Init(const std::string &log_file_name, uint64_t thread_id,
-                  const Slice &slice, char *backing_buf);
+        void Init(const std::string &log_file_name,
+                  uint64_t thread_id,
+                  const LevelDBLogRecord &log_record,
+                  char *backing_buf);
 
         nova::NovaRDMAStore *store_;
         std::map<std::string, LogFileMetadata> logfile_last_buf_;
 
         MemManager *mem_manager_;
-        nova::LogFileManager *log_manager_;
+        nova::InMemoryLogFileManager *log_manager_;
     };
 
 }  // namespace leveldb

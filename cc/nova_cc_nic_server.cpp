@@ -51,7 +51,9 @@ namespace nova {
 
         leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
                                     leveldb::MemTablePool *memtable_pool,
-                                    std::vector<leveldb::EnvBGThread *> bg_threads,
+                                    leveldb::MemManager *mem_manager,
+                                    leveldb::CCClient *cc_client,
+                                    std::vector<leveldb::EnvBGThread *> &bg_threads,
                                     leveldb::EnvBGThread *reorg_thread) {
             leveldb::EnvOptions env_option;
             env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_MEM;
@@ -70,13 +72,16 @@ namespace nova {
             if (NovaConfig::config->sstable_size > 0) {
                 options.max_file_size = NovaConfig::config->sstable_size;
             }
-
+            options.mem_manager = mem_manager;
+            options.dc_client = cc_client;
             options.num_memtable_partitions = NovaCCConfig::cc_config->num_memtable_partitions;
             options.l0_consolidate_group_size = 8;
             options.num_memtables = NovaCCConfig::cc_config->num_memtables;
             options.l0_stop_writes_trigger = NovaCCConfig::cc_config->cc_l0_stop_write;
             options.max_open_files = 50000;
             options.enable_table_locator = NovaCCConfig::cc_config->enable_table_locator;
+            options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
+
             if (NovaCCConfig::cc_config->cc_l0_stop_write == 0) {
                 options.l0_stop_writes_trigger = UINT32_MAX;
             }
@@ -405,11 +410,6 @@ namespace nova {
         char *cache_buf = buf + nrdma_buf_cc();
 
         uint32_t num_mem_partitions = 1;
-//        if (ndbs == 1) {
-//            num_mem_partitions = 1;
-//        } else {
-//            num_mem_partitions = 4;
-//        }
         NovaConfig::config->num_mem_partitions = num_mem_partitions;
         uint64_t slab_size_mb = std::max(
                 NovaConfig::config->sstable_size / 1024 / 1024,
@@ -420,10 +420,9 @@ namespace nova {
                                          num_mem_partitions,
                                          NovaConfig::config->mem_pool_size_gb,
                                          slab_size_mb);
-        log_manager = new LogFileManager(mem_manager);
+        log_manager = new InMemoryLogFileManager(mem_manager);
 
         NovaConfig::config->add_tid_mapping();
-
         int bg_thread_id = 0;
         for (int i = 0;
              i < NovaCCConfig::cc_config->num_compaction_workers; i++) {
@@ -454,11 +453,15 @@ namespace nova {
         pool->num_available_memtables_ =
                 NovaCCConfig::cc_config->num_memtables;
         pool->range_cond_vars_ = new leveldb::port::CondVar *[ndbs];
+
+        std::vector<nova::NovaMsgCallback *> rdma_threads;
         for (int db_index = 0; db_index < ndbs; db_index++) {
             auto reorg = new leveldb::NovaCCCompactionThread(mem_manager);
             reorg_bgs.push_back(reorg);
+            auto client = new leveldb::NovaBlockCCClient(0);
             dbs_.push_back(
-                    CreateDatabase(db_index, block_cache, pool, bgs, reorg));
+                    CreateDatabase(db_index, block_cache, pool, mem_manager,
+                                   client, bgs, reorg));
         }
         for (int db_index = 0; db_index < ndbs; db_index++) {
             dbs_[db_index]->dbs_ = dbs_;
@@ -506,6 +509,7 @@ namespace nova {
                     rdma_ctrl,
                     mem_manager,
                     dbs_);
+            rdma_threads.push_back(cc);
             async_workers.push_back(cc);
             NovaRDMAStore *store = nullptr;
             std::vector<QPEndPoint> endpoints;
@@ -573,6 +577,7 @@ namespace nova {
                     rdma_ctrl,
                     mem_manager,
                     dbs_);
+            rdma_threads.push_back(cc);
             async_compaction_workers.push_back(cc);
 
             NovaRDMAStore *store = nullptr;
@@ -673,6 +678,10 @@ namespace nova {
             auto bg = reinterpret_cast<leveldb::NovaCCCompactionThread *>(reorg_bgs[i]);
             reorg_workers.emplace_back(&leveldb::NovaCCCompactionThread::Start,
                                        bg);
+        }
+
+        for (int db_index = 0; db_index < ndbs; db_index++) {
+            dbs_[db_index]->rdma_threads_ = rdma_threads;
         }
 
         // Start the threads.

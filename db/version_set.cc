@@ -8,6 +8,9 @@
 
 #include <algorithm>
 #include <fmt/core.h>
+#include <getopt.h>
+#include <nova/nova_common.h>
+#include <cc/nova_cc.h>
 #include "nova/logging.hpp"
 
 #include "db/filename.h"
@@ -630,6 +633,151 @@ namespace leveldb {
         }
     }
 
+    void Version::ComputeOverlappingFilesPerTable(
+            std::map<uint64_t, leveldb::FileMetaData *> *files,
+            std::vector<leveldb::OverlappingStats> *num_overlapping,
+            const leveldb::Comparator *user_comparator) {
+        for (auto pivot_it = files->begin();
+             pivot_it != files->end(); pivot_it++) {
+            Slice lower = pivot_it->second->smallest.user_key();
+            Slice upper = pivot_it->second->largest.user_key();
+
+            OverlappingStats stats = {};
+            stats.num_overlapping_tables = 1;
+            stats.total_size = pivot_it->second->file_size;
+            nova::str_to_int(lower.data(), &stats.smallest, lower.size());
+            nova::str_to_int(upper.data(), &stats.largest, upper.size());
+
+            for (auto comp_it = files->begin();
+                 comp_it != files->end(); comp_it++) {
+                if (comp_it == pivot_it) {
+                    continue;
+                }
+                if (user_comparator->Compare(lower,
+                                             comp_it->second->largest.user_key()) >
+                    0) {
+                    continue;
+                }
+                if (user_comparator->Compare(upper,
+                                             comp_it->second->smallest.user_key()) <
+                    0) {
+                    continue;
+                }
+                stats.num_overlapping_tables += 1;
+                stats.total_size += comp_it->second->file_size;
+            }
+            num_overlapping->push_back(stats);
+        }
+
+        {
+            auto comp = [&](const OverlappingStats &a,
+                            const OverlappingStats &b) {
+                return a.num_overlapping_tables > b.num_overlapping_tables;
+            };
+            std::sort(num_overlapping->begin(), num_overlapping->end(),
+                      comp);
+        }
+    }
+
+    void Version::ComputeOverlappingFiles(
+            std::map<uint64_t, leveldb::FileMetaData *> *files,
+            std::vector<OverlappingStats> *overlapping_stats,
+            const Comparator *user_comparator) {
+        // Compute overlapping sstables at L0.
+        while (!files->empty()) {
+            uint64_t pivot = files->begin()->first;
+            Slice lower = files->begin()->second->smallest.user_key();
+            Slice upper = files->begin()->second->largest.user_key();
+            OverlappingStats stats = {};
+            stats.num_overlapping_tables = 1;
+            stats.total_size = files->begin()->second->file_size;
+
+            files->erase(pivot);
+            auto it = files->begin();
+
+            // Find all overlapping tables.
+            while (it != files->end()) {
+                auto *file = it->second;
+                if (user_comparator->Compare(lower, file->largest.user_key()) >
+                    0) {
+                    it++;
+                    continue;
+                }
+                if (user_comparator->Compare(upper, file->smallest.user_key()) <
+                    0) {
+                    it++;
+                    continue;
+                }
+                // overlap.
+                stats.num_overlapping_tables++;
+                stats.total_size += file->file_size;
+                // Take the smallest user key.
+                if (user_comparator->Compare(file->smallest.user_key(), lower) <
+                    0) {
+                    lower = file->smallest.user_key();
+                }
+                if (user_comparator->Compare(file->largest.user_key(), upper) >
+                    0) {
+                    upper = file->largest.user_key();
+                }
+                it = files->erase(it);
+                it = files->begin();
+            }
+            nova::str_to_int(lower.data(), &stats.smallest, lower.size());
+            nova::str_to_int(upper.data(), &stats.largest, upper.size());
+            overlapping_stats->push_back(stats);
+        }
+
+        {
+            auto comp = [&](const OverlappingStats &a,
+                            const OverlappingStats &b) {
+                return a.smallest < b.smallest;
+            };
+            std::sort(overlapping_stats->begin(), overlapping_stats->end(),
+                      comp);
+        }
+    }
+
+    void Version::QueryStats(leveldb::DBStats *stats,
+                             const Comparator *user_comparator) {
+        std::map<uint64_t, FileMetaData *> all_fnfile;
+        std::map<uint64_t, FileMetaData *> new_fnfile;
+
+        for (int level = 0; level < config::kNumLevels; level++) {
+            const std::vector<FileMetaData *> &files = files_[level];
+            stats->nsstables += files.size();
+            for (size_t i = 0; i < files.size(); i++) {
+                stats->dbsize += files[i]->file_size;
+                stats->sstable_size_dist[files[i]->file_size / 1024 /
+                                         1024] += 1;
+                if (level == 0) {
+                    all_fnfile[files[i]->number] = files[i];
+                    if (last_fnfile.find(files[i]->number) ==
+                        last_fnfile.end()) {
+                        new_fnfile[files[i]->number] = files[i];
+                        last_fnfile[files[i]->number] = files[i];
+                    }
+                }
+            }
+        }
+
+        stats->new_l0_sstables_since_last_query = new_fnfile.size();
+        ComputeOverlappingFilesPerTable(&all_fnfile,
+                                        &stats->num_overlapping_sstables_per_table,
+                                        user_comparator);
+        ComputeOverlappingFiles(&all_fnfile, &stats->num_overlapping_sstables,
+                                user_comparator);
+        RDMA_ASSERT(all_fnfile.empty());
+
+        ComputeOverlappingFilesPerTable(&new_fnfile,
+                                        &stats->num_overlapping_sstables_per_table_since_last_query,
+                                        user_comparator);
+        ComputeOverlappingFiles(&new_fnfile,
+                                &stats->num_overlapping_sstables_since_last_query,
+                                user_comparator);
+        RDMA_ASSERT(new_fnfile.empty());
+    }
+
     std::string Version::DebugString() const {
         std::string r;
         for (int level = 0; level < config::kNumLevels; level++) {
@@ -859,10 +1007,7 @@ namespace leveldb {
               table_cache_(table_cache),
               icmp_(*cmp),
               next_file_number_(2),
-              manifest_file_number_(0),  // Filled by Recover()
               last_sequence_(0),
-              log_number_(0),
-              prev_log_number_(0),
               descriptor_file_(nullptr),
               descriptor_log_(nullptr),
               version_id_seq_(0),
@@ -898,224 +1043,65 @@ namespace leveldb {
         current_version_id_.store(v->version_id_);
     }
 
-    Status VersionSet::LogAndApply(VersionEdit *edit, Version *v) {
-        if (edit->has_log_number_) {
-            assert(edit->log_number_ >= log_number_);
-            assert(edit->log_number_ < next_file_number_);
-        } else {
-            edit->SetLogNumber(log_number_);
-        }
-
-        if (!edit->has_prev_log_number_) {
-            edit->SetPrevLogNumber(prev_log_number_);
-        }
-
+    void VersionSet::AppendChangesToManifest(leveldb::VersionEdit *edit,
+                                             NovaCCMemFile *manifest_file) {
+        manifest_lock_.lock();
         edit->SetNextFile(next_file_number_);
         edit->SetLastSequence(last_sequence_);
+        char *edit_str = manifest_file->Buf();
+        uint32_t msg_size = edit->EncodeTo(edit_str);
+        RDMA_ASSERT(manifest_file->SyncAppend(Slice(edit_str, msg_size)).ok());
+        manifest_lock_.unlock();
+    }
 
+    Status VersionSet::LogAndApply(VersionEdit *edit, Version *v) {
         {
             Builder builder(this, current_);
             builder.Apply(edit);
             builder.SaveTo(v);
         }
-//        Finalize(v);
+        Finalize(v);
         AppendVersion(v);
-        log_number_ = edit->log_number_;
-        prev_log_number_ = edit->prev_log_number_;
         return Status::OK();
-
-        // Initialize new descriptor log file if necessary by creating
-        // a temporary file that contains a snapshot of the current version.
-//        std::string new_manifest_file;
-//        Status s;
-//        if (descriptor_log_ == nullptr) {
-//            // No reason to unlock *mu here since we only hit this path in the
-//            // first call to LogAndApply (when opening the database).
-//            assert(descriptor_file_ == nullptr);
-//            new_manifest_file = DescriptorFileName(dbname_,
-//                                                   manifest_file_number_);
-//            edit->SetNextFile(next_file_number_);
-//            s = env_->NewWritableFile(new_manifest_file, {
-//                    .level = -1
-//            }, &descriptor_file_);
-//            if (s.ok()) {
-//                descriptor_log_ = new log::Writer(descriptor_file_);
-//                s = WriteSnapshot(descriptor_log_);
-//            }
-//        }
-//
-//        // Install the new version
-//        if (s.ok()) {
-//
-//        } else {
-//            delete v;
-//            if (!new_manifest_file.empty()) {
-//                delete descriptor_log_;
-//                delete descriptor_file_;
-//                descriptor_log_ = nullptr;
-//                descriptor_file_ = nullptr;
-//                env_->DeleteFile(new_manifest_file);
-//            }
-//        }
-
-        // Unlock during expensive MANIFEST log write
-//        {
-//            mu->Unlock();
-//
-//            // Write new record to MANIFEST log
-//            if (s.ok()) {
-//                std::string record;
-//                edit->EncodeTo(&record);
-//                s = descriptor_log_->AddRecord(record);
-//                if (s.ok()) {
-//                    s = descriptor_file_->Sync();
-//                }
-//                if (!s.ok()) {
-//                    Log(options_->info_log, "MANIFEST write: %s\n",
-//                        s.ToString().c_str());
-//                }
-//            }
-//
-//            // If we just created a new descriptor file, install it by writing a
-//            // new CURRENT file that points to it.
-//            if (s.ok() && !new_manifest_file.empty()) {
-//                s = SetCurrentFile(env_, dbname_, manifest_file_number_);
-//            }
-//
-//            mu->Lock();
-//        }
-//        return s;
     }
 
-    Status VersionSet::Recover(bool *save_manifest) {
-        struct LogReporter : public log::Reader::Reporter {
-            Status *status;
-
-            void Corruption(size_t bytes, const Status &s) override {
-                if (this->status->ok()) *this->status = s;
-            }
-        };
-
-        // Read "CURRENT" file, which contains a pointer to the current manifest file
-        std::string current;
-        Status s = ReadFileToString(env_, CurrentFileName(dbname_), &current);
-        if (!s.ok()) {
-            return s;
-        }
-        if (current.empty() || current[current.size() - 1] != '\n') {
-            return Status::Corruption("CURRENT file does not end with newline");
-        }
-        current.resize(current.size() - 1);
-
-        std::string dscname = dbname_ + "/" + current;
-        SequentialFile *file;
-        s = env_->NewSequentialFile(dscname, &file);
-        if (!s.ok()) {
-            if (s.IsNotFound()) {
-                return Status::Corruption(
-                        "CURRENT points to a non-existent file",
-                        s.ToString());
-            }
-            return s;
-        }
-
-        bool have_log_number = false;
-        bool have_prev_log_number = false;
-        bool have_next_file = false;
-        bool have_last_sequence = false;
+    Status VersionSet::Recover(Slice record) {
         uint64_t next_file = 0;
         uint64_t last_sequence = 0;
-        uint64_t log_number = 0;
-        uint64_t prev_log_number = 0;
         Builder builder(this, current_);
-
         {
-            LogReporter reporter;
-            reporter.status = &s;
-            log::Reader reader(file, &reporter, true /*checksum*/,
-                               0 /*initial_offset*/);
-            Slice record;
-            std::string scratch;
-            while (reader.ReadRecord(&record, &scratch) && s.ok()) {
-                VersionEdit edit;
-                s = edit.DecodeFrom(record);
-                if (s.ok()) {
-                    if (edit.has_comparator_ &&
-                        edit.comparator_ != icmp_.user_comparator()->Name()) {
-                        s = Status::InvalidArgument(
-                                edit.comparator_ +
-                                " does not match existing comparator ",
-                                icmp_.user_comparator()->Name());
-                    }
-                }
-
-                if (s.ok()) {
-                    builder.Apply(&edit);
-                }
-
-                if (edit.has_log_number_) {
-                    log_number = edit.log_number_;
-                    have_log_number = true;
-                }
-
-                if (edit.has_prev_log_number_) {
-                    prev_log_number = edit.prev_log_number_;
-                    have_prev_log_number = true;
-                }
-
-                if (edit.has_next_file_number_) {
-                    next_file = edit.next_file_number_;
-                    have_next_file = true;
-                }
-
-                if (edit.has_last_sequence_) {
-                    last_sequence = edit.last_sequence_;
-                    have_last_sequence = true;
+            VersionEdit edit;
+            Status s = edit.DecodeFrom(record);
+            if (s.ok()) {
+                if (edit.has_comparator_ &&
+                    edit.comparator_ != icmp_.user_comparator()->Name()) {
+                    s = Status::InvalidArgument(
+                            edit.comparator_ +
+                            " does not match existing comparator ",
+                            icmp_.user_comparator()->Name());
                 }
             }
-        }
-        delete file;
-        file = nullptr;
 
-        if (s.ok()) {
-            if (!have_next_file) {
-                s = Status::Corruption("no meta-nextfile entry in descriptor");
-            } else if (!have_log_number) {
-                s = Status::Corruption("no meta-lognumber entry in descriptor");
-            } else if (!have_last_sequence) {
-                s = Status::Corruption(
-                        "no last-sequence-number entry in descriptor");
+            if (s.ok()) {
+                builder.Apply(&edit);
+            }
+            if (edit.has_next_file_number_) {
+                next_file = edit.next_file_number_;
             }
 
-            if (!have_prev_log_number) {
-                prev_log_number = 0;
-            }
-
-            MarkFileNumberUsed(prev_log_number);
-            MarkFileNumberUsed(log_number);
-        }
-
-        if (s.ok()) {
-            Version *v = new Version(this, version_id_seq_++);
-            builder.SaveTo(v);
-            // Install recovered version
-            Finalize(v);
-            AppendVersion(v);
-            manifest_file_number_ = next_file;
-            next_file_number_ = next_file + 1;
-            last_sequence_ = last_sequence;
-            log_number_ = log_number;
-            prev_log_number_ = prev_log_number;
-
-            // See if we can reuse the existing MANIFEST file.
-            if (ReuseManifest(dscname, current)) {
-                // No need to save new manifest
-            } else {
-                *save_manifest = true;
+            if (edit.has_last_sequence_) {
+                last_sequence = edit.last_sequence_;
             }
         }
 
-        return s;
+        Version *v = new Version(this, version_id_seq_++);
+        builder.SaveTo(v);
+        // Install recovered version
+        Finalize(v);
+        AppendVersion(v);
+        next_file_number_ = next_file + 1;
+        last_sequence_ = last_sequence;
+        return Status::OK();
     }
 
     bool VersionSet::ReuseManifest(const std::string &dscname,
@@ -1146,7 +1132,6 @@ namespace leveldb {
 
         Log(options_->info_log, "Reusing MANIFEST %s\n", dscname.c_str());
         descriptor_log_ = new log::Writer(descriptor_file_, manifest_size);
-        manifest_file_number_ = manifest_number;
         return true;
     }
 
@@ -1218,6 +1203,7 @@ namespace leveldb {
                 const FileMetaData *f = files[i];
                 edit.AddFile(level, 0, f->number, f->file_size,
                              f->converted_file_size,
+                             f->flush_timestamp,
                              f->smallest,
                              f->largest,
                              f->meta_block_handle,
@@ -1226,7 +1212,7 @@ namespace leveldb {
         }
 
         std::string record;
-        edit.EncodeTo(&record);
+//        edit.EncodeTo(&record);
         return log->AddRecord(record);
     }
 

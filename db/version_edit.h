@@ -28,16 +28,6 @@ namespace leveldb {
             comparator_ = name.ToString();
         }
 
-        void SetLogNumber(uint64_t num) {
-            has_log_number_ = true;
-            log_number_ = num;
-        }
-
-        void SetPrevLogNumber(uint64_t num) {
-            has_prev_log_number_ = true;
-            prev_log_number_ = num;
-        }
-
         void SetNextFile(uint64_t num) {
             has_next_file_number_ = true;
             next_file_number_ = num;
@@ -58,7 +48,9 @@ namespace leveldb {
         void AddFile(int level, uint32_t memtable_id, uint64_t file,
                      uint64_t file_size,
                      uint64_t converted_file_size,
-                     const InternalKey &smallest, const InternalKey &largest,
+                     uint64_t flush_timestamp,
+                     const InternalKey &smallest,
+                     const InternalKey &largest,
                      RTableHandle meta_block_handle,
                      const std::vector<RTableHandle> &data_block_group_handles) {
             FileMetaData f;
@@ -66,6 +58,7 @@ namespace leveldb {
             f.number = file;
             f.file_size = file_size;
             f.converted_file_size = converted_file_size;
+            f.flush_timestamp = flush_timestamp;
             f.smallest = smallest;
             f.largest = largest;
             f.meta_block_handle = meta_block_handle;
@@ -81,7 +74,7 @@ namespace leveldb {
             deleted_files_.emplace_back(std::make_pair(level, f));
         }
 
-        void EncodeTo(std::string *dst) const;
+        uint32_t EncodeTo(char *dst) const;
 
         Status DecodeFrom(const Slice &src);
 
@@ -91,12 +84,9 @@ namespace leveldb {
         friend class VersionSet;
 
         std::string comparator_;
-        uint64_t log_number_;
-        uint64_t prev_log_number_;
         uint64_t next_file_number_;
         SequenceNumber last_sequence_;
         bool has_comparator_;
-        bool has_log_number_;
         bool has_prev_log_number_;
         bool has_next_file_number_;
         bool has_last_sequence_;

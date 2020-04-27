@@ -51,12 +51,15 @@ namespace leveldb {
         CC_DELETE_LOG_FILE = 'm',
         CC_DELETE_LOG_FILE_SUCC = 'n',
         CC_DELETE_TABLES = 'o',
+        CC_READ_IN_MEMORY_LOG_FILE = 'p',
         CC_RTABLE_WRITE_SSTABLE = 'q',
         CC_RTABLE_WRITE_SSTABLE_RESPONSE = 'r',
         CC_RTABLE_PERSIST_RESPONSE = 't',
         CC_DC_READ_STATS = 'u',
         CC_DC_READ_STATS_RESPONSE = 's',
         CC_REPLICATE_LOG_RECORDS = 'v',
+        CC_QUERY_LOG_FILES = 'w',
+        CC_QUERY_LOG_FILES_RESPONSE = 'w',
     };
 
     struct CCRequestContext {
@@ -84,6 +87,8 @@ namespace leveldb {
         uint32_t db_id;
         uint32_t memtable_id;
         WriteState *replicate_log_record_states;
+
+        std::map<std::string, uint64_t> *logfile_offset;
     };
 
     struct CCResponse {
@@ -102,22 +107,34 @@ namespace leveldb {
         RDMA_ASYNC_REQ_WRITE_DATA_BLOCKS = 'd',
         RDMA_ASYNC_REQ_DELETE_TABLES = 'e',
         RDMA_ASYNC_READ_DC_STATS = 'f',
+        RDMA_ASYNC_REQ_QUERY_LOG_FILES = 'g',
+        RDMA_ASYNC_READ_LOG_FILE = 'h',
+    };
+
+    struct LevelDBLogRecord {
+        Slice key;
+        Slice value;
+        uint64_t sequence_number;
     };
 
     struct RDMAAsyncClientRequestTask {
         RDMAAsyncRequestType type;
         sem_t *sem = nullptr;
 
+        char *rdma_log_record_backing_mem = nullptr;
+        uint64_t remote_dc_offset;
+
         RTableHandle rtable_handle;
         uint64_t offset;
         uint32_t size;
         char *result = nullptr;
+        std::string filename;
 
         std::string log_file_name;
         uint64_t thread_id;
         uint32_t dbid;
         uint32_t memtable_id;
-        Slice log_record;
+        LevelDBLogRecord log_record;
 
         uint32_t server_id;
         std::vector<SSTableRTablePair> rtable_ids;
@@ -128,17 +145,25 @@ namespace leveldb {
         uint32_t write_size;
         bool is_meta_blocks;
 
-        WriteState *replicate_log_record_states;
-
+        WriteState *replicate_log_record_states = nullptr;
+        std::map<std::string, uint64_t> *logfile_offset = nullptr;
         CCResponse *response = nullptr;
     };
+
+
 
     class LEVELDB_EXPORT CCClient {
     public:
         virtual uint32_t
         InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
                                     uint64_t offset, uint32_t size,
-                                    char *result) = 0;
+                                    char *result,
+                                    std::string filename) = 0;
+
+        virtual uint32_t InitiateQueryLogFile(
+                uint32_t storage_server_id,uint32_t server_id,
+                                              uint32_t dbid,
+                                              std::map<std::string, uint64_t> *logfile_offset) = 0;
 
         virtual uint32_t
         InitiateRTableWriteDataBlocks(uint32_t server_id, uint32_t thread_id,
@@ -153,12 +178,16 @@ namespace leveldb {
                              const std::vector<SSTableRTablePair> &rtable_ids) = 0;
 
         virtual uint32_t
+        InitiateReadInMemoryLogFile(char *local_buf, uint32_t remote_server_id,
+                                    uint64_t remote_offset, uint64_t size) = 0;
+
+        virtual uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
                                     uint64_t thread_id,
                                     uint32_t db_id,
                                     uint32_t memtable_id,
                                     char *rdma_backing_mem,
-                                    const Slice &slice,
+                                    const LevelDBLogRecord& log_record,
                                     WriteState *replicate_log_record_states) = 0;
 
 

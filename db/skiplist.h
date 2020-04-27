@@ -97,7 +97,7 @@ namespace leveldb {
         private:
             const SkipList *list_;
             Node *node_;
-            uint32_t iter_level_;
+            int iter_level_;
             uint32_t sampled_puts_;
             // Intentionally copyable
         };
@@ -224,6 +224,7 @@ namespace leveldb {
                 iter_level_ = 0;
             }
         }
+//        RDMA_LOG(rdmaio::INFO) << fmt::format("Search {}", iter_level_);
     }
 
     template<typename Key, class Comparator>
@@ -404,8 +405,8 @@ namespace leveldb {
             // we publish a pointer to "x" in prev[i].
             x->NoBarrier_SetNext(i, prev[i]->NoBarrier_Next(i));
             prev[i]->SetNext(i, x);
+            nputs_per_level[i].fetch_add(1, std::memory_order_relaxed);
         }
-        nputs_per_level[height].fetch_add(1, std::memory_order_relaxed);
     }
 
     template<typename Key, class Comparator>

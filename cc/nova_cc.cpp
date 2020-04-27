@@ -84,6 +84,39 @@ namespace leveldb {
         return Status::OK();
     }
 
+    char *NovaCCMemFile::Buf() {
+        return backing_mem_ + used_size_;
+    }
+
+    Status NovaCCMemFile::Append(uint32_t size) {
+        RDMA_ASSERT(used_size_ + size < allocated_size_)
+            << fmt::format(
+                    "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{} data size:{}",
+                    thread_id_, fname_, dbname_, allocated_size_, used_size_,
+                    size);
+        used_size_ += size;
+        return Status::OK();
+    }
+
+    Status NovaCCMemFile::SyncAppend(const leveldb::Slice &data) {
+        char *buf = backing_mem_ + used_size_;
+        RDMA_ASSERT(used_size_ + data.size() < allocated_size_)
+            << fmt::format(
+                    "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{} data size:{}",
+                    thread_id_, fname_, dbname_, allocated_size_, used_size_,
+                    data.size());
+
+        uint32_t rtable_id;
+        auto client = reinterpret_cast<NovaBlockCCClient *> (cc_client_);
+        uint32_t req_id = client->InitiateRTableWriteDataBlocks(0, 0,
+                                                                &rtable_id, buf,
+                                                                dbname_, 0,
+                                                                data.size(),
+                                                                false);
+        client->Wait();
+        used_size_ += data.size();
+    }
+
     Status NovaCCMemFile::Append(const leveldb::Slice &data) {
         char *buf = backing_mem_ + used_size_;
         RDMA_ASSERT(used_size_ + data.size() < allocated_size_)
@@ -113,6 +146,7 @@ namespace leveldb {
         Format();
         return Status::OK();
     }
+
 
     void NovaCCMemFile::Format() {
         Status s;
@@ -596,29 +630,11 @@ namespace leveldb {
             RDMA_ASSERT(n < MAX_BLOCK_SIZE);
             char *backing_mem_block = read_options.rdma_backing_mem;
 
-//            DataBlockBuf buf;
-            // Search the first available buf.
-//            mutex_.lock();
-
-//            if (backing_mem_blocks_.empty()) {
-//                uint32_t scid = mem_manager_->slabclassid(
-//                        read_options.thread_id,
-//                        MAX_BLOCK_SIZE);
-//                backing_mem_block = mem_manager_->ItemAlloc(
-//                        read_options.thread_id, scid);
-//                buf.thread_id = read_options.thread_id;
-//                buf.buf = backing_mem_block;
-//            } else {
-//                buf = backing_mem_blocks_.front();
-//                backing_mem_block = buf.buf;
-//                backing_mem_blocks_.pop();
-//            }
-//            mutex_.unlock();
             RDMA_ASSERT(backing_mem_block);
             auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(read_options.dc_client);
             dc->set_dbid(dbid_);
             uint32_t req_id = dc->InitiateRTableReadDataBlock(
-                    rtable_handle, offset, n, backing_mem_block);
+                    rtable_handle, offset, n, backing_mem_block, "");
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("t[{}]: CCRead req:{} start db:{} fn:{} s:{}",
                                read_options.thread_id,
@@ -694,7 +710,7 @@ namespace leveldb {
                                                       handle.offset,
                                                       handle.size,
                                                       backing_mem_table_ +
-                                                      offset);
+                                                      offset, "");
             DataBlockRTableLocalBuf buf = {};
             buf.offset = handle.offset;
             buf.size = handle.size;

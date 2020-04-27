@@ -35,6 +35,15 @@ namespace leveldb {
         return MakeFileName(dbname, number, "ldb");
     }
 
+    std::string TableFileName(const std::string &dbname, uint64_t number,
+                              bool is_metadata) {
+        assert(number > 0);
+        if (is_metadata) {
+            return MakeFileName(dbname, number, "ldb-meta");
+        }
+        return MakeFileName(dbname, number, "ldb");
+    }
+
     std::string SSTTableFileName(const std::string &dbname, uint64_t number) {
         assert(number > 0);
         return MakeFileName(dbname, number, "sst");

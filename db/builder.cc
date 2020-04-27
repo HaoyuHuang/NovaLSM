@@ -19,11 +19,70 @@
 namespace leveldb {
 
     Status
+    TestBuildTable(const std::string &dbname, Env *env, const Options &options,
+                   TableCache *table_cache, Iterator *iter, FileMetaData *meta,
+                   EnvBGThread *bg_thread) {
+        Status s;
+        meta->file_size = 0;
+        iter->SeekToFirst();
+        std::string fname = TableFileName(dbname, meta->number);
+        if (iter->Valid()) {
+            MemManager *mem_manager = bg_thread->mem_manager();
+            uint64_t key = bg_thread->thread_id();
+
+            ParsedInternalKey ik;
+            Slice user_key;
+            bool insert = true;
+            meta->smallest.DecodeFrom(iter->key());
+            int nentries = 0;
+            uint64_t file_size = 0;
+            for (; iter->Valid(); iter->Next()) {
+                insert = true;
+                Slice key = iter->key();
+                if (options.prune_memtable_before_flushing) {
+                    RDMA_ASSERT(ParseInternalKey(key, &ik));
+                    if (user_key.empty()) {
+                        user_key = ik.user_key;
+                    } else {
+                        if (options.comparator->Compare(ik.user_key,
+                                                        user_key) == 0) {
+                            insert = false;
+                        }
+                    }
+                }
+                if (insert) {
+                    nentries += 1;
+                    file_size += (key.size() + iter->value().size());
+                    meta->largest.DecodeFrom(key);
+                }
+
+            }
+
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format(
+                        "!!!!!!!!!!!!!!!!!!!!! CompactMemTable tid:{} alloc_size:{} nentries:{} nblocks:{}",
+                        key, options.max_dc_file_size, nentries, -1);
+
+            // Finish and check for builder errors
+            meta->file_size = file_size;
+            meta->converted_file_size = meta->file_size;
+            assert(meta->file_size > 0);
+            // Make sure WRITEs are complete before we persist them.
+            meta->converted_file_size = file_size;
+        }
+
+        // Check for input iterator errors
+        if (!iter->status().ok()) {
+            s = iter->status();
+        }
+        return s;
+    }
+
+    Status
     BuildTable(const std::string &dbname, Env *env, const Options &options,
                TableCache *table_cache, Iterator *iter, FileMetaData *meta,
                EnvBGThread *bg_thread) {
         // TODO: Prune memtables. Support compacting mulitple memtables.
-
         Status s;
         meta->file_size = 0;
         iter->SeekToFirst();
@@ -42,11 +101,30 @@ namespace leveldb {
                                                        bg_thread->rand_seed());
             WritableFile *file = new MemWritableFile(cc_file);
             TableBuilder *builder = new TableBuilder(options, file);
+
+            ParsedInternalKey ik;
+            Slice user_key;
+            bool insert = true;
             meta->smallest.DecodeFrom(iter->key());
             for (; iter->Valid(); iter->Next()) {
+                insert = true;
                 Slice key = iter->key();
-                meta->largest.DecodeFrom(key);
-                builder->Add(key, iter->value());
+                if (options.prune_memtable_before_flushing) {
+                    RDMA_ASSERT(ParseInternalKey(key, &ik));
+                    if (user_key.empty()) {
+                        user_key = ik.user_key;
+                    } else {
+                        if (options.comparator->Compare(ik.user_key,
+                                                        user_key) == 0) {
+                            insert = false;
+                        }
+                    }
+                }
+                if (insert) {
+                    meta->largest.DecodeFrom(key);
+                    builder->Add(key, iter->value());
+                }
+
             }
 
             RDMA_LOG(rdmaio::DEBUG)

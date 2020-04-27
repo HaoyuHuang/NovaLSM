@@ -8,6 +8,7 @@
 #include <atomic>
 #include <stdint.h>
 #include <stdio.h>
+#include <fmt/core.h>
 
 #include "leveldb/export.h"
 #include "leveldb/iterator.h"
@@ -43,6 +44,40 @@ namespace leveldb {
         Slice limit;  // Not included in the range
     };
 
+    struct OverlappingStats {
+        uint32_t num_overlapping_tables = 0;
+        uint64_t total_size = 0;
+        uint64_t smallest;
+        uint64_t largest;
+
+        std::string DebugStringNum() {
+            return fmt::format("{}", num_overlapping_tables);
+        }
+
+        std::string DebugString() {
+            return fmt::format("[{},{}]:{}", smallest, largest,
+                               num_overlapping_tables);
+        }
+    };
+
+    struct DBStats {
+        uint32_t nsstables = 0;
+        uint64_t dbsize = 0;
+        double maximum_load_imbalance = 0.0;
+
+        uint32_t num_major_reorgs = 0.0;
+        uint32_t num_minor_reorgs = 0.0;
+        uint32_t num_skipped_major_reorgs = 0.0;
+        uint32_t num_skipped_minor_reorgs = 0.0;
+        uint32_t new_l0_sstables_since_last_query = 0.0;
+
+        std::vector<OverlappingStats> num_overlapping_sstables_per_table;
+        std::vector<OverlappingStats> num_overlapping_sstables;
+        std::vector<OverlappingStats> num_overlapping_sstables_per_table_since_last_query;
+        std::vector<OverlappingStats> num_overlapping_sstables_since_last_query;
+        uint32_t *sstable_size_dist = nullptr;
+    };
+
 // A DB is a persistent ordered map from keys to values.
 // A DB is safe for concurrent access from multiple threads without
 // any external synchronization.
@@ -56,6 +91,8 @@ namespace leveldb {
         static Status Open(const Options &options, const std::string &name,
                            DB **dbptr);
 
+        virtual Status Recover() = 0;
+
         DB() = default;
 
         DB(const DB &) = delete;
@@ -63,6 +100,8 @@ namespace leveldb {
         DB &operator=(const DB &) = delete;
 
         virtual ~DB();
+
+        virtual void QueryDBStats(DBStats *db_stats) = 0;
 
         // Set the database entry for "key" to "value".  Returns OK on success,
         // and a non-OK status on error.
@@ -101,6 +140,9 @@ namespace leveldb {
                            std::string *value) = 0;
 
         virtual void StartTracing() = 0;
+
+        virtual void TestCompact(EnvBGThread *bg_thread,
+                                 const std::vector<EnvBGTask> &tasks) = 0;
 
         // Return a heap-allocated iterator over the contents of the database.
         // The result of NewIterator() is initially invalid (caller must
@@ -166,7 +208,8 @@ namespace leveldb {
 
         virtual void PerformSubRangeReorganization() = 0;
 
-        std::vector<DB*> dbs_;
+        std::vector<DB *> dbs_;
+        std::vector<nova::NovaMsgCallback*> rdma_threads_;
 
         uint64_t number_of_memtable_hits_ = 0;
         uint64_t number_of_gets_ = 0;

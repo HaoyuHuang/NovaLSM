@@ -60,11 +60,18 @@ namespace leveldb {
 
             num_tasks_ += tasks.size();
 
-            if (tasks.size() == 1 && tasks[0].memtable == nullptr) {
-                // reorg task.
-                auto db = reinterpret_cast<DB *>(tasks[0].db);
-                db->PerformSubRangeReorganization();
-                return;
+            bool reorg = false;
+            for (auto &task : tasks) {
+                if (task.memtable == nullptr) {
+                    auto db = reinterpret_cast<DB *>(tasks[0].db);
+                    db->PerformSubRangeReorganization();
+                    reorg = true;
+                    continue;
+                }
+            }
+
+            if (reorg) {
+                continue;
             }
 
             std::map<void *, std::vector<EnvBGTask>> db_tasks;

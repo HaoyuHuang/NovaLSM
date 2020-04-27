@@ -30,6 +30,11 @@ namespace nova {
         POWER_OF_THREE
     };
 
+    struct ZipfianDist {
+        uint64_t sum = 0;
+        std::vector<uint64_t> accesses;
+    };
+
     class NovaConfig {
     public:
         bool enable_load_data;
@@ -64,6 +69,28 @@ namespace nova {
 
         ScatterPolicy  scatter_policy;
         NovaLogRecordMode log_record_mode;
+        bool measure_recovery_duration;
+        uint32_t number_of_recovery_threads;
+
+        double subrange_sampling_ratio;
+        std::string zipfian_dist_file_path;
+        ZipfianDist zipfian_dist;
+        std::string client_access_pattern;
+
+        void ReadZipfianDist() {
+            if (zipfian_dist_file_path.empty()) {
+                return;
+            }
+
+            std::string line;
+            ifstream file;
+            file.open(zipfian_dist_file_path);
+            while (std::getline(file, line)) {
+                uint64_t accesses = std::stoi(line);
+                zipfian_dist.accesses.push_back(accesses);
+                zipfian_dist.sum += accesses;
+            }
+        }
 
         void add_tid_mapping() {
             std::lock_guard<std::mutex> l(m);

@@ -13,7 +13,7 @@
 #include "nova/nova_rdma_rc_store.h"
 #include "mc/nova_mem_manager.h"
 #include "dc/nova_dc.h"
-#include "log/nova_log.h"
+#include "log/nova_in_memory_log_manager.h"
 #include "nova_rtable.h"
 
 namespace nova {
@@ -69,7 +69,7 @@ namespace nova {
         NovaCCServer(rdmaio::RdmaCtrl *rdma_ctrl,
                      NovaMemManager *mem_manager,
                      leveldb::NovaRTableManager *rtable_manager,
-                     LogFileManager *log_manager,
+                     InMemoryLogFileManager *log_manager,
                      uint32_t thread_id, bool is_compaction_thread);
 
         bool
@@ -97,7 +97,7 @@ namespace nova {
         uint32_t thread_id_;
         rdmaio::RdmaCtrl *rdma_ctrl_;
         NovaMemManager *mem_manager_;
-        LogFileManager *log_manager_;
+        InMemoryLogFileManager *log_manager_;
         leveldb::NovaRTableManager *rtable_manager_;
         leveldb::NovaRTable *current_rtable_ = nullptr;
 

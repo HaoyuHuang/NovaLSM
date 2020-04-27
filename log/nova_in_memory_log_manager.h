@@ -4,8 +4,8 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
-#ifndef LEVELDB_NOVA_LOG_H
-#define LEVELDB_NOVA_LOG_H
+#ifndef LEVELDB_NOVA_IN_MEMORY_LOG_MANAGER_H
+#define LEVELDB_NOVA_IN_MEMORY_LOG_MANAGER_H
 
 #include "mc/nova_mem_manager.h"
 #include "db/dbformat.h"
@@ -53,13 +53,16 @@ namespace nova {
         std::vector<TableIndex> table_index_;
     };
 
-    class LogFileManager {
+    class InMemoryLogFileManager {
     public:
-        LogFileManager(NovaMemManager *mem_manager);
+        InMemoryLogFileManager(NovaMemManager *mem_manager);
 
         void Add(uint64_t thread_id, const std::string &log_file, char *buf);
 
         void DeleteLogBuf(const std::string &log_file);
+
+        void QueryLogFiles(uint32_t sid, uint32_t range_id,
+                           std::map<std::string, uint64_t> *logfile_offset);
 
     private:
         struct LogRecords {
@@ -78,4 +81,4 @@ namespace nova {
     };
 }
 
-#endif //LEVELDB_NOVA_LOG_H
+#endif //LEVELDB_NOVA_IN_MEMORY_LOG_MANAGER_H

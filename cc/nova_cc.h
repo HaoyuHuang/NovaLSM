@@ -46,7 +46,13 @@ namespace leveldb {
 
         Status Append(const Slice &data) override;
 
+        char * Buf();
+
+        Status Append(uint32_t size);
+
         Status Fsync() override;
+
+        Status SyncAppend(const Slice& data);
 
         void Format();
 

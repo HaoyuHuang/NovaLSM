@@ -32,6 +32,10 @@ namespace leveldb {
         void EncodeHandle(char *buf) const;
 
         void DecodeHandle(const char *buf);
+
+        static bool DecodeHandle(Slice *data, RTableHandle *handle);
+
+        static bool DecodeHandles(Slice *data, std::vector<RTableHandle> *handles);
     };
 
     struct SSTableRTablePair {
@@ -112,6 +116,7 @@ namespace leveldb {
         uint64_t number;
         uint64_t file_size;    // File size in bytes in original SSTable format.
         uint64_t converted_file_size; // File size in bytes after converted to RTable.
+        uint64_t flush_timestamp = 0;
         InternalKey smallest;  // Smallest internal key served by table
         InternalKey largest;   // Largest internal key served by table
         FileCompactionStatus compaction_status;
@@ -185,7 +190,7 @@ namespace leveldb {
 
     class MemTablePool {
     public:
-        port::CondVar ** range_cond_vars_;
+        port::CondVar **range_cond_vars_;
         uint32_t num_available_memtables_ = 0;
         std::mutex mutex_;
     };

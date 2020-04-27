@@ -23,7 +23,7 @@ namespace nova {
         NovaMemManager *mem_manager = new NovaMemManager(cache_buf, 1,
                                                          NovaConfig::config->mem_pool_size_gb, 0);
         leveldb::Cache *cache = leveldb::NewLRUCache(1024 * 1024 * 1024);
-        LogFileManager *logFileManager = new LogFileManager(mem_manager);
+        InMemoryLogFileManager *logFileManager = new InMemoryLogFileManager(mem_manager);
         std::vector<std::string> dbnames;
         for (auto sid : dbs) {
             for (auto dbid : sid.second) {

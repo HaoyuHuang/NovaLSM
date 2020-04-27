@@ -5,7 +5,7 @@
 //
 
 #include "nova/nova_config.h"
-#include "nova_log.h"
+#include "nova_in_memory_log_manager.h"
 
 namespace nova {
     leveldb::Status LogRecord::Encode(char *data) {
@@ -48,7 +48,7 @@ namespace nova {
                                            backing_mem_(backing_mem),
                                            file_size_(file_size) {}
 
-    LogFileManager::LogFileManager(
+    InMemoryLogFileManager::InMemoryLogFileManager(
             nova::NovaMemManager *mem_manager) : mem_manager_(mem_manager) {
         server_db_log_files_ = new DBLogFiles **[NovaConfig::config->servers.size()];
         uint32_t nranges = NovaCCConfig::cc_config->fragments.size() /
@@ -61,7 +61,18 @@ namespace nova {
         }
     }
 
-    void LogFileManager::Add(uint64_t thread_id, const std::string &log_file,
+    void InMemoryLogFileManager::QueryLogFiles(uint32_t sid, uint32_t range_id,
+                                       std::map<std::string, uint64_t> *logfile_offset) {
+        DBLogFiles *db = server_db_log_files_[sid][range_id];
+        db->mutex_.Lock();
+        for (const auto &it : db->logfiles_) {
+            uint64_t offset = (uint64_t) it.second->backing_mems.begin()->second[0];
+            (*logfile_offset)[it.first] = offset;
+        }
+        db->mutex_.Unlock();
+    }
+
+    void InMemoryLogFileManager::Add(uint64_t thread_id, const std::string &log_file,
                              char *buf) {
         uint32_t sid;
         uint32_t db_index;
@@ -88,7 +99,7 @@ namespace nova {
                            log_file, thread_id);
     }
 
-    void LogFileManager::DeleteLogBuf(const std::string &log_file) {
+    void InMemoryLogFileManager::DeleteLogBuf(const std::string &log_file) {
         uint32_t sid;
         uint32_t db_index;
         ParseDBIndexFromFile(log_file, &sid, &db_index);

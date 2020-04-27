@@ -64,13 +64,24 @@ namespace nova {
             ctx.response = task.response;
             bool failed = false;
             switch (task.type) {
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_READ_LOG_FILE:
+                    ctx.req_id = cc_client_->InitiateReadInMemoryLogFile(
+                            task.rdma_log_record_backing_mem, task.server_id,
+                            task.remote_dc_offset, task.size);
+                    break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_READ:
                     ctx.req_id = cc_client_->InitiateRTableReadDataBlock(
                             task.rtable_handle,
                             task.offset,
                             task.size,
-                            task.result);
+                            task.result, task.filename);
 
+                    break;
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_QUERY_LOG_FILES:
+                    ctx.req_id = cc_client_->InitiateQueryLogFile(
+                            task.server_id,
+                            nova::NovaConfig::config->my_server_id, task.dbid,
+                            task.logfile_offset);
                     break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_REQ_CLOSE_LOG:
                     ctx.req_id = cc_client_->InitiateCloseLogFile(
@@ -144,6 +155,10 @@ namespace nova {
         bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
+            if (should_pause) {
+                sem_wait(&sem_);
+            }
+
             if (should_sleep) {
                 usleep(timeout);
             }

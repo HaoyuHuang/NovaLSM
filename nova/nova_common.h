@@ -659,5 +659,16 @@ namespace nova {
             return nkey == 0;
         }
     };
+
+    uint32_t
+    LogRecordsSize(const leveldb::LevelDBLogRecord &log_record);
+
+
+    uint32_t
+    EncodeLogRecord(char *buf,
+                    const leveldb::LevelDBLogRecord &log_record);
+
+    uint32_t DecodeLogRecord(char *buf,
+                             leveldb::LevelDBLogRecord *log_record);
 }
 #endif //RLIB_NOVA_COMMON_H

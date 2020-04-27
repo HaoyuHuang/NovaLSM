@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 #include <string>
+#include <nova/nova_msg_callback.h>
 
 #include "leveldb/export.h"
 #include "leveldb/cc_client.h"
@@ -61,7 +62,14 @@ namespace leveldb {
         // comparator provided to previous open calls on the same DB.
         const Comparator *comparator;
 
+        MemManager *mem_manager = nullptr;
+        uint32_t num_recovery_thread = 0;
+
+        CCClient *dc_client = nullptr;
+
         double subrange_reorg_sampling_ratio = 1.0;
+
+        std::string zipfian_dist_file_path = "/tmp/zipfian";
 
         // Enable tracing accesses.
         bool enable_tracing;

@@ -7,6 +7,35 @@
 #include "nova_cc_stat_thread.h"
 
 namespace nova {
+    namespace {
+        struct Stats {
+            uint32_t min = UINT32_MAX;
+            uint32_t max = 0;
+            uint32_t median = 0;
+
+            std::string DebugString() {
+                return fmt::format("{},{},{}", min, max, median);
+            }
+        };
+
+        Stats
+        compute_stats(const std::vector<leveldb::OverlappingStats> &data) {
+            Stats stats = {};
+            if (data.empty()) {
+                stats.min = 0;
+            }
+
+            for (int i = 0; i < data.size(); i++) {
+                stats.min = std::min(data[i].num_overlapping_tables, stats.min);
+                stats.max = std::max(data[i].num_overlapping_tables, stats.max);
+            }
+            if (!data.empty()) {
+                stats.median = data[data.size() / 2].num_overlapping_tables;
+            }
+            return stats;
+        }
+    }
+
     void NovaStatThread::Start() {
         std::vector<uint32_t> foreground_rdma_tasks;
         std::vector<uint32_t> bg_rdma_tasks;
@@ -179,6 +208,112 @@ namespace nova {
             }
             output += "\n";
 
+            // report overlapping sstables.
+            leveldb::DBStats aggregated_stats = {};
+            uint32_t size_dist[BUCKET_SIZE];
+            aggregated_stats.sstable_size_dist = size_dist;
+
+            for (int j = 0; j < BUCKET_SIZE; j++) {
+                size_dist[j] = 0;
+            }
+
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += "db-overlapping-sstable-stats-" + std::to_string(i) +
+                          ":";
+                leveldb::DBStats stats = {};
+                uint32_t size_dist[BUCKET_SIZE];
+                for (int j = 0; j < BUCKET_SIZE; j++) {
+                    size_dist[j] = 0;
+                }
+                stats.sstable_size_dist = size_dist;
+                dbs_[i]->QueryDBStats(&stats);
+
+                aggregated_stats.dbsize += stats.dbsize;
+                aggregated_stats.nsstables += stats.nsstables;
+                output += std::to_string(stats.nsstables);
+                output += ",";
+                uint32_t ideal_nsstables = stats.nsstables;
+                if (nova::NovaConfig::config->enable_subrange) {
+                    ideal_nsstables = stats.nsstables /
+                                      nova::NovaCCConfig::cc_config->num_memtable_partitions;
+                    ideal_nsstables = std::max(ideal_nsstables, (uint32_t) 1);
+                }
+                output += std::to_string(ideal_nsstables);
+                output += ",";
+
+                Stats ostats = compute_stats(
+                        stats.num_overlapping_sstables_per_table);
+                output += ostats.DebugString();
+                output += ",";
+
+                uint32_t ideal_nsstables_since_last_query = stats.new_l0_sstables_since_last_query;
+                if (nova::NovaConfig::config->enable_subrange) {
+                    ideal_nsstables_since_last_query =
+                            stats.new_l0_sstables_since_last_query /
+                            nova::NovaCCConfig::cc_config->num_memtable_partitions;
+                    ideal_nsstables_since_last_query = std::max(
+                            ideal_nsstables_since_last_query, (uint32_t) 1);
+                }
+                output += std::to_string(
+                        stats.new_l0_sstables_since_last_query);
+                output += ",";
+                output += std::to_string(ideal_nsstables_since_last_query);
+                output += ",";
+
+                ostats = compute_stats(
+                        stats.num_overlapping_sstables_per_table_since_last_query);
+                output += ostats.DebugString();
+                output += ",";
+                output += std::to_string(stats.maximum_load_imbalance);
+                output += ",";
+                // ideal load imbalance is 0.
+                output += std::to_string(0);
+                output += ",";
+                output += std::to_string(stats.num_major_reorgs);
+                output += ",";
+                output += std::to_string(stats.num_skipped_major_reorgs);
+                output += ",";
+                output += std::to_string(stats.num_minor_reorgs);
+                output += ",";
+                output += std::to_string(stats.num_skipped_minor_reorgs);
+                output += "\n";
+
+                output += "db-size-stats-" + std::to_string(i) + ":";
+                output += std::to_string(stats.dbsize / 1024 / 1024 / 1024);
+                output += ",";
+                output += std::to_string(stats.nsstables);
+                output += ",";
+                for (int j = 0; j < BUCKET_SIZE; j++) {
+                    size_dist[j] += stats.sstable_size_dist[j];
+                    output += std::to_string(stats.sstable_size_dist[j]);
+                    output += ",";
+                }
+                output += "\n";
+
+                output += "db-overlap-overall-" + std::to_string(i) + ":";
+                for (auto &overlap : stats.num_overlapping_sstables) {
+                    output += overlap.DebugString();
+                    output += ",";
+                }
+                output += "\n";
+
+                output += "db-overlap-" + std::to_string(i) + ":";
+                for (auto &overlap : stats.num_overlapping_sstables_since_last_query) {
+                    output += overlap.DebugString();
+                    output += ",";
+                }
+                output += "\n";
+            }
+            output += "db:" + std::to_string(
+                    aggregated_stats.dbsize / 1024 / 1024 / 1024);
+            output += ",";
+            output += std::to_string(aggregated_stats.nsstables);
+            output += ",";
+            for (int j = 0; j < BUCKET_SIZE; j++) {
+                output += std::to_string(aggregated_stats.sstable_size_dist[j]);
+                output += ",";
+            }
+            output += "\n";
             RDMA_LOG(INFO) << fmt::format("stats: \n{}", output);
             output.clear();
         }

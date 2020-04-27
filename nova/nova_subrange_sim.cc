@@ -1,0 +1,336 @@
+
+//
+// Created by Haoyu Huang on 4/22/20.
+// Copyright (c) 2020 University of Southern California. All rights reserved.
+//
+
+#include "rdma_ctrl.hpp"
+#include "nova_common.h"
+#include "nova_config.h"
+#include "nova_rdma_rc_store.h"
+#include "cc/nova_cc_nic_server.h"
+#include "leveldb/db.h"
+#include "leveldb/cache.h"
+#include "leveldb/filter_policy.h"
+#include "leveldb/comparator.h"
+#include "leveldb/env.h"
+#include "db/filename.h"
+#include "util/env_posix.h"
+#include "db/version_set.h"
+
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <stdio.h>
+#include <string.h>
+#include <thread>
+#include <assert.h>
+#include <csignal>
+#include <gflags/gflags.h>
+
+using namespace std;
+using namespace rdmaio;
+using namespace nova;
+
+NovaConfig *NovaConfig::config;
+NovaCCConfig *NovaCCConfig::cc_config;
+NovaDCConfig *NovaDCConfig::dc_config;
+
+DEFINE_uint32(cc_num_memtables, 64, "");
+DEFINE_uint32(cc_num_memtable_partitions, 32, "");
+DEFINE_uint64(cc_iterations, 10000000, "");
+DEFINE_double(cc_sampling_ratio, 1, "");
+DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
+DEFINE_string(cc_client_access_pattern, "uniform", "");
+
+namespace {
+    class YCSBKeyComparator : public leveldb::Comparator {
+    public:
+        //   if a < b: negative result
+        //   if a > b: positive result
+        //   else: zero result
+        int
+        Compare(const leveldb::Slice &a, const leveldb::Slice &b) const {
+            uint64_t ai = 0;
+            str_to_int(a.data(), &ai, a.size());
+            uint64_t bi = 0;
+            str_to_int(b.data(), &bi, b.size());
+
+            if (ai < bi) {
+                return -1;
+            } else if (ai > bi) {
+                return 1;
+            }
+            return 0;
+        }
+
+        // Ignore the following methods for now:
+        const char *Name() const { return "YCSBKeyComparator"; }
+
+        void
+        FindShortestSeparator(std::string *,
+                              const leveldb::Slice &) const {}
+
+        void FindShortSuccessor(std::string *) const {}
+    };
+
+    leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
+                                leveldb::MemTablePool *memtable_pool,
+                                std::vector<leveldb::EnvBGThread *> bg_threads,
+                                leveldb::EnvBGThread *reorg_thread) {
+        leveldb::EnvOptions env_option;
+        env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_MEM;
+        leveldb::PosixEnv *env = new leveldb::PosixEnv;
+        env->set_env_option(env_option);
+        leveldb::DB *db;
+        leveldb::Options options;
+        options.block_cache = cache;
+        options.memtable_pool = memtable_pool;
+        options.subrange_reorg_sampling_ratio = FLAGS_cc_sampling_ratio;
+        options.zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
+
+        if (NovaCCConfig::cc_config->write_buffer_size_mb > 0) {
+            options.write_buffer_size =
+                    (uint64_t) (
+                            NovaCCConfig::cc_config->write_buffer_size_mb) *
+                    1024 * 1024;
+        }
+        if (NovaConfig::config->sstable_size > 0) {
+            options.max_file_size = NovaConfig::config->sstable_size;
+        }
+
+        options.num_memtable_partitions = NovaCCConfig::cc_config->num_memtable_partitions;
+        options.l0_consolidate_group_size = 8;
+        options.num_memtables = NovaCCConfig::cc_config->num_memtables;
+        options.l0_stop_writes_trigger = NovaCCConfig::cc_config->cc_l0_stop_write;
+        options.max_open_files = 50000;
+        options.enable_table_locator = NovaCCConfig::cc_config->enable_table_locator;
+        if (NovaCCConfig::cc_config->cc_l0_stop_write == 0) {
+            options.l0_stop_writes_trigger = UINT32_MAX;
+        }
+        options.max_dc_file_size =
+                std::max(options.write_buffer_size, options.max_file_size) +
+                LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
+        options.env = env;
+        options.create_if_missing = true;
+        options.compression = leveldb::kNoCompression;
+        options.filter_policy = leveldb::NewBloomFilterPolicy(10);
+        options.bg_threads = bg_threads;
+        options.enable_tracing = false;
+        options.comparator = new YCSBKeyComparator();
+        if (NovaConfig::config->memtable_type == "pool") {
+            options.memtable_type = leveldb::MemTableType::kMemTablePool;
+        } else {
+            options.memtable_type = leveldb::MemTableType::kStaticPartition;
+        }
+        options.enable_subranges = NovaConfig::config->enable_subrange;
+        options.subrange_reorg_sampling_ratio = 1.0;
+        options.reorg_thread = reorg_thread;
+
+        leveldb::Logger *log = nullptr;
+        std::string db_path = DBName(NovaConfig::config->db_path,
+                                     NovaConfig::config->my_server_id,
+                                     db_index);
+        mkdirs(db_path.c_str());
+
+        RDMA_ASSERT(env->NewLogger(
+                db_path + "/LOG-" + std::to_string(db_index), &log).ok());
+        options.info_log = log;
+        leveldb::Status status = leveldb::DB::Open(options, db_path, &db);
+        RDMA_ASSERT(status.ok()) << "Open leveldb failed "
+                                 << status.ToString();
+
+        uint32_t index = 0;
+        uint32_t sid = 0;
+        std::string logname = leveldb::LogFileName(db_path, 1111);
+        ParseDBIndexFromFile(logname, &sid, &index);
+        RDMA_ASSERT(index == db_index);
+        RDMA_ASSERT(NovaConfig::config->my_server_id == sid);
+        return db;
+    }
+}
+
+std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
+std::atomic_int_fast32_t nova::NovaCCServer::cc_server_seq_id_;
+std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
+std::map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
+
+
+void start(NovaCCNICServer *server) {
+    server->Start();
+}
+
+void InitializeCC() {
+    uint64_t nrdmatotal = nrdma_buf_cc();
+    uint64_t ntotal = nrdmatotal;
+    ntotal += NovaConfig::config->mem_pool_size_gb * 1024 * 1024 * 1024;
+    RDMA_LOG(INFO) << "Allocated buffer size in bytes: " << ntotal;
+
+    auto *buf = (char *) malloc(ntotal);
+    memset(buf, 0, ntotal);
+    NovaConfig::config->nova_buf = buf;
+    NovaConfig::config->nnovabuf = ntotal;
+    RDMA_ASSERT(buf != NULL) << "Not enough memory";
+    system(fmt::format("exec rm -rf {}/*", NovaConfig::config->db_path).data());
+    system(fmt::format("exec rm -rf {}/*",
+                       NovaConfig::config->rtable_path).data());
+
+    mkdirs(NovaConfig::config->rtable_path.data());
+    mkdirs(NovaConfig::config->db_path.data());
+
+    leveldb::NovaNoopCompactionThread *bg = new leveldb::NovaNoopCompactionThread;
+    std::vector<leveldb::EnvBGThread *> bgs;
+    bgs.push_back(bg);
+
+    leveldb::NovaCCCompactionThread *reorg = new leveldb::NovaCCCompactionThread(
+            nullptr);
+    std::thread t(&leveldb::NovaCCCompactionThread::Start, reorg);
+
+    leveldb::DB *db = CreateDatabase(0, nullptr, nullptr, bgs, reorg);
+    bg->db = db;
+
+    auto stat_thread = new NovaStatThread;
+    stat_thread->cc_server_workers_ = {};
+    stat_thread->bgs_ = bgs;
+    stat_thread->async_workers_ = {};
+    stat_thread->async_compaction_workers_ = {};
+    stat_thread->dbs_ = {db};
+    std::thread stats_thread(&NovaStatThread::Start, stat_thread);
+
+    // load data.
+    timeval start{};
+    gettimeofday(&start, nullptr);
+    uint64_t loaded_keys = 0;
+    std::vector<CCFragment *> &frags = NovaCCConfig::cc_config->fragments;
+    leveldb::WriteState *state = new leveldb::WriteState[NovaConfig::config->servers.size()];
+    for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
+        state[i].rdma_wr_id = -1;
+        state[i].result = leveldb::WriteResult::REPLICATE_LOG_RECORD_NONE;
+    }
+
+    unsigned int rand_seed = 0;
+    uint32_t records = 10000000;
+    for (uint64_t j = 0; j < FLAGS_cc_iterations; FLAGS_cc_iterations++) {
+        uint32_t rid = rand() % records;
+
+        auto v = static_cast<char>((rid % 10) + 'a');
+
+        std::string key(std::to_string(rid));
+        std::string val(
+                NovaConfig::config->load_default_value_size, v);
+
+        for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
+            state[i].rdma_wr_id = -1;
+            state[i].result = leveldb::WriteResult::REPLICATE_LOG_RECORD_NONE;
+        }
+        leveldb::WriteOptions option;
+        option.sync = true;
+        option.hash = rid;
+        option.rand_seed = &rand_seed;
+        option.thread_id = 0;
+        option.local_write = true;
+        option.replicate_log_record_states = state;
+
+        leveldb::Status s = db->Put(option, key, val);
+        RDMA_ASSERT(s.ok());
+    }
+
+    t.join();
+    stats_thread.join();
+}
+
+int main(int argc, char *argv[]) {
+
+    NovaConfig::config = new NovaConfig;
+    NovaCCConfig::cc_config = new NovaCCConfig;
+    NovaConfig::config->rtable_path = "/tmp/rtables";
+
+    NovaConfig::config->mem_pool_size_gb = 1;
+
+    NovaConfig::config->load_default_value_size = 1024;
+    // RDMA
+    NovaConfig::config->rdma_port = 11211;
+    NovaConfig::config->max_msg_size = 1024;
+    NovaConfig::config->rdma_max_num_sends = 256;
+    NovaConfig::config->rdma_doorbell_batch_size = 8;
+    NovaConfig::config->rdma_pq_batch_size = 8;
+
+    NovaCCConfig::cc_config->block_cache_mb = 0;
+    NovaCCConfig::cc_config->row_cache_mb = 0;
+    NovaCCConfig::cc_config->write_buffer_size_mb = 16;
+
+    NovaConfig::config->db_path = "/tmp/db";
+    NovaConfig::config->enable_rdma = false;
+    NovaConfig::config->enable_load_data = true;
+
+    NovaConfig::config->servers = convert_hosts("localhost:11222");
+    for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
+        if (i < 1) {
+            NovaCCConfig::cc_config->cc_servers.push_back(
+                    NovaConfig::config->servers[i]);
+        } else {
+            NovaCCConfig::cc_config->dc_servers.push_back(
+                    NovaConfig::config->servers[i]);
+        }
+    }
+
+    for (int i = 0; i < NovaCCConfig::cc_config->cc_servers.size(); i++) {
+        Host host = NovaCCConfig::cc_config->cc_servers[i];
+        RDMA_LOG(INFO)
+            << fmt::format("cc: {}:{}:{}", host.server_id, host.ip, host.port);
+    }
+    for (int i = 0; i < NovaCCConfig::cc_config->dc_servers.size(); i++) {
+        Host host = NovaCCConfig::cc_config->dc_servers[i];
+        RDMA_LOG(INFO)
+            << fmt::format("dc: {}:{}:{}", host.server_id, host.ip, host.port);
+    }
+
+    NovaConfig::config->my_server_id = 0;
+
+    NovaCCConfig::ReadFragments(
+            "/tmp/nova-shared-cc-nrecords-10000000-nccservers-1-nlogreplicas-1-nranges-1",
+            &NovaCCConfig::cc_config->fragments);
+    uint32_t start_stoc_id = 0;
+    for (int i = 0; i < NovaCCConfig::cc_config->fragments.size(); i++) {
+        NovaCCConfig::cc_config->fragments[i]->log_replica_stoc_ids.clear();
+        for (int r = 0; r < 0; r++) {
+            NovaCCConfig::cc_config->fragments[i]->log_replica_stoc_ids.push_back(
+                    start_stoc_id);
+            start_stoc_id = (start_stoc_id + 1) %
+                            NovaCCConfig::cc_config->dc_servers.size();
+        }
+    }
+
+    NovaCCConfig::cc_config->num_conn_workers = 1;
+    NovaCCConfig::cc_config->num_conn_async_workers = 1;
+    NovaCCConfig::cc_config->num_cc_server_workers = 1;
+    NovaCCConfig::cc_config->num_compaction_workers = 1;
+    NovaCCConfig::cc_config->num_rdma_compaction_workers = 1;
+    NovaCCConfig::cc_config->num_memtables = FLAGS_cc_num_memtables;
+    NovaCCConfig::cc_config->num_memtable_partitions = FLAGS_cc_num_memtable_partitions;
+    NovaCCConfig::cc_config->cc_l0_stop_write = 0;
+    NovaConfig::config->enable_subrange = true;
+    NovaConfig::config->memtable_type = "static_partition";
+
+    NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks = 1;
+    NovaConfig::config->log_buf_size = 18 * 1024 * 1024;
+    NovaConfig::config->rtable_size = 18 * 1024 * 1024;
+    NovaConfig::config->sstable_size = 18 * 1024 * 1024;
+    NovaConfig::config->use_multiple_disks = false;
+    NovaConfig::config->scatter_policy = ScatterPolicy::RANDOM;
+    NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_NONE;
+
+    NovaCCConfig::cc_config->enable_table_locator = true;
+
+    leveldb::EnvBGThread::bg_thread_id_seq = 0;
+    nova::NovaCCServer::cc_server_seq_id_ = 0;
+    leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
+    NovaConfig::config->use_multiple_disks = false;
+
+    NovaConfig::config->subrange_sampling_ratio = FLAGS_cc_sampling_ratio;
+    NovaConfig::config->zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
+    NovaConfig::config->ReadZipfianDist();
+    NovaConfig::config->client_access_pattern = FLAGS_cc_client_access_pattern;
+
+    InitializeCC();
+    return 0;
+}

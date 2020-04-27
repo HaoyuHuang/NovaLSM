@@ -16,13 +16,14 @@ namespace leveldb {
 // "*dest" must remain live while this Writer is in use.
     RDMALogWriter::RDMALogWriter(nova::NovaRDMAStore *store,
                                  MemManager *mem_manager,
-                                 nova::LogFileManager *log_manager)
+                                 nova::InMemoryLogFileManager *log_manager)
             : store_(store), mem_manager_(mem_manager),
               log_manager_(log_manager) {
     }
 
     void RDMALogWriter::Init(const std::string &log_file_name,
-                             uint64_t thread_id, const Slice &slice,
+                             uint64_t thread_id,
+                             const LevelDBLogRecord &log_record,
                              char *backing_buf) {
         auto it = logfile_last_buf_.find(log_file_name);
         if (it == logfile_last_buf_.end()) {
@@ -38,7 +39,7 @@ namespace leveldb {
             }
             logfile_last_buf_[log_file_name] = meta;
         }
-        memcpy(backing_buf, slice.data(), slice.size());
+        nova::EncodeLogRecord(backing_buf, log_record);
     }
 
     void RDMALogWriter::AckAllocLogBuf(const std::string &log_file_name,
@@ -86,14 +87,15 @@ namespace leveldb {
                              uint32_t dbid,
                              uint32_t memtableid,
                              char *rdma_backing_buf,
-                             const Slice &slice,
+                             const LevelDBLogRecord &log_record,
                              uint32_t client_req_id,
                              WriteState *replicate_log_record_states) {
         nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid];
-        Init(log_file_name, thread_id, slice, rdma_backing_buf);
         if (frag->log_replica_stoc_ids.empty()) {
             return true;
         }
+        Init(log_file_name, thread_id, log_record, rdma_backing_buf);
+        uint32_t log_record_size = nova::LogRecordsSize(log_record);
 
         // If one of the log buf is intiializing, return false.
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
@@ -124,18 +126,18 @@ namespace leveldb {
             } else {
                 RDMA_ASSERT(!it.stoc_bufs[stoc_server_id].is_initializing);
                 RDMA_ASSERT(
-                        it.stoc_bufs[stoc_server_id].offset + slice.size() <=
+                        it.stoc_bufs[stoc_server_id].offset + log_record_size <=
                         it.stoc_bufs[stoc_server_id].size);
                 // WRITE.
                 char *sendbuf = store_->GetSendBuf(stoc_server_id);
                 sendbuf[0] = leveldb::CCRequestType::CC_REPLICATE_LOG_RECORDS;
                 leveldb::EncodeFixed32(sendbuf + 1, client_req_id);
                 replicate_log_record_states[stoc_server_id].rdma_wr_id = store_->PostWrite(
-                        rdma_backing_buf, slice.size(), stoc_server_id,
+                        rdma_backing_buf, log_record_size, stoc_server_id,
                         it.stoc_bufs[stoc_server_id].base +
                         it.stoc_bufs[stoc_server_id].offset,
                         false, 0);
-                it.stoc_bufs[stoc_server_id].offset += slice.size();
+                it.stoc_bufs[stoc_server_id].offset += log_record_size;
                 replicate_log_record_states[stoc_server_id].result = WriteResult::WAIT_FOR_WRITE;
             }
             store_->FlushPendingSends(stoc_server_id);

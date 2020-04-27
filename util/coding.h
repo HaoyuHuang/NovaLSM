@@ -67,7 +67,7 @@ namespace leveldb {
 // Lower-level versions of Put... that write directly into a character buffer
 // REQUIRES: dst has enough space for the value being written
 
-    inline void EncodeFixed32(char *dst, uint32_t value) {
+    inline uint32_t EncodeFixed32(char *dst, uint32_t value) {
         uint8_t *const buffer = reinterpret_cast<uint8_t *>(dst);
 
 //        if (port::kLittleEndian) {
@@ -83,6 +83,7 @@ namespace leveldb {
         buffer[1] = static_cast<uint8_t>(value >> 8);
         buffer[2] = static_cast<uint8_t>(value >> 16);
         buffer[3] = static_cast<uint8_t>(value >> 24);
+        return 4;
     }
 
     inline uint32_t EncodeStr(char *dst, const std::string &src) {
@@ -92,7 +93,7 @@ namespace leveldb {
         return 4 + src.size();
     }
 
-    inline void EncodeFixed64(char *dst, uint64_t value) {
+    inline uint32_t EncodeFixed64(char *dst, uint64_t value) {
         uint8_t *const buffer = reinterpret_cast<uint8_t *>(dst);
 
 //        if (port::kLittleEndian) {
@@ -112,6 +113,7 @@ namespace leveldb {
         buffer[5] = static_cast<uint8_t>(value >> 40);
         buffer[6] = static_cast<uint8_t>(value >> 48);
         buffer[7] = static_cast<uint8_t>(value >> 56);
+        return 8;
     }
 
 // Lower-level versions of Get... that read directly from a character buffer
@@ -119,15 +121,6 @@ namespace leveldb {
 
     inline uint32_t DecodeFixed32(const char *ptr) {
         const uint8_t *const buffer = reinterpret_cast<const uint8_t *>(ptr);
-
-//        if (port::kLittleEndian) {
-//            // Fast path for little-endian CPUs. All major compilers optimize this to a
-//            // single mov (x86_64) / ldr (ARM) instruction.
-//            uint32_t result;
-//            std::memcpy(&result, buffer, sizeof(uint32_t));
-//            return result;
-//        }
-
         // Platform-independent code.
         // Clang and gcc optimize this to a single mov / ldr instruction.
         return (static_cast<uint32_t>(buffer[0])) |
@@ -138,15 +131,6 @@ namespace leveldb {
 
     inline uint64_t DecodeFixed64(const char *ptr) {
         const uint8_t *const buffer = reinterpret_cast<const uint8_t *>(ptr);
-
-//        if (port::kLittleEndian) {
-//            // Fast path for little-endian CPUs. All major compilers optimize this to a
-//            // single mov (x86_64) / ldr (ARM) instruction.
-//            uint64_t result;
-//            std::memcpy(&result, buffer, sizeof(uint64_t));
-//            return result;
-//        }
-
         // Platform-independent code.
         // Clang and gcc optimize this to a single mov / ldr instruction.
         return (static_cast<uint64_t>(buffer[0])) |
@@ -163,6 +147,47 @@ namespace leveldb {
         uint32_t size = DecodeFixed32(src);
         result->append(src + 4, size);
         return size + 4;
+    }
+
+    inline bool DecodeFixed32(Slice *ptr, uint32_t *n) {
+        if (ptr->size() < 4) {
+            return false;
+        }
+        *n = DecodeFixed32(ptr->data());
+        *ptr = Slice(ptr->data() + 4, ptr->size() - 4);
+        return true;
+    }
+
+    inline bool DecodeFixed64(Slice *ptr, uint64_t *n) {
+        if (ptr->size() < 8) {
+            return false;
+        }
+        *n = DecodeFixed64(ptr->data());
+        *ptr = Slice(ptr->data() + 8, ptr->size() - 8);
+        return true;
+    }
+
+    inline bool DecodeStr(Slice *ptr, Slice *str) {
+        uint32_t n = 0;
+        if (DecodeFixed32(ptr, &n) && ptr->size() >= n) {
+            *str = Slice(ptr->data(), n);
+            *ptr = Slice(ptr->data() + n, ptr->size() - n);
+            return true;
+        }
+        return false;
+    }
+
+    inline uint32_t EncodeSlice(char *dst, const Slice &src) {
+        EncodeFixed32(dst, src.size());
+        dst += 4;
+        memcpy(dst, src.data(), src.size());
+        return 4 + src.size();
+    }
+
+    inline Slice DecodeSlice(const char *src) {
+        uint32_t size = DecodeFixed32(src);
+        Slice slice(src + 4, size);
+        return slice;
     }
 
 // Internal routine for use by fallback path of GetVarint32Ptr

@@ -65,7 +65,7 @@ namespace nova {
 
         std::vector<leveldb::DB *> dbs_;
         NovaMemManager *mem_manager;
-        LogFileManager *log_manager;
+        InMemoryLogFileManager *log_manager;
 
         std::vector<NovaCCConnWorker *> conn_workers;
         std::vector<NovaRDMAComputeComponent *> async_workers;

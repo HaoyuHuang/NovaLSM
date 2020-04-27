@@ -109,17 +109,22 @@ namespace leveldb {
         void ReadDataBlock(const RTableHandle &rtable_handle, uint64_t offset,
                            uint32_t size, char *scratch);
 
+        NovaRTable *OpenRTable(uint32_t thread_id, std::string& filename);
+
     private:
         Env *env_ = nullptr;
         MemManager *mem_manager_ = nullptr;
         uint32_t rtable_size_ = 0;
         std::string rtable_path_;
         // 0 is reserved so that read knows to fetch the block from a local file.
-        uint32_t current_rtable_id_ = 1;
+        // 1 is reserved for manifest file.
+        uint32_t current_rtable_id_ = 2;
         NovaRTable *active_rtables_[64];
         NovaRTable *rtables_[MAX_NUM_RTABLES];
         leveldb::Cache *block_cache_ = nullptr;
         std::mutex mutex_;
+
+        std::map<std::string, leveldb::NovaRTable*> fn_rtable_map_;
     };
 
 }

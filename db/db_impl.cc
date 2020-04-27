@@ -40,6 +40,13 @@
 #include "util/mutexlock.h"
 
 namespace leveldb {
+    namespace {
+        uint64_t time_diff(timeval t1, timeval t2) {
+            return (t2.tv_sec - t1.tv_sec) * 1000000 +
+                   (t2.tv_usec - t1.tv_usec);
+        }
+    }
+
     uint64_t TableLocator::Lookup(const leveldb::Slice &key, uint64_t hash) {
         RDMA_ASSERT(hash >= 0 && hash <= MAX_BUCKETS);
         TableLocation &loc = table_locator_[hash % MAX_BUCKETS];
@@ -53,7 +60,7 @@ namespace leveldb {
 
     void TableLocator::Insert(const leveldb::Slice &key, uint64_t hash,
                               uint32_t memtableid) {
-        RDMA_ASSERT(hash >= 0 && hash <= MAX_BUCKETS);
+        RDMA_ASSERT(hash >= 0 && hash <= MAX_BUCKETS) << hash;
         TableLocation &loc = table_locator_[hash % MAX_BUCKETS];
 //        loc.mutex.lock();
 //        loc.memtable_id = memtableid;
@@ -175,7 +182,8 @@ namespace leveldb {
                                        &internal_comparator_)),
               compaction_threads_(raw_options.bg_threads),
               reorg_thread_(raw_options.reorg_thread),
-              memtable_available_signal_(&range_lock_) {
+              memtable_available_signal_(&range_lock_),
+              user_comparator_(raw_options.comparator) {
         memtable_id_seq_.store(1);
         if (options_.enable_table_locator) {
             table_locator_ = new TableLocator;
@@ -207,7 +215,6 @@ namespace leveldb {
     Status DBImpl::NewDB() {
         VersionEdit new_db;
         new_db.SetComparatorName(user_comparator()->Name());
-        new_db.SetLogNumber(0);
         new_db.SetNextFile(2);
         new_db.SetLastSequence(0);
 
@@ -220,13 +227,13 @@ namespace leveldb {
             return s;
         }
         {
-            log::Writer log(file);
-            std::string record;
-            new_db.EncodeTo(&record);
-            s = log.AddRecord(record);
-            if (s.ok()) {
-                s = file->Close();
-            }
+//            log::Writer log(file);
+//            std::string record;
+//            new_db.EncodeTo(&record);
+//            s = log.AddRecord(record);
+//            if (s.ok()) {
+//                s = file->Close();
+//            }
         }
         delete file;
         if (s.ok()) {
@@ -279,15 +286,6 @@ namespace leveldb {
             if (ParseFileName(filename, &number, &type)) {
                 bool keep = true;
                 switch (type) {
-                    case kLogFile:
-                        keep = ((number >= versions_->LogNumber()) ||
-                                (number == versions_->PrevLogNumber()));
-                        break;
-                    case kDescriptorFile:
-                        // Keep my manifest file, and any newer incarnations'
-                        // (in case there is a race that allows other incarnations)
-                        keep = (number >= versions_->ManifestFileNumber());
-                        break;
                     case kTableFile:
                         keep = (live.find(number) != live.end());
                         break;
@@ -368,202 +366,312 @@ namespace leveldb {
         mutex_.Lock();
     }
 
-    Status DBImpl::Recover(VersionEdit *edit, bool *save_manifest) {
-        mutex_.AssertHeld();
+    DBImpl::NovaCCRecoveryThread::NovaCCRecoveryThread(
+            uint32_t client_id,
+            std::vector<leveldb::MemTable *> memtables,
+            MemManager *mem_manager)
+            : client_id_(client_id), memtables_(memtables),
+              mem_manager_(mem_manager) {
+        sem_init(&sem_, 0, 0);
+    }
 
-        // Ignore error from CreateDir since the creation of the DB is
-        // committed only when the descriptor is created, and this directory
-        // may already exist from a previous failed creation attempt.
-        env_->CreateDir(dbname_);
-        assert(db_lock_ == nullptr);
-        Status s = env_->LockFile(LockFileName(dbname_), &db_lock_);
-        if (!s.ok()) {
-            return s;
+    void DBImpl::NovaCCRecoveryThread::Recover() {
+        sem_wait(&sem_);
+        if (log_replicas_.empty()) {
+            return;
         }
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("t{}: started memtables:{}", client_id_,
+                           log_replicas_.size());
+        timeval start{};
+        gettimeofday(&start, nullptr);
 
-        if (!env_->FileExists(CurrentFileName(dbname_))) {
-            if (options_.create_if_missing) {
-                s = NewDB();
-                if (!s.ok()) {
-                    return s;
-                }
-            } else {
-                return Status::InvalidArgument(
-                        dbname_, "does not exist (create_if_missing is false)");
-            }
-        } else {
-            if (options_.error_if_exists) {
-                return Status::InvalidArgument(dbname_,
-                                               "exists (error_if_exists is true)");
-            }
-        }
+        timeval new_memtable_end{};
+        gettimeofday(&new_memtable_end, nullptr);
+        new_memtable_time = time_diff(start, new_memtable_end);
 
-        s = versions_->Recover(save_manifest);
-        if (!s.ok()) {
-            return s;
-        }
-        SequenceNumber max_sequence(0);
+        for (int i = 0; i < log_replicas_.size(); i++) {
+            char *buf = log_replicas_[i];
+            leveldb::MemTable *memtable = memtables_[i];
 
-        // Recover from all newer log files than the ones named in the
-        // descriptor (new log files may have been added by the previous
-        // incarnation without registering them in the descriptor).
-        //
-        // Note that PrevLogNumber() is no longer used, but we pay
-        // attention to it in case we are recovering a database
-        // produced by an older version of leveldb.
-        const uint64_t min_log = versions_->LogNumber();
-        const uint64_t prev_log = versions_->PrevLogNumber();
-        std::vector<std::string> filenames;
-        s = env_->GetChildren(dbname_, &filenames);
-        if (!s.ok()) {
-            return s;
-        }
-        std::set<uint64_t> expected;
-        versions_->AddLiveFiles(&expected);
-        uint64_t number;
-        FileType type;
-        std::vector<uint64_t> logs;
-        for (size_t i = 0; i < filenames.size(); i++) {
-            if (ParseFileName(filenames[i], &number, &type)) {
-                expected.erase(number);
-                if (type == kLogFile &&
-                    ((number >= min_log) || (number == prev_log)))
-                    logs.push_back(number);
+            leveldb::LevelDBLogRecord record;
+            uint32_t record_size = nova::DecodeLogRecord(buf, &record);
+            while (record_size != 0) {
+                memtable->Add(record.sequence_number,
+                              leveldb::ValueType::kTypeValue, record.key,
+                              record.value);
+                recovered_log_records += 1;
+                buf += record_size;
+                record_size = nova::DecodeLogRecord(buf, &record);
+                max_sequence_number = std::max(max_sequence_number,
+                                               record.sequence_number);
             }
         }
-        if (!expected.empty()) {
-            char buf[50];
-            snprintf(buf, sizeof(buf), "%d missing files; e.g.",
-                     static_cast<int>(expected.size()));
-            return Status::Corruption(buf, TableFileName(dbname_,
-                                                         *(expected.begin())));
+
+        RDMA_ASSERT(memtables_.size() == log_replicas_.size());
+
+        timeval end{};
+        gettimeofday(&end, nullptr);
+        recovery_time = time_diff(start, end);
+    }
+
+    Status DBImpl::Recover() {
+        timeval start = {};
+        gettimeofday(&start, nullptr);
+
+        uint32_t stoc_id =
+                dbid_ % nova::NovaCCConfig::cc_config->dc_servers.size();
+        std::string manifest = DescriptorFileName(dbname_, 0);
+        auto client = reinterpret_cast<NovaBlockCCClient *> (options_.dc_client);
+        uint32_t scid = options_.mem_manager->slabclassid(0,
+                                                          options_.max_file_size);
+        char *buf = options_.mem_manager->ItemAlloc(0, scid);
+        client->InitiateRTableReadDataBlock({}, stoc_id, options_.max_file_size,
+                                            buf,
+                                            manifest);
+        client->Wait();
+
+        std::map<std::string, uint64_t> logfile_buf;
+        client->InitiateQueryLogFile(0, nova::NovaConfig::config->my_server_id,
+                                     dbid_, &logfile_buf);
+        client->Wait();
+
+        // Recover log records.
+        RDMA_ASSERT(versions_->Recover(buf).ok());
+
+        for (const auto &logfile : logfile_buf) {
+            uint32_t index = logfile.first.find_last_of('-');
+            uint32_t log_file_number = std::stoi(
+                    logfile.first.substr(index + 1));
+            versions_->MarkFileNumberUsed(log_file_number);
+        }
+        options_.mem_manager->FreeItem(0, buf, scid);
+
+        uint32_t recovered_log_records;
+        timeval rdma_read_complete;
+        RDMA_ASSERT(RecoverLogFile(logfile_buf, &recovered_log_records,
+                                   &rdma_read_complete).ok());
+        timeval end = {};
+        gettimeofday(&end, nullptr);
+
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("Total recovery duration: {},{},{},{},{}",
+                           logfile_buf.size(),
+                           recovered_log_records,
+                           time_diff(start, rdma_read_complete),
+                           time_diff(rdma_read_complete, end),
+                           time_diff(start, end));
+    }
+
+    Status
+    DBImpl::RecoverLogFile(const std::map<std::string, uint64_t> &logfile_buf,
+                           uint32_t *recovered_log_records,
+                           timeval *rdma_read_complete) {
+        auto client = reinterpret_cast<NovaBlockCCClient *> (options_.dc_client);
+        std::vector<NovaCCRecoveryThread *> recovery_threads;
+        uint32_t memtable_per_thread =
+                logfile_buf.size() / options_.num_recovery_thread;
+        uint32_t remainder = logfile_buf.size() % options_.num_recovery_thread;
+        RDMA_ASSERT(logfile_buf.size() < partitioned_active_memtables_.size());
+        uint32_t memtable_index = 0;
+        uint32_t thread_id = 0;
+        while (memtable_index < logfile_buf.size()) {
+            std::vector<MemTable *> memtables;
+            for (int j = 0; j < memtable_per_thread; j++) {
+                memtables.push_back(
+                        partitioned_active_memtables_[memtable_index]->memtable);
+                memtable_index++;
+            }
+            if (remainder > 0) {
+                memtable_index++;
+                remainder--;
+            }
+            NovaCCRecoveryThread *thread = new NovaCCRecoveryThread(
+                    thread_id, memtables, options_.mem_manager);
+            recovery_threads.push_back(thread);
+            thread_id++;
         }
 
-        // Recover in the order in which the logs were generated
-        std::sort(logs.begin(), logs.end());
-        for (size_t i = 0; i < logs.size(); i++) {
-            s = RecoverLogFile(logs[i], (i == logs.size() - 1), save_manifest,
-                               edit,
-                               &max_sequence);
-            if (!s.ok()) {
-                return s;
-            }
+        // Pin each recovery thread to a core.
+        std::vector<std::thread> threads;
+        for (int i = 0; i < recovery_threads.size(); i++) {
+            threads.emplace_back(&NovaCCRecoveryThread::Recover,
+                                 recovery_threads[i]);
+            cpu_set_t cpuset;
+            CPU_ZERO(&cpuset);
+            CPU_SET(i, &cpuset);
+            int rc = pthread_setaffinity_np(threads[i].native_handle(),
+                                            sizeof(cpu_set_t), &cpuset);
+            RDMA_ASSERT(rc == 0) << rc;
+        }
 
-            // The previous incarnation may not have written any MANIFEST
-            // records after allocating this log number.  So we manually
-            // update the file number allocation counter in VersionSet.
-            versions_->MarkFileNumberUsed(logs[i]);
+        std::vector<char *> rdma_bufs;
+        std::vector<uint32_t> reqs;
+        nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid_];
+        uint32_t stoc_server_id = nova::NovaCCConfig::cc_config->dc_servers[frag->log_replica_stoc_ids[0]].server_id;
+        for (auto &replica : logfile_buf) {
+            uint32_t scid = options_.mem_manager->slabclassid(0,
+                                                              options_.max_log_file_size);
+            char *rdma_buf = options_.mem_manager->ItemAlloc(0, scid);
+            RDMA_ASSERT(rdma_buf);
+            rdma_bufs.push_back(rdma_buf);
+            uint32_t reqid = client->InitiateReadInMemoryLogFile(rdma_buf,
+                                                                 stoc_server_id,
+                                                                 replica.second,
+                                                                 options_.max_log_file_size);
+            reqs.push_back(reqid);
+        }
+
+        // Wait for all RDMA READ to complete.
+        for (auto &replica : logfile_buf) {
+            client->Wait();
+        }
+
+        for (int i = 0; i < reqs.size(); i++) {
+            leveldb::CCResponse response;
+            RDMA_ASSERT(client->IsDone(reqs[i], &response, nullptr));
+        }
+
+        gettimeofday(rdma_read_complete, nullptr);
+
+        // put all rdma foreground to sleep.
+        for (int i = 0; i < rdma_threads_.size(); i++) {
+            auto *thread = reinterpret_cast<nova::NovaRDMAComputeComponent *>(rdma_threads_[i]);
+            thread->should_pause = true;
+        }
+
+        // Divide.
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format(
+                    "Start recovery: memtables:{} memtable_per_thread:{}",
+                    logfile_buf.size(),
+                    memtable_per_thread);
+
+        std::vector<char *> replicas;
+        thread_id = 0;
+        for (int i = 0; i < logfile_buf.size(); i++) {
+            if (replicas.size() == memtable_per_thread) {
+                recovery_threads[thread_id]->log_replicas_ = replicas;
+                replicas.clear();
+                thread_id += 1;
+            }
+            replicas.push_back(rdma_bufs[i]);
+        }
+
+        if (!replicas.empty()) {
+            recovery_threads[thread_id]->log_replicas_ = replicas;
+        }
+
+        for (int i = 0;
+             i < options_.num_recovery_thread; i++) {
+            sem_post(&recovery_threads[i]->sem_);
+        }
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("Start recovery: recovery threads:{}",
+                           recovery_threads.size());
+        for (int i = 0; i < recovery_threads.size(); i++) {
+            threads[i].join();
+        }
+
+        uint32_t log_records = 0;
+        for (int i = 0; i < recovery_threads.size(); i++) {
+            auto recovery = recovery_threads[i];
+            log_records += recovery->recovered_log_records;
+
+            RDMA_LOG(rdmaio::INFO)
+                << fmt::format("recovery duration of {}: {},{},{},{}",
+                               i,
+                               recovery->log_replicas_.size(),
+                               recovery->recovered_log_records,
+                               recovery->new_memtable_time,
+                               recovery->recovery_time);
+        }
+        *recovered_log_records = log_records;
+
+        uint64_t max_sequence = 0;
+        for (auto &recovery : recovery_threads) {
+            max_sequence = std::max(max_sequence,
+                                    recovery->max_sequence_number);
         }
 
         if (versions_->LastSequence() < max_sequence) {
             versions_->SetLastSequence(max_sequence);
         }
 
+        for (int i = 0; i < rdma_threads_.size(); i++) {
+            auto *thread = reinterpret_cast<nova::NovaRDMAComputeComponent *>(rdma_threads_[i]);
+            thread->should_pause = false;
+        }
         return Status::OK();
     }
 
-    Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
-                                  bool *save_manifest, VersionEdit *edit,
-                                  SequenceNumber *max_sequence) {
-        struct LogReporter : public log::Reader::Reporter {
-            Env *env;
-            Logger *info_log;
-            const char *fname;
-            Status *status;  // null if options_.paranoid_checks==false
-            void Corruption(size_t bytes, const Status &s) override {
-                Log(info_log, "%s%s: dropping %d bytes; %s",
-                    (this->status == nullptr ? "(ignoring error) " : ""), fname,
-                    static_cast<int>(bytes), s.ToString().c_str());
-                if (this->status != nullptr && this->status->ok())
-                    *this->status = s;
-            }
-        };
-
-        mutex_.AssertHeld();
-
-        // Open the log file
-        std::string fname = LogFileName(dbname_, log_number);
-        SequentialFile *file;
-        Status status = env_->NewSequentialFile(fname, &file);
-        if (!status.ok()) {
-            MaybeIgnoreError(&status);
-            return status;
-        }
-
-        // Create the log reader.
-        LogReporter reporter;
-        reporter.env = env_;
-        reporter.info_log = options_.info_log;
-        reporter.fname = fname.c_str();
-        reporter.status = (options_.paranoid_checks ? &status : nullptr);
-        // We intentionally make log::Reader do checksumming even if
-        // paranoid_checks==false so that corruptions cause entire commits
-        // to be skipped instead of propagating bad information (like overly
-        // large sequence numbers).
-        log::Reader reader(file, &reporter, true /*checksum*/,
-                           0 /*initial_offset*/);
-        Log(options_.info_log, "Recovering log #%llu",
-            (unsigned long long) log_number);
-
-        // Read all the records and add to a memtable
-        std::string scratch;
-        Slice record;
-        WriteBatch batch;
-        int compactions = 0;
-        MemTable *mem = nullptr;
-        while (reader.ReadRecord(&record, &scratch) && status.ok()) {
-            if (record.size() < 12) {
-                reporter.Corruption(record.size(),
-                                    Status::Corruption("log record too small"));
-                continue;
-            }
-            WriteBatchInternal::SetContents(&batch, record);
-
-            if (mem == nullptr) {
-            }
-            status = WriteBatchInternal::InsertInto(&batch, mem);
-            MaybeIgnoreError(&status);
-            if (!status.ok()) {
-                break;
-            }
-            const SequenceNumber last_seq =
-                    WriteBatchInternal::Sequence(&batch) +
-                    WriteBatchInternal::Count(&batch) - 1;
-            if (last_seq > *max_sequence) {
-                *max_sequence = last_seq;
-            }
-
-            if (mem->ApproximateMemoryUsage() > options_.write_buffer_size) {
-                compactions++;
-                *save_manifest = true;
-//                status = WriteLevel0Table(mem, edit, nullptr);
-//                versions_->mid_table_mapping_[mem->memtableid()].Unref();
-                mem = nullptr;
-                if (!status.ok()) {
-                    // Reflect errors immediately so that conditions like full
-                    // file-systems cause the DB::Open() to fail.
-                    break;
-                }
+    void DBImpl::TestCompact(leveldb::EnvBGThread *bg_thread,
+                             const std::vector<leveldb::EnvBGTask> &tasks) {
+        VersionEdit edit;
+        for (auto &task : tasks) {
+            MemTable *imm = reinterpret_cast<MemTable *>(task.memtable);
+            FileMetaData &meta = imm->meta();
+            meta.number = versions_->NewFileNumber();
+            meta.flush_timestamp = processed_writes_;
+            Status s;
+            Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
+                                              AccessCaller::kCompaction);
+            s = TestBuildTable(dbname_, env_, options_, table_cache_, iter,
+                               &meta, bg_thread);
+            RDMA_ASSERT(s.ok()) << s.ToString();
+            delete iter;
+            // Note that if file_size is zero, the file has been deleted and
+            // should not be added to the manifest.
+            int level = 0;
+            if (meta.file_size > 0) {
+                RDMA_ASSERT(imm->memtableid() != 0);
+                edit.AddFile(level, imm->memtableid(),
+                             meta.number,
+                             meta.file_size,
+                             meta.converted_file_size,
+                             meta.flush_timestamp,
+                             meta.smallest,
+                             meta.largest,
+                             meta.meta_block_handle,
+                             meta.data_block_group_handles);
             }
         }
+        versions_->AppendChangesToManifest(&edit, manifest_file_);
+        Version *v = new Version(versions_,
+                                 versions_->version_id_seq_.fetch_add(1));
+        mutex_.Lock();
+        Status s = versions_->LogAndApply(&edit, v);
+        RDMA_ASSERT(s.ok());
+        mutex_.Unlock();
 
-        delete file;
-
-        // See if we should keep reusing the last log file.
-        if (status.ok() && options_.reuse_logs && last_log &&
-            compactions == 0) {
+        std::map<uint32_t, std::vector<EnvBGTask>> pid_tasks;
+        for (auto &task : tasks) {
+            pid_tasks[task.memtable_partition_id].push_back(task);
+            MemTable *imm = reinterpret_cast<MemTable *>(task.memtable);
+            auto atomic_imm = &versions_->mid_table_mapping_[imm->memtableid()];
+            atomic_imm->is_immutable_ = true;
+            atomic_imm->SetFlushed(dbname_,
+                                   imm->meta().number);
         }
 
-        if (mem != nullptr) {
-            // mem did not get reused; compact it.
-            if (status.ok()) {
-                *save_manifest = true;
-//                status = WriteLevel0Table(mem, edit, nullptr);
+        for (auto &it : pid_tasks) {
+            // New verion is installed. Then remove it from the immutable memtables.
+            MemTablePartition *p = partitioned_active_memtables_[it.first];
+            p->mutex.Lock();
+            bool no_slots = p->available_slots.empty();
+            for (auto &task : it.second) {
+                RDMA_ASSERT(task.imm_slot < partitioned_imms_.size());
+                RDMA_ASSERT(partitioned_imms_[task.imm_slot] != 0);
+                partitioned_imms_[task.imm_slot] = 0;
+                p->available_slots.push(task.imm_slot);
+                RDMA_ASSERT(p->available_slots.size() <= p->imm_slots.size());
             }
-//            versions_->mid_table_mapping_[mem->memtableid()].Unref();
+            if (no_slots) {
+                p->background_work_finished_signal_.SignalAll();
+            }
+            number_of_immutable_memtables_.fetch_add(-it.second.size());
+            p->mutex.Unlock();
         }
-
-        return status;
     }
 
     bool DBImpl::CompactMemTableStaticPartition(leveldb::EnvBGThread *bg_thread,
@@ -571,8 +679,10 @@ namespace leveldb {
         VersionEdit edit;
         for (auto &task : tasks) {
             MemTable *imm = reinterpret_cast<MemTable *>(task.memtable);
+            RDMA_ASSERT(imm);
             FileMetaData &meta = imm->meta();
             meta.number = versions_->NewFileNumber();
+            meta.flush_timestamp = processed_writes_;
             Status s;
             Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
                                               AccessCaller::kCompaction);
@@ -589,13 +699,15 @@ namespace leveldb {
                              meta.number,
                              meta.file_size,
                              meta.converted_file_size,
+                             meta.flush_timestamp,
                              meta.smallest,
                              meta.largest,
                              meta.meta_block_handle,
                              meta.data_block_group_handles);
-                edit.SetPrevLogNumber(0);
             }
         }
+
+        versions_->AppendChangesToManifest(&edit, manifest_file_);
         Version *v = new Version(versions_,
                                  versions_->version_id_seq_.fetch_add(1));
         mutex_.Lock();
@@ -648,6 +760,7 @@ namespace leveldb {
 
             FileMetaData &meta = imm->meta();
             meta.number = versions_->NewFileNumber();
+            meta.flush_timestamp = processed_writes_;
 
             Status s;
             Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
@@ -666,11 +779,11 @@ namespace leveldb {
                              meta.number,
                              meta.file_size,
                              meta.converted_file_size,
+                             meta.flush_timestamp,
                              meta.smallest,
                              meta.largest,
                              meta.meta_block_handle,
                              meta.data_block_group_handles);
-                edit.SetPrevLogNumber(0);
             }
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format(
@@ -837,48 +950,12 @@ namespace leveldb {
         }
     }
 
-    void DBImpl::PerformSubRangeReorganization() {
-        RDMA_ASSERT(versions_->last_sequence_ > SUBRANGE_WARMUP_NPUTS);
-        SubRanges *ref = latest_subranges_;
-        double fair_rate = 1.0 / ref->subranges.size();
-
-        // Make a copy.
-        SubRanges *latest = new SubRanges;
-        latest->subranges = ref->subranges;
-        std::vector<SubRange> &subranges = latest->subranges;
-        RDMA_ASSERT(subranges.size() == options_.num_memtable_partitions);
+    void DBImpl::PerformSubrangeMajorReorg(leveldb::DBImpl::SubRanges *latest,
+                                           double total_inserts) {
         std::vector<double> insertion_rates;
-        double total_inserts = 0;
-        double unfair_subranges = 0;
-
-        for (int i = 0; i < subranges.size(); i++) {
-            SubRange sr = subranges[i];
-            total_inserts += sr.ninserts;
-        }
-
-        for (int i = 0; i < subranges.size(); i++) {
-            SubRange sr = subranges[i];
-            sr.rate = (double) sr.ninserts / total_inserts;
-            double diff = (sr.rate - fair_rate) * 100.0 / fair_rate;
-            if (std::abs(diff) > 10 && !sr.IsAPoint(options_.comparator)) {
-                unfair_subranges += 1;
-            }
-        }
-
-        if (unfair_subranges / subranges.size() <= 0.1) {
-            delete latest;
-            return;
-        }
-
-        if (total_inserts - last_major_reorg_seq_ <
-            SUBRANGE_MAJOR_REORG_INTERVAL) {
-            delete latest;
-            return;
-        }
-
+        std::vector<SubRange> &subranges = latest->subranges;
         // Perform major reorg.
         std::vector<std::vector<AtomicMemTable *>> subrange_imms;
-        std::vector<uint32_t> subrange_nputs;
         uint32_t nslots = (options_.num_memtables -
                            options_.num_memtable_partitions) /
                           options_.num_memtable_partitions;
@@ -892,7 +969,8 @@ namespace leveldb {
             partitioned_active_memtables_[i]->mutex.Lock();
             MemTable *m = partitioned_active_memtables_[i]->memtable;
             if (m) {
-                versions_->mid_table_mapping_[m->memtableid()].Ref(nullptr);
+                RDMA_ASSERT(versions_->mid_table_mapping_[m->memtableid()].Ref(
+                        nullptr));
                 memtables.push_back(
                         &versions_->mid_table_mapping_[m->memtableid()]);
             }
@@ -920,15 +998,22 @@ namespace leveldb {
 
         // We have all memtables now.
         // Determine the number of samples we retrieve from each subrange.
-        uint32_t sample_size_per_subrange = 0;
+        uint32_t sample_size_per_subrange = UINT32_MAX;
+        std::vector<uint32_t> subrange_nputs;
+        std::vector<std::vector<uint32_t>> subrange_mem_nputs;
         for (int i = 0; i < subrange_imms.size(); i++) {
             uint32_t nputs = 0;
+            std::vector<uint32_t> ns;
             for (int j = 0; j < subrange_imms[i].size(); j++) {
-                nputs += subrange_imms[i][j]->nentries_.load(
+                uint32_t n = subrange_imms[i][j]->nentries_.load(
                         std::memory_order_relaxed);
+                ns.push_back(n);
+
+                nputs += n;
             }
+            subrange_mem_nputs.push_back(ns);
             subrange_nputs.push_back(nputs);
-            if (nputs > 10) {
+            if (nputs > 100) {
                 sample_size_per_subrange = std::min(sample_size_per_subrange,
                                                     nputs);
             }
@@ -937,30 +1022,29 @@ namespace leveldb {
         // Sample from each memtable.
         sample_size_per_subrange = (double) (sample_size_per_subrange) *
                                    options_.subrange_reorg_sampling_ratio;
-        auto comp = [&](const Slice &a, const Slice &b) {
-            return options_.comparator->Compare(a, b);
+        auto comp = [&](const std::string &a, const std::string &b) {
+            return user_comparator_->Compare(a, b);
         };
-        std::map<Slice, double, decltype(comp)> userkey_rate(comp);
+        std::map<uint64_t, double> userkey_rate;
         double total_rate = 0;
 
         for (int i = 0; i < subrange_imms.size(); i++) {
+            SubRange &sr = subranges[i];
             uint32_t total_puts = subrange_nputs[i];
             double rate = subranges[i].rate;
 
             for (int j = 0; j < subrange_imms[i].size(); j++) {
                 AtomicMemTable *mem = subrange_imms[i][j];
-                uint32_t nputs = mem->nentries_.load(std::memory_order_relaxed);
                 uint32_t sample_size = 0;
                 if (total_puts <= sample_size_per_subrange) {
                     // sample everything.
-                    sample_size = 0;
+                    sample_size = sample_size_per_subrange;
                 } else {
-                    sample_size = ((double) nputs /
-                                   (double) sample_size_per_subrange) *
-                                  total_puts;
+                    sample_size = ((double) subrange_mem_nputs[i][j] /
+                                   (double) total_puts) *
+                                  sample_size_per_subrange;
                 }
 
-                //
                 uint32_t samples = 0;
                 leveldb::Iterator *it = mem->memtable_->NewIterator(
                         TraceType::MEMTABLE, AccessCaller::kUncategorized,
@@ -969,50 +1053,81 @@ namespace leveldb {
                 ParsedInternalKey ik;
                 while (it->Valid() && samples < sample_size) {
                     RDMA_ASSERT(ParseInternalKey(it->key(), &ik));
-                    userkey_rate[ik.user_key] += rate;
+//                    if (sr.IsSmallerThanLower(ik.user_key, user_comparator_)) {
+//                        continue;
+//                    }
+//                    if (sr.IsGreaterThanUpper(ik.user_key, user_comparator_)) {
+//                        continue;
+//                    }
+
+                    uint64_t k = 0;
+                    nova::str_to_int(ik.user_key.data(), &k,
+                                     ik.user_key.size());
+                    userkey_rate[k] += rate;
                     total_rate += rate;
-                    it->Next();
                     samples += 1;
+                    it->Next();
                 }
+
+                RDMA_LOG(rdmaio::INFO)
+                    << fmt::format("Sample {} {} {} {} from mid-{} subrange-{}",
+                                   samples, sample_size,
+                                   subrange_mem_nputs[i][j], total_puts,
+                                   mem->memtable_->memtableid(), i);
                 delete it;
             }
         }
 
         if (userkey_rate.size() <= subranges.size() * 2) {
+            num_skipped_major_reorgs++;
+
+            // Unref all immutable memtables.
+            for (int i = 0; i < subrange_imms.size(); i++) {
+                for (int j = 0; j < subrange_imms[i].size(); j++) {
+                    subrange_imms[i][j]->Unref(dbname_);
+                }
+            }
             delete latest;
             return;
         }
 
-        last_major_reorg_seq_ = total_inserts;
-
+        last_major_reorg_seq_ = processed_writes_;
+        last_minor_reorg_seq_ = processed_writes_;
+        num_major_reorgs++;
         double share_per_subrange = total_rate / subranges.size();
         int index = 0;
         double sum = 0;
-        for (auto &entry : userkey_rate) {
-            sum += entry.second;
+        for (auto entry = userkey_rate.begin();
+             entry != userkey_rate.end(); entry++) {
+            sum += entry->second;
+            total_rate -= entry->second;
             if (sum >= share_per_subrange) {
-                std::string userkey = entry.first.ToString();
-                subranges[index].upper = userkey;
+                Slice userkey = std::to_string(entry->first);
+                delete subranges[index].upper.data();
+                delete subranges[index + 1].lower.data();
+
+                subranges[index].upper = SubRange::Copy(userkey);
                 subranges[index].upper_inclusive = true;
-                subranges[index + 1].lower = userkey;
+                subranges[index + 1].lower = SubRange::Copy(userkey);
                 subranges[index + 1].lower_inclusive = false;
                 index++;
                 if (index == subranges.size() - 1) {
                     break;
                 }
                 sum = 0;
+                share_per_subrange = total_rate / (subranges.size() - index);
             }
         }
 
         bool bad_reorg = false;
         for (int i = 0; i < subranges.size(); i++) {
             SubRange &sr = subranges[i];
-            if (options_.comparator->Compare(sr.upper, sr.lower) < 0) {
+            if (user_comparator_->Compare(sr.upper, sr.lower) < 0) {
                 // This is a bad reorg due to too few samples. give up.
                 bad_reorg = true;
                 break;
             }
-            sr.ninserts = total_inserts / subranges.size();
+            sr.ninserts = 0; //total_inserts / subranges.size();
         }
 
         // Unref all immutable memtables.
@@ -1023,14 +1138,319 @@ namespace leveldb {
         }
 
         if (bad_reorg) {
+            RDMA_LOG(rdmaio::INFO)
+                << fmt::format("bad reorg: {}", latest->DebugString());
             delete latest;
             return;
         }
-        RDMA_LOG(rdmaio::INFO) << fmt::format("before {}", ref->DebugString());
         RDMA_LOG(rdmaio::INFO)
             << fmt::format("major at {} puts with {} keys: {}", total_inserts,
                            userkey_rate.size(), latest->DebugString());
         latest_subranges_.store(latest);
+    }
+
+    void DBImpl::PerformSubrangeMinorReorg(int subrange_id,
+                                           leveldb::DBImpl::SubRanges *latest,
+                                           double total_inserts) {
+        last_minor_reorg_seq_ = processed_writes_;
+        std::vector<SubRange> &subranges = latest->subranges;
+        double fair_rate = 1.0 / (double) subranges.size();
+
+        SubRange &sr = subranges[subrange_id];
+        RDMA_ASSERT(sr.rate > fair_rate);
+
+        // higher share.
+        // Perform major reorg.
+        std::vector<AtomicMemTable *> subrange_imms;
+        uint32_t nslots = (options_.num_memtables -
+                           options_.num_memtable_partitions) /
+                          options_.num_memtable_partitions;
+        uint32_t remainder = (options_.num_memtables -
+                              options_.num_memtable_partitions) %
+                             options_.num_memtable_partitions;
+        uint32_t slot_id = 0;
+        uint32_t slots = 0;
+        for (int i = 0; i < subrange_id; i++) {
+            slots = nslots;
+            if (remainder > 0) {
+                slots += 1;
+                remainder--;
+            }
+            slot_id += slots;
+        }
+
+        slots = nslots;
+        if (remainder > 0) {
+            slots += 1;
+        }
+
+        partitioned_active_memtables_[subrange_id]->mutex.Lock();
+        MemTable *m = partitioned_active_memtables_[subrange_id]->memtable;
+        if (m) {
+            RDMA_ASSERT(versions_->mid_table_mapping_[m->memtableid()].Ref(
+                    nullptr));
+            subrange_imms.push_back(
+                    &versions_->mid_table_mapping_[m->memtableid()]);
+        }
+
+        for (int j = 0; j < slots; j++) {
+            RDMA_ASSERT(slot_id + j < partitioned_imms_.size());
+            uint32_t imm_id = partitioned_imms_[slot_id + j];
+            if (imm_id == 0) {
+                continue;
+            }
+            MemTable *imm = versions_->mid_table_mapping_[imm_id].Ref(
+                    nullptr);
+            if (imm) {
+                subrange_imms.push_back(&versions_->mid_table_mapping_[imm_id]);
+            }
+        }
+        partitioned_active_memtables_[subrange_id]->mutex.Unlock();
+
+        // We have all memtables now.
+        std::map<uint64_t, uint32_t> userkey_freq;
+        uint32_t total_accesses = 0;
+        for (int i = 0; i < subrange_imms.size(); i++) {
+            AtomicMemTable *mem = subrange_imms[i];
+            uint32_t samples = 0;
+            leveldb::Iterator *it = mem->memtable_->NewIterator(
+                    TraceType::MEMTABLE, AccessCaller::kUncategorized,
+                    0);
+            it->SeekToFirst();
+            ParsedInternalKey ik;
+            while (it->Valid()) {
+                RDMA_ASSERT(ParseInternalKey(it->key(), &ik));
+                if (sr.IsSmallerThanLower(ik.user_key, user_comparator_)) {
+                    it->Next();
+                    continue;
+                }
+                if (sr.IsGreaterThanUpper(ik.user_key, user_comparator_)) {
+                    it->Next();
+                    continue;
+                }
+
+                uint64_t k = 0;
+                nova::str_to_int(ik.user_key.data(), &k,
+                                 ik.user_key.size());
+                userkey_freq[k] += 1;
+                samples += 1;
+                total_accesses += 1;
+                it->Next();
+            }
+//            RDMA_LOG(rdmaio::INFO)
+//                << fmt::format("minor sample {} from mid-{} subrange-{}",
+//                               samples, mem->memtable_->memtableid(),
+//                               subrange_id);
+            delete it;
+        }
+
+        if (userkey_freq.size() < 100) {
+            num_skipped_minor_reorgs++;
+            // Unref all immutable memtables.
+            for (int j = 0; j < subrange_imms.size(); j++) {
+                subrange_imms[j]->Unref(dbname_);
+            }
+            delete latest;
+            return;
+        }
+
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format(
+                    "minor at {} puts with {} keys for subrange-{}: before {}",
+                    total_inserts,
+                    userkey_freq.size(), subrange_id,
+                    sr.DebugString());
+
+        double inserts = (sr.rate - fair_rate) * total_inserts;
+        RDMA_ASSERT(inserts < sr.ninserts);
+        double remove_share = (double) (((sr.rate - fair_rate) / sr.rate)
+                                        * total_accesses);
+        double left_share = remove_share;
+        double right_share = remove_share;
+        double left_inserts = inserts;
+        double right_inserts = inserts;
+
+        double total_rate_to_distribute = sr.rate - fair_rate;
+        double remaining_rate = total_rate_to_distribute;
+        double left_rate = 0;
+        double right_rate = 0;
+
+        if (subrange_id != 0 && subrange_id != subranges.size() - 1) {
+            SubRange &left = subranges[subrange_id - 1];
+            SubRange &right = subranges[subrange_id + 1];
+
+            if (left.rate > fair_rate
+                && right.rate < fair_rate) {
+                double need_rate = fair_rate - right.rate;
+                if (total_rate_to_distribute < need_rate) {
+                    right_rate = total_rate_to_distribute;
+                    remaining_rate = 0;
+                } else {
+                    right_rate = need_rate;
+                    remaining_rate = total_rate_to_distribute - need_rate;
+                }
+            } else if (left.rate < fair_rate
+                       && right.rate > fair_rate) {
+                double need_rate = fair_rate - left.rate;
+                if (total_rate_to_distribute < need_rate) {
+                    left_rate = total_rate_to_distribute;
+                    remaining_rate = 0;
+                } else {
+                    left_rate = need_rate;
+                    remaining_rate = total_rate_to_distribute - need_rate;
+                }
+            }
+
+            if (remaining_rate > 0) {
+                double new_right_rate = right.rate + right_rate;
+                double new_left_rate = left.rate + left_rate;
+
+                double total = new_left_rate + new_right_rate;
+                double leftp = new_right_rate / total;
+                double rightp = new_left_rate / total;
+
+                left_rate += leftp * remaining_rate;
+                right_rate += rightp * remaining_rate;
+            }
+
+            RDMA_ASSERT(std::abs(
+                    total_rate_to_distribute - left_rate - right_rate) <=
+                        0.001);
+            double leftp = left_rate / total_rate_to_distribute;
+            double rightp = right_rate / total_rate_to_distribute;
+            left_share = remove_share * leftp;
+            left_inserts = inserts * leftp;
+            right_share = remove_share * rightp;
+            right_inserts = inserts * rightp;
+        }
+
+        bool success = false;
+        if (subrange_id > 0 && left_share > 0) {
+            uint64_t sr_lower;
+            uint64_t new_lower;
+            nova::str_to_int(sr.lower.data(), &new_lower, sr.lower.size());
+            sr_lower = new_lower;
+            double removes = left_share;
+            auto it = userkey_freq.begin();
+            while (it != userkey_freq.end()) {
+                if (removes <= 0) {
+                    break;
+                }
+                removes -= it->second;
+                new_lower = it->first;
+                it = userkey_freq.erase(it);
+            }
+            if (new_lower > sr_lower) {
+                sr.lower = SubRange::Copy(std::to_string(new_lower));
+                sr.lower_inclusive = true;
+                sr.ninserts -= left_inserts;
+
+                SubRange &other = subranges[subrange_id - 1];
+                other.ninserts += left_inserts;
+                other.upper = SubRange::Copy(sr.lower);
+                other.upper_inclusive = false;
+                success = true;
+            }
+        }
+        if (subrange_id < subranges.size() - 1 && right_share > 0) {
+            uint64_t sr_upper;
+            uint64_t new_upper;
+            nova::str_to_int(sr.upper.data(), &new_upper, sr.upper.size());
+            sr_upper = new_upper;
+            double removes = right_share;
+            for (auto it = userkey_freq.rbegin();
+                 it != userkey_freq.rend(); it++) {
+                if (removes <= 0) {
+                    break;
+                }
+                removes -= it->second;
+                new_upper = it->first;
+            }
+            if (new_upper < sr_upper) {
+                sr.upper = SubRange::Copy(std::to_string(new_upper));
+                sr.upper_inclusive = true;
+                sr.ninserts -= right_inserts;
+
+                SubRange &other = subranges[subrange_id + 1];
+                other.ninserts += right_inserts;
+                other.lower = SubRange::Copy(sr.upper);
+                other.lower_inclusive = false;
+                success = true;
+            }
+        }
+
+        // Unref all immutable memtables.
+        for (int j = 0; j < subrange_imms.size(); j++) {
+            subrange_imms[j]->Unref(dbname_);
+        }
+
+        if (success) {
+            RDMA_LOG(rdmaio::INFO)
+                << fmt::format(
+                        "minor at {} puts with {} keys for subrange-{}: after {}",
+                        total_inserts,
+                        userkey_freq.size(), subrange_id,
+                        sr.DebugString());
+            num_minor_reorgs += 1;
+            latest_subranges_.store(latest);
+            return;
+        }
+
+        delete latest;
+        num_skipped_minor_reorgs++;
+    }
+
+    void DBImpl::PerformSubRangeReorganization() {
+        RDMA_ASSERT(versions_->last_sequence_ > SUBRANGE_WARMUP_NPUTS);
+        SubRanges *ref = latest_subranges_;
+        double fair_rate = 1.0 / (double) ref->subranges.size();
+
+        uint64_t now = versions_->last_sequence_.load(
+                std::memory_order_relaxed);
+
+        // Make a copy.
+        SubRanges *latest = new SubRanges(*ref);
+        std::vector<SubRange> &subranges = latest->subranges;
+        RDMA_ASSERT(subranges.size() == options_.num_memtable_partitions);
+        double total_inserts = 0;
+        double unfair_subranges = 0;
+
+        for (int i = 0; i < subranges.size(); i++) {
+            SubRange &sr = subranges[i];
+            total_inserts += sr.ninserts;
+        }
+        RDMA_ASSERT(total_inserts <= now)
+            << fmt::format("{},{}", total_inserts, now);
+
+        double most_unfair = 0;
+        uint32_t most_unfair_subrange = 0;
+        for (int i = 0; i < subranges.size(); i++) {
+            SubRange &sr = subranges[i];
+            sr.rate = (double) sr.ninserts / total_inserts;
+            double diff = (sr.rate - fair_rate) * 100.0 / fair_rate;
+            if (std::abs(diff) > 20 && !sr.IsAPoint(user_comparator_)) {
+                unfair_subranges += 1;
+            }
+            if (diff > 20 && diff > most_unfair &&
+                !sr.IsAPoint(user_comparator_) && sr.ninserts > 100 &&
+                now - last_minor_reorg_seq_ >
+                SUBRANGE_MINOR_REORG_INTERVAL) {
+                most_unfair = diff;
+                most_unfair_subrange = i;
+            }
+        }
+        if (unfair_subranges / (double) subranges.size() > 0.1 &&
+            now - last_major_reorg_seq_ >
+            SUBRANGE_MAJOR_REORG_INTERVAL) {
+            PerformSubrangeMajorReorg(latest, total_inserts);
+            return;
+        } else if (most_unfair != 0) {
+            // Perform minor.
+            PerformSubrangeMinorReorg(most_unfair_subrange, latest,
+                                      total_inserts);
+            return;
+        }
+        delete latest;
     }
 
     void DBImpl::PerformCompaction(leveldb::EnvBGThread *bg_thread,
@@ -1044,7 +1464,6 @@ namespace leveldb {
         if (options_.enable_major) {
             PerformMajorCompaction(bg_thread, tasks);
         }
-
     }
 
     bool DBImpl::PerformMajorCompaction(EnvBGThread *bg_thread,
@@ -1075,6 +1494,7 @@ namespace leveldb {
                                0,
                                f->number, f->file_size,
                                f->converted_file_size,
+                               f->flush_timestamp,
                                f->smallest,
                                f->largest,
                                f->meta_block_handle,
@@ -1278,6 +1698,7 @@ namespace leveldb {
                                                  out.number,
                                                  out.file_size,
                                                  out.converted_file_size,
+                                                 processed_writes_,
                                                  out.smallest, out.largest,
                                                  out.meta_block_handle,
                                                  out.data_block_group_handles);
@@ -1872,9 +2293,9 @@ namespace leveldb {
             int m = l + (r - l) / 2;
             SubRange &subrange = ref->subranges[m];
 
-            if (subrange.IsSmallerThanLower(key, options_.comparator)) {
+            if (subrange.IsSmallerThanLower(key, user_comparator_)) {
                 r = m - 1;
-            } else if (subrange.IsGreaterThanUpper(key, options_.comparator)) {
+            } else if (subrange.IsGreaterThanUpper(key, user_comparator_)) {
                 l = m + 1;
             } else {
                 return m;
@@ -1900,9 +2321,7 @@ namespace leveldb {
 
         SubRanges *ref = latest_subranges_;
 
-        if (RDMA_LOG_LEVEL == rdmaio::DEBUG) {
-            ref->AssertSubrangeBoundary(options_.comparator);
-        }
+//        ref->AssertSubrangeBoundary(user_comparator_);
 
         int subrange_id = -1;
         if (ref->subranges.size() == options_.num_memtable_partitions) {
@@ -1929,15 +2348,22 @@ namespace leveldb {
 
             if (subrange_id != -1 &&
                 ref->subranges.size() < options_.num_memtable_partitions) {
-                // find the key but not enough subranges. Split this subrange.
                 SubRange &sr = ref->subranges[subrange_id];
-                SubRange new_sr;
+                if (sr.lower_inclusive &&
+                    user_comparator_->Compare(sr.lower, key) == 0) {
+                    // Cannot split this subrange since it will create a new subrange with no keys.
+                    continue;
+                }
 
-                new_sr.lower = Slice(key.ToString());
-                new_sr.upper = sr.upper;
+                // find the key but not enough subranges. Split this subrange.
+                SubRange new_sr = {}; // [k, sr.upper]
+                new_sr.lower = SubRange::Copy(key);
+                new_sr.upper = SubRange::Copy(sr.upper);
                 new_sr.lower_inclusive = true;
-                new_sr.upper_inclusive = false;
-                sr.upper = new_sr.lower;
+                new_sr.upper_inclusive = sr.upper_inclusive;
+                // [lower, k]
+                delete sr.upper.data();
+                sr.upper = SubRange::Copy(new_sr.lower);
                 sr.upper_inclusive = false;
 
                 // update stats.
@@ -1956,17 +2382,17 @@ namespace leveldb {
                 // didn't find the key but we have enough subranges.
                 // Extend either the first subrange or the last subrange.
                 if (ref->subranges[0].IsSmallerThanLower(key,
-                                                         options_.comparator)) {
+                                                         user_comparator_)) {
                     SubRange &sr = ref->subranges[0];
-                    sr.lower = Slice(key.ToString());
+                    sr.lower = SubRange::Copy(key);
                     sr.lower_inclusive = true;
                     subrange_id = 0;
                 } else {
                     RDMA_ASSERT(ref->subranges[ref->subranges.size() -
                                                1].IsGreaterThanUpper(key,
-                                                                     options_.comparator));
+                                                                     user_comparator_));
                     SubRange &sr = ref->subranges[ref->subranges.size() - 1];
-                    sr.upper = Slice(key.ToString());
+                    sr.upper = SubRange::Copy(key);
                     sr.upper_inclusive = true;
                     subrange_id = ref->subranges.size() - 1;
                 }
@@ -1977,9 +2403,9 @@ namespace leveldb {
             // still not enough subranges.
             // no subranges. construct a point.
             if (ref->subranges.empty()) {
-                SubRange sr;
-                sr.lower = Slice(key.ToString());
-                sr.upper = Slice(key.ToString());
+                SubRange sr = {};
+                sr.lower = SubRange::Copy(key);
+                sr.upper = SubRange::Copy(key);
 
                 sr.lower_inclusive = true;
                 sr.upper_inclusive = true;
@@ -1988,32 +2414,30 @@ namespace leveldb {
                 continue;
             }
 
-            // one subrange and it is a point. Grow this subrange.
             if (ref->subranges.size() == 1 &&
-                ref->subranges[0].IsAPoint(options_.comparator)) {
-                subrange_id = 0;
+                ref->subranges[0].IsAPoint(user_comparator_)) {
                 if (ref->subranges[0].IsSmallerThanLower(key,
-                                                         options_.comparator)) {
-                    ref->subranges[0].lower = Slice(key.ToString());
+                                                         user_comparator_)) {
+                    ref->subranges[0].lower_inclusive = true;
+                    ref->subranges[0].lower = SubRange::Copy(key);
                 } else {
-                    RDMA_ASSERT(ref->subranges[ref->subranges.size() -
-                                               1].IsGreaterThanUpper(key,
-                                                                     options_.comparator));
-                    ref->subranges[0].upper = Slice(key.ToString());
+                    ref->subranges[0].upper_inclusive = true;
+                    ref->subranges[0].upper = SubRange::Copy(key);
                 }
+                subrange_id = 0;
                 continue;
             }
 
             // key is less than the smallest user key.
             if (ref->subranges[0].IsSmallerThanLower(key,
-                                                     options_.comparator)) {
-                SubRange sr;
-                sr.lower = Slice(key.ToString());
-                sr.upper = Slice(ref->subranges[0].lower.ToString());
+                                                     user_comparator_)) {
+                SubRange sr = {};
+                sr.lower = SubRange::Copy(key);
+                sr.upper = SubRange::Copy(ref->subranges[0].lower);
                 sr.lower_inclusive = true;
                 sr.upper_inclusive = false;
 
-                ref->subranges.push_back(sr);
+                ref->subranges.insert(ref->subranges.begin(), sr);
                 subrange_id = 0;
                 continue;
             }
@@ -2021,12 +2445,11 @@ namespace leveldb {
             // key is greater than the largest user key.
             if (ref->subranges[
                     ref->subranges.size() - 1].IsGreaterThanUpper(key,
-                                                                  options_.comparator)) {
-                SubRange sr;
-                sr.lower = Slice(ref->subranges[ref->subranges.size() -
-                                                1].upper.ToString());
-                sr.upper = Slice(key.ToString());
-
+                                                                  user_comparator_)) {
+                SubRange sr = {};
+                sr.lower = SubRange::Copy(ref->subranges[ref->subranges.size() -
+                                                         1].upper);
+                sr.upper = SubRange::Copy(key);
                 sr.lower_inclusive = false;
                 sr.upper_inclusive = true;
                 ref->subranges.push_back(sr);
@@ -2035,8 +2458,10 @@ namespace leveldb {
             }
             RDMA_ASSERT(false);
         }
+        RDMA_LOG(rdmaio::DEBUG)
+            << fmt::format("{} {} {}", key.ToString(), subrange_id,
+                           ref->DebugString());
         range_lock_.Unlock();
-
         RDMA_ASSERT(subrange_id != -1);
         RDMA_ASSERT(WriteStaticPartition(options, key, val, subrange_id, true,
                                          last_sequence,
@@ -2047,7 +2472,6 @@ namespace leveldb {
     Status DBImpl::Write(const WriteOptions &options, const Slice &key,
                          const Slice &val) {
         // TODO: Support tracing past accesses.
-
         uint64_t last_sequence = versions_->last_sequence_.fetch_add(1);
 
         std::vector<MemTable *> full_memtables;
@@ -2351,12 +2775,16 @@ namespace leveldb {
             auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
             RDMA_ASSERT(dc);
             dc->set_dbid(dbid_);
+            LevelDBLogRecord log_record = {};
+            log_record.sequence_number = last_sequence;
+            log_record.key = key;
+            log_record.value = val;
             options.dc_client->InitiateReplicateLogRecords(
                     fmt::format("{}-{}-{}", server_id_, dbid_,
                                 atomic_memtable->memtable_->memtableid()),
                     options.thread_id, dbid_,
                     atomic_memtable->memtable_->memtableid(),
-                    options.rdma_backing_mem, val,
+                    options.rdma_backing_mem, log_record,
                     options.replicate_log_record_states);
             dc->Wait();
             atomic_memtable->mutex_.lock();
@@ -2406,6 +2834,82 @@ namespace leveldb {
                                     options.rand_seed);
         }
         return Status::OK();
+    }
+
+    void DBImpl::QueryDBStats(leveldb::DBStats *db_stats) {
+        Version *current = nullptr;
+        uint32_t vid = 0;
+        while (current == nullptr) {
+            vid = versions_->current_version_id();
+            RDMA_ASSERT(vid < MAX_LIVE_MEMTABLES) << vid;
+            current = versions_->versions_[vid].Ref();
+        }
+        RDMA_ASSERT(current->version_id() == vid);
+        SubRanges *ref = latest_subranges_;
+        db_stats->num_major_reorgs = num_major_reorgs;
+        db_stats->num_minor_reorgs = num_minor_reorgs;
+        db_stats->num_skipped_major_reorgs = num_skipped_major_reorgs;
+        db_stats->num_skipped_minor_reorgs = num_skipped_minor_reorgs;
+
+        if (options_.enable_subranges) {
+            if (nova::NovaConfig::config->client_access_pattern == "uniform") {
+                uint64_t lower = 0;
+                uint64_t upper = 0;
+                uint64_t keys = 0;
+                uint64_t fair_nkeys_per_subrange =
+                        10000000.0 / options_.num_memtable_partitions;
+                uint64_t max_keys = 0;
+                for (int i = 0; i < ref->subranges.size(); i++) {
+                    SubRange &sr = ref->subranges[i];
+                    nova::str_to_int(sr.lower.data(), &lower, sr.lower.size());
+                    nova::str_to_int(sr.upper.data(), &upper, sr.upper.size());
+
+                    keys = upper - lower;
+                    if (sr.upper_inclusive) {
+                        keys += 1;
+                    }
+                    if (!sr.lower_inclusive) {
+                        keys -= 1;
+                    }
+                    max_keys = std::max(max_keys, keys);
+                }
+                db_stats->maximum_load_imbalance =
+                        ((double) max_keys / (double) fair_nkeys_per_subrange) *
+                        100.0 - 100.0;
+            } else {
+                // Zipfian.
+                uint64_t lower = 0;
+                uint64_t upper = 0;
+                uint64_t fair_naccesses_per_subrange =
+                        nova::NovaConfig::config->zipfian_dist.sum /
+                        options_.num_memtable_partitions;
+                uint64_t max_accesses = 0;
+                for (int i = 0; i < ref->subranges.size(); i++) {
+                    uint64_t accesses = 0;
+                    SubRange &sr = ref->subranges[i];
+                    nova::str_to_int(sr.lower.data(), &lower, sr.lower.size());
+                    nova::str_to_int(sr.upper.data(), &upper, sr.upper.size());
+
+                    if (!sr.upper_inclusive) {
+                        upper -= 1;
+                    }
+                    if (!sr.lower_inclusive) {
+                        lower += 1;
+                    }
+
+                    for (uint64_t key = lower; key <= upper; key++) {
+                        accesses += nova::NovaConfig::config->zipfian_dist.accesses[key];
+                    }
+                    max_accesses = std::max(max_accesses, accesses);
+                }
+                db_stats->maximum_load_imbalance =
+                        ((double) max_accesses /
+                         (double) fair_naccesses_per_subrange) *
+                        100.0 - 100.0;
+            }
+        }
+        current->QueryStats(db_stats, user_comparator_);
+        versions_->versions_[vid].Unref(dbname_);
     }
 
     bool DBImpl::GetProperty(const Slice &property, std::string *value) {
@@ -2512,6 +3016,16 @@ namespace leveldb {
         if (options.enable_subranges) {
             impl->latest_subranges_.store(new DBImpl::SubRanges);
         }
+        impl->manifest_file_ = new NovaCCMemFile(options.env, options, 0,
+                                                 options.mem_manager,
+                                                 options.dc_client, dbname, 0,
+                                                 options.max_file_size,
+                                                 &impl->rand_seed_);
+
+
+        for (int i = 0; i < MAX_LIVE_MEMTABLES; i++) {
+            impl->versions_->mid_table_mapping_[i].nentries_ = 0;
+        }
 
         if (options.memtable_type == MemTableType::kMemTablePool) {
             for (int i = 0; i < impl->min_memtables_; i++) {
@@ -2598,42 +3112,29 @@ namespace leveldb {
         impl->processed_writes_ = 0;
         impl->number_of_puts_no_wait_ = 0;
         impl->number_of_puts_wait_ = 0;
-        VersionEdit edit;
-        // Recover handles create_if_missing, error_if_exists
-        bool save_manifest = false;
-        Status s = impl->Recover(&edit, &save_manifest);
-        if (s.ok()) {
-            // Create new log and a corresponding memtable.
-            uint64_t new_log_number = impl->versions_->NewFileNumber();
-            WritableFile *lfile;
-            s = options.env->NewWritableFile(
-                    LogFileName(dbname, new_log_number),
-                    {.level = -1},
-                    &lfile);
-            impl->current_log_file_name_ = LogFileName(dbname, new_log_number);
-            if (s.ok()) {
-                edit.SetLogNumber(new_log_number);
-            }
-        }
-        if (s.ok() && save_manifest) {
-            edit.SetPrevLogNumber(0);  // No older logs needed after recovery.
-            edit.SetLogNumber(0);
-            Version *v = new Version(impl->versions_,
-                                     impl->versions_->version_id_seq_.fetch_add(
-                                             1));
-            s = impl->versions_->LogAndApply(&edit, v);
-        }
-        if (s.ok()) {
-//            impl->DeleteObsoleteFiles();
-//            impl->MaybeScheduleCompaction();
-        }
+//        VersionEdit edit;
+//        // Recover handles create_if_missing, error_if_exists
+//        bool save_manifest = false;
+//        Status s = impl->Recover(&edit, &save_manifest);
+//        if (s.ok()) {
+//            // Create new log and a corresponding memtable.
+//            uint64_t new_log_number = impl->versions_->NewFileNumber();
+//            WritableFile *lfile;
+//            s = options.env->NewWritableFile(
+//                    LogFileName(dbname, new_log_number),
+//                    {.level = -1},
+//                    &lfile);
+//            impl->current_log_file_name_ = LogFileName(dbname, new_log_number);
+//        }
+//        if (s.ok() && save_manifest) {
+//            Version *v = new Version(impl->versions_,
+//                                     impl->versions_->version_id_seq_.fetch_add(
+//                                             1));
+//            s = impl->versions_->LogAndApply(&edit, v);
+//        }
         impl->mutex_.Unlock();
-        if (s.ok()) {
-            *dbptr = impl;
-        } else {
-            delete impl;
-        }
-        return s;
+        *dbptr = impl;
+        return Status::OK();
     }
 
     Snapshot::~Snapshot() = default;
