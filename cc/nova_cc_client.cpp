@@ -124,9 +124,6 @@ namespace leveldb {
         task.sem = &sem_;
 
         uint32_t reqid = req_id_;
-        CCResponse *response = new CCResponse;
-        req_response[reqid] = response;
-        task.response = response;
         AddAsyncTask(task);
         req_id_++;
         return reqid;
@@ -156,6 +153,49 @@ namespace leveldb {
         return 0;
     }
 
+    uint32_t NovaBlockCCClient::InitiateFileNameRTableMapping(uint32_t stoc_id,
+                                                              const std::map<std::string, uint32_t> &fn_rtableid) {
+        RDMAAsyncClientRequestTask task = {};
+        task.type = RDMAAsyncRequestType::RDMA_ASYNC_FILENAME_RTABLE_MAPPING;
+        task.server_id = stoc_id;
+        task.fn_rtableid = fn_rtableid;
+
+        task.sem = &sem_;
+        AddAsyncTask(task);
+
+        uint32_t reqid = req_id_;
+        req_id_++;
+        return reqid;
+    }
+
+    uint32_t NovaCCClient::InitiateFileNameRTableMapping(uint32_t stoc_id,
+                                                         const std::map<std::string, uint32_t> &fn_rtableid) {
+        uint32_t req_id = current_req_id_;
+        CCRequestContext context = {};
+        context.done = false;
+        context.req_type = CCRequestType::CC_FILENAME_RTABLEID;
+
+        char *send_buf = rdma_store_->GetSendBuf(stoc_id);
+        uint32_t msg_size = 1;
+        send_buf[0] = CCRequestType::CC_FILENAME_RTABLEID;
+        msg_size += EncodeFixed32(send_buf + msg_size, fn_rtableid.size());
+        for (auto &it : fn_rtableid) {
+            msg_size += EncodeStr(send_buf + msg_size, it.first);
+            msg_size += EncodeFixed32(send_buf + msg_size, it.second);
+        }
+
+        rdma_store_->PostSend(send_buf, msg_size, stoc_id, req_id);
+        request_context_[req_id] = context;
+        IncrementReqId();
+
+        rdma_store_->FlushPendingSends(stoc_id);
+        RDMA_LOG(DEBUG)
+            << fmt::format(
+                    "dcclient[{}]: Inform Filename RTable ID stoc:{} size:{} req:{}",
+                    cc_client_id_, stoc_id, fn_rtableid.size(), req_id);
+        return req_id;
+    }
+
 
     void NovaBlockCCClient::AddAsyncTask(
             const leveldb::RDMAAsyncClientRequestTask &task) {
@@ -166,14 +206,6 @@ namespace leveldb {
             ccs_[id % ccs_.size()]->AddTask(task);
             return;
         }
-
-        if (task.type ==
-            RDMAAsyncRequestType::RDMA_ASYNC_REQ_WRITE_DATA_BLOCKS &&
-            task.file_number == 0) {
-            ccs_[0]->AddTask(task);
-            return;;
-        }
-
         uint32_t seq = NovaBlockCCClient::rdma_worker_seq_id_.fetch_add(1,
                                                                         std::memory_order_relaxed) %
                        ccs_.size();
@@ -325,7 +357,9 @@ namespace leveldb {
         RDMA_ASSERT(rtable_handle.server_id !=
                     nova::NovaConfig::config->my_server_id);
         if (rtable_handle.server_id == nova::NovaConfig::config->my_server_id) {
-            rtable_manager_->ReadDataBlock(rtable_handle, offset, size, result);
+            Slice backing_result;
+            rtable_manager_->ReadDataBlock(rtable_handle, offset, size, result,
+                                           &backing_result);
             return 0;
         }
 
@@ -621,7 +655,6 @@ namespace leveldb {
                         // Waiting for WRITEs.
                         if (nova::IsRDMAWRITEComplete(context.backing_mem,
                                                       context.size)) {
-//                            RDMA_ASSERT(buf[0] == '~') << buf[0];
                             RDMA_LOG(DEBUG) << fmt::format(
                                         "dcclient[{}]: Read RTable blocks complete size:{} req:{}",
                                         cc_client_id_, context.size, req_id);
@@ -692,6 +725,10 @@ namespace leveldb {
                             read_size += 8;
                             (*context.logfile_offset)[log] = offset;
                         }
+                        context.done = true;
+                        processed = true;
+                    } else if (buf[0] ==
+                               CCRequestType::CC_FILENAME_RTABLEID_RESPONSE) {
                         context.done = true;
                         processed = true;
                     }

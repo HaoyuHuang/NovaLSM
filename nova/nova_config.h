@@ -37,89 +37,6 @@ namespace nova {
 
     class NovaConfig {
     public:
-        bool enable_load_data;
-        bool enable_rdma;
-
-        vector<Host> servers;
-        int my_server_id;
-        uint64_t load_default_value_size;
-        int max_msg_size;
-
-        std::string db_path;
-
-        int rdma_port;
-        int rdma_pq_batch_size;
-        int rdma_max_num_sends;
-        int rdma_doorbell_batch_size;
-
-        uint64_t log_buf_size;
-        uint64_t rtable_size;
-        uint64_t sstable_size;
-        std::string rtable_path;
-
-        bool use_multiple_disks;
-        bool enable_subrange;
-        std::string memtable_type;
-        bool enable_major_compaction;
-
-        uint64_t mem_pool_size_gb;
-        uint32_t num_mem_partitions;
-        char *nova_buf;
-        uint64_t nnovabuf;
-
-        ScatterPolicy  scatter_policy;
-        NovaLogRecordMode log_record_mode;
-        bool measure_recovery_duration;
-        uint32_t number_of_recovery_threads;
-
-        double subrange_sampling_ratio;
-        std::string zipfian_dist_file_path;
-        ZipfianDist zipfian_dist;
-        std::string client_access_pattern;
-
-        void ReadZipfianDist() {
-            if (zipfian_dist_file_path.empty()) {
-                return;
-            }
-
-            std::string line;
-            ifstream file;
-            file.open(zipfian_dist_file_path);
-            while (std::getline(file, line)) {
-                uint64_t accesses = std::stoi(line);
-                zipfian_dist.accesses.push_back(accesses);
-                zipfian_dist.sum += accesses;
-            }
-        }
-
-        void add_tid_mapping() {
-            std::lock_guard<std::mutex> l(m);
-            threads[std::this_thread::get_id()] = syscall(SYS_gettid);
-        }
-
-        void print_mapping() {
-            std::lock_guard<std::mutex> l(m);
-            for (auto tid : threads) {
-                constexpr const int kMaxThreadIdSize = 32;
-                std::ostringstream thread_stream;
-                thread_stream << tid.first;
-                std::string thread_id = thread_stream.str();
-                if (thread_id.size() > kMaxThreadIdSize) {
-                    thread_id.resize(kMaxThreadIdSize);
-                }
-
-                RDMA_LOG(INFO) << fmt::format("{}:{}", thread_id, tid.second);
-            }
-        }
-
-        std::mutex m;
-        std::map<std::thread::id, pid_t> threads;
-
-        static NovaConfig *config;
-    };
-
-    class NovaCCConfig {
-    public:
         static int
         ParseNumberOfDatabases(const std::vector<CCFragment *> &fragments,
                                std::vector<CCFragment *> *db_fragments,
@@ -188,14 +105,14 @@ namespace nova {
         static CCFragment *home_fragment(uint64_t key) {
             CCFragment *home = nullptr;
             RDMA_ASSERT(
-                    key <= cc_config->fragments[cc_config->fragments.size() -
+                    key <= config->fragments[config->fragments.size() -
                                                 1]->range.key_end);
             uint32_t l = 0;
-            uint32_t r = cc_config->fragments.size() - 1;
+            uint32_t r = config->fragments.size() - 1;
 
             while (l <= r) {
                 uint32_t m = l + (r - l) / 2;
-                home = cc_config->fragments[m];
+                home = config->fragments[m];
                 // Check if x is present at mid
                 if (key >= home->range.key_start &&
                     key <= home->range.key_end) {
@@ -210,6 +127,46 @@ namespace nova {
             }
             return home;
         }
+
+        bool enable_load_data;
+        bool enable_rdma;
+
+        vector<Host> servers;
+        int my_server_id;
+        uint64_t load_default_value_size;
+        int max_msg_size;
+
+        std::string db_path;
+
+        int rdma_port;
+        int rdma_pq_batch_size;
+        int rdma_max_num_sends;
+        int rdma_doorbell_batch_size;
+
+        uint64_t log_buf_size;
+        uint64_t rtable_size;
+        uint64_t sstable_size;
+        std::string rtable_path;
+
+        bool use_multiple_disks;
+        bool enable_subrange;
+        std::string memtable_type;
+        bool enable_major_compaction;
+
+        uint64_t mem_pool_size_gb;
+        uint32_t num_mem_partitions;
+        char *nova_buf;
+        uint64_t nnovabuf;
+
+        ScatterPolicy  scatter_policy;
+        NovaLogRecordMode log_record_mode;
+        bool recover_dbs;
+        uint32_t number_of_recovery_threads;
+
+        double subrange_sampling_ratio;
+        std::string zipfian_dist_file_path;
+        ZipfianDist zipfian_dist;
+        std::string client_access_pattern;
 
         vector<Host> cc_servers;
         vector<Host> dc_servers;
@@ -230,72 +187,47 @@ namespace nova {
         std::vector<CCFragment *> db_fragment;
         int num_rtable_num_servers_scatter_data_blocks;
 
+        void ReadZipfianDist() {
+            if (zipfian_dist_file_path.empty()) {
+                return;
+            }
 
-        static NovaCCConfig *cc_config;
-    };
-
-    class NovaDCConfig {
-    public:
-        static void
-        ReadFragments(const std::string &path,
-                      std::vector<DCFragment *> *frags) {
             std::string line;
             ifstream file;
-            file.open(path);
+            file.open(zipfian_dist_file_path);
             while (std::getline(file, line)) {
-                auto *frag = new DCFragment();
-                std::vector<std::string> tokens = SplitByDelimiter(&line, ",");
-                frag->range.key_start = std::stoi(tokens[0]);
-                frag->range.key_end = std::stoi(tokens[1]);
-                frag->dc_server_id = std::stoi(tokens[2]);
-                frags->push_back(frag);
-            }
-            RDMA_LOG(INFO) << "DC Configuration has a total of "
-                           << frags->size()
-                           << " fragments.";
-            for (int i = 0; i < frags->size(); i++) {
-                RDMA_LOG(DEBUG) << fmt::format("frag[{}]: {}-{}-{}", i,
-                                               (*frags)[i]->range.key_start,
-                                               (*frags)[i]->range.key_end,
-                                               (*frags)[i]->dc_server_id);
+                uint64_t accesses = std::stoi(line);
+                zipfian_dist.accesses.push_back(accesses);
+                zipfian_dist.sum += accesses;
             }
         }
 
-        static DCFragment *home_fragment(uint64_t key) {
-            DCFragment *home = nullptr;
-            RDMA_ASSERT(
-                    key <= dc_config->fragments[dc_config->fragments.size() -
-                                                1]->range.key_end);
-            uint32_t l = 0;
-            uint32_t r = dc_config->fragments.size() - 1;
+        void add_tid_mapping() {
+            std::lock_guard<std::mutex> l(m);
+            threads[std::this_thread::get_id()] = syscall(SYS_gettid);
+        }
 
-            while (l <= r) {
-                uint32_t m = l + (r - l) / 2;
-                home = dc_config->fragments[m];
-                // Check if x is present at mid
-                if (key >= home->range.key_start &&
-                    key <= home->range.key_end) {
-                    break;
+        void print_mapping() {
+            std::lock_guard<std::mutex> l(m);
+            for (auto tid : threads) {
+                constexpr const int kMaxThreadIdSize = 32;
+                std::ostringstream thread_stream;
+                thread_stream << tid.first;
+                std::string thread_id = thread_stream.str();
+                if (thread_id.size() > kMaxThreadIdSize) {
+                    thread_id.resize(kMaxThreadIdSize);
                 }
-                // If x greater, ignore left half
-                if (home->range.key_end < key)
-                    l = m + 1;
-                    // If x is smaller, ignore right half
-                else
-                    r = m - 1;
+
+                RDMA_LOG(INFO) << fmt::format("{}:{}", thread_id, tid.second);
             }
-            return home;
         }
 
-        int num_dc_workers;
-        vector<Host> dc_servers;
-        std::vector<DCFragment *> fragments;
-        static NovaDCConfig *dc_config;
+        std::mutex m;
+        std::map<std::thread::id, pid_t> threads;
+        static NovaConfig *config;
     };
 
     uint64_t nrdma_buf_cc();
-
-    uint64_t nrdma_buf_dc();
 
     uint64_t nrdma_buf_unit();
 }

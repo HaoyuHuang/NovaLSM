@@ -14,6 +14,31 @@
 
 namespace leveldb {
 
+    std::string FileMetaData::DebugString() const {
+        std::string r;
+        r.append("[");
+        r.append(smallest.DebugString());
+        r.append(",");
+        r.append(largest.DebugString());
+        r.append("]");
+        r.append(" fn:");
+        AppendNumberTo(&r, number);
+        r.append(" fs:");
+        AppendNumberTo(&r, file_size);
+        r.append(" mid:");
+        AppendNumberTo(&r, memtable_id);
+        r.append(" time:");
+        AppendNumberTo(&r, flush_timestamp);
+        r.append(" meta:");
+        r.append(meta_block_handle.DebugString());
+        r.append(" data:");
+        for (auto& data : data_block_group_handles) {
+            r.append(data.DebugString());
+            r.append(" ");
+        }
+        return r;
+    }
+
     uint32_t
     EncodeFileMetaData(const FileMetaData &meta, char *buf, uint32_t buf_size) {
         char *tmp = buf;
@@ -40,7 +65,6 @@ namespace leveldb {
         used_size += smallest.size();
         memcpy(tmp + used_size, largest.data(), largest.size());
         used_size += largest.size();
-
 
 
         RDMA_ASSERT(used_size < buf_size);

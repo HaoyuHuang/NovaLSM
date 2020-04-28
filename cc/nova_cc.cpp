@@ -29,9 +29,10 @@ namespace leveldb {
                                  CCClient *cc_client,
                                  const std::string &dbname,
                                  uint64_t thread_id,
-                                 uint64_t file_size, unsigned int *rand_seed)
+                                 uint64_t file_size, unsigned int *rand_seed,
+                                 std::string &filename)
             : env_(env), options_(options), file_number_(file_number),
-              fname_(TableFileName(dbname, file_number)),
+              fname_(filename),
               mem_manager_(mem_manager),
               cc_client_(cc_client),
               dbname_(dbname), thread_id_(thread_id),
@@ -98,7 +99,8 @@ namespace leveldb {
         return Status::OK();
     }
 
-    Status NovaCCMemFile::SyncAppend(const leveldb::Slice &data) {
+    Status
+    NovaCCMemFile::SyncAppend(const leveldb::Slice &data, uint32_t stoc_id) {
         char *buf = backing_mem_ + used_size_;
         RDMA_ASSERT(used_size_ + data.size() < allocated_size_)
             << fmt::format(
@@ -108,13 +110,16 @@ namespace leveldb {
 
         uint32_t rtable_id;
         auto client = reinterpret_cast<NovaBlockCCClient *> (cc_client_);
-        uint32_t req_id = client->InitiateRTableWriteDataBlocks(0, 0,
+        uint32_t req_id = client->InitiateRTableWriteDataBlocks(stoc_id, 0,
                                                                 &rtable_id, buf,
                                                                 dbname_, 0,
                                                                 data.size(),
                                                                 false);
         client->Wait();
+        CCResponse response;
+        RDMA_ASSERT(client->IsDone(req_id, &response, nullptr));
         used_size_ += data.size();
+        return Status::OK();
     }
 
     Status NovaCCMemFile::Append(const leveldb::Slice &data) {
@@ -173,7 +178,7 @@ namespace leveldb {
                                  footer.index_handle().offset());
         // 4 KB 250 = 1 MB
         int min_num_data_blocks_in_group = num_data_blocks_ /
-                                           nova::NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks;
+                                           nova::NovaConfig::config->num_rtable_num_servers_scatter_data_blocks;
 //        if (num_data_blocks_ <= 250) {
 //            min_num_data_blocks_in_group = num_data_blocks_;
 //        }
@@ -207,42 +212,42 @@ namespace leveldb {
         if (nova::NovaConfig::config->scatter_policy ==
             nova::ScatterPolicy::POWER_OF_TWO) {
             uint32_t start_dc_id = rand_r(rand_seed_) %
-                                   nova::NovaCCConfig::cc_config->dc_servers.size();
+                                   nova::NovaConfig::config->dc_servers.size();
             for (int i = 0; i < 2; i++) {
                 dc_ids.push_back(start_dc_id);
                 start_dc_id = (start_dc_id + 1) %
-                              nova::NovaCCConfig::cc_config->dc_servers.size();
+                              nova::NovaConfig::config->dc_servers.size();
             }
         } else if (nova::NovaConfig::config->scatter_policy ==
                    nova::ScatterPolicy::POWER_OF_THREE) {
             uint32_t start_dc_id = rand_r(rand_seed_) %
-                                   nova::NovaCCConfig::cc_config->dc_servers.size();
+                                   nova::NovaConfig::config->dc_servers.size();
             for (int i = 0; i < 3; i++) {
                 dc_ids.push_back(start_dc_id);
                 start_dc_id = (start_dc_id + 1) %
-                              nova::NovaCCConfig::cc_config->dc_servers.size();
+                              nova::NovaConfig::config->dc_servers.size();
             }
         } else if (nova::NovaConfig::config->scatter_policy ==
                    nova::ScatterPolicy::SCATTER_DC_STATS) {
             for (int i = 0;
-                 i < nova::NovaCCConfig::cc_config->dc_servers.size(); i++) {
+                 i < nova::NovaConfig::config->dc_servers.size(); i++) {
                 dc_ids.push_back(i);
             }
         } else {
             // Random.
             uint32_t start_dc_id = rand_r(rand_seed_) %
-                                   nova::NovaCCConfig::cc_config->dc_servers.size();
+                                   nova::NovaConfig::config->dc_servers.size();
             for (int i = 0; i < nblocks_in_group_.size(); i++) {
-                scatter_dcs[i] = nova::NovaCCConfig::cc_config->dc_servers[start_dc_id].server_id;
+                scatter_dcs[i] = nova::NovaConfig::config->dc_servers[start_dc_id].server_id;
                 start_dc_id = (start_dc_id + 1) %
-                              nova::NovaCCConfig::cc_config->dc_servers.size();
+                              nova::NovaConfig::config->dc_servers.size();
             }
         }
 
         if (!dc_ids.empty()) {
             for (int i = 0;
                  i < dc_ids.size(); i++) {
-                uint32_t server_id = nova::NovaCCConfig::cc_config->dc_servers[dc_ids[i]].server_id;
+                uint32_t server_id = nova::NovaConfig::config->dc_servers[dc_ids[i]].server_id;
                 uint32_t req_id = client->InitiateReadDCStats(server_id);
                 DCStatsStatus status;
                 status.remote_dc_id = server_id;
@@ -499,8 +504,8 @@ namespace leveldb {
 
         if (PERSIST_META_BLOCKS_TO_RTABLE) {
             uint32_t dc_id = rand_r(rand_seed_) %
-                             nova::NovaCCConfig::cc_config->dc_servers.size();
-            dc_id = nova::NovaCCConfig::cc_config->dc_servers[dc_id].server_id;
+                             nova::NovaConfig::config->dc_servers.size();
+            dc_id = nova::NovaConfig::config->dc_servers[dc_id].server_id;
             uint32_t req_id = client->InitiateRTableWriteDataBlocks(dc_id,
                                                                     thread_id_,
                                                                     nullptr,
@@ -578,12 +583,17 @@ namespace leveldb {
             const leveldb::FileMetaData &meta, leveldb::CCClient *dc_client,
             leveldb::MemManager *mem_manager,
             uint64_t thread_id,
-            bool prefetch_all) : env_(env), dbname_(dbname),
-                                 file_number_(file_number),
-                                 meta_(meta),
-                                 mem_manager_(mem_manager),
-                                 thread_id_(thread_id),
-                                 prefetch_all_(prefetch_all) {
+            bool prefetch_all, std::string &filename) : env_(env),
+                                                        dbname_(dbname),
+                                                        file_number_(
+                                                                file_number),
+                                                        meta_(meta),
+                                                        mem_manager_(
+                                                                mem_manager),
+                                                        thread_id_(thread_id),
+                                                        prefetch_all_(
+                                                                prefetch_all),
+                                                        filename(filename) {
 //        prefetch_all_ = false;
         RDMA_ASSERT(mem_manager_);
 

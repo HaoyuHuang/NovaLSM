@@ -603,7 +603,7 @@ namespace leveldb {
                                       const EnvFileMetadata &metadata,
                                       ReadWriteFile **result) {
         int fd = ::open(filename.c_str(),
-                        O_TRUNC | O_RDWR | O_CREAT | kOpenBaseFlags,
+                        O_RDWR | O_CREAT | kOpenBaseFlags,
                         0644);
         if (fd < 0) {
             *result = nullptr;

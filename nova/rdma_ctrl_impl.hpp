@@ -1,6 +1,7 @@
 #include <pthread.h>
 #include <map>
 #include <mutex>
+#include <fmt/core.h>
 #include "qp.hpp"
 #include "common.hpp"
 
@@ -201,6 +202,28 @@ namespace rdmaio {
                 }
             };
             return res;
+        }
+
+        RCQP *destroy_rc_qp(QPIdx idx) {
+            SCS s;
+            uint64_t qid = get_rc_key(idx);
+            RDMA_ASSERT(qps_.find(qid) != qps_.end());
+            RCQP *res = dynamic_cast<RCQP *>(qps_[qid]);
+
+            RDMA_ASSERT(ibv_destroy_qp(res->qp_) == 0)
+                << fmt::format("destroy qp {}-{}-{} failed {}", idx.node_id,
+                               idx.worker_id, idx.index, strerror(errno));
+
+            RDMA_ASSERT(ibv_destroy_cq(res->cq_) == 0)
+                << fmt::format("destroy scq qp {}-{}-{} failed {}",
+                               idx.node_id,
+                               idx.worker_id, idx.index, strerror(errno));
+            RDMA_ASSERT(ibv_destroy_cq(res->recv_cq_) == 0)
+                << fmt::format("destroy rcq qp {}-{}-{} failed {}",
+                               idx.node_id,
+                               idx.worker_id, idx.index, strerror(errno));
+            delete res;
+            qps_.erase(qid);
         }
 
         UDQP *create_ud_qp(QPIdx idx, RNicHandler *dev, MemoryAttr *attr) {
@@ -605,6 +628,11 @@ namespace rdmaio {
     RCQP *RdmaCtrl::create_rc_qp(QPIdx idx, RNicHandler *dev, MemoryAttr *attr,
                                  ibv_cq *cq, ibv_cq *recv_cq) {
         return impl_->create_rc_qp(idx, dev, attr, IBV_QPT_RC, cq, recv_cq);
+    }
+
+    inline __attribute__ ((always_inline))
+    void RdmaCtrl::destroy_rc_qp(QPIdx idx) {
+        impl_->destroy_rc_qp(idx);
     }
 
     inline __attribute__ ((always_inline))

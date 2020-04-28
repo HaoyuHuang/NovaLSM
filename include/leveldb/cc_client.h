@@ -59,7 +59,9 @@ namespace leveldb {
         CC_DC_READ_STATS_RESPONSE = 's',
         CC_REPLICATE_LOG_RECORDS = 'v',
         CC_QUERY_LOG_FILES = 'w',
-        CC_QUERY_LOG_FILES_RESPONSE = 'w',
+        CC_QUERY_LOG_FILES_RESPONSE = 'x',
+        CC_FILENAME_RTABLEID = 'y',
+        CC_FILENAME_RTABLEID_RESPONSE = 'z',
     };
 
     struct CCRequestContext {
@@ -109,6 +111,7 @@ namespace leveldb {
         RDMA_ASYNC_READ_DC_STATS = 'f',
         RDMA_ASYNC_REQ_QUERY_LOG_FILES = 'g',
         RDMA_ASYNC_READ_LOG_FILE = 'h',
+        RDMA_ASYNC_FILENAME_RTABLE_MAPPING = 'i',
     };
 
     struct LevelDBLogRecord {
@@ -147,13 +150,20 @@ namespace leveldb {
 
         WriteState *replicate_log_record_states = nullptr;
         std::map<std::string, uint64_t> *logfile_offset = nullptr;
+
+        std::map<std::string, uint32_t> fn_rtableid;
+
         CCResponse *response = nullptr;
     };
 
 
-
     class LEVELDB_EXPORT CCClient {
     public:
+
+        virtual uint32_t
+        InitiateFileNameRTableMapping(uint32_t stoc_id,
+                                      const std::map<std::string, uint32_t> &fn_rtableid) = 0;
+
         virtual uint32_t
         InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
                                     uint64_t offset, uint32_t size,
@@ -161,9 +171,9 @@ namespace leveldb {
                                     std::string filename) = 0;
 
         virtual uint32_t InitiateQueryLogFile(
-                uint32_t storage_server_id,uint32_t server_id,
-                                              uint32_t dbid,
-                                              std::map<std::string, uint64_t> *logfile_offset) = 0;
+                uint32_t storage_server_id, uint32_t server_id,
+                uint32_t dbid,
+                std::map<std::string, uint64_t> *logfile_offset) = 0;
 
         virtual uint32_t
         InitiateRTableWriteDataBlocks(uint32_t server_id, uint32_t thread_id,
@@ -187,7 +197,7 @@ namespace leveldb {
                                     uint32_t db_id,
                                     uint32_t memtable_id,
                                     char *rdma_backing_mem,
-                                    const LevelDBLogRecord& log_record,
+                                    const LevelDBLogRecord &log_record,
                                     WriteState *replicate_log_record_states) = 0;
 
 

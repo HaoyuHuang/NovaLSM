@@ -235,7 +235,7 @@ namespace nova {
                 uint32_t ideal_nsstables = stats.nsstables;
                 if (nova::NovaConfig::config->enable_subrange) {
                     ideal_nsstables = stats.nsstables /
-                                      nova::NovaCCConfig::cc_config->num_memtable_partitions;
+                                      nova::NovaConfig::config->num_memtable_partitions;
                     ideal_nsstables = std::max(ideal_nsstables, (uint32_t) 1);
                 }
                 output += std::to_string(ideal_nsstables);
@@ -250,7 +250,7 @@ namespace nova {
                 if (nova::NovaConfig::config->enable_subrange) {
                     ideal_nsstables_since_last_query =
                             stats.new_l0_sstables_since_last_query /
-                            nova::NovaCCConfig::cc_config->num_memtable_partitions;
+                            nova::NovaConfig::config->num_memtable_partitions;
                     ideal_nsstables_since_last_query = std::max(
                             ideal_nsstables_since_last_query, (uint32_t) 1);
                 }

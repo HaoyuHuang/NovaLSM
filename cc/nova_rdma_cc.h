@@ -36,6 +36,8 @@ namespace nova {
                 rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager), dbs_(dbs) {
             stat_tasks_ = 0;
             sem_init(&sem_, 0, 0);
+            should_pause = false;
+            paused = false;
         }
 
         bool IsInitialized();
@@ -64,8 +66,8 @@ namespace nova {
         }
 
         std::atomic_bool should_pause;
+        std::atomic_bool paused;
         sem_t sem_;
-
     private:
         int ProcessQueue();
 

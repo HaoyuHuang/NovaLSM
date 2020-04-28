@@ -64,6 +64,10 @@ namespace nova {
             ctx.response = task.response;
             bool failed = false;
             switch (task.type) {
+                case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_FILENAME_RTABLE_MAPPING:
+                    ctx.req_id = cc_client_->InitiateFileNameRTableMapping(
+                            task.server_id, task.fn_rtableid);
+                    break;
                 case leveldb::RDMAAsyncRequestType::RDMA_ASYNC_READ_LOG_FILE:
                     ctx.req_id = cc_client_->InitiateReadInMemoryLogFile(
                             task.rdma_log_record_backing_mem, task.server_id,
@@ -156,7 +160,10 @@ namespace nova {
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
             if (should_pause) {
+                paused = true;
                 sem_wait(&sem_);
+                paused = false;
+                should_pause = false;
             }
 
             if (should_sleep) {

@@ -137,7 +137,8 @@ namespace nova {
         GET_INDEX = 'i',
         EXISTS = 'h',
         MISS = 'm',
-        FORCE_GET = 'G'
+        FORCE_GET = 'G',
+        REINITIALIZE_QP = 'a',
     };
 
     static RequestType char_to_req_type(char c) {

@@ -12,7 +12,6 @@
 #include "leveldb/db_types.h"
 #include "nova/nova_rdma_rc_store.h"
 #include "mc/nova_mem_manager.h"
-#include "dc/nova_dc.h"
 #include "log/nova_in_memory_log_manager.h"
 #include "nova_rtable.h"
 

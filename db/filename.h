@@ -76,6 +76,9 @@ namespace leveldb {
     bool ParseFileName(const std::string &filename, uint64_t *number,
                        FileType *type);
 
+    bool ParseFileName(const std::string &filename,
+                       FileType *type);
+
 // Make the CURRENT file point to the descriptor file with the
 // specified number.
     Status SetCurrentFile(Env *env, const std::string &dbname,

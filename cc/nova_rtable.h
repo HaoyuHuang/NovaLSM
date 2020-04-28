@@ -22,7 +22,7 @@ namespace leveldb {
                    MemManager *mem_manager,
                    uint32_t thread_id, uint32_t rtable_size);
 
-        Status Read(uint64_t offset, uint32_t size, char *scratch);
+        Status Read(uint64_t offset, uint32_t size, char *scratch, Slice *result);
 
         uint64_t Persist();
 
@@ -38,6 +38,8 @@ namespace leveldb {
         uint32_t rtable_id() {
             return rtable_id_;
         }
+
+        void ForceSeal();
 
     private:
 
@@ -107,9 +109,11 @@ namespace leveldb {
         NovaRTable *CreateNewRTable(uint32_t thread_id);
 
         void ReadDataBlock(const RTableHandle &rtable_handle, uint64_t offset,
-                           uint32_t size, char *scratch);
+                           uint32_t size, char *scratch, Slice *result);
 
         NovaRTable *OpenRTable(uint32_t thread_id, std::string& filename);
+
+        void OpenRTables(std::map<std::string, uint32_t>& fn_rtables);
 
     private:
         Env *env_ = nullptr;

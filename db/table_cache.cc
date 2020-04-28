@@ -83,12 +83,15 @@ namespace leveldb {
             if (caller == AccessCaller::kCompaction) {
                 prefetch_all = true;
             }
+            std::string filename = TableFileName(dbname_, file_number, false);
             file = new NovaCCRandomAccessFile(env_, dbname_, file_number, meta,
                                               options.dc_client,
                                               options.mem_manager,
                                               options.thread_id,
-                                              prefetch_all);
-            s = Table::Open(options_, options, file, file_size, level, file_number,
+                                              prefetch_all,
+                                              filename);
+            s = Table::Open(options_, options, file, file_size, level,
+                            file_number,
                             &table, db_profiler_);
             RDMA_ASSERT(s.ok()) << s.ToString();
 

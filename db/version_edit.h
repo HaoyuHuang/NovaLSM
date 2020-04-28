@@ -15,6 +15,16 @@ namespace leveldb {
 
     class VersionSet;
 
+    struct VersionSubRange {
+        uint32_t subrange_id;
+        Slice lower;
+        Slice upper;
+        bool lower_inclusive;
+        bool upper_inclusive;
+
+        std::string DebugString() const;
+    };
+
     class VersionEdit {
     public:
         VersionEdit() { Clear(); }
@@ -40,6 +50,18 @@ namespace leveldb {
 
         void SetCompactPointer(int level, const InternalKey &key) {
             compact_pointers_.emplace_back(std::make_pair(level, key));
+        }
+
+        void UpdateSubRange(uint32_t subrange_id, Slice lower, Slice upper,
+                            bool lower_inclusive,
+                            bool upper_inclusive) {
+            VersionSubRange sr = {};
+            sr.subrange_id = subrange_id;
+            sr.lower = lower;
+            sr.upper = upper;
+            sr.lower_inclusive = lower_inclusive;
+            sr.upper_inclusive = upper_inclusive;
+            new_subranges_.push_back(sr);
         }
 
         // Add the specified file at the specified number.
@@ -94,6 +116,9 @@ namespace leveldb {
         std::vector<std::pair<int, InternalKey>> compact_pointers_;
         std::vector<std::pair<int, DeletedFileIdentifier>> deleted_files_;
         std::vector<std::pair<int, FileMetaData>> new_files_;
+
+        std::vector<VersionSubRange> new_subranges_;
+
     };
 
 }  // namespace leveldb

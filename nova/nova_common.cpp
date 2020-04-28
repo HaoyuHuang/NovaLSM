@@ -150,7 +150,8 @@ namespace nova {
     }
 
     bool IsRDMAWRITEComplete(char *ptr, uint32_t size) {
-        return ptr[size - 1] != 0;
+        return true;
+//        return ptr[size - 1] != 0;
     }
 
     uint32_t str_to_int(const char *str, uint64_t *out, uint32_t nkey) {

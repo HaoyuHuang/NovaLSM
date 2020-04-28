@@ -31,7 +31,7 @@ namespace leveldb {
     }
 
     std::string TableFileName(const std::string &dbname, uint64_t number) {
-        assert(number > 0);
+//        assert(number > 0);
         return MakeFileName(dbname, number, "ldb");
     }
 
@@ -50,7 +50,6 @@ namespace leveldb {
     }
 
     std::string DescriptorFileName(const std::string &dbname, uint64_t number) {
-        assert(number > 0);
         char buf[100];
         snprintf(buf, sizeof(buf), "/MANIFEST-%06llu",
                  static_cast<unsigned long long>(number));
@@ -119,7 +118,7 @@ namespace leveldb {
             Slice suffix = rest;
             if (suffix == Slice(".log")) {
                 *type = kLogFile;
-            } else if (suffix == Slice(".sst") || suffix == Slice(".ldb")) {
+            } else if (suffix == Slice(".sst") || suffix == Slice(".ldb")|| suffix == Slice(".ldb-meta") ) {
                 *type = kTableFile;
             } else if (suffix == Slice(".dbtmp")) {
                 *type = kTempFile;
@@ -127,6 +126,30 @@ namespace leveldb {
                 return false;
             }
             *number = num;
+        }
+        return true;
+    }
+
+    bool ParseFileName(const std::string &filename,
+                       FileType *type) {
+        if (filename.rfind("CURRENT") != std::string::npos) {
+            *type = kCurrentFile;
+        } else if (filename.rfind("LOCK") != std::string::npos) {
+            *type = kDBLockFile;
+        } else if (filename.rfind("LOG") != std::string::npos) {
+            *type = kInfoLogFile;
+        } else if (filename.rfind("MANIFEST") != std::string::npos) {
+            *type = kDescriptorFile;
+        } else {
+            if (filename.rfind("log") != std::string::npos) {
+                *type = kLogFile;
+            } else if (filename.rfind("ldb") != std::string::npos) {
+                *type = kTableFile;
+            } else if (filename.rfind("tmp") != std::string::npos) {
+                *type = kTempFile;
+            } else {
+                return false;
+            }
         }
         return true;
     }

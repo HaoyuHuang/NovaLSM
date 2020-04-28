@@ -182,7 +182,7 @@ namespace nova {
 
         leveldb::Slice key(buf, nkey);
 
-        CCFragment *frag = NovaCCConfig::home_fragment(hv);
+        CCFragment *frag = NovaConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
         std::string value;
         leveldb::ReadOptions read_options;
@@ -211,6 +211,42 @@ namespace nova {
     }
 
     bool
+    process_reintialize_qps(int fd, Connection *conn) {
+        NovaCCConnWorker *worker = (NovaCCConnWorker *) conn->worker;
+
+        for (int i = 0; i < worker->rdma_threads.size(); i++) {
+            auto *thread = reinterpret_cast<NovaRDMAComputeComponent *>(worker->rdma_threads[i]);
+            thread->should_pause = true;
+        }
+
+        // Wait until all rdma threads are paused.
+        bool wait = true;
+        while (wait) {
+            wait = false;
+            for (int i = 0; i < worker->rdma_threads.size(); i++) {
+                auto *thread = reinterpret_cast<NovaRDMAComputeComponent *>(worker->rdma_threads[i]);
+                if (!thread->paused) {
+                    wait = true;
+                    break;
+                }
+            }
+        }
+
+        for (int i = 0; i < worker->rdma_threads.size(); i++) {
+            auto *thread = reinterpret_cast<NovaRDMAComputeComponent *>(worker->rdma_threads[i]);
+            auto *broker = reinterpret_cast<NovaRDMARCStore *> (thread->rdma_store_);
+            broker->ReinitializeQPs(worker->ctrl_);
+        }
+
+        char *response_buf = conn->buf;
+        int nlen = 1;
+        int len = int_to_str(response_buf, nlen);
+        conn->response_buf = conn->buf;
+        conn->response_size = len + nlen;
+        return true;
+    }
+
+    bool
     process_socket_range(int fd, Connection *conn) {
         // Stats.
         NovaCCConnWorker *worker = (NovaCCConnWorker *) conn->worker;
@@ -233,7 +269,7 @@ namespace nova {
 //                        << fd << " key:" << skey << " nkey:" << nkey
 //                        << " nrecords: " << nrecords;
         uint64_t hv = keyhash(startkey, nkey);
-        CCFragment *frag = NovaCCConfig::home_fragment(hv);
+        CCFragment *frag = NovaConfig::home_fragment(hv);
         leveldb::Iterator *iterator = worker->dbs_[frag->dbid]->NewIterator(
                 leveldb::ReadOptions());
         iterator->Seek(startkey);
@@ -309,12 +345,13 @@ namespace nova {
         option.thread_id = worker->thread_id_;
         option.rand_seed = &worker->rand_seed;
         option.hash = key;
-        option.total_writes = total_writes.fetch_add(1, std::memory_order_relaxed) + 1;
+        option.total_writes =
+                total_writes.fetch_add(1, std::memory_order_relaxed) + 1;
         option.replicate_log_record_states = worker->replicate_log_record_states;
         option.rdma_backing_mem = worker->rdma_backing_mem;
 
 //        worker->stats.nputs * NovaCCConfig::cc_config->num_conn_workers;//
-        CCFragment *frag = NovaCCConfig::home_fragment(hv);
+        CCFragment *frag = NovaConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
         RDMA_ASSERT(db);
 
@@ -368,6 +405,9 @@ namespace nova {
         }
         if (buf[0] == RequestType::PUT) {
             return process_socket_put(fd, conn);
+        }
+        if (buf[0] == RequestType::REINITIALIZE_QP) {
+            return process_reintialize_qps(fd, conn);
         }
 //        if (buf[0] == RequestType::DELETE_LOG_FILE) {
 //            return process_socket_delete_log_file(fd, conn);
@@ -502,7 +542,7 @@ namespace nova {
         store->nconns += store->conn_queue.size();
         if (store->conn_queue.size() != 0) {
             RDMA_LOG(DEBUG) << "memstore[" << store->thread_id_ << "]: conns "
-                           << store->nconns;
+                            << store->nconns;
         }
         for (int i = 0; i < store->conn_queue.size(); i++) {
             int client_fd = store->conn_queue[i];
@@ -552,7 +592,7 @@ namespace nova {
             exit(1);
         }
         RDMA_LOG(DEBUG) << "Using Libevent with backend method "
-                       << event_base_get_method(base);
+                        << event_base_get_method(base);
         const int f = event_base_get_features(base);
         if ((f & EV_FEATURE_ET)) {
             RDMA_LOG(DEBUG) << "Edge-triggered events are supported.";
@@ -560,7 +600,7 @@ namespace nova {
 
         if ((f & EV_FEATURE_O1)) {
             RDMA_LOG(DEBUG) <<
-                           "O(1) event notification is supported.";
+                            "O(1) event notification is supported.";
         }
 
         if ((f & EV_FEATURE_FDS)) {

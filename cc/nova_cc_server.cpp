@@ -28,7 +28,8 @@ namespace nova {
     NovaCCServer::NovaCCServer(rdmaio::RdmaCtrl *rdma_ctrl,
                                NovaMemManager *mem_manager,
                                leveldb::NovaRTableManager *rtable_manager,
-                               InMemoryLogFileManager *log_manager, uint32_t thread_id,
+                               InMemoryLogFileManager *log_manager,
+                               uint32_t thread_id,
                                bool is_compaction_thread)
             : rdma_ctrl_(rdma_ctrl),
               mem_manager_(mem_manager),
@@ -159,8 +160,6 @@ namespace nova {
                         leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
                         if (IsRDMAWRITEComplete((char *) context.rtable_offset,
                                                 context.size)) {
-//                            RDMA_ASSERT(buf[0] == '~');
-
                             rtable_manager_->rtable(
                                     context.rtable_id)->MarkOffsetAsWritten(
                                     context.rtable_offset);
@@ -240,6 +239,12 @@ namespace nova {
                     msg_size += 8;
                     std::string filename;
                     leveldb::DecodeStr(buf + msg_size, &filename);
+                    RDMA_LOG(DEBUG) << fmt::format(
+                                "dc{}: Read blocks of RTable {} offset:{} size:{} cc_mr_offset:{} file:{}",
+                                thread_id_, rtable_id, offset, size,
+                                cc_mr_offset,
+                                filename);
+
                     if (!filename.empty()) {
                         rtable_id = rtable_manager_->OpenRTable(thread_id_,
                                                                 filename)->rtable_id();
@@ -265,12 +270,6 @@ namespace nova {
                     task.rtable_handle.size = size;
 
                     AddAsyncTask(task);
-
-                    RDMA_LOG(DEBUG) << fmt::format(
-                                "dc{}: Read blocks of RTable {} offset:{} size:{} cc_mr_offset:{} last:{}",
-                                thread_id_, rtable_id, offset, size,
-                                cc_mr_offset,
-                                rdma_buf[task.rtable_handle.size - 1]);
                     processed = true;
                 } else if (buf[0] ==
                            leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
@@ -332,8 +331,7 @@ namespace nova {
                     context.request_type = leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE;
                     context.rtable_id = rtatble->rtable_id();
                     context.rtable_offset = rtable_off;
-                    context.sstable_id = leveldb::TableFileName(dbname,
-                                                                file_number);
+                    context.sstable_id = filename;
                     context.is_meta_blocks = is_meta_blocks;
                     context.size = size;
                     request_context_map_[req_id] = context;
@@ -371,8 +369,6 @@ namespace nova {
                     std::map<std::string, uint64_t> logfile_offset;
                     log_manager_->QueryLogFiles(server_id, dbid,
                                                 &logfile_offset);
-
-
                     uint32_t msg_size = 0;
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     send_buf[msg_size] = leveldb::CCRequestType::CC_QUERY_LOG_FILES_RESPONSE;
@@ -396,6 +392,31 @@ namespace nova {
                                 "dc[{}]: Delete log buffer for file {}.",
                                 thread_id_, log_file);
                     processed = true;
+                } else if (buf[0] == leveldb::CCRequestType::CC_FILENAME_RTABLEID) {
+                    uint32 read_size = 1;
+                    uint32_t nfiles = leveldb::DecodeFixed32(buf + read_size);
+                    read_size += 4;
+                    std::map<std::string, uint32_t> fn_rtable;
+
+                    for (int i = 0; i < nfiles; i++) {
+                        std::string fn;
+                        read_size += leveldb::DecodeStr(buf + read_size, &fn);
+                        uint32_t rtableid = leveldb::DecodeFixed32(buf + read_size);
+                        read_size += 4;
+                        fn_rtable[fn] = rtableid;
+                    }
+                    rtable_manager_->OpenRTables(fn_rtable);
+
+
+                    char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
+                    send_buf[0] = leveldb::CCRequestType::CC_FILENAME_RTABLEID_RESPONSE;
+                    rdma_store_->PostSend(send_buf, 1, remote_server_id,
+                                          dc_req_id);
+                    RDMA_LOG(DEBUG) << fmt::format(
+                                "dc[{}]: Filename rtable mapping {}.",
+                                thread_id_, fn_rtable.size());
+                    processed = true;
+
                 }
                 break;
         }
@@ -417,10 +438,6 @@ namespace nova {
             const nova::NovaServerAsyncTask &task) {
         mutex_.lock();
         stat_tasks_ += 1;
-        if (task.request_type ==
-            leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS) {
-
-        }
         queue_.push_back(task);
         mutex_.unlock();
 
@@ -463,14 +480,22 @@ namespace nova {
 
                 if (task.request_type ==
                     leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS) {
+                    leveldb::Slice result;
                     rtable_manager_->ReadDataBlock(task.rtable_handle,
                                                    task.rtable_handle.offset,
                                                    task.rtable_handle.size,
-                                                   task.rdma_buf);
+                                                   task.rdma_buf, &result);
+                    if (result.size() < task.rtable_handle.size) {
+                        // Mark the data has been written.
+                        task.rdma_buf[task.rtable_handle.size - 1] = 1;
+                    }
+                    task.rtable_handle.size = result.size();
+                    RDMA_ASSERT(result.size() <= task.rtable_handle.size);
                     stat_read_bytes_ += task.rtable_handle.size;
                 } else if (task.request_type ==
                            leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
                     RDMA_ASSERT(task.persist_pairs.size() == 1);
+                    leveldb::FileType type = leveldb::FileType::kCurrentFile;
                     for (auto &pair : task.persist_pairs) {
                         leveldb::NovaRTable *rtable = rtable_manager_->rtable(
                                 pair.rtable_id);
@@ -488,6 +513,13 @@ namespace nova {
                         rh.offset = h.offset();
                         rh.size = h.size();
                         ct.rtable_handles.push_back(rh);
+
+                        RDMA_ASSERT(leveldb::ParseFileName(pair.sstable_id,
+                                                           &type));
+                        if (task.is_meta_blocks ||
+                            type == leveldb::FileType::kTableFile) {
+                            rtable->ForceSeal();
+                        }
                     }
                 } else {
                     RDMA_ASSERT(false);

@@ -419,25 +419,135 @@ namespace leveldb {
         timeval start = {};
         gettimeofday(&start, nullptr);
 
-        uint32_t stoc_id =
-                dbid_ % nova::NovaCCConfig::cc_config->dc_servers.size();
+        uint32_t stoc_id = options_.manifest_stoc_id;
         std::string manifest = DescriptorFileName(dbname_, 0);
         auto client = reinterpret_cast<NovaBlockCCClient *> (options_.dc_client);
         uint32_t scid = options_.mem_manager->slabclassid(0,
                                                           options_.max_file_size);
         char *buf = options_.mem_manager->ItemAlloc(0, scid);
-        client->InitiateRTableReadDataBlock({}, stoc_id, options_.max_file_size,
+        RTableHandle handle = {};
+        handle.server_id = stoc_id;
+        handle.rtable_id = 0;
+        handle.offset = 0;
+        handle.size = options_.max_file_size;
+
+        RDMA_LOG(rdmaio::INFO) << fmt::format(
+                    "Recover the latest verion from manifest file {} at StoC-{}",
+                    manifest, stoc_id);
+
+        client->InitiateRTableReadDataBlock(handle, 0, options_.max_file_size,
                                             buf,
                                             manifest);
         client->Wait();
 
         std::map<std::string, uint64_t> logfile_buf;
-        client->InitiateQueryLogFile(0, nova::NovaConfig::config->my_server_id,
-                                     dbid_, &logfile_buf);
-        client->Wait();
+        nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid_];
+        if (!frag->log_replica_stoc_ids.empty()) {
+            uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[0]].server_id;
+            RDMA_LOG(rdmaio::INFO) << fmt::format(
+                        "Recover the latest memtables from log files at StoC-{}",
+                        stoc_server_id);
+            client->InitiateQueryLogFile(stoc_server_id,
+                                         nova::NovaConfig::config->my_server_id,
+                                         dbid_, &logfile_buf);
+            client->Wait();
+        }
+
+        for (auto &it : logfile_buf) {
+            RDMA_LOG(rdmaio::INFO)
+                << fmt::format("log file {}:{}", it.first, it.second);
+        }
 
         // Recover log records.
-        RDMA_ASSERT(versions_->Recover(buf).ok());
+        std::vector<VersionSubRange> subrange_edits;
+        RDMA_ASSERT(versions_->Recover(Slice(buf, options_.max_file_size),
+                                       &subrange_edits).ok());
+
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("Recovered Version: {}",
+                           versions_->current()->DebugString());
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("Recovered lsn:{} lfn:{}", versions_->last_sequence_,
+                           versions_->NextFileNumber());
+
+        // TODO: Inform all StoCs of the mapping between a file and rtable id.
+        std::vector<FileMetaData *> *files = versions_->current()->files_;
+        std::map<uint32_t, std::map<std::string, uint32_t>> stoc_fn_rtableid;
+        for (int level = 0; level < config::kNumLevels; level++) {
+            for (int i = 0; i < files[level].size(); i++) {
+                auto meta = files[level][i];
+                std::string metafilename = TableFileName(dbname_, meta->number,
+                                                         true);
+                std::string filename = TableFileName(dbname_, meta->number,
+                                                     false);
+                auto meta_handle = meta->meta_block_handle;
+                stoc_fn_rtableid[meta_handle.server_id][metafilename] = meta_handle.rtable_id;
+
+                for (auto& data_block : meta->data_block_group_handles) {
+                    stoc_fn_rtableid[data_block.server_id][filename] = data_block.rtable_id;
+                }
+            }
+        }
+
+        for (auto& mapping : stoc_fn_rtableid) {
+            uint32_t stoc_id = mapping.first;
+            std::map<std::string, uint32_t> &fnrtable = mapping.second;
+            client->InitiateFileNameRTableMapping(stoc_id, fnrtable);
+            client->Wait();
+        }
+
+
+        // TODO: Fetch metadata blocks.
+        for (int level = 0; level < config::kNumLevels; level++) {
+            for (int i = 0; i < files[level].size(); i++) {
+                auto meta = files[level][i];
+                std::string filename = TableFileName(dbname_, meta->number,
+                                                     true);
+                uint32_t scid = options_.mem_manager->slabclassid(0,
+                                                                  meta->meta_block_handle.size);
+                char *buf = options_.mem_manager->ItemAlloc(0, scid);
+                RDMA_LOG(rdmaio::INFO)
+                    << fmt::format("Recover metadata blocks {} handle:{}",
+                                   filename,
+                                   meta->meta_block_handle.DebugString());
+                client->InitiateRTableReadDataBlock(meta->meta_block_handle, 0,
+                                                    meta->meta_block_handle.size,
+                                                    buf, filename);
+                client->Wait();
+
+                WritableFile *writable_file;
+                EnvFileMetadata env_meta = {};
+                Status s = env_->NewWritableFile(filename, env_meta,
+                                                 &writable_file);
+                RDMA_ASSERT(s.ok());
+                Slice sstable_rtable(buf,
+                                     meta->meta_block_handle.size);
+                s = writable_file->Append(sstable_rtable);
+                RDMA_ASSERT(s.ok());
+                s = writable_file->Flush();
+                RDMA_ASSERT(s.ok());
+                s = writable_file->Sync();
+                RDMA_ASSERT(s.ok());
+                s = writable_file->Close();
+                RDMA_ASSERT(s.ok());
+                delete writable_file;
+                writable_file = nullptr;
+
+                options_.mem_manager->FreeItem(0, buf, scid);
+            }
+        }
+
+        SubRanges *srs = latest_subranges_;
+        srs->subranges.resize(subrange_edits.size());
+        for (const auto &edit : subrange_edits) {
+            srs->subranges[edit.subrange_id].lower = SubRange::Copy(edit.lower);
+            srs->subranges[edit.subrange_id].upper = SubRange::Copy(edit.upper);
+            srs->subranges[edit.subrange_id].lower_inclusive = edit.lower_inclusive;
+            srs->subranges[edit.subrange_id].upper_inclusive = edit.upper_inclusive;
+        }
+        srs->AssertSubrangeBoundary(user_comparator_);
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("Recovered Subranges: {}", srs->DebugString());
 
         for (const auto &logfile : logfile_buf) {
             uint32_t index = logfile.first.find_last_of('-');
@@ -447,8 +557,10 @@ namespace leveldb {
         }
         options_.mem_manager->FreeItem(0, buf, scid);
 
-        uint32_t recovered_log_records;
+        uint32_t recovered_log_records = 0;
         timeval rdma_read_complete;
+        gettimeofday(&rdma_read_complete, nullptr);
+
         RDMA_ASSERT(RecoverLogFile(logfile_buf, &recovered_log_records,
                                    &rdma_read_complete).ok());
         timeval end = {};
@@ -461,12 +573,17 @@ namespace leveldb {
                            time_diff(start, rdma_read_complete),
                            time_diff(rdma_read_complete, end),
                            time_diff(start, end));
+        return Status::OK();
     }
 
     Status
     DBImpl::RecoverLogFile(const std::map<std::string, uint64_t> &logfile_buf,
                            uint32_t *recovered_log_records,
                            timeval *rdma_read_complete) {
+        if (logfile_buf.empty()) {
+            return Status::OK();
+        }
+
         auto client = reinterpret_cast<NovaBlockCCClient *> (options_.dc_client);
         std::vector<NovaCCRecoveryThread *> recovery_threads;
         uint32_t memtable_per_thread =
@@ -507,8 +624,8 @@ namespace leveldb {
 
         std::vector<char *> rdma_bufs;
         std::vector<uint32_t> reqs;
-        nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid_];
-        uint32_t stoc_server_id = nova::NovaCCConfig::cc_config->dc_servers[frag->log_replica_stoc_ids[0]].server_id;
+        nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid_];
+        uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[0]].server_id;
         for (auto &replica : logfile_buf) {
             uint32_t scid = options_.mem_manager->slabclassid(0,
                                                               options_.max_log_file_size);
@@ -636,7 +753,8 @@ namespace leveldb {
                              meta.data_block_group_handles);
             }
         }
-        versions_->AppendChangesToManifest(&edit, manifest_file_);
+        versions_->AppendChangesToManifest(&edit, manifest_file_,
+                                           options_.manifest_stoc_id);
         Version *v = new Version(versions_,
                                  versions_->version_id_seq_.fetch_add(1));
         mutex_.Lock();
@@ -707,7 +825,10 @@ namespace leveldb {
             }
         }
 
-        versions_->AppendChangesToManifest(&edit, manifest_file_);
+        // Include the latest version.
+        versions_->AppendChangesToManifest(&edit, manifest_file_,
+                                           options_.manifest_stoc_id);
+
         Version *v = new Version(versions_,
                                  versions_->version_id_seq_.fetch_add(1));
         mutex_.Lock();
@@ -725,6 +846,7 @@ namespace leveldb {
                                    imm->meta().number);
         }
 
+        std::vector<uint32_t> closed_memtable_log_files;
         for (auto &it : pid_tasks) {
             // New verion is installed. Then remove it from the immutable memtables.
             MemTablePartition *p = partitioned_active_memtables_[it.first];
@@ -741,7 +863,21 @@ namespace leveldb {
                 p->background_work_finished_signal_.SignalAll();
             }
             number_of_immutable_memtables_.fetch_add(-it.second.size());
+            for (auto &log_file : p->closed_log_files) {
+                closed_memtable_log_files.push_back(log_file);
+            }
+            p->closed_log_files.clear();
             p->mutex.Unlock();
+        }
+
+        // Delete log files.
+        if (nova::NovaConfig::config->log_record_mode ==
+            nova::NovaLogRecordMode::LOG_RDMA) {
+            for (const auto &file : closed_memtable_log_files) {
+                bg_thread->dc_client()->InitiateCloseLogFile(
+                        fmt::format("{}-{}-{}", server_id_, dbid_, file),
+                        dbid_);
+            }
         }
     }
 
@@ -791,6 +927,8 @@ namespace leveldb {
                         dbid_, imm->memtableid());
         }
 
+        versions_->AppendChangesToManifest(&edit, manifest_file_,
+                                           options_.manifest_stoc_id);
         Version *v = new Version(versions_,
                                  versions_->version_id_seq_.fetch_add(1));
         RDMA_ASSERT(v->version_id() < MAX_LIVE_MEMTABLES);
@@ -832,7 +970,7 @@ namespace leveldb {
         options_.memtable_pool->mutex_.lock();
         options_.memtable_pool->num_available_memtables_ += num_available;
         RDMA_ASSERT(options_.memtable_pool->num_available_memtables_ <
-                    nova::NovaCCConfig::cc_config->num_memtables - dbs_.size());
+                    nova::NovaConfig::config->num_memtables - dbs_.size());
         options_.memtable_pool->mutex_.unlock();
 
         if (wakeup_all) {
@@ -1053,13 +1191,6 @@ namespace leveldb {
                 ParsedInternalKey ik;
                 while (it->Valid() && samples < sample_size) {
                     RDMA_ASSERT(ParseInternalKey(it->key(), &ik));
-//                    if (sr.IsSmallerThanLower(ik.user_key, user_comparator_)) {
-//                        continue;
-//                    }
-//                    if (sr.IsGreaterThanUpper(ik.user_key, user_comparator_)) {
-//                        continue;
-//                    }
-
                     uint64_t k = 0;
                     nova::str_to_int(ik.user_key.data(), &k,
                                      ik.user_key.size());
@@ -1147,6 +1278,15 @@ namespace leveldb {
             << fmt::format("major at {} puts with {} keys: {}", total_inserts,
                            userkey_rate.size(), latest->DebugString());
         latest_subranges_.store(latest);
+
+        VersionEdit edit;
+        for (int i = 0; i < subranges.size(); i++) {
+            edit.UpdateSubRange(i, subranges[i].lower, subranges[i].upper,
+                                subranges[i].lower_inclusive,
+                                subranges[i].upper_inclusive);
+        }
+        versions_->AppendChangesToManifest(&edit, manifest_file_,
+                                           options_.manifest_stoc_id);
     }
 
     void DBImpl::PerformSubrangeMinorReorg(int subrange_id,
@@ -1393,6 +1533,20 @@ namespace leveldb {
                         sr.DebugString());
             num_minor_reorgs += 1;
             latest_subranges_.store(latest);
+
+            VersionEdit edit;
+            for (int i = -1; i <= 1; i++) {
+                int sr_id = subrange_id + i;
+                if (sr_id < 0 || sr_id >= subranges.size()) {
+                    continue;
+                }
+                SubRange &sr = subranges[sr_id];
+                edit.UpdateSubRange(sr_id, sr.lower, sr.upper,
+                                    sr.lower_inclusive,
+                                    sr.upper_inclusive);
+            }
+            versions_->AppendChangesToManifest(&edit, manifest_file_,
+                                               options_.manifest_stoc_id);
             return;
         }
 
@@ -1520,7 +1674,8 @@ namespace leveldb {
                 RecordBackgroundError(status);
             }
             CleanupCompaction(compact);
-            c->ReleaseInputs();
+            versions_->versions_[c->input_version_->version_id()].Unref(
+                    dbname_);
             DeleteObsoleteVersions(bg_thread);
             DeleteObsoleteFiles(bg_thread);
             is_major_compaciton_running_ = false;
@@ -1544,15 +1699,10 @@ namespace leveldb {
             // May happen if we get a shutdown call in the middle of compaction
             compact->builder->Abandon();
             delete compact->builder;
-        } else {
-//            assert(compact->outfile == nullptr);
         }
 
         // Also delete its contained mem file.
         // Delete everything now.
-        // TODO:
-
-        // Delete the files.
         for (int i = 0; i < compact->output_files.size(); i++) {
             MemWritableFile *out = compact->output_files[i];
             if (out) {
@@ -1590,6 +1740,7 @@ namespace leveldb {
         }
         // Make the output file
         MemManager *mem_manager = bg_thread->mem_manager();
+        std::string filename = TableFileName(dbname_, file_number);
         NovaCCMemFile *cc_file = new NovaCCMemFile(options_.env,
                                                    options_,
                                                    file_number,
@@ -1598,7 +1749,8 @@ namespace leveldb {
                                                    dbname_,
                                                    bg_thread->thread_id(),
                                                    options_.max_dc_file_size,
-                                                   bg_thread->rand_seed());
+                                                   bg_thread->rand_seed(),
+                                                   filename);
         compact->outfile = new MemWritableFile(cc_file);
         compact->builder = new TableBuilder(options_, compact->outfile);
         compact->output_files.push_back(compact->outfile);
@@ -1646,26 +1798,6 @@ namespace leveldb {
         s = compact->outfile->Close();
 
         mem_file->WaitForPersistingDataBlocks();
-
-        if (s.ok() && current_entries > 0) {
-            // Verify that the table is usable
-//            Iterator *iter =
-//                    table_cache_->NewIterator(AccessCaller::kUncategorized,
-//                                              ReadOptions(), meta,
-//                                              output_number,
-//                                              compact->compaction->level() + 1,
-//                                              current_bytes);
-//            s = iter->status();
-//            delete iter;
-//            if (s.ok()) {
-//                Log(options_.info_log,
-//                    "Generated table #%llu@%d: %lld keys, %lld bytes",
-//                    (unsigned long long) output_number,
-//                    compact->compaction->level(),
-//                    (unsigned long long) current_entries,
-//                    (unsigned long long) current_bytes);
-//            }
-        }
         return s;
     }
 
@@ -1703,12 +1835,16 @@ namespace leveldb {
                                                  out.meta_block_handle,
                                                  out.data_block_group_handles);
         }
+
+        versions_->AppendChangesToManifest(compact->compaction->edit(),
+                                           manifest_file_,
+                                           options_.manifest_stoc_id);
         Version *new_version = new Version(versions_,
                                            versions_->version_id_seq_.fetch_add(
                                                    1));
         mutex_.Lock();
         Log(options_.info_log,
-            "bg[%u]: Compacted %d@%d + %d@%d files => %lld bytes",
+            "bg[%u]: Major Compacted %d@%d + %d@%d files => %lld bytes",
             thread_id,
             compact->compaction->num_input_files(0),
             src_level,
@@ -1723,7 +1859,7 @@ namespace leveldb {
         const uint64_t start_micros = env_->NowMicros();
         int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
 
-        Log(options_.info_log, "bg[%lu] Compacting %d@%d + %d@%d files",
+        Log(options_.info_log, "bg[%lu] Major Compacting %d@%d + %d@%d files",
             bg_thread->thread_id(),
             compact->compaction->num_input_files(0),
             compact->compaction->level(),
@@ -1740,8 +1876,7 @@ namespace leveldb {
 //                           compact->compaction->level() +
 //                           1);
 
-        int src_level = compact->compaction->level() == -1 ? 0
-                                                           : compact->compaction->level();
+        int src_level = compact->compaction->level();
         assert(versions_->NumLevelFiles(src_level) > 0);
         assert(compact->builder == nullptr);
         assert(compact->outfile == nullptr);
@@ -1765,18 +1900,6 @@ namespace leveldb {
         SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
         while (input->Valid() &&
                !shutting_down_.load(std::memory_order_acquire)) {
-            // Prioritize immutable compaction work
-//            if (nimms_ > 0) {
-//                const uint64_t imm_start = env_->NowMicros();
-//                mutex_.Lock();
-//                if (CompactMemTable(bg_thread)) {
-//                    // Wake up MakeRoomForWrite() if necessary.
-//                    background_work_finished_signal_.SignalAll();
-//                }
-//                mutex_.Unlock();
-//                imm_micros += (env_->NowMicros() - imm_start);
-//            }
-
             Slice key = input->key();
             if (compact->compaction->ShouldStopBefore(key) &&
                 compact->builder != nullptr) {
@@ -1919,7 +2042,6 @@ namespace leveldb {
             state->mu->Unlock();
             delete state;
         }
-
     }  // anonymous namespace
 
     Iterator *DBImpl::NewInternalIterator(const ReadOptions &options,
@@ -2119,7 +2241,7 @@ namespace leveldb {
                     (double) (steal_from_range->number_of_active_memtables_ +
                               steal_from_range->number_of_immutable_memtables_)
                     /
-                    (double) nova::NovaCCConfig::cc_config->num_memtables;
+                    (double) nova::NovaConfig::config->num_memtables;
 
             if (steal_from_range->active_memtables_.size() > 1 &&
                 processed_writes_ >=
@@ -2242,8 +2364,6 @@ namespace leveldb {
         if (table_locator_ != nullptr) {
             table_locator_->Insert(key, options.hash, table->memtableid());
         }
-        std::vector<uint32_t> closed_log_files(partition->closed_log_files);
-        partition->closed_log_files.clear();
         partition->mutex.Unlock();
 
         if (schedule_compaction) {
@@ -2252,9 +2372,9 @@ namespace leveldb {
                                     partition_id,
                                     next_imm_slot, options.rand_seed);
         }
-        RDMA_LOG(rdmaio::DEBUG)
-            << fmt::format("#### Put key {} in table {}", key.ToString(),
-                           memtable_id);
+//        RDMA_LOG(rdmaio::DEBUG)
+//            << fmt::format("#### Put key {} in table {}", key.ToString(),
+//                           memtable_id);
         return true;
     }
 
@@ -2321,7 +2441,7 @@ namespace leveldb {
 
         SubRanges *ref = latest_subranges_;
 
-//        ref->AssertSubrangeBoundary(user_comparator_);
+        ref->AssertSubrangeBoundary(user_comparator_);
 
         int subrange_id = -1;
         if (ref->subranges.size() == options_.num_memtable_partitions) {
@@ -2458,9 +2578,9 @@ namespace leveldb {
             }
             RDMA_ASSERT(false);
         }
-        RDMA_LOG(rdmaio::DEBUG)
-            << fmt::format("{} {} {}", key.ToString(), subrange_id,
-                           ref->DebugString());
+//        RDMA_LOG(rdmaio::DEBUG)
+//            << fmt::format("{} {} {}", key.ToString(), subrange_id,
+//                           ref->DebugString());
         range_lock_.Unlock();
         RDMA_ASSERT(subrange_id != -1);
         RDMA_ASSERT(WriteStaticPartition(options, key, val, subrange_id, true,
@@ -2484,7 +2604,7 @@ namespace leveldb {
         int expected_share =
                 round(((double) processed_writes_ /
                        (double) options.total_writes) *
-                      nova::NovaCCConfig::cc_config->num_memtables);
+                      nova::NovaConfig::config->num_memtables);
         int actual_share = 0;
         AtomicMemTable *emptiest_memtable = nullptr;
         uint64_t smallest_size = UINT64_MAX;
@@ -2682,7 +2802,7 @@ namespace leveldb {
                 range_lock_.Unlock();
                 break;
             } else {
-//                if (nova::NovaCCConfig::cc_config->num_memtables >
+//                if (nova::NovaConfig::config->num_memtables >
 //                    2 * dbs_.size()) {
 //                    StealMemTable(options);
 //                }
@@ -2977,8 +3097,6 @@ namespace leveldb {
         // TODO(opt): better implementation
         MutexLock l(&mutex_);
         Version *v = versions_->current();
-//        v->Ref();
-
         for (int i = 0; i < n; i++) {
             // Convert user_key into a corresponding internal key.
             InternalKey k1(range[i].start, kMaxSequenceNumber,
@@ -2989,8 +3107,6 @@ namespace leveldb {
             uint64_t limit = versions_->ApproximateOffsetOf(v, k2);
             sizes[i] = (limit >= start ? limit - start : 0);
         }
-
-        v->Unref();
     }
 
 // Default implementations of convenience methods that subclasses of DB
@@ -3016,11 +3132,14 @@ namespace leveldb {
         if (options.enable_subranges) {
             impl->latest_subranges_.store(new DBImpl::SubRanges);
         }
-        impl->manifest_file_ = new NovaCCMemFile(options.env, options, 0,
+        std::string manifest_file_name = DescriptorFileName(dbname, 0);
+        impl->manifest_file_ = new NovaCCMemFile(options.env, impl->options_, 0,
                                                  options.mem_manager,
-                                                 options.dc_client, dbname, 0,
+                                                 options.dc_client,
+                                                 impl->dbname_, 0,
                                                  options.max_file_size,
-                                                 &impl->rand_seed_);
+                                                 &impl->rand_seed_,
+                                                 manifest_file_name);
 
 
         for (int i = 0; i < MAX_LIVE_MEMTABLES; i++) {

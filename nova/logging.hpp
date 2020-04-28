@@ -43,7 +43,7 @@ namespace rdmaio {
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
 #ifndef RDMA_LOG_LEVEL
-#define RDMA_LOG_LEVEL ::rdmaio::INFO
+#define RDMA_LOG_LEVEL ::rdmaio::DEBUG
 #endif
 
 // logging macro definiations

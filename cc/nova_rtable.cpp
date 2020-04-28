@@ -14,7 +14,9 @@
 
 namespace leveldb {
 
-//    nova::DCStats dc_stats;
+    std::string RTableHandle::DebugString() const {
+        return fmt::format("[{} {} {} {}]", server_id, rtable_id, offset, size);
+    }
 
     void RTableHandle::EncodeHandle(char *buf) const {
         EncodeFixed32(buf, server_id);
@@ -82,7 +84,8 @@ namespace leveldb {
         RDMA_ASSERT(backing_mem_) << "Running out of memory";
     }
 
-    Status NovaRTable::Read(uint64_t offset, uint32_t size, char *scratch) {
+    Status NovaRTable::Read(uint64_t offset, uint32_t size, char *scratch,
+                            Slice *result) {
         mutex_.lock();
         if (backing_mem_ && !diskoff_memoff_.empty()) {
             uint64_t diskoff = offset;
@@ -91,21 +94,12 @@ namespace leveldb {
             if (it->first > diskoff || it == diskoff_memoff_.end()) {
                 it--;
             }
-//            std::string ds;
-//            for (auto its : diskoff_memoff_) {
-//                ds.append(fmt::format("[{},{},{}],", its.first,
-//                                      its.second.offset(), its.second.size()));
-//            }
-
-//            RDMA_ASSERT(it != diskoff_memoff_.begin())
-//                << fmt::format("{} {} {} {} {} {}", offset, size, read_size,
-//                               file_size_, diskoff_memoff_.size(), ds);;
             RDMA_ASSERT(diskoff >= it->first &&
                         diskoff < it->first + it->second.size())
                 << fmt::format("{} {} {} {} {}", offset, size, read_size,
                                file_size_, diskoff_memoff_.size());;
 
-            while (read_size < size) {
+            while (read_size < size && it != diskoff_memoff_.end()) {
                 RDMA_ASSERT(it != diskoff_memoff_.end())
                     << fmt::format("{} {} {} {} {}", offset, size, read_size,
                                    file_size_, diskoff_memoff_.size());
@@ -120,17 +114,16 @@ namespace leveldb {
                 diskoff += ss;
                 it++;
             }
-            RDMA_ASSERT(read_size == size);
+            *result = Slice(scratch, read_size);
             mutex_.unlock();
             return Status::OK();
         }
         mutex_.unlock();
 
-        Slice s;
         RTableHandle h = {};
         nova::dc_stats.dc_queue_depth += 1;
         nova::dc_stats.dc_pending_disk_reads += size;
-        Status status = file_->Read(h, offset, size, &s, scratch);
+        Status status = file_->Read(h, offset, size, result, scratch);
         nova::dc_stats.dc_queue_depth -= 1;
         nova::dc_stats.dc_pending_disk_reads -= size;
         return status;
@@ -159,6 +152,9 @@ namespace leveldb {
             << size << ","
             << allocated_mem_size_;
 
+        leveldb::FileType type = leveldb::FileType::kCurrentFile;
+        RDMA_ASSERT(ParseFileName(sstable, &type));
+
         mutex_.lock();
         if (is_full_ || current_mem_offset_ + size > allocated_mem_size_) {
             is_full_ = true;
@@ -172,10 +168,11 @@ namespace leveldb {
         handle.set_offset(off);
         handle.set_size(size);
 
+
         if (is_meta_blocks) {
             RDMA_ASSERT(sstable_meta_block_offset_.find(sstable) ==
                         sstable_meta_block_offset_.end());
-        } else {
+        } else if (type == leveldb::FileType::kTableFile) {
             RDMA_ASSERT(sstable_data_block_offset_.find(sstable) ==
                         sstable_data_block_offset_.end());
         }
@@ -210,16 +207,25 @@ namespace leveldb {
                 buf++;
                 continue;
             }
+
+            uint64_t fn = 0;
+            leveldb::FileType type = leveldb::FileType::kCurrentFile;
+            leveldb::ParseFileName(buf->sstable_id, &fn, &type);
+
             if (buf->is_meta_blocks) {
-                RDMA_ASSERT(sstable_meta_block_offset_.find(buf->sstable_id) ==
-                            sstable_meta_block_offset_.end());
+                RDMA_ASSERT(
+                        sstable_meta_block_offset_.find(buf->sstable_id) ==
+                        sstable_meta_block_offset_.end());
                 SSTablePersistStatus &s = sstable_meta_block_offset_[buf->sstable_id];
                 s.disk_handle.set_offset(current_disk_offset_);
                 s.disk_handle.set_size(buf->size);
                 s.persisted = false;
             } else {
-                RDMA_ASSERT(sstable_data_block_offset_.find(buf->sstable_id) ==
+                if (type == leveldb::FileType::kTableFile) {
+                    RDMA_ASSERT(
+                            sstable_data_block_offset_.find(buf->sstable_id) ==
                             sstable_data_block_offset_.end());
+                }
                 SSTablePersistStatus &s = sstable_data_block_offset_[buf->sstable_id];
                 s.disk_handle.set_offset(current_disk_offset_);
                 s.disk_handle.set_size(buf->size);
@@ -403,6 +409,15 @@ namespace leveldb {
         RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
     }
 
+    void NovaRTable::ForceSeal() {
+        mutex_.lock();
+        RDMA_ASSERT(allocated_bufs_.empty());
+        RDMA_ASSERT(persisting_cnt == 0);
+        is_full_ = true;
+        Seal();
+        mutex_.unlock();
+    }
+
     void NovaRTable::Seal() {
         bool seal = false;
         if (allocated_bufs_.empty() && is_full_ && persisting_cnt == 0) {
@@ -419,9 +434,6 @@ namespace leveldb {
         if (!seal) {
             return;
         }
-
-//        leveldb::Status s = file_->Sync();
-//        RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());;
 
         RDMA_LOG(rdmaio::DEBUG)
             << fmt::format(
@@ -472,10 +484,10 @@ namespace leveldb {
 
     void NovaRTableManager::ReadDataBlock(
             const leveldb::RTableHandle &rtable_handle, uint64_t offset,
-            uint32_t size, char *scratch) {
+            uint32_t size, char *scratch, Slice *result) {
         if (!block_cache_) {
             NovaRTable *rtable = rtables_[rtable_handle.rtable_id];
-            rtable->Read(offset, size, scratch);
+            rtable->Read(offset, size, scratch, result);
             return;
         }
 
@@ -489,7 +501,7 @@ namespace leveldb {
             memcpy(scratch, block, rtable_handle.size);
         } else {
             NovaRTable *rtable = rtables_[rtable_handle.rtable_id];
-            rtable->Read(offset, size, scratch);
+            rtable->Read(offset, size, scratch, result);
             char *block = new char[size];
             memcpy(block, scratch, size);
             cache_handle = block_cache_->Insert(key, block,
@@ -533,11 +545,33 @@ namespace leveldb {
         return rtable;
     }
 
+    void NovaRTableManager::OpenRTables(
+            std::map<std::string, uint32_t> &fn_rtables) {
+        mutex_.lock();
+
+        for (auto &it : fn_rtables) {
+            auto &fn = it.first;
+            auto &rtableid = it.second;
+
+            NovaRTable *rtable = new NovaRTable(rtableid, env_,
+                                                fn,
+                                                mem_manager_,
+                                                0, rtable_size_);
+            rtable->ForceSeal();
+            rtables_[rtableid] = rtable;
+            fn_rtable_map_[fn] = rtable;
+            current_rtable_id_ = std::max(current_rtable_id_, rtableid);
+        }
+
+        current_rtable_id_ += 1;
+        mutex_.unlock();
+    }
+
     NovaRTable *NovaRTableManager::OpenRTable(uint32_t thread_id,
                                               std::string &filename) {
         mutex_.lock();
         auto rtable_ptr = fn_rtable_map_.find(filename);
-        if (rtable_ptr == fn_rtable_map_.end()) {
+        if (rtable_ptr != fn_rtable_map_.end()) {
             auto rtable = rtable_ptr->second;
             mutex_.unlock();
             return rtable;
@@ -548,8 +582,8 @@ namespace leveldb {
         mutex_.unlock();
 
         RDMA_LOG(rdmaio::DEBUG)
-            << fmt::format("Create a new RTable {} for thread {}", id,
-                           thread_id);
+            << fmt::format("Create a new RTable {} for thread {} fn:{}", id,
+                           thread_id, filename);
         RDMA_ASSERT(id < MAX_NUM_RTABLES)
             << fmt::format("Too many RTables");
         NovaRTable *rtable = new NovaRTable(id, env_,

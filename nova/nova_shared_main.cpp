@@ -27,7 +27,6 @@
 
 #include "db/filename.h"
 #include "util/env_posix.h"
-#include "dc/nova_dc_server.h"
 #include "db/version_set.h"
 
 using namespace std;
@@ -35,8 +34,6 @@ using namespace rdmaio;
 using namespace nova;
 
 NovaConfig *NovaConfig::config;
-NovaCCConfig *NovaCCConfig::cc_config;
-NovaDCConfig *NovaDCConfig::dc_config;
 
 DEFINE_string(db_path, "/tmp/nova", "level db path");
 DEFINE_string(rtable_path, "/tmp/rtables", "RTable path");
@@ -96,7 +93,8 @@ DEFINE_double(cc_sampling_ratio, 1, "");
 DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
 DEFINE_string(cc_client_access_pattern, "uniform", "");
 
-DEFINE_bool(cc_test_recovery, false, "recovery");
+DEFINE_bool(cc_enable_major_compaction, false, "enable major compaction");
+DEFINE_bool(cc_recover_dbs, false, "recovery");
 DEFINE_uint32(cc_num_recovery_threads, 32, "recovery");
 
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
@@ -122,9 +120,9 @@ void InitializeCC() {
     NovaConfig::config->nova_buf = buf;
     NovaConfig::config->nnovabuf = ntotal;
     RDMA_ASSERT(buf != NULL) << "Not enough memory";
-    system(fmt::format("exec rm -rf {}/*", NovaConfig::config->db_path).data());
-    system(fmt::format("exec rm -rf {}/*",
-                       NovaConfig::config->rtable_path).data());
+//    system(fmt::format("exec rm -rf {}/*", NovaConfig::config->db_path).data());
+//    system(fmt::format("exec rm -rf {}/*",
+//                       NovaConfig::config->rtable_path).data());
 
     mkdirs(NovaConfig::config->rtable_path.data());
     mkdirs(NovaConfig::config->db_path.data());
@@ -153,7 +151,6 @@ int main(int argc, char *argv[]) {
     }
 
     NovaConfig::config = new NovaConfig;
-    NovaCCConfig::cc_config = new NovaCCConfig;
     NovaConfig::config->rtable_path = FLAGS_rtable_path;
 
     NovaConfig::config->mem_pool_size_gb = FLAGS_mem_pool_size_gb;
@@ -172,79 +169,80 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->rdma_doorbell_batch_size = FLAGS_rdma_doorbell_batch_size;
     NovaConfig::config->rdma_pq_batch_size = FLAGS_rdma_pq_batch_size;
 
-    NovaCCConfig::cc_config->block_cache_mb = FLAGS_cc_block_cache_mb;
-    NovaCCConfig::cc_config->row_cache_mb = FLAGS_cc_row_cache_mb;
-    NovaCCConfig::cc_config->write_buffer_size_mb = FLAGS_cc_write_buffer_size_mb;
+    NovaConfig::config->block_cache_mb = FLAGS_cc_block_cache_mb;
+    NovaConfig::config->row_cache_mb = FLAGS_cc_row_cache_mb;
+    NovaConfig::config->write_buffer_size_mb = FLAGS_cc_write_buffer_size_mb;
 
     NovaConfig::config->db_path = FLAGS_db_path;
     NovaConfig::config->enable_rdma = FLAGS_enable_rdma;
     NovaConfig::config->enable_load_data = FLAGS_enable_load_data;
+    NovaConfig::config->enable_major_compaction = FLAGS_cc_enable_major_compaction;
 
-    NovaConfig::config->measure_recovery_duration = FLAGS_cc_test_recovery;
     NovaConfig::config->number_of_recovery_threads = FLAGS_cc_num_recovery_threads;
+    NovaConfig::config->recover_dbs = FLAGS_cc_recover_dbs;
 
     NovaConfig::config->servers = convert_hosts(FLAGS_cc_servers);
     if (FLAGS_cc_multiple_disks) {
         for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
-            NovaCCConfig::cc_config->cc_servers.push_back(
+            NovaConfig::config->cc_servers.push_back(
                     NovaConfig::config->servers[i]);
             if (i != FLAGS_server_id) {
-                NovaCCConfig::cc_config->dc_servers.push_back(
+                NovaConfig::config->dc_servers.push_back(
                         NovaConfig::config->servers[i]);
             }
         }
     } else {
         for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
             if (i < FLAGS_number_of_ccs) {
-                NovaCCConfig::cc_config->cc_servers.push_back(
+                NovaConfig::config->cc_servers.push_back(
                         NovaConfig::config->servers[i]);
             } else {
-                NovaCCConfig::cc_config->dc_servers.push_back(
+                NovaConfig::config->dc_servers.push_back(
                         NovaConfig::config->servers[i]);
             }
         }
     }
 
-    for (int i = 0; i < NovaCCConfig::cc_config->cc_servers.size(); i++) {
-        Host host = NovaCCConfig::cc_config->cc_servers[i];
+    for (int i = 0; i < NovaConfig::config->cc_servers.size(); i++) {
+        Host host = NovaConfig::config->cc_servers[i];
         RDMA_LOG(INFO)
             << fmt::format("cc: {}:{}:{}", host.server_id, host.ip, host.port);
     }
-    for (int i = 0; i < NovaCCConfig::cc_config->dc_servers.size(); i++) {
-        Host host = NovaCCConfig::cc_config->dc_servers[i];
+    for (int i = 0; i < NovaConfig::config->dc_servers.size(); i++) {
+        Host host = NovaConfig::config->dc_servers[i];
         RDMA_LOG(INFO)
             << fmt::format("dc: {}:{}:{}", host.server_id, host.ip, host.port);
     }
     RDMA_ASSERT(FLAGS_cc_num_log_replicas <=
-                NovaCCConfig::cc_config->dc_servers.size());
+                NovaConfig::config->dc_servers.size());
 
     NovaConfig::config->my_server_id = FLAGS_server_id;
 
-    NovaCCConfig::ReadFragments(FLAGS_cc_config_path,
-                                &NovaCCConfig::cc_config->fragments);
+    NovaConfig::ReadFragments(FLAGS_cc_config_path,
+                                &NovaConfig::config->fragments);
     uint32_t start_stoc_id = 0;
-    for (int i = 0; i < NovaCCConfig::cc_config->fragments.size(); i++) {
-        NovaCCConfig::cc_config->fragments[i]->log_replica_stoc_ids.clear();
+    for (int i = 0; i < NovaConfig::config->fragments.size(); i++) {
+        NovaConfig::config->fragments[i]->log_replica_stoc_ids.clear();
         for (int r = 0; r < FLAGS_cc_num_log_replicas; r++) {
-            NovaCCConfig::cc_config->fragments[i]->log_replica_stoc_ids.push_back(
+            NovaConfig::config->fragments[i]->log_replica_stoc_ids.push_back(
                     start_stoc_id);
             start_stoc_id = (start_stoc_id + 1) %
-                            NovaCCConfig::cc_config->dc_servers.size();
+                            NovaConfig::config->dc_servers.size();
         }
     }
 
-    NovaCCConfig::cc_config->num_conn_workers = FLAGS_cc_num_conn_workers;
-    NovaCCConfig::cc_config->num_conn_async_workers = FLAGS_cc_num_async_workers;
-    NovaCCConfig::cc_config->num_cc_server_workers = FLAGS_cc_num_cc_server_workers;
-    NovaCCConfig::cc_config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
-    NovaCCConfig::cc_config->num_rdma_compaction_workers = FLAGS_cc_num_rdma_compaction_workers;
-    NovaCCConfig::cc_config->num_memtables = FLAGS_cc_num_memtables;
-    NovaCCConfig::cc_config->num_memtable_partitions = FLAGS_cc_num_memtable_partitions;
-    NovaCCConfig::cc_config->cc_l0_stop_write = FLAGS_cc_l0_stop_write;
+    NovaConfig::config->num_conn_workers = FLAGS_cc_num_conn_workers;
+    NovaConfig::config->num_conn_async_workers = FLAGS_cc_num_async_workers;
+    NovaConfig::config->num_cc_server_workers = FLAGS_cc_num_cc_server_workers;
+    NovaConfig::config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
+    NovaConfig::config->num_rdma_compaction_workers = FLAGS_cc_num_rdma_compaction_workers;
+    NovaConfig::config->num_memtables = FLAGS_cc_num_memtables;
+    NovaConfig::config->num_memtable_partitions = FLAGS_cc_num_memtable_partitions;
+    NovaConfig::config->cc_l0_stop_write = FLAGS_cc_l0_stop_write;
     NovaConfig::config->enable_subrange = FLAGS_cc_enable_subrange;
     NovaConfig::config->memtable_type = FLAGS_cc_memtable_type;
 
-    NovaCCConfig::cc_config->num_rtable_num_servers_scatter_data_blocks = FLAGS_cc_rtable_num_servers_scatter_data_blocks;
+    NovaConfig::config->num_rtable_num_servers_scatter_data_blocks = FLAGS_cc_rtable_num_servers_scatter_data_blocks;
     NovaConfig::config->log_buf_size = FLAGS_cc_rtable_size_mb * 1024;
     NovaConfig::config->rtable_size = FLAGS_cc_rtable_size_mb * 1024;
     NovaConfig::config->sstable_size = FLAGS_cc_sstable_size_mb * 1024 * 1024;
@@ -266,7 +264,7 @@ int main(int argc, char *argv[]) {
         NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_RDMA;
     }
 
-    NovaCCConfig::cc_config->enable_table_locator = FLAGS_cc_enable_table_locator;
+    NovaConfig::config->enable_table_locator = FLAGS_cc_enable_table_locator;
     NovaConfig::config->subrange_sampling_ratio = FLAGS_cc_sampling_ratio;
     NovaConfig::config->zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
     NovaConfig::config->ReadZipfianDist();

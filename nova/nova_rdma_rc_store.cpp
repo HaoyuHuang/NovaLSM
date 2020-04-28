@@ -41,6 +41,34 @@ namespace nova {
                        << mr_size_
                        << " my memory id: "
                        << my_memory_id;
+        InitializeQPs(rdma_ctrl);
+        RDMA_LOG(INFO)
+            << fmt::format("RDMA client thread {} initialized", thread_id_);
+    }
+
+    void NovaRDMARCStore::ReinitializeQPs(rdmaio::RdmaCtrl *rdma_ctrl) {
+        DestroyQPs(rdma_ctrl);
+        InitializeQPs(rdma_ctrl);
+    }
+
+    void NovaRDMARCStore::DestroyQPs(rdmaio::RdmaCtrl *rdma_ctrl) {
+        int num_servers = end_points_.size();
+        for (int i = 0; i < num_servers; i++) {
+            npending_send_[i] = 0;
+            psend_index_[i] = 0;
+            send_sge_index_[i] = 0;
+            QPEndPoint peer_store = end_points_[i];
+            QPIdx my_rc_key = create_rc_idx(my_server_id_, thread_id_,
+                                            peer_store.server_id);
+            rdma_ctrl->destroy_rc_qp(my_rc_key);
+            qp_[i] = NULL;
+        }
+    }
+
+    void NovaRDMARCStore::InitializeQPs(RdmaCtrl *rdma_ctrl) {
+        uint64_t my_memory_id = my_server_id_;
+        int num_servers = end_points_.size();
+
         for (int peer_id = 0; peer_id < num_servers; peer_id++) {
             QPEndPoint peer_store = end_points_[peer_id];
             QPIdx my_rc_key = create_rc_idx(my_server_id_, thread_id_,
@@ -97,8 +125,6 @@ namespace nova {
                 PostRecv(peer_store.server_id, i);
             }
         }
-        RDMA_LOG(INFO)
-            << fmt::format("RDMA client thread {} initialized", thread_id_);
     }
 
     uint64_t
@@ -248,7 +274,8 @@ namespace nova {
             RDMA_ASSERT(wcs_[i].status == IBV_WC_SUCCESS)
                 << "rdma-rc[" << thread_id_ << "]: " << "SQ error wc status "
                 << wcs_[i].status << " str:"
-                << ibv_wc_status_str(wcs_[i].status) << " serverid " << server_id;
+                << ibv_wc_status_str(wcs_[i].status) << " serverid "
+                << server_id;
 
             RDMA_LOG(DEBUG) << fmt::format(
                         "rdma-rc[{}]: SQ: poll complete from server {} wr:{} op:{}",
@@ -276,9 +303,11 @@ namespace nova {
 
     void NovaRDMARCStore::PostRecv(int server_id, int recv_buf_index) {
         uint32_t qp_idx = to_qp_idx(server_id);
-        char *local_buf = rdma_recv_buf_[qp_idx] + max_msg_size_ * recv_buf_index;
+        char *local_buf =
+                rdma_recv_buf_[qp_idx] + max_msg_size_ * recv_buf_index;
         local_buf[0] = '~';
-        auto ret = qp_[qp_idx]->post_recv(local_buf, max_msg_size_, recv_buf_index);
+        auto ret = qp_[qp_idx]->post_recv(local_buf, max_msg_size_,
+                                          recv_buf_index);
         RDMA_ASSERT(ret == SUCC) << ret;
     }
 

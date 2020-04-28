@@ -134,6 +134,8 @@ namespace nova {
 
         uint32_t store_id() { return thread_id_; }
 
+        void ReinitializeQPs(rdmaio::RdmaCtrl *rdma_ctrl);
+
     private:
         uint32_t to_qp_idx(uint32_t server_id);
 
@@ -152,12 +154,12 @@ namespace nova {
         const uint32_t max_msg_size_;
         const uint32_t doorbell_batch_size_;
 
-        std::map<uint32_t, int> server_qp_idx_map;
-        std::vector<QPEndPoint> end_points_;
         const int thread_id_;
         const char *rdma_buf_;
 
         // RDMA variables
+        std::map<uint32_t, int> server_qp_idx_map;
+        std::vector<QPEndPoint> end_points_;
         ibv_wc *wcs_;
         RCQP **qp_;
         char **rdma_send_buf_;
@@ -165,12 +167,16 @@ namespace nova {
 
         struct ibv_sge **send_sges_;
         ibv_send_wr **send_wrs_;
-        int *send_sge_index_;
 
         // pending sends.
+        int *send_sge_index_;
         int *npending_send_;
         int *psend_index_;
         NovaMsgCallback *callback_;
+
+        void InitializeQPs(RdmaCtrl *rdma_ctrl);
+
+        void DestroyQPs(RdmaCtrl *rdma_ctrl);
     };
 }
 

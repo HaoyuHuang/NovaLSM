@@ -171,6 +171,8 @@ namespace leveldb {
 
         ~Version();
 
+        // List of files per level
+        std::vector<FileMetaData *> files_[config::kNumLevels];
     private:
         friend class Compaction;
 
@@ -200,8 +202,7 @@ namespace leveldb {
         Version *prev_;     // Previous version in linked list
         int refs_ = 0;          // Number of live refs to this version
 
-        // List of files per level
-        std::vector<FileMetaData *> files_[config::kNumLevels];
+
 //        std::map<uint64_t, FileMetaData*> fn_files_;
         FileMetaData *fn_files_[MAX_LIVE_MEMTABLES];
 
@@ -252,10 +253,12 @@ namespace leveldb {
         Status LogAndApply(VersionEdit *edit, Version *new_version);
 
         void AppendChangesToManifest(VersionEdit *edit,
-                                     NovaCCMemFile *manifest_file);
+                                     NovaCCMemFile *manifest_file,
+                                     uint32_t stoc_id);
 
         // Recover the last saved descriptor from persistent storage.
-        Status Recover(Slice manifest_file);
+        Status Recover(Slice manifest_file,
+                       std::vector<VersionSubRange> *subrange_edits);
 
         // Return the current version.
         Version *current() const { return current_; }
@@ -263,6 +266,10 @@ namespace leveldb {
         // Allocate and return a new file number
         uint64_t NewFileNumber() {
             return next_file_number_.fetch_add(1);
+        }
+
+        uint64_t NextFileNumber() {
+            return next_file_number_;
         }
 
         // Arrange to reuse "file_number" unless a newer file number has
@@ -438,9 +445,7 @@ namespace leveldb {
         // before processing "internal_key".
         bool ShouldStopBefore(const Slice &internal_key);
 
-        // Release the input version for the compaction, once the compaction
-        // is successful.
-        void ReleaseInputs();
+        Version *input_version_;
 
     private:
         friend class Version;
@@ -451,7 +456,6 @@ namespace leveldb {
 
         int level_;
         uint64_t max_output_file_size_;
-        Version *input_version_;
         VersionEdit edit_;
 
         // Each compaction reads inputs from "level_" and "level_+1"

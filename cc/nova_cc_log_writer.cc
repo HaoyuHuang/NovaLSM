@@ -90,7 +90,7 @@ namespace leveldb {
                              const LevelDBLogRecord &log_record,
                              uint32_t client_req_id,
                              WriteState *replicate_log_record_states) {
-        nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid];
+        nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid];
         if (frag->log_replica_stoc_ids.empty()) {
             return true;
         }
@@ -99,7 +99,7 @@ namespace leveldb {
 
         // If one of the log buf is intiializing, return false.
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
-            uint32_t stoc_server_id = nova::NovaCCConfig::cc_config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
+            uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
             auto &it = logfile_last_buf_[log_file_name];
             if (it.stoc_bufs[stoc_server_id].is_initializing) {
                 return false;
@@ -107,7 +107,7 @@ namespace leveldb {
         }
 
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
-            uint32_t stoc_server_id = nova::NovaCCConfig::cc_config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
+            uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
             auto &it = logfile_last_buf_[log_file_name];
             if (it.stoc_bufs[stoc_server_id].base == 0) {
                 it.stoc_bufs[stoc_server_id].is_initializing = true;
@@ -152,14 +152,14 @@ namespace leveldb {
                                         char *backing_mem,
                                         uint32_t log_record_size,
                                         WriteState *replicate_log_record_states) {
-        nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid];
+        nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid];
         // Pull all pending writes.
         int acks = 0;
         int total_states = 0;
         LogFileMetadata *meta = nullptr;
         char *sendbuf = nullptr;
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
-            uint32_t stoc_server_id = nova::NovaCCConfig::cc_config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
+            uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
             switch (replicate_log_record_states[stoc_server_id].result) {
                 case WriteResult::REPLICATE_LOG_RECORD_NONE:
                     break;
@@ -184,13 +184,13 @@ namespace leveldb {
 
     Status RDMALogWriter::CloseLogFile(const std::string &log_file_name,
                                        uint32_t dbid, uint32_t client_req_id) {
-        nova::CCFragment *frag = nova::NovaCCConfig::cc_config->db_fragment[dbid];
+        nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid];
         LogFileMetadata *meta = &logfile_last_buf_[log_file_name];
         delete meta->stoc_bufs;
         logfile_last_buf_.erase(log_file_name);
         log_manager_->DeleteLogBuf(log_file_name);
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
-            uint32_t stoc_server_id = nova::NovaCCConfig::cc_config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
+            uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
 
             char *send_buf = store_->GetSendBuf(stoc_server_id);
             char *buf = send_buf;

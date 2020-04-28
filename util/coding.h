@@ -184,6 +184,30 @@ namespace leveldb {
         return 4 + src.size();
     }
 
+    inline uint32_t EncodeBool(char *dst, bool value) {
+        if (value) {
+            dst[0] = '1';
+        } else {
+            dst[0] = '2';
+        }
+        return 1;
+    }
+
+    inline bool DecodeBool(Slice *ptr, bool* value) {
+        if (ptr->size() >= 1) {
+            if (ptr->data()[0] == '1') {
+                *value = true;
+            } else if (ptr->data()[0] == '2') {
+                *value = false;
+            } else {
+                return false;
+            }
+            *ptr = Slice(ptr->data() + 1, ptr->size() - 1);
+            return true;
+        }
+        return false;
+    }
+
     inline Slice DecodeSlice(const char *src) {
         uint32_t size = DecodeFixed32(src);
         Slice slice(src + 4, size);

@@ -42,6 +42,10 @@ namespace leveldb {
                                     std::string filename) override;
 
         uint32_t
+        InitiateFileNameRTableMapping(uint32_t stoc_id,
+                                      const std::map<std::string, uint32_t> &fn_rtableid) override;
+
+        uint32_t
         InitiateQueryLogFile(uint32_t storage_server_id, uint32_t server_id,
                              uint32_t dbid,
                              std::map<std::string, uint64_t> *logfile_offset) override;
@@ -65,7 +69,7 @@ namespace leveldb {
                                     uint32_t db_id,
                                     uint32_t memtable_id,
                                     char *rdma_backing_mem,
-                                    const LevelDBLogRecord& log_record,
+                                    const LevelDBLogRecord &log_record,
                                     WriteState *replicate_log_record_states) override;
 
 
@@ -126,6 +130,10 @@ namespace leveldb {
         }
 
         uint32_t
+        InitiateFileNameRTableMapping(uint32_t stoc_id,
+                                      const std::map<std::string, uint32_t> &fn_rtableid) override;
+
+        uint32_t
         InitiateDeleteTables(uint32_t server_id,
                              const std::vector<SSTableRTablePair> &rtable_ids) override;
 
@@ -160,7 +168,7 @@ namespace leveldb {
                                     uint32_t db_id,
                                     uint32_t memtable_id,
                                     char *rdma_backing_mem,
-                                    const LevelDBLogRecord& log_record,
+                                    const LevelDBLogRecord &log_record,
                                     WriteState *replicate_log_record_states) override;
 
         uint32_t InitiateReadDCStats(uint32_t server_id) override;

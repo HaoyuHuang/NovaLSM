@@ -51,9 +51,9 @@ namespace nova {
     InMemoryLogFileManager::InMemoryLogFileManager(
             nova::NovaMemManager *mem_manager) : mem_manager_(mem_manager) {
         server_db_log_files_ = new DBLogFiles **[NovaConfig::config->servers.size()];
-        uint32_t nranges = NovaCCConfig::cc_config->fragments.size() /
-                           NovaCCConfig::cc_config->cc_servers.size();
-        for (int i = 0; i < NovaCCConfig::cc_config->cc_servers.size(); i++) {
+        uint32_t nranges = NovaConfig::config->fragments.size() /
+                           NovaConfig::config->cc_servers.size();
+        for (int i = 0; i < NovaConfig::config->cc_servers.size(); i++) {
             server_db_log_files_[i] = new DBLogFiles *[nranges];
             for (int j = 0; j < nranges; j++) {
                 server_db_log_files_[i][j] = new DBLogFiles;

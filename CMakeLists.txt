@@ -202,8 +202,6 @@ target_sources(leveldb
         "util/env_mem.cc"
         "util/env_mem.h"
         "util/env_posix.h"
-        "dc/nova_dc.cpp"
-        "dc/nova_dc.h"
         "cc/nova_cc_client.cpp"
         "cc/nova_cc_client.h"
         "cc/nova_cc_server.cpp"
@@ -259,17 +257,6 @@ target_sources(leveldb
         cc/nova_rdma_cc.h
         cc/nova_cc.cpp
         cc/nova_cc.h
-
-        dc/nova_dc_server.cpp
-        dc/nova_dc_server.h
-#
-#        mc/nova_mc_wb_worker.cpp
-#        mc/nova_mc_wb_worker.h
-#
-#        mc/nova_sstable.cpp
-#        mc/nova_sstable.h
-
-
 
         bench/bench_common.h
         bench/mock_rtable.h

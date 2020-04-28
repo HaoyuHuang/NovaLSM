@@ -67,6 +67,8 @@ namespace leveldb {
 
         CCClient *dc_client = nullptr;
 
+        uint32_t manifest_stoc_id;
+
         double subrange_reorg_sampling_ratio = 1.0;
 
         std::string zipfian_dist_file_path = "/tmp/zipfian";

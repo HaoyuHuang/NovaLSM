@@ -96,6 +96,10 @@ namespace rdmaio {
         RCQP *
         create_rc_qp(QPIdx idx, RNicHandler *dev, MemoryAttr *attr = NULL, ibv_cq *cq = NULL, ibv_cq *recv_cq = NULL);
 
+        void
+        destroy_rc_qp(QPIdx idx);
+
+
         RCQP *
         create_uc_qp(QPIdx idx, RNicHandler *dev, MemoryAttr *attr = NULL, ibv_cq *cq = NULL, ibv_cq *recv_cq = NULL);
 

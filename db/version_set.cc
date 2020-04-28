@@ -780,6 +780,13 @@ namespace leveldb {
 
     std::string Version::DebugString() const {
         std::string r;
+        r.append("compaction-level: ");
+        AppendNumberTo(&r, compaction_level_);
+
+        r.append("compaction-score: ");
+        r.append(std::to_string(compaction_score_));
+        r.append("\n");
+
         for (int level = 0; level < config::kNumLevels; level++) {
             r.append("sstables,");
             AppendNumberTo(&r, level);
@@ -798,21 +805,13 @@ namespace leveldb {
             //   --- level 1 ---
             //   17:123['a' .. 'd']
             //   20:43['e' .. 'g']
-//            r.append("--- level ");
-//            AppendNumberTo(&r, level);
-//            r.append(" ---\n");
-//            const std::vector<FileMetaData *> &files = files_[level];
-//            for (size_t i = 0; i < files.size(); i++) {
-//                r.push_back(' ');
-//                AppendNumberTo(&r, files[i]->number);
-//                r.push_back(':');
-//                AppendNumberTo(&r, files[i]->file_size);
-//                r.append("[");
-//                r.append(files[i]->smallest.DebugString());
-//                r.append(" .. ");
-//                r.append(files[i]->largest.DebugString());
-//                r.append("]\n");
-//            }
+            r.append("--- level ");
+            AppendNumberTo(&r, level);
+            r.append(" ---\n");
+            for (size_t i = 0; i < files.size(); i++) {
+                r.append(files[i]->DebugString());
+                r.append("\n");
+            }
         }
         return r;
     }
@@ -1044,13 +1043,22 @@ namespace leveldb {
     }
 
     void VersionSet::AppendChangesToManifest(leveldb::VersionEdit *edit,
-                                             NovaCCMemFile *manifest_file) {
+                                             NovaCCMemFile *manifest_file,
+                                             uint32_t stoc_id) {
         manifest_lock_.lock();
         edit->SetNextFile(next_file_number_);
         edit->SetLastSequence(last_sequence_);
         char *edit_str = manifest_file->Buf();
         uint32_t msg_size = edit->EncodeTo(edit_str);
-        RDMA_ASSERT(manifest_file->SyncAppend(Slice(edit_str, msg_size)).ok());
+
+        if (RDMA_LOG_LEVEL == rdmaio::DEBUG) {
+            VersionEdit decode;
+            RDMA_ASSERT(decode.DecodeFrom(Slice(edit_str, msg_size)).ok());
+            RDMA_LOG(rdmaio::DEBUG) << decode.DebugString();
+        }
+
+        RDMA_ASSERT(manifest_file->SyncAppend(Slice(edit_str, msg_size),
+                                              stoc_id).ok());
         manifest_lock_.unlock();
     }
 
@@ -1065,13 +1073,15 @@ namespace leveldb {
         return Status::OK();
     }
 
-    Status VersionSet::Recover(Slice record) {
+    Status VersionSet::Recover(Slice record,
+                               std::vector<VersionSubRange> *subrange_edits) {
         uint64_t next_file = 0;
         uint64_t last_sequence = 0;
         Builder builder(this, current_);
         {
             VersionEdit edit;
             Status s = edit.DecodeFrom(record);
+            std::set<uint32_t> subrange_ids;
             if (s.ok()) {
                 if (edit.has_comparator_ &&
                     edit.comparator_ != icmp_.user_comparator()->Name()) {
@@ -1081,16 +1091,27 @@ namespace leveldb {
                             icmp_.user_comparator()->Name());
                 }
             }
+            RDMA_LOG(rdmaio::INFO)
+                << fmt::format("stats:{} debug:{}", s.ToString(),
+                               edit.DebugString());
 
-            if (s.ok()) {
-                builder.Apply(&edit);
-            }
+            builder.Apply(&edit);
             if (edit.has_next_file_number_) {
                 next_file = edit.next_file_number_;
             }
 
             if (edit.has_last_sequence_) {
                 last_sequence = edit.last_sequence_;
+            }
+
+            // Only retain the latest subrange.
+            for (int i = edit.new_subranges_.size() - 1; i >= 0; i--) {
+                VersionSubRange &sr = edit.new_subranges_[i];
+                if (subrange_ids.find(sr.subrange_id) != subrange_ids.end()) {
+                    continue;
+                }
+                subrange_ids.insert(sr.subrange_id);
+                subrange_edits->push_back(sr);
             }
         }
 
@@ -1463,7 +1484,7 @@ namespace leveldb {
         }
 
         c->input_version_ = current_;
-        c->input_version_->Ref();
+        versions_[current_->version_id()].Ref();
 
         // Files in level 0 may overlap each other, so pick up all overlapping ones
         if (level == 0) {
@@ -1762,13 +1783,6 @@ namespace leveldb {
             return true;
         } else {
             return false;
-        }
-    }
-
-    void Compaction::ReleaseInputs() {
-        if (input_version_ != nullptr) {
-//            input_version_->Unref();
-            input_version_ = nullptr;
         }
     }
 

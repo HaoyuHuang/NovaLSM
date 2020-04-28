@@ -33,7 +33,7 @@ namespace leveldb {
                       CCClient *cc_client,
                       const std::string &dbname,
                       uint64_t thread_id,
-                      uint64_t file_size, unsigned int *rand_seed);
+                      uint64_t file_size, unsigned int *rand_seed, std::string& filename);
 
         ~NovaCCMemFile();
 
@@ -52,17 +52,13 @@ namespace leveldb {
 
         Status Fsync() override;
 
-        Status SyncAppend(const Slice& data);
+        Status SyncAppend(const Slice& data, uint32_t stoc_id);
 
         void Format();
 
         void WaitForPersistingDataBlocks();
 
         uint32_t Finalize();
-
-        const std::string &sstable_id() {
-            return fname_;
-        }
 
         const char *backing_mem() override { return backing_mem_; }
 
@@ -136,7 +132,8 @@ namespace leveldb {
                                CCClient *dc_client,
                                MemManager *mem_manager,
                                uint64_t thread_id,
-                               bool prefetch_all);
+                               bool prefetch_all,
+                               std::string& filename);
 
         ~NovaCCRandomAccessFile() override;
 
@@ -149,6 +146,8 @@ namespace leveldb {
              uint64_t offset, size_t n,
              Slice *result, char *scratch) override;
 
+        Status ReadAll(CCClient *dc_client);
+
     private:
         struct DataBlockRTableLocalBuf {
             uint64_t offset;
@@ -156,11 +155,10 @@ namespace leveldb {
             uint64_t local_offset;
         };
 
-        Status ReadAll(CCClient *dc_client);
-
         const std::string &dbname_;
         uint64_t file_number_;
         FileMetaData meta_;
+        const std::string filename;
 
         bool prefetch_all_ = false;
         char *backing_mem_table_ = nullptr;

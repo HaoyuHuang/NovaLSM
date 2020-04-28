@@ -9,6 +9,26 @@
 
 namespace leveldb {
 
+    std::string VersionSubRange::DebugString() const {
+        std::string result;
+        result.append(std::to_string(subrange_id));
+        result.append(" ");
+        if (lower_inclusive) {
+            result.append("[");
+        } else {
+            result.append("(");
+        }
+        result.append(lower.ToString());
+        result.append(",");
+        result.append(upper.ToString());
+        if (upper_inclusive) {
+            result.append("]");
+        } else {
+            result.append(")");
+        }
+        return result;
+    }
+
 // Tag numbers for serialized VersionEdit.  These numbers are written to
 // disk and should not be changed.
     enum Tag : char {
@@ -19,6 +39,7 @@ namespace leveldb {
         kCompactPointer = 5,
         kDeletedFile = 6,
         kNewFile = 7,
+        kUpdateSubRange = 8,
         // 8 was used for large value refs
                 kPrevLogNumber = 9
     };
@@ -35,7 +56,7 @@ namespace leveldb {
         new_files_.clear();
     }
 
-    uint32_t  VersionEdit::EncodeTo(char *dst) const {
+    uint32_t VersionEdit::EncodeTo(char *dst) const {
         uint32_t msg_size = 0;
         if (has_comparator_) {
             dst[msg_size] = kComparator;
@@ -53,12 +74,6 @@ namespace leveldb {
             msg_size += EncodeFixed64(dst + msg_size, last_sequence_);
         }
 
-//        for (size_t i = 0; i < compact_pointers_.size(); i++) {
-//            PutVarint32(dst, kCompactPointer);
-//            PutVarint32(dst, compact_pointers_[i].first);  // level
-//            PutLengthPrefixedSlice(dst, compact_pointers_[i].second.Encode());
-//        }
-
         for (const auto &deleted_file_kvp : deleted_files_) {
             dst[msg_size] = kDeletedFile;
             msg_size += 1;
@@ -66,6 +81,9 @@ namespace leveldb {
                                       deleted_file_kvp.first);// level
             msg_size += EncodeFixed64(dst + msg_size,
                                       deleted_file_kvp.second.fnumber); // file number
+            msg_size += EncodeFixed32(dst + msg_size,
+                                      deleted_file_kvp.second.memtable_id); // file number
+
         }
 
         for (size_t i = 0; i < new_files_.size(); i++) {
@@ -92,6 +110,18 @@ namespace leveldb {
                 handle.EncodeHandle(dst + msg_size);
                 msg_size += handle.HandleSize();
             }
+        }
+
+        for (size_t i = 0; i < new_subranges_.size(); i++) {
+            auto &subrange = new_subranges_[i];
+            dst[msg_size] = kUpdateSubRange;
+            msg_size += 1;
+
+            msg_size += EncodeFixed32(dst + msg_size, subrange.subrange_id);
+            msg_size += EncodeSlice(dst + msg_size, subrange.lower);
+            msg_size += EncodeSlice(dst + msg_size, subrange.upper);
+            msg_size += EncodeBool(dst + msg_size, subrange.lower_inclusive);
+            msg_size += EncodeBool(dst + msg_size, subrange.upper_inclusive);
         }
         return msg_size;
     }
@@ -124,11 +154,15 @@ namespace leveldb {
         // Temporary storage for parsing
         int level;
         uint64_t number;
+        uint32_t number_2;
         FileMetaData f;
         Slice str;
         InternalKey key;
+        VersionSubRange sr;
 
-        while (msg == nullptr && GetVarint32(&input, &tag)) {
+        while (msg == nullptr && input.size() > 0) {
+            tag = input[0];
+            input.remove_prefix(1);
             switch (tag) {
                 case kComparator:
                     if (DecodeStr(&input, &str)) {
@@ -165,9 +199,11 @@ namespace leveldb {
 
                 case kDeletedFile:
                     if (GetLevel(&input, &level) &&
-                        DecodeFixed64(&input, &number)) {
+                        DecodeFixed64(&input, &number) &&
+                        DecodeFixed32(&input, &number_2)) {
                         DeletedFileIdentifier df = {};
                         df.fnumber = number;
+                        df.memtable_id = number_2;
                         deleted_files_.emplace_back(std::make_pair(level, df));
                     } else {
                         msg = "deleted file";
@@ -186,9 +222,21 @@ namespace leveldb {
                                                    &f.meta_block_handle) &&
                         RTableHandle::DecodeHandles(&input,
                                                     &f.data_block_group_handles)) {
-                        new_files_.push_back(std::make_pair(level, f));
+                        new_files_.emplace_back(std::make_pair(level, f));
+                        f.data_block_group_handles.clear();
                     } else {
                         msg = "new-file entry";
+                    }
+                    break;
+                case kUpdateSubRange:
+                    if (DecodeFixed32(&input, &sr.subrange_id) &&
+                        DecodeStr(&input, &sr.lower) &&
+                        DecodeStr(&input, &sr.upper) &&
+                        DecodeBool(&input, &sr.lower_inclusive) &&
+                        DecodeBool(&input, &sr.upper_inclusive)) {
+                        new_subranges_.push_back(sr);
+                    } else {
+                        msg = "update-subrange entry";
                     }
                     break;
 
@@ -234,6 +282,8 @@ namespace leveldb {
             r.append("\n  DeleteFile: ");
             AppendNumberTo(&r, deleted_files_kvp.first);
             r.append(" ");
+            AppendNumberTo(&r, deleted_files_kvp.second.memtable_id);
+            r.append(" ");
             AppendNumberTo(&r, deleted_files_kvp.second.fnumber);
         }
         for (size_t i = 0; i < new_files_.size(); i++) {
@@ -241,13 +291,12 @@ namespace leveldb {
             r.append("\n  AddFile: ");
             AppendNumberTo(&r, new_files_[i].first);
             r.append(" ");
-            AppendNumberTo(&r, f.number);
-            r.append(" ");
-            AppendNumberTo(&r, f.file_size);
-            r.append(" ");
-            r.append(f.smallest.DebugString());
-            r.append(" .. ");
-            r.append(f.largest.DebugString());
+            r.append(f.DebugString());
+        }
+        for (size_t i = 0; i < new_subranges_.size(); i++) {
+            const VersionSubRange &sr = new_subranges_[i];
+            r.append("\n  UpdateSubrange: ");
+            r.append(sr.DebugString());
         }
         r.append("\n}\n");
         return r;

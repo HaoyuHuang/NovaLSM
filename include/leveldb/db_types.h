@@ -29,13 +29,16 @@ namespace leveldb {
             return 4 + 4 + 8 + 4;
         }
 
+        std::string DebugString() const;
+
         void EncodeHandle(char *buf) const;
 
         void DecodeHandle(const char *buf);
 
         static bool DecodeHandle(Slice *data, RTableHandle *handle);
 
-        static bool DecodeHandles(Slice *data, std::vector<RTableHandle> *handles);
+        static bool
+        DecodeHandles(Slice *data, std::vector<RTableHandle> *handles);
     };
 
     struct SSTableRTablePair {
@@ -109,6 +112,8 @@ namespace leveldb {
         FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0),
                          converted_file_size(0),
                          compaction_status(FileCompactionStatus::NONE) {}
+
+        std::string DebugString() const;
 
         int refs;
         int allowed_seeks;  // Seeks allowed until compaction

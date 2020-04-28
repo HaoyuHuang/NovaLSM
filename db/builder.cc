@@ -90,6 +90,8 @@ namespace leveldb {
         if (iter->Valid()) {
             MemManager *mem_manager = bg_thread->mem_manager();
             uint64_t key = bg_thread->thread_id();
+            std::string filename = TableFileName(dbname,
+                                                 meta->number);
             NovaCCMemFile *cc_file = new NovaCCMemFile(env,
                                                        options,
                                                        meta->number,
@@ -98,7 +100,8 @@ namespace leveldb {
                                                        dbname,
                                                        bg_thread->thread_id(),
                                                        options.max_dc_file_size,
-                                                       bg_thread->rand_seed());
+                                                       bg_thread->rand_seed(),
+                                                       filename);
             WritableFile *file = new MemWritableFile(cc_file);
             TableBuilder *builder = new TableBuilder(options, file);
 
