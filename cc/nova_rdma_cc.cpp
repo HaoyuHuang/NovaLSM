@@ -159,11 +159,10 @@ namespace nova {
         bool should_sleep = true;
         uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
         while (is_running_) {
-            if (should_pause) {
+            while (should_pause) {
                 paused = true;
                 sem_wait(&sem_);
                 paused = false;
-                should_pause = false;
             }
 
             if (should_sleep) {

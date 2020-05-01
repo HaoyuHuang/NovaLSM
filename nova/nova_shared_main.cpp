@@ -120,13 +120,15 @@ void InitializeCC() {
     NovaConfig::config->nova_buf = buf;
     NovaConfig::config->nnovabuf = ntotal;
     RDMA_ASSERT(buf != NULL) << "Not enough memory";
-//    system(fmt::format("exec rm -rf {}/*", NovaConfig::config->db_path).data());
-//    system(fmt::format("exec rm -rf {}/*",
-//                       NovaConfig::config->rtable_path).data());
 
+    if (!FLAGS_cc_recover_dbs) {
+        system(fmt::format("exec rm -rf {}/*",
+                           NovaConfig::config->db_path).data());
+        system(fmt::format("exec rm -rf {}/*",
+                           NovaConfig::config->rtable_path).data());
+    }
     mkdirs(NovaConfig::config->rtable_path.data());
     mkdirs(NovaConfig::config->db_path.data());
-
     auto *mem_server = new NovaCCNICServer(rdma_ctrl, buf, port);
     mem_server->Start();
 }
@@ -219,7 +221,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->my_server_id = FLAGS_server_id;
 
     NovaConfig::ReadFragments(FLAGS_cc_config_path,
-                                &NovaConfig::config->fragments);
+                              &NovaConfig::config->fragments);
     uint32_t start_stoc_id = 0;
     for (int i = 0; i < NovaConfig::config->fragments.size(); i++) {
         NovaConfig::config->fragments[i]->log_replica_stoc_ids.clear();

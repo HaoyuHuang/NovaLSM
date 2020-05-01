@@ -369,6 +369,7 @@ namespace leveldb {
         context.backing_mem = result;
         context.size = size;
         context.done = false;
+        context.log_file_name = filename;
 
         nova::MarkCharAsWaitingForRDMAWRITE(result, context.size);
 
@@ -396,10 +397,12 @@ namespace leveldb {
 
         RDMA_LOG(DEBUG)
             << fmt::format(
-                    "dcclient[{}]: Read RTable server:{} rtable:{} offset:{} size:{} off:{} size:{} req:{}",
+                    "dcclient[{}]: Read RTable server:{} rtable:{} offset:{} size:{} off:{} size:{} fn:{} backing_mem:{} req:{}",
                     cc_client_id_, rtable_handle.server_id,
                     rtable_handle.rtable_id, rtable_handle.offset,
-                    rtable_handle.size, offset, size, req_id);
+                    rtable_handle.size, offset, size, filename,
+                    (uint64_t) result,
+                    req_id);
         return req_id;
     }
 
@@ -652,9 +655,16 @@ namespace leveldb {
                         processed = true;
                     } else if (context.req_type ==
                                CCRequestType::CC_RTABLE_READ_BLOCKS) {
+                        if (context.log_file_name.empty()) {
+                            RDMA_ASSERT(
+                                    context.backing_mem[context.size - 1] != 0)
+                                << context.log_file_name;
+                        }
+
                         // Waiting for WRITEs.
                         if (nova::IsRDMAWRITEComplete(context.backing_mem,
                                                       context.size)) {
+                            context.file_number;
                             RDMA_LOG(DEBUG) << fmt::format(
                                         "dcclient[{}]: Read RTable blocks complete size:{} req:{}",
                                         cc_client_id_, context.size, req_id);

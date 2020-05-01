@@ -138,10 +138,27 @@ namespace leveldb {
         void QueryStats(DBStats *stats,
                         const Comparator *user_comparator);
 
-        void ComputeOverlappingFiles(std::map<uint64_t, FileMetaData *> *files,
-                                     std::vector<OverlappingStats> *num_overlapping,
-                                     const Comparator *user_comparator);
+        void ComputeOverlappingFilesStats(
+                std::map<uint64_t, FileMetaData *> *files,
+                std::vector<OverlappingStats> *num_overlapping,
+                const Comparator *user_comparator);
 
+        bool ComputeOverlappingFilesInRange(
+                std::map<uint64_t, FileMetaData *> *files,
+                int which,
+                Compaction *compaction,
+                const Slice &lower,
+                const Slice &upper,
+                Slice *new_lower,
+                Slice *new_upper,
+                const leveldb::Comparator *user_comparator);
+
+        void ComputeOverlappingFilesForRange(
+                std::map<uint64_t, FileMetaData *> *l0files,
+                std::map<uint64_t, FileMetaData *> *l1files,
+                const Options *options,
+                std::vector<Compaction *> *compactions,
+                const leveldb::Comparator *user_comparator);
 
         void ComputeOverlappingFilesPerTable(
                 std::map<uint64_t, FileMetaData *> *files,
@@ -173,6 +190,8 @@ namespace leveldb {
 
         // List of files per level
         std::vector<FileMetaData *> files_[config::kNumLevels];
+        std::map<uint64_t, FileMetaData *> fn_files_;
+        uint32_t version_id_;
     private:
         friend class Compaction;
 
@@ -203,13 +222,9 @@ namespace leveldb {
         int refs_ = 0;          // Number of live refs to this version
 
 
-//        std::map<uint64_t, FileMetaData*> fn_files_;
-        FileMetaData *fn_files_[MAX_LIVE_MEMTABLES];
-
         // Next file to compact based on seek stats.
         FileMetaData *file_to_compact_;
         int file_to_compact_level_;
-        uint32_t version_id_;
 
         // Level that should be compacted next and its compaction score.
         // Score < 1 means compaction is not strictly needed.  These fields
@@ -306,6 +321,9 @@ namespace leveldb {
         // Otherwise returns a pointer to a heap-allocated object that
         // describes the compaction.  Caller should delete the result.
         Compaction *PickCompaction(uint32_t thread_id);
+
+        void ComputeNonOverlappingSet(
+                std::vector<Compaction *> *compactions);
 
         // Return a compaction object for compacting the range [begin,end] in
         // the specified level.  Returns nullptr if there is nothing in that

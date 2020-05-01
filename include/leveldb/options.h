@@ -71,6 +71,10 @@ namespace leveldb {
 
         double subrange_reorg_sampling_ratio = 1.0;
 
+        uint32_t max_num_coordinated_compaction_nonoverlapping_sets = 1;
+
+        uint32_t max_num_sstables_in_nonoverlapping_set = 1;
+
         std::string zipfian_dist_file_path = "/tmp/zipfian";
 
         // Enable tracing accesses.
@@ -263,6 +267,7 @@ namespace leveldb {
 
         bool local_write = false;
         unsigned int *rand_seed;
+        bool update_subranges = true;
 
         uint64_t hash = 0;
         // For replicating log records.

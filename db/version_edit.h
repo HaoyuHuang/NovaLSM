@@ -76,6 +76,7 @@ namespace leveldb {
                      RTableHandle meta_block_handle,
                      const std::vector<RTableHandle> &data_block_group_handles) {
             FileMetaData f;
+            f.level = level;
             f.memtable_id = memtable_id;
             f.number = file;
             f.file_size = file_size;
@@ -98,7 +99,7 @@ namespace leveldb {
 
         uint32_t EncodeTo(char *dst) const;
 
-        Status DecodeFrom(const Slice &src);
+        Status DecodeFrom(const Slice &src, Slice *result = nullptr);
 
         std::string DebugString() const;
 

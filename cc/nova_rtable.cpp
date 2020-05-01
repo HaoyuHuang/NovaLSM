@@ -86,39 +86,39 @@ namespace leveldb {
 
     Status NovaRTable::Read(uint64_t offset, uint32_t size, char *scratch,
                             Slice *result) {
-        mutex_.lock();
-        if (backing_mem_ && !diskoff_memoff_.empty()) {
-            uint64_t diskoff = offset;
-            uint32_t read_size = 0;
-            auto it = diskoff_memoff_.lower_bound(offset);
-            if (it->first > diskoff || it == diskoff_memoff_.end()) {
-                it--;
-            }
-            RDMA_ASSERT(diskoff >= it->first &&
-                        diskoff < it->first + it->second.size())
-                << fmt::format("{} {} {} {} {}", offset, size, read_size,
-                               file_size_, diskoff_memoff_.size());;
-
-            while (read_size < size && it != diskoff_memoff_.end()) {
-                RDMA_ASSERT(it != diskoff_memoff_.end())
-                    << fmt::format("{} {} {} {} {}", offset, size, read_size,
-                                   file_size_, diskoff_memoff_.size());
-                uint64_t memoff =
-                        it->second.offset() + (diskoff - it->first);
-                uint32_t ss = std::min(size - read_size,
-                                       (uint32_t) (it->second.size() -
-                                                   (diskoff - it->first)));
-                memcpy(scratch + read_size, backing_mem_ + memoff, ss);
-
-                read_size += ss;
-                diskoff += ss;
-                it++;
-            }
-            *result = Slice(scratch, read_size);
-            mutex_.unlock();
-            return Status::OK();
-        }
-        mutex_.unlock();
+//        mutex_.lock();
+//        if (backing_mem_ && !diskoff_memoff_.empty()) {
+//            uint64_t diskoff = offset;
+//            uint32_t read_size = 0;
+//            auto it = diskoff_memoff_.lower_bound(offset);
+//            if (it->first > diskoff || it == diskoff_memoff_.end()) {
+//                it--;
+//            }
+//            RDMA_ASSERT(diskoff >= it->first &&
+//                        diskoff < it->first + it->second.size())
+//                << fmt::format("{} {} {} {} {}", offset, size, read_size,
+//                               file_size_, diskoff_memoff_.size());;
+//
+//            while (read_size < size && it != diskoff_memoff_.end()) {
+//                RDMA_ASSERT(it != diskoff_memoff_.end())
+//                    << fmt::format("{} {} {} {} {}", offset, size, read_size,
+//                                   file_size_, diskoff_memoff_.size());
+//                uint64_t memoff =
+//                        it->second.offset() + (diskoff - it->first);
+//                uint32_t ss = std::min(size - read_size,
+//                                       (uint32_t) (it->second.size() -
+//                                                   (diskoff - it->first)));
+//                memcpy(scratch + read_size, backing_mem_ + memoff, ss);
+//
+//                read_size += ss;
+//                diskoff += ss;
+//                it++;
+//            }
+//            *result = Slice(scratch, read_size);
+//            mutex_.unlock();
+//            return Status::OK();
+//        }
+//        mutex_.unlock();
 
         RTableHandle h = {};
         nova::dc_stats.dc_queue_depth += 1;
@@ -208,9 +208,8 @@ namespace leveldb {
                 continue;
             }
 
-            uint64_t fn = 0;
             leveldb::FileType type = leveldb::FileType::kCurrentFile;
-            leveldb::ParseFileName(buf->sstable_id, &fn, &type);
+            RDMA_ASSERT(leveldb::ParseFileName(buf->sstable_id, &type));
 
             if (buf->is_meta_blocks) {
                 RDMA_ASSERT(
@@ -356,7 +355,7 @@ namespace leveldb {
         return persisted_bytes;
     }
 
-    void NovaRTable::DeleteSSTable(const std::string &sstable_id) {
+    bool NovaRTable::DeleteSSTable(const std::string &sstable_id) {
         bool delete_rtable = false;
 
         mutex_.lock();
@@ -396,7 +395,7 @@ namespace leveldb {
         mutex_.unlock();
 
         if (!delete_rtable) {
-            return;
+            return false;
         }
 
         RDMA_ASSERT(file_);
@@ -407,6 +406,22 @@ namespace leveldb {
         file_ = nullptr;
         s = env_->DeleteFile(rtable_name_);
         RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
+        return true;
+    }
+
+    void NovaRTable::Close() {
+        mutex_.lock();
+        RDMA_ASSERT(allocated_bufs_.empty());
+        RDMA_ASSERT(persisting_cnt == 0);
+        is_full_ = true;
+        Seal();
+
+        RDMA_ASSERT(file_);
+        Status s = file_->Close();
+        RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
+        delete file_;
+        file_ = nullptr;
+        mutex_.unlock();
     }
 
     void NovaRTable::ForceSeal() {
@@ -487,7 +502,16 @@ namespace leveldb {
             uint32_t size, char *scratch, Slice *result) {
         if (!block_cache_) {
             NovaRTable *rtable = rtables_[rtable_handle.rtable_id];
+            leveldb::FileType type;
+            RDMA_ASSERT(ParseFileName(rtable->rtable_name_, &type));
             rtable->Read(offset, size, scratch, result);
+            if (type == leveldb::FileType::kTableFile) {
+                RDMA_ASSERT(result->size() == size)
+                    << fmt::format("fn:{} given size:{} read size:{}",
+                                   rtable->rtable_name_,
+                                   size,
+                                   result->size());
+            }
             return;
         }
 
@@ -552,6 +576,8 @@ namespace leveldb {
         for (auto &it : fn_rtables) {
             auto &fn = it.first;
             auto &rtableid = it.second;
+            RDMA_LOG(rdmaio::INFO)
+                << fmt::format("Open RTable {} for file {}", rtableid, fn);
 
             NovaRTable *rtable = new NovaRTable(rtableid, env_,
                                                 fn,
@@ -596,6 +622,20 @@ namespace leveldb {
         fn_rtable_map_[filename] = rtable;
         mutex_.unlock();
         return rtable;
+    }
+
+    void NovaRTableManager::DeleteSSTable(const std::string &sstable_id) {
+        mutex_.lock();
+        auto it = fn_rtable_map_.find(sstable_id);
+        NovaRTable *rtable = nullptr;
+        if (it != fn_rtable_map_.end()) {
+            rtable = it->second;
+            fn_rtable_map_.erase(sstable_id);
+        }
+        mutex_.unlock();
+        if (rtable) {
+            rtable->DeleteSSTable(sstable_id);
+        }
     }
 
     NovaRTable *NovaRTableManager::rtable(int rtable_id) {

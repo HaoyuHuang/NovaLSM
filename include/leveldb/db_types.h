@@ -122,6 +122,7 @@ namespace leveldb {
         uint64_t file_size;    // File size in bytes in original SSTable format.
         uint64_t converted_file_size; // File size in bytes after converted to RTable.
         uint64_t flush_timestamp = 0;
+        uint32_t level = 0;
         InternalKey smallest;  // Smallest internal key served by table
         InternalKey largest;   // Largest internal key served by table
         FileCompactionStatus compaction_status;

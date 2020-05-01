@@ -359,9 +359,14 @@ namespace leveldb {
         for (const std::string &filename : files_to_delete) {
             env_->DeleteFile(dbname_ + "/" + filename);
         }
-        for (auto it : server_pairs) {
+        for (auto &it : server_pairs) {
             bg_thread->dc_client()->InitiateDeleteTables(it.first,
                                                          it.second);
+            for (auto &tble : it.second) {
+                RDMA_LOG(rdmaio::INFO)
+                    << fmt::format("Delete {} {}", tble.rtable_id,
+                                   tble.sstable_id);
+            }
         }
         mutex_.Lock();
     }
@@ -483,15 +488,19 @@ namespace leveldb {
                 auto meta_handle = meta->meta_block_handle;
                 stoc_fn_rtableid[meta_handle.server_id][metafilename] = meta_handle.rtable_id;
 
-                for (auto& data_block : meta->data_block_group_handles) {
+                for (auto &data_block : meta->data_block_group_handles) {
                     stoc_fn_rtableid[data_block.server_id][filename] = data_block.rtable_id;
                 }
             }
         }
 
-        for (auto& mapping : stoc_fn_rtableid) {
+        for (auto &mapping : stoc_fn_rtableid) {
             uint32_t stoc_id = mapping.first;
             std::map<std::string, uint32_t> &fnrtable = mapping.second;
+            RDMA_LOG(rdmaio::INFO)
+                << fmt::format("Recover Install FileRTable mapping {} size:{}",
+                               stoc_id,
+                               fnrtable.size());
             client->InitiateFileNameRTableMapping(stoc_id, fnrtable);
             client->Wait();
         }
@@ -503,24 +512,26 @@ namespace leveldb {
                 auto meta = files[level][i];
                 std::string filename = TableFileName(dbname_, meta->number,
                                                      true);
-                uint32_t scid = options_.mem_manager->slabclassid(0,
-                                                                  meta->meta_block_handle.size);
-                char *buf = options_.mem_manager->ItemAlloc(0, scid);
+                uint32_t backing_scid = options_.mem_manager->slabclassid(0,
+                                                                          meta->meta_block_handle.size);
+                char *backing_buf = options_.mem_manager->ItemAlloc(0,
+                                                                    backing_scid);
                 RDMA_LOG(rdmaio::INFO)
                     << fmt::format("Recover metadata blocks {} handle:{}",
                                    filename,
                                    meta->meta_block_handle.DebugString());
                 client->InitiateRTableReadDataBlock(meta->meta_block_handle, 0,
                                                     meta->meta_block_handle.size,
-                                                    buf, filename);
+                                                    backing_buf, filename);
                 client->Wait();
 
                 WritableFile *writable_file;
                 EnvFileMetadata env_meta = {};
+                filename = TableFileName(dbname_, meta->number);
                 Status s = env_->NewWritableFile(filename, env_meta,
                                                  &writable_file);
                 RDMA_ASSERT(s.ok());
-                Slice sstable_rtable(buf,
+                Slice sstable_rtable(backing_buf,
                                      meta->meta_block_handle.size);
                 s = writable_file->Append(sstable_rtable);
                 RDMA_ASSERT(s.ok());
@@ -533,7 +544,7 @@ namespace leveldb {
                 delete writable_file;
                 writable_file = nullptr;
 
-                options_.mem_manager->FreeItem(0, buf, scid);
+                options_.mem_manager->FreeItem(0, backing_buf, backing_scid);
             }
         }
 
@@ -718,6 +729,7 @@ namespace leveldb {
         for (int i = 0; i < rdma_threads_.size(); i++) {
             auto *thread = reinterpret_cast<nova::NovaRDMAComputeComponent *>(rdma_threads_[i]);
             thread->should_pause = false;
+            sem_post(&thread->sem_);
         }
         return Status::OK();
     }
@@ -729,7 +741,8 @@ namespace leveldb {
             MemTable *imm = reinterpret_cast<MemTable *>(task.memtable);
             FileMetaData &meta = imm->meta();
             meta.number = versions_->NewFileNumber();
-            meta.flush_timestamp = processed_writes_;
+            meta.flush_timestamp = versions_->last_sequence_;
+            meta.level = 0;
             Status s;
             Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
                                               AccessCaller::kCompaction);
@@ -800,7 +813,8 @@ namespace leveldb {
             RDMA_ASSERT(imm);
             FileMetaData &meta = imm->meta();
             meta.number = versions_->NewFileNumber();
-            meta.flush_timestamp = processed_writes_;
+            meta.flush_timestamp = versions_->last_sequence_;
+            meta.level = 0;
             Status s;
             Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
                                               AccessCaller::kCompaction);
@@ -896,7 +910,8 @@ namespace leveldb {
 
             FileMetaData &meta = imm->meta();
             meta.number = versions_->NewFileNumber();
-            meta.flush_timestamp = processed_writes_;
+            meta.flush_timestamp = versions_->last_sequence_;
+            meta.level = 0;
 
             Status s;
             Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
@@ -1222,8 +1237,8 @@ namespace leveldb {
             return;
         }
 
-        last_major_reorg_seq_ = processed_writes_;
-        last_minor_reorg_seq_ = processed_writes_;
+        last_major_reorg_seq_ = versions_->last_sequence_;
+        last_minor_reorg_seq_ = versions_->last_sequence_;
         num_major_reorgs++;
         double share_per_subrange = total_rate / subranges.size();
         int index = 0;
@@ -1292,7 +1307,7 @@ namespace leveldb {
     void DBImpl::PerformSubrangeMinorReorg(int subrange_id,
                                            leveldb::DBImpl::SubRanges *latest,
                                            double total_inserts) {
-        last_minor_reorg_seq_ = processed_writes_;
+        last_minor_reorg_seq_ = versions_->last_sequence_;
         std::vector<SubRange> &subranges = latest->subranges;
         double fair_rate = 1.0 / (double) subranges.size();
 
@@ -1582,10 +1597,12 @@ namespace leveldb {
             SubRange &sr = subranges[i];
             sr.rate = (double) sr.ninserts / total_inserts;
             double diff = (sr.rate - fair_rate) * 100.0 / fair_rate;
-            if (std::abs(diff) > 20 && !sr.IsAPoint(user_comparator_)) {
+            if (std::abs(diff) > SUBRANGE_REORG_DIFF_FROM_FAIR_THRESHOLD &&
+                !sr.IsAPoint(user_comparator_)) {
                 unfair_subranges += 1;
             }
-            if (diff > 20 && diff > most_unfair &&
+            if (diff > SUBRANGE_REORG_DIFF_FROM_FAIR_THRESHOLD &&
+                diff > most_unfair &&
                 !sr.IsAPoint(user_comparator_) && sr.ninserts > 100 &&
                 now - last_minor_reorg_seq_ >
                 SUBRANGE_MINOR_REORG_INTERVAL) {
@@ -1593,7 +1610,8 @@ namespace leveldb {
                 most_unfair_subrange = i;
             }
         }
-        if (unfair_subranges / (double) subranges.size() > 0.1 &&
+        if (unfair_subranges / (double) subranges.size() >
+            SUBRANGE_MAJOR_REORG_THRESHOLD &&
             now - last_major_reorg_seq_ >
             SUBRANGE_MAJOR_REORG_INTERVAL) {
             PerformSubrangeMajorReorg(latest, total_inserts);
@@ -1616,20 +1634,39 @@ namespace leveldb {
         }
 
         if (options_.enable_major) {
-            PerformMajorCompaction(bg_thread, tasks);
+            while (true) {
+                MutexLock lock(&mutex_);
+                if (is_major_compaciton_running_) {
+                    return;
+                }
+
+                if (versions_->NeedsCompaction() ||
+                    versions_->current()->files_[0].size() >
+                    config::kL0_StopWritesTrigger) {
+
+                    PerformMajorCompaction(bg_thread, tasks);
+                } else {
+                    return;
+                }
+            }
         }
+    }
+
+    bool DBImpl::CoordinateMajorCompaction(leveldb::EnvBGThread *bg_thread) {
+        // TODO
+        // Compute non-overlapping sets.
+        // All SSTables in one set are overlapping.
+        // SSTables in different sets are non-overlapping.
+        // A set contains at least one SSTable from L0.
+        // A set represents a range. Its smallest internal key is li and its largest internal key is ri.
+
+
+
+        return false;
     }
 
     bool DBImpl::PerformMajorCompaction(EnvBGThread *bg_thread,
                                         const std::vector<EnvBGTask> &tasks) {
-        MutexLock lock(&mutex_);
-        if (is_major_compaciton_running_) {
-            return false;
-        }
-
-        if (!versions_->NeedsCompaction()) {
-            return false;
-        }
         Compaction *c = versions_->PickCompaction(bg_thread->thread_id());
         Status status;
         if (c == nullptr) {
@@ -1642,9 +1679,8 @@ namespace leveldb {
             assert(c->num_input_files(0) == 1);
             assert(c->num_input_files(1) == 0);
             FileMetaData *f = c->input(0, 0);
-            int level = c->level() == -1 ? 0 : c->level();
-            c->edit()->DeleteFile(level, f->memtable_id, f->number);
-            c->edit()->AddFile(level + 1,
+            c->edit()->DeleteFile(c->level(), f->memtable_id, f->number);
+            c->edit()->AddFile(c->level() + 1,
                                0,
                                f->number, f->file_size,
                                f->converted_file_size,
@@ -1660,12 +1696,14 @@ namespace leveldb {
             if (!status.ok()) {
                 RecordBackgroundError(status);
             }
-            Log(options_.info_log,
-                "Moved #%lld@%d to level-%d %lld bytes %s\n",
-                static_cast<unsigned long long>(f->number),
-                c->level(), c->level() + 1,
-                static_cast<unsigned long long>(f->file_size),
-                status.ToString().c_str());
+            std::string output = fmt::format(
+                    "Moved #{}@{} to level-{} {} bytes {}\n",
+                    f->number,
+                    c->level(), c->level() + 1,
+                    f->file_size,
+                    status.ToString().c_str());
+            Log(options_.info_log, "%s", output.c_str());
+            RDMA_LOG(rdmaio::INFO) << output;
         } else {
             is_major_compaciton_running_ = true;
             CompactionState *compact = new CompactionState(c);
@@ -1684,7 +1722,9 @@ namespace leveldb {
 
         }
         delete c;
-
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("New version: {}",
+                           versions_->current()->DebugString());
         if (status.ok()) {
         } else {
             Log(options_.info_log, "Compaction error: %s",
@@ -1830,7 +1870,7 @@ namespace leveldb {
                                                  out.number,
                                                  out.file_size,
                                                  out.converted_file_size,
-                                                 processed_writes_,
+                                                 versions_->last_sequence_,
                                                  out.smallest, out.largest,
                                                  out.meta_block_handle,
                                                  out.data_block_group_handles);
@@ -1842,39 +1882,34 @@ namespace leveldb {
         Version *new_version = new Version(versions_,
                                            versions_->version_id_seq_.fetch_add(
                                                    1));
+        std::string output = fmt::format(
+                "bg[{}]: Major Compacted {}@{} + {}@{} files => {} bytes",
+                thread_id,
+                compact->compaction->num_input_files(0),
+                src_level,
+                compact->compaction->num_input_files(1),
+                dest_level,
+                compact->total_bytes);
+        Log(options_.info_log, "%s", output.c_str());
+        RDMA_LOG(rdmaio::INFO) << output;
+
         mutex_.Lock();
-        Log(options_.info_log,
-            "bg[%u]: Major Compacted %d@%d + %d@%d files => %lld bytes",
-            thread_id,
-            compact->compaction->num_input_files(0),
-            src_level,
-            compact->compaction->num_input_files(1),
-            dest_level,
-            static_cast<long long>(compact->total_bytes));
         return versions_->LogAndApply(compact->compaction->edit(), new_version);
     }
 
     Status
     DBImpl::DoCompactionWork(CompactionState *compact, EnvBGThread *bg_thread) {
         const uint64_t start_micros = env_->NowMicros();
-        int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
 
-        Log(options_.info_log, "bg[%lu] Major Compacting %d@%d + %d@%d files",
-            bg_thread->thread_id(),
-            compact->compaction->num_input_files(0),
-            compact->compaction->level(),
-            compact->compaction->num_input_files(1),
-            compact->compaction->level() + 1);
-
-        //        RDMA_LOG(rdmaio::DEBUG)
-//            << fmt::format("!!!!!!!!!!!!!!!!!Compacting {}@{} + {}@{} files",
-//                           compact->compaction->num_input_files(
-//                                   0),
-//                           compact->compaction->level(),
-//                           compact->compaction->num_input_files(
-//                                   1),
-//                           compact->compaction->level() +
-//                           1);
+        std::string output = fmt::format(
+                "bg[{}] Major Compacting {}@{} + {}@{} files",
+                bg_thread->thread_id(),
+                compact->compaction->num_input_files(0),
+                compact->compaction->level(),
+                compact->compaction->num_input_files(1),
+                compact->compaction->level() + 1);
+        Log(options_.info_log, "%s", output.c_str());
+        RDMA_LOG(rdmaio::INFO) << output;
 
         int src_level = compact->compaction->level();
         assert(versions_->NumLevelFiles(src_level) > 0);
@@ -1995,16 +2030,18 @@ namespace leveldb {
         input = nullptr;
 
         CompactionStats stats;
-        stats.micros = env_->NowMicros() - start_micros - imm_micros;
+        stats.micros = env_->NowMicros() - start_micros;
         for (int which = 0; which < 2; which++) {
             for (int i = 0;
                  i < compact->compaction->num_input_files(which); i++) {
                 stats.bytes_read += compact->compaction->input(which,
                                                                i)->file_size;
+                stats.num_input_files += 1;
             }
         }
         for (size_t i = 0; i < compact->outputs.size(); i++) {
             stats.bytes_written += compact->outputs[i].file_size;
+            stats.num_output_files += 1;
         }
 
         if (status.ok()) {
@@ -2013,7 +2050,14 @@ namespace leveldb {
         if (!status.ok()) {
             RecordBackgroundError(status);
         }
-        stats_[compact->compaction->level() + 1].Add(stats);
+//        stats_[compact->compaction->level() + 1].Add(stats);
+
+        Log(options_.info_log, "%s",
+            fmt::format("Major compaction stats,{},{},{},{},{}",
+                        stats.num_input_files, stats.bytes_read,
+                        stats.num_output_files, stats.bytes_written,
+                        stats.micros).c_str());
+
         versions_->AddCompactedInputs(compact->compaction, &compacted_tables_);
         return status;
     }
@@ -2172,7 +2216,8 @@ namespace leveldb {
     DBImpl::Put(const WriteOptions &o, const Slice &key, const Slice &val) {
         processed_writes_ += 1;
         if (options_.memtable_type == MemTableType::kStaticPartition) {
-            if (options_.enable_subranges) {
+            if (options_.enable_subranges && o.update_subranges) {
+                // Update subranges is false during loading the database.
                 return WriteSubrange(o, key, val);
             } else {
                 return WriteStaticPartition(o, key, val);
@@ -2372,9 +2417,6 @@ namespace leveldb {
                                     partition_id,
                                     next_imm_slot, options.rand_seed);
         }
-//        RDMA_LOG(rdmaio::DEBUG)
-//            << fmt::format("#### Put key {} in table {}", key.ToString(),
-//                           memtable_id);
         return true;
     }
 
@@ -2431,8 +2473,8 @@ namespace leveldb {
                                  const leveldb::Slice &val) {
         uint64_t last_sequence = versions_->last_sequence_.fetch_add(1);
 
-        if (last_sequence > SUBRANGE_WARMUP_NPUTS &&
-            last_sequence % SUBRANGE_REORG_INTERVAL == 0) {
+        if (processed_writes_ > SUBRANGE_WARMUP_NPUTS &&
+            processed_writes_ % SUBRANGE_REORG_INTERVAL == 0) {
             // wake up reorg thread.
             EnvBGTask task = {};
             task.db = this;
@@ -2441,7 +2483,7 @@ namespace leveldb {
 
         SubRanges *ref = latest_subranges_;
 
-        ref->AssertSubrangeBoundary(user_comparator_);
+//        ref->AssertSubrangeBoundary(user_comparator_);
 
         int subrange_id = -1;
         if (ref->subranges.size() == options_.num_memtable_partitions) {
@@ -2578,9 +2620,6 @@ namespace leveldb {
             }
             RDMA_ASSERT(false);
         }
-//        RDMA_LOG(rdmaio::DEBUG)
-//            << fmt::format("{} {} {}", key.ToString(), subrange_id,
-//                           ref->DebugString());
         range_lock_.Unlock();
         RDMA_ASSERT(subrange_id != -1);
         RDMA_ASSERT(WriteStaticPartition(options, key, val, subrange_id, true,

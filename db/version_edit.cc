@@ -40,6 +40,7 @@ namespace leveldb {
         kDeletedFile = 6,
         kNewFile = 7,
         kUpdateSubRange = 8,
+        kEndEdit = 10,
         // 8 was used for large value refs
                 kPrevLogNumber = 9
     };
@@ -95,11 +96,13 @@ namespace leveldb {
                                       new_files_[i].first); // level
             msg_size += EncodeFixed64(dst + msg_size, f.number);
             msg_size += EncodeFixed64(dst + msg_size, f.file_size);
+            msg_size += EncodeFixed64(dst + msg_size, f.converted_file_size);
             msg_size += EncodeStr(dst + msg_size,
                                   f.smallest.Encode().ToString());
             msg_size += EncodeStr(dst + msg_size,
                                   f.largest.Encode().ToString());
             msg_size += EncodeFixed64(dst + msg_size, f.flush_timestamp);
+            msg_size += EncodeFixed32(dst + msg_size, f.level);
             msg_size += EncodeFixed32(dst + msg_size, f.memtable_id);
             f.meta_block_handle.EncodeHandle(dst + msg_size);
             msg_size += f.meta_block_handle.HandleSize();
@@ -123,6 +126,8 @@ namespace leveldb {
             msg_size += EncodeBool(dst + msg_size, subrange.lower_inclusive);
             msg_size += EncodeBool(dst + msg_size, subrange.upper_inclusive);
         }
+        dst[msg_size] = kEndEdit;
+        msg_size += 1;
         return msg_size;
     }
 
@@ -145,7 +150,7 @@ namespace leveldb {
         }
     }
 
-    Status VersionEdit::DecodeFrom(const Slice &src) {
+    Status VersionEdit::DecodeFrom(const Slice &src, Slice *result) {
         Clear();
         Slice input = src;
         const char *msg = nullptr;
@@ -163,6 +168,14 @@ namespace leveldb {
         while (msg == nullptr && input.size() > 0) {
             tag = input[0];
             input.remove_prefix(1);
+
+            if (tag == kEndEdit) {
+                if (result != nullptr) {
+                    *result = input;
+                }
+                return Status::OK();
+            }
+
             switch (tag) {
                 case kComparator:
                     if (DecodeStr(&input, &str)) {
@@ -214,9 +227,11 @@ namespace leveldb {
                     if (GetLevel(&input, &level) &&
                         DecodeFixed64(&input, &f.number) &&
                         DecodeFixed64(&input, &f.file_size) &&
+                        DecodeFixed64(&input, &f.converted_file_size) &&
                         GetInternalKey(&input, &f.smallest) &&
                         GetInternalKey(&input, &f.largest) &&
                         DecodeFixed64(&input, &f.flush_timestamp) &&
+                        DecodeFixed32(&input, &f.level) &&
                         DecodeFixed32(&input, &f.memtable_id) &&
                         RTableHandle::DecodeHandle(&input,
                                                    &f.meta_block_handle) &&
@@ -241,7 +256,7 @@ namespace leveldb {
                     break;
 
                 default:
-                    msg = "unknown tag";
+                    msg = "unknown tag " + tag;
                     break;
             }
         }
@@ -250,11 +265,14 @@ namespace leveldb {
             msg = "invalid tag";
         }
 
-        Status result;
+        Status s;
         if (msg != nullptr) {
-            result = Status::Corruption("VersionEdit", msg);
+            s = Status::Corruption("VersionEdit", msg);
         }
-        return result;
+        if (result != nullptr) {
+            *result = input;
+        }
+        return s;
     }
 
     std::string VersionEdit::DebugString() const {

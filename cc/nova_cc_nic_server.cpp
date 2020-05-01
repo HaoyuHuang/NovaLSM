@@ -211,6 +211,8 @@ namespace nova {
                 option.thread_id = tid_;
                 option.local_write = true;
                 option.replicate_log_record_states = state;
+                // DO NOT update subranges since this is not the actual workload.
+                option.update_subranges = false;
 
                 leveldb::Status s = db->Put(option, key, val);
                 RDMA_ASSERT(s.ok());
@@ -460,7 +462,7 @@ namespace nova {
         pool->range_cond_vars_ = new leveldb::port::CondVar *[ndbs];
 
         std::vector<nova::NovaMsgCallback *> rdma_threads;
-        std::vector<leveldb::NovaBlockCCClient*> db_clients;
+        std::vector<leveldb::NovaBlockCCClient *> db_clients;
         for (int db_index = 0; db_index < ndbs; db_index++) {
             auto reorg = new leveldb::NovaCCCompactionThread(mem_manager);
             reorg_bgs.push_back(reorg);
@@ -658,6 +660,7 @@ namespace nova {
             conn_workers[i]->cc_client_->ccs_ = async_workers;
             conn_workers[i]->rdma_threads = rdma_threads;
             conn_workers[i]->ctrl_ = rdma_ctrl;
+            conn_workers[i]->rtable_manager_ = rtable_manager;
         }
 
         for (int i = 0;
@@ -749,9 +752,12 @@ namespace nova {
             usleep(10000);
         }
 
+        for (int db_index = 0; db_index < ndbs; db_index++) {
+            db_clients[db_index]->ccs_ = async_compaction_workers;
+        }
+
         if (NovaConfig::config->recover_dbs) {
             for (int db_index = 0; db_index < ndbs; db_index++) {
-                db_clients[db_index]->ccs_ = async_workers;
                 RDMA_ASSERT(dbs_[db_index]->Recover().ok());
             }
         }

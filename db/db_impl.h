@@ -33,6 +33,9 @@
 #define SUBRANGE_MINOR_REORG_INTERVAL 100000
 #define SUBRANGE_REORG_INTERVAL 100000
 
+#define SUBRANGE_REORG_DIFF_FROM_FAIR_THRESHOLD 20
+#define SUBRANGE_MAJOR_REORG_THRESHOLD 0.2
+
 namespace leveldb {
 
     class MemTable;
@@ -210,9 +213,11 @@ namespace leveldb {
                 this->bytes_written += c.bytes_written;
             }
 
-            int64_t micros;
-            int64_t bytes_read;
-            int64_t bytes_written;
+            uint64_t micros;
+            uint64_t num_input_files;
+            uint64_t bytes_read;
+            uint64_t num_output_files;
+            uint64_t bytes_written;
         };
 
         Iterator *NewInternalIterator(const ReadOptions &,
@@ -257,6 +262,10 @@ namespace leveldb {
         bool
         PerformMajorCompaction(EnvBGThread *bg_thread,
                                const std::vector<EnvBGTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
+                mutex_);
+
+        bool
+        CoordinateMajorCompaction(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         void CleanupCompaction(CompactionState *compact)

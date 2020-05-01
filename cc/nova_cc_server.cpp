@@ -213,10 +213,14 @@ namespace nova {
                         uint32_t rtableid = leveldb::DecodeFixed32(
                                 buf + msg_size);
                         msg_size += 4;
-                        rtable_manager_->rtable(rtableid)->DeleteSSTable(
-                                sstable_id);
+                        rtable_manager_->DeleteSSTable(sstable_id);
+                        leveldb::FileType type;
+                        RDMA_ASSERT(leveldb::ParseFileName(sstable_id, &type));
+                        if (type == leveldb::FileType::kTableFile) {
+                            rtable_manager_->DeleteSSTable(
+                                    sstable_id + "-meta");
+                        }
                     }
-
                     RDMA_LOG(DEBUG) << fmt::format(
                                 "dc[{}]: Delete SSTables. nsstables:{}",
                                 thread_id_, nrtables);
@@ -305,7 +309,8 @@ namespace nova {
                             thread_id_, filename);
                     uint64_t rtable_off = rtatble->AllocateBuf(
                             filename, size, is_meta_blocks);
-                    RDMA_ASSERT(rtable_off != UINT64_MAX);
+                    RDMA_ASSERT(rtable_off != UINT64_MAX)
+                        << fmt::format("{} {}", filename, size);
 //                    if (rtable_off == UINT64_MAX) {
 //                        // overflow.
 //                        // close.
@@ -392,7 +397,8 @@ namespace nova {
                                 "dc[{}]: Delete log buffer for file {}.",
                                 thread_id_, log_file);
                     processed = true;
-                } else if (buf[0] == leveldb::CCRequestType::CC_FILENAME_RTABLEID) {
+                } else if (buf[0] ==
+                           leveldb::CCRequestType::CC_FILENAME_RTABLEID) {
                     uint32 read_size = 1;
                     uint32_t nfiles = leveldb::DecodeFixed32(buf + read_size);
                     read_size += 4;
@@ -401,7 +407,8 @@ namespace nova {
                     for (int i = 0; i < nfiles; i++) {
                         std::string fn;
                         read_size += leveldb::DecodeStr(buf + read_size, &fn);
-                        uint32_t rtableid = leveldb::DecodeFixed32(buf + read_size);
+                        uint32_t rtableid = leveldb::DecodeFixed32(
+                                buf + read_size);
                         read_size += 4;
                         fn_rtable[fn] = rtableid;
                     }
@@ -485,10 +492,10 @@ namespace nova {
                                                    task.rtable_handle.offset,
                                                    task.rtable_handle.size,
                                                    task.rdma_buf, &result);
-                    if (result.size() < task.rtable_handle.size) {
-                        // Mark the data has been written.
-                        task.rdma_buf[task.rtable_handle.size - 1] = 1;
-                    }
+//                    if (result.size() < task.rtable_handle.size) {
+//                        // Mark the data has been written.
+//                        task.rdma_buf[task.rtable_handle.size - 1] = 1;
+//                    }
                     task.rtable_handle.size = result.size();
                     RDMA_ASSERT(result.size() <= task.rtable_handle.size);
                     stat_read_bytes_ += task.rtable_handle.size;

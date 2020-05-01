@@ -255,18 +255,17 @@ namespace leveldb {
             }
         }
 
-        RDMA_ASSERT(s.ok());
-//        <<
-//                            fmt::format(
-//                                    "{} Cache hit {} Insert {} cs:{} cc:{} fn:{} rs:{} rr:{} roff:{} rsize:{}",
-//                                    s.ToString(),
-//                                    cache_hit,
-//                                    insert, block_cache->TotalCharge(),
-//                                    block_cache->TotalCapacity(),
-//                                    table->rep_->file_number,
-//                                    rtable_handle.server_id,
-//                                    rtable_handle.rtable_id,
-//                                    rtable_handle.offset, rtable_handle.size);
+        RDMA_ASSERT(s.ok())
+            <<
+            fmt::format(
+                    "{} Cache hit {} Insert {} fn:{} rs:{} rr:{} roff:{} rsize:{}",
+                    s.ToString(),
+                    cache_hit,
+                    insert,
+                    table->rep_->file_number,
+                    rtable_handle.server_id,
+                    rtable_handle.rtable_id,
+                    rtable_handle.offset, rtable_handle.size);
 
         if (table->db_profiler_ != nullptr) {
             Access access = {

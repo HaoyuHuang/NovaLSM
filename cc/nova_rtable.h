@@ -33,7 +33,9 @@ namespace leveldb {
 
         BlockHandle Handle(const std::string &sstable_id, bool is_meta_blocks);
 
-        void DeleteSSTable(const std::string &sstable_id);
+        bool DeleteSSTable(const std::string &sstable_id);
+
+        void Close();
 
         uint32_t rtable_id() {
             return rtable_id_;
@@ -41,6 +43,7 @@ namespace leveldb {
 
         void ForceSeal();
 
+        std::string rtable_name_;
     private:
 
         void Seal();
@@ -75,7 +78,6 @@ namespace leveldb {
         bool sealed_ = false;
 
         MemManager *mem_manager_ = nullptr;
-        std::string rtable_name_;
         char *backing_mem_ = nullptr;
         uint64_t current_disk_offset_ = 0;
         uint64_t current_mem_offset_ = 0;
@@ -115,6 +117,9 @@ namespace leveldb {
 
         void OpenRTables(std::map<std::string, uint32_t>& fn_rtables);
 
+        void DeleteSSTable(const std::string &sstable_id);
+
+        std::map<std::string, leveldb::NovaRTable*> fn_rtable_map_;
     private:
         Env *env_ = nullptr;
         MemManager *mem_manager_ = nullptr;
@@ -127,8 +132,6 @@ namespace leveldb {
         NovaRTable *rtables_[MAX_NUM_RTABLES];
         leveldb::Cache *block_cache_ = nullptr;
         std::mutex mutex_;
-
-        std::map<std::string, leveldb::NovaRTable*> fn_rtable_map_;
     };
 
 }

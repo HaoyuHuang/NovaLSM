@@ -135,6 +135,7 @@ namespace nova {
         struct event_base *base = nullptr;
         rdmaio::RdmaCtrl* ctrl_;
         std::vector<nova::NovaMsgCallback *> rdma_threads;
+        leveldb::NovaRTableManager *rtable_manager_;
 
         leveldb::NovaBlockCCClient *cc_client_;
         NovaMemManager *mem_manager_;

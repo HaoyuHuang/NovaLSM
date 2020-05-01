@@ -139,6 +139,7 @@ namespace nova {
         MISS = 'm',
         FORCE_GET = 'G',
         REINITIALIZE_QP = 'a',
+        CLOSE_RTABLE = 'c',
     };
 
     static RequestType char_to_req_type(char c) {

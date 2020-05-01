@@ -25,10 +25,14 @@ namespace leveldb {
         AppendNumberTo(&r, number);
         r.append(" fs:");
         AppendNumberTo(&r, file_size);
+        r.append(" cfs:");
+        AppendNumberTo(&r, converted_file_size);
         r.append(" mid:");
         AppendNumberTo(&r, memtable_id);
         r.append(" time:");
         AppendNumberTo(&r, flush_timestamp);
+        r.append(" level:");
+        AppendNumberTo(&r, level);
         r.append(" meta:");
         r.append(meta_block_handle.DebugString());
         r.append(" data:");
