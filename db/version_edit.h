@@ -21,7 +21,6 @@ namespace leveldb {
         Slice upper;
         bool lower_inclusive;
         bool upper_inclusive;
-
         std::string DebugString() const;
     };
 

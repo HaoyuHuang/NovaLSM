@@ -62,6 +62,8 @@ namespace leveldb {
         // comparator provided to previous open calls on the same DB.
         const Comparator *comparator;
 
+        bool debug = false;
+
         MemManager *mem_manager = nullptr;
         uint32_t num_recovery_thread = 0;
 

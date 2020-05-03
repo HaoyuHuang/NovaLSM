@@ -276,6 +276,8 @@ namespace nova {
                 output += std::to_string(stats.num_minor_reorgs);
                 output += ",";
                 output += std::to_string(stats.num_skipped_minor_reorgs);
+                output += ",";
+                output += std::to_string(stats.num_minor_reorgs_for_dup);
                 output += "\n";
 
                 output += "db-size-stats-" + std::to_string(i) + ":";

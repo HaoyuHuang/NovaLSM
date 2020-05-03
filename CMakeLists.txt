@@ -243,10 +243,7 @@ target_sources(leveldb
         nova/linked_list.h
         mc/nova_chained_hashtable.cpp
         mc/nova_chained_hashtable.h
-#        mc/mc.cpp
-#        mc/mc.h
-#        mc/worker.cpp
-#        mc/worker.h
+
         log/nova_in_memory_log_manager.cpp
         log/nova_in_memory_log_manager.h
         cc/nova_cc_log_writer.cc
@@ -266,6 +263,11 @@ target_sources(leveldb
 
         bench/rdma_write_server_worker.cpp
         bench/rdma_write_server_worker.h
+
+        ycsb/generator.h
+        ycsb/utils.h
+        ycsb/zipfian_generator.h
+        ycsb/uniform_generator.h
 
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>

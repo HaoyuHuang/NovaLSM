@@ -1134,6 +1134,10 @@ namespace leveldb {
     void VersionSet::AppendChangesToManifest(leveldb::VersionEdit *edit,
                                              NovaCCMemFile *manifest_file,
                                              uint32_t stoc_id) {
+        if (!manifest_file) {
+            return;
+        }
+
         manifest_lock_.lock();
         edit->SetNextFile(next_file_number_);
         edit->SetLastSequence(last_sequence_);

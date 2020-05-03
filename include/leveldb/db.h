@@ -69,6 +69,7 @@ namespace leveldb {
         uint32_t num_minor_reorgs = 0.0;
         uint32_t num_skipped_major_reorgs = 0.0;
         uint32_t num_skipped_minor_reorgs = 0.0;
+        uint32_t num_minor_reorgs_for_dup = 0.0;
         uint32_t new_l0_sstables_since_last_query = 0.0;
 
         std::vector<OverlappingStats> num_overlapping_sstables_per_table;

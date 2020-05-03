@@ -18,6 +18,10 @@
 #include "util/env_posix.h"
 #include "db/version_set.h"
 
+#include "ycsb/generator.h"
+#include "ycsb/uniform_generator.h"
+#include "ycsb/zipfian_generator.h"
+
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <stdio.h>
@@ -27,18 +31,19 @@
 #include <csignal>
 #include <gflags/gflags.h>
 
+
 using namespace std;
 using namespace rdmaio;
 using namespace nova;
 
 NovaConfig *NovaConfig::config;
 
-DEFINE_uint32(cc_num_memtables, 64, "");
-DEFINE_uint32(cc_num_memtable_partitions, 32, "");
+DEFINE_uint32(cc_num_memtables, 128, "");
+DEFINE_uint32(cc_num_memtable_partitions, 64, "");
 DEFINE_uint64(cc_iterations, 10000000, "");
 DEFINE_double(cc_sampling_ratio, 1, "");
 DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
-DEFINE_string(cc_client_access_pattern, "uniform", "");
+DEFINE_string(cc_client_access_pattern, "zipfian", "");
 
 namespace {
     class YCSBKeyComparator : public leveldb::Comparator {
@@ -72,6 +77,7 @@ namespace {
     };
 
     leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
+                                leveldb::MemManager *mem_manager,
                                 leveldb::MemTablePool *memtable_pool,
                                 std::vector<leveldb::EnvBGThread *> bg_threads,
                                 leveldb::EnvBGThread *reorg_thread) {
@@ -81,7 +87,9 @@ namespace {
         env->set_env_option(env_option);
         leveldb::DB *db;
         leveldb::Options options;
+        options.mem_manager = mem_manager;
         options.block_cache = cache;
+        options.debug = true;
         options.memtable_pool = memtable_pool;
         options.subrange_reorg_sampling_ratio = FLAGS_cc_sampling_ratio;
         options.zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
@@ -182,8 +190,10 @@ void InitializeCC() {
     leveldb::NovaCCCompactionThread *reorg = new leveldb::NovaCCCompactionThread(
             nullptr);
     std::thread t(&leveldb::NovaCCCompactionThread::Start, reorg);
+    leveldb::MemManager *mem_manager = new NovaMemManager(buf, 1, 1, 18);
 
-    leveldb::DB *db = CreateDatabase(0, nullptr, nullptr, bgs, reorg);
+    leveldb::DB *db = CreateDatabase(0, nullptr, mem_manager, nullptr, bgs,
+                                     reorg);
     bg->db = db;
 
     auto stat_thread = new NovaStatThread;
@@ -207,9 +217,15 @@ void InitializeCC() {
 
     unsigned int rand_seed = 0;
     uint32_t records = 10000000;
-    for (uint64_t j = 0; j < FLAGS_cc_iterations; FLAGS_cc_iterations++) {
-        uint32_t rid = rand() % records;
+    ycsbc::Generator<uint64_t> *gen = nullptr;
+    if (FLAGS_cc_client_access_pattern == "uniform") {
+        gen = new ycsbc::UniformGenerator(0, records);
+    } else {
+        gen = new ycsbc::ZipfianGenerator(0, records);
+    }
 
+    for (uint64_t j = 0; j < FLAGS_cc_iterations; FLAGS_cc_iterations++) {
+        uint32_t rid = gen->Next();
         auto v = static_cast<char>((rid % 10) + 'a');
 
         std::string key(std::to_string(rid));
@@ -364,6 +380,6 @@ int main(int argc, char *argv[]) {
     RDMA_ASSERT(new_edit.DecodeFrom(leveldb::Slice(edit_memory, size)).ok());
     RDMA_LOG(rdmaio::INFO) << new_edit.DebugString();
 
-//    InitializeCC();
+    InitializeCC();
     return 0;
 }

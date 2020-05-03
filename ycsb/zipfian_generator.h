@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdint>
 #include <mutex>
+#include "generator.h"
 #include "utils.h"
 
 namespace ycsbc {

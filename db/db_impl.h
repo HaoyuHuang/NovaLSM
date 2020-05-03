@@ -34,7 +34,7 @@
 #define SUBRANGE_REORG_INTERVAL 100000
 
 #define SUBRANGE_REORG_DIFF_FROM_FAIR_THRESHOLD 20
-#define SUBRANGE_MAJOR_REORG_THRESHOLD 0.2
+#define SUBRANGE_MAJOR_REORG_THRESHOLD 0.3
 
 namespace leveldb {
 
@@ -265,7 +265,8 @@ namespace leveldb {
                 mutex_);
 
         bool
-        CoordinateMajorCompaction(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
+        CoordinateMajorCompaction(
+                EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         void CleanupCompaction(CompactionState *compact)
@@ -335,6 +336,7 @@ namespace leveldb {
         uint32_t num_major_reorgs = 0;
         uint32_t num_skipped_major_reorgs = 0;
         uint32_t num_minor_reorgs = 0;
+        uint32_t num_minor_reorgs_for_dup = 0;
         uint32_t num_skipped_minor_reorgs = 0;
 
         struct SubRange {
@@ -342,8 +344,10 @@ namespace leveldb {
             Slice upper;
             bool lower_inclusive = true;
             bool upper_inclusive = false;
+            uint32_t num_duplicates = 0;
+
             uint64_t ninserts = 0;
-            double rate = 0;
+            double insertion_ratio = 0;
 
             static Slice Copy(Slice from) {
                 char *c = new char[from.size()];
@@ -376,15 +380,48 @@ namespace leveldb {
                     output += ")";
                 }
 
-                output += fmt::format(":{}, {}%, keys={}", ninserts,
-                                      (uint32_t) rate * 100.0, up - low);
+                output += fmt::format(":{}, {}%, d={} keys={}", ninserts,
+                                      (uint32_t) insertion_ratio * 100.0,
+                                      num_duplicates,
+                                      up - low);
                 return output;
+            }
+
+            bool Equals(const SubRange &other, const Comparator *comparator) {
+                if (lower_inclusive != other.lower_inclusive) {
+                    return false;
+                }
+                if (upper_inclusive != other.upper_inclusive) {
+                    return false;
+                }
+                if (num_duplicates != other.num_duplicates) {
+                    return false;
+                }
+                if (comparator->Compare(lower, other.lower) != 0) {
+                    return false;
+                }
+                if (comparator->Compare(upper, other.upper) != 0) {
+                    return false;
+                }
+                return true;
             }
 
             bool
             IsSmallerThanLower(const Slice &key, const Comparator *comparator) {
                 int comp = comparator->Compare(key, lower);
                 if (comp < 0) {
+                    return true;
+                }
+                if (comp == 0 && !lower_inclusive) {
+                    return true;
+                }
+                return false;
+            }
+
+            bool
+            IsGreaterThanLower(const Slice &key, const Comparator *comparator) {
+                int comp = comparator->Compare(key, lower);
+                if (comp > 0) {
                     return true;
                 }
                 if (comp == 0 && !lower_inclusive) {
@@ -435,6 +472,7 @@ namespace leveldb {
                     subranges[i].lower_inclusive = other.subranges[i].lower_inclusive;
                     subranges[i].upper_inclusive = other.subranges[i].upper_inclusive;
                     subranges[i].ninserts = other.subranges[i].ninserts;
+                    subranges[i].num_duplicates = other.subranges[i].num_duplicates;
                 }
             }
 
@@ -456,9 +494,10 @@ namespace leveldb {
                 if (subranges.empty()) {
                     return;
                 }
-                Slice prior_upper;
-                bool upper_inclusive;
-                for (int i = 0; i < subranges.size(); i++) {
+                Slice prior_upper = {};
+                bool upper_inclusive = false;
+                int i = 0;
+                while (i < subranges.size()) {
                     SubRange &sr = subranges[i];
                     RDMA_ASSERT(!sr.IsSmallerThanLower(sr.upper, comparator))
                         << DebugString();
@@ -468,27 +507,48 @@ namespace leveldb {
                                 RDMA_ASSERT(
                                         sr.IsSmallerThanLower(prior_upper,
                                                               comparator))
-                                    << DebugString();
+                                    << fmt::format("assert {} {}", i,
+                                                   DebugString());
                             } else {
-                                // Must be the same.
                                 RDMA_ASSERT(comparator->Compare(prior_upper,
-                                                                sr.lower) == 0)
-                                    << DebugString();
+                                                                sr.lower) <= 0)
+                                    << fmt::format("assert {} {}", i,
+                                                   DebugString());
                             }
                         } else {
-                            RDMA_ASSERT(sr.lower_inclusive) << DebugString();
+                            // Does not include upper.
                             RDMA_ASSERT(comparator->Compare(prior_upper,
-                                                            sr.lower) == 0)
-                                << DebugString();
+                                                            sr.lower) <= 0)
+                                << fmt::format("assert {} {}", i,
+                                               DebugString());
                         }
                     }
                     prior_upper = sr.upper;
                     upper_inclusive = sr.upper_inclusive;
+                    i++;
+
+                    if (sr.num_duplicates > 0) {
+                        int ndup = 1;
+                        while (ndup < sr.num_duplicates) {
+                            const SubRange &dup = subranges[i];
+                            RDMA_ASSERT(sr.Equals(dup, comparator))
+                                << fmt::format("assert {} {}", i,
+                                               DebugString());;
+                            i++;
+                            ndup++;
+                            RDMA_ASSERT(i < subranges.size());
+                        }
+                    }
                 }
             }
         };
 
-        int BinarySearch(SubRanges *ref, const leveldb::Slice &key);
+        bool BinarySearch(SubRanges *ref, const leveldb::Slice &key,
+                          int *subrange_id);
+
+        bool
+        BinarySearchWithDuplicate(SubRanges *ref, const leveldb::Slice &key,
+                                  unsigned int *rand_seed, int *subrange_id);
 
         std::atomic<SubRanges *> latest_subranges_;
 
@@ -540,6 +600,14 @@ namespace leveldb {
 
         void PerformSubrangeMajorReorg(SubRanges *latest,
                                        double total_inserts);
+
+        void MoveShareDuplicateSubranges(SubRanges *latest, int index);
+
+        bool
+        PerformSubrangeMinorReorgDuplicate(int subrange_id, SubRanges *latest,
+                                           double total_inserts);
+
+        bool MinorReorgDestroyDuplicates(SubRanges *latest, int subrange_id);
 
         void PerformSubrangeMinorReorg(int subrange_id, SubRanges *latest,
                                        double total_inserts);
