@@ -123,12 +123,21 @@ endif (BUILD_SHARED_LIBS)
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
 
-add_library(leveldb "" cc/nova_cc_stat_thread.cpp cc/nova_cc_stat_thread.h nova/nova_subrange_sim.cc)
+add_library(leveldb "")
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
         include/leveldb/cc_client.h
         include/leveldb/db_types.h
+
+        cc/nova_cc_stat_thread.cpp
+        cc/nova_cc_stat_thread.h
+        db/subrange.cpp
+        db/subrange.h
+        db/compaction.cpp
+        db/compaction.h
+        db/subrange_manager.cpp
+        db/subrange_manager.h
         "db/builder.cc"
         "db/builder.h"
         "db/c.cc"
@@ -206,6 +215,11 @@ target_sources(leveldb
         "cc/nova_cc_client.h"
         "cc/nova_cc_server.cpp"
         "cc/nova_cc_server.h"
+
+        "util/testharness.cc"
+        "util/testharness.h"
+        "util/testutil.cc"
+        "util/testutil.h"
 
         cc/nova_rtable.cpp
         cc/nova_rtable.h
@@ -575,4 +589,7 @@ target_link_libraries(scatter_bench -lgflags leveldb)
 
 add_executable(memtable_bench "bench_memtable/memtable_bench.cpp")
 target_link_libraries(memtable_bench -lgflags leveldb)
+
+add_executable(version_set_test "db/version_set_test.cc")
+target_link_libraries(version_set_test -lgflags leveldb)
 

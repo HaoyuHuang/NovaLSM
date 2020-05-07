@@ -21,6 +21,8 @@ namespace leveldb {
         Slice upper;
         bool lower_inclusive;
         bool upper_inclusive;
+        uint32_t num_duplicates;
+
         std::string DebugString() const;
     };
 
@@ -53,13 +55,14 @@ namespace leveldb {
 
         void UpdateSubRange(uint32_t subrange_id, Slice lower, Slice upper,
                             bool lower_inclusive,
-                            bool upper_inclusive) {
+                            bool upper_inclusive, uint32_t num_duplicates) {
             VersionSubRange sr = {};
             sr.subrange_id = subrange_id;
             sr.lower = lower;
             sr.upper = upper;
             sr.lower_inclusive = lower_inclusive;
             sr.upper_inclusive = upper_inclusive;
+            sr.num_duplicates = num_duplicates;
             new_subranges_.push_back(sr);
         }
 

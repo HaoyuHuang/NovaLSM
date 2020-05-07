@@ -271,11 +271,11 @@ void leveldb_approximate_sizes(leveldb_t *db, int num_ranges,
 void leveldb_compact_range(leveldb_t *db, const char *start_key,
                            size_t start_key_len, const char *limit_key,
                            size_t limit_key_len) {
-    Slice a, b;
-    db->rep->CompactRange(
-            // Pass null Slice if corresponding "const char*" is null
-            (start_key ? (a = Slice(start_key, start_key_len), &a) : nullptr),
-            (limit_key ? (b = Slice(limit_key, limit_key_len), &b) : nullptr));
+//    Slice a, b;
+//    db->rep->CompactRange(
+//            // Pass null Slice if corresponding "const char*" is null
+//            (start_key ? (a = Slice(start_key, start_key_len), &a) : nullptr),
+//            (limit_key ? (b = Slice(limit_key, limit_key_len), &b) : nullptr));
 }
 
 void leveldb_destroy_db(const leveldb_options_t *options, const char *name,

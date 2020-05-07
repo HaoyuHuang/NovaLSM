@@ -125,6 +125,7 @@ namespace leveldb {
             msg_size += EncodeSlice(dst + msg_size, subrange.upper);
             msg_size += EncodeBool(dst + msg_size, subrange.lower_inclusive);
             msg_size += EncodeBool(dst + msg_size, subrange.upper_inclusive);
+            msg_size += EncodeFixed32(dst + msg_size, subrange.num_duplicates);
         }
         dst[msg_size] = kEndEdit;
         msg_size += 1;
@@ -248,7 +249,8 @@ namespace leveldb {
                         DecodeStr(&input, &sr.lower) &&
                         DecodeStr(&input, &sr.upper) &&
                         DecodeBool(&input, &sr.lower_inclusive) &&
-                        DecodeBool(&input, &sr.upper_inclusive)) {
+                        DecodeBool(&input, &sr.upper_inclusive) &&
+                        DecodeFixed32(&input, &sr.num_duplicates)) {
                         new_subranges_.push_back(sr);
                     } else {
                         msg = "update-subrange entry";

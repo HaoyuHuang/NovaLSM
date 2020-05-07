@@ -11,7 +11,7 @@ namespace leveldb {
     NovaCCCompactionThread::NovaCCCompactionThread(MemManager *mem_manager)
             : mem_manager_(mem_manager) {
         sem_init(&signal, 0, 0);
-        for (int i = 0 ; i < BUCKET_SIZE; i++) {
+        for (int i = 0; i < BUCKET_SIZE; i++) {
             memtable_size[i] = 0;
         }
     }
@@ -35,6 +35,8 @@ namespace leveldb {
         return num_tasks_;
     }
 
+
+
     void NovaCCCompactionThread::Start() {
         nova::NovaConfig::config->add_tid_mapping();
 
@@ -43,6 +45,11 @@ namespace leveldb {
         background_work_mutex_.Unlock();
 
         rand_seed_ = thread_id_ + 100000;
+
+        if (db_) {
+            leveldb::DB *db = reinterpret_cast<leveldb::DB*>(db_);
+            db->CoordinateMajorCompaction();
+        }
 
         RDMA_LOG(rdmaio::INFO) << "Compaction workers started";
         while (is_running_) {
@@ -62,7 +69,8 @@ namespace leveldb {
 
             bool reorg = false;
             for (auto &task : tasks) {
-                if (task.memtable == nullptr) {
+                if (task.memtable == nullptr &&
+                    task.compaction_task == nullptr) {
                     auto db = reinterpret_cast<DB *>(tasks[0].db);
                     db->PerformSubRangeReorganization();
                     reorg = true;
@@ -80,7 +88,7 @@ namespace leveldb {
                 memtable_size[task.memtable_size_mb] += 1;
             }
 
-            for (auto& it : db_tasks) {
+            for (auto &it : db_tasks) {
                 auto db = reinterpret_cast<DB *>(it.first);
                 db->PerformCompaction(this, it.second);
             }

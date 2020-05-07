@@ -14,6 +14,18 @@
 
 namespace leveldb {
 
+    std::string FileMetaData::ShortDebugString() const {
+        std::string r;
+        r.append("[");
+        r.append(smallest.DebugString());
+        r.append(",");
+        r.append(largest.DebugString());
+        r.append("]");
+        r.append(" fn:");
+        AppendNumberTo(&r, number);
+        return r;
+    }
+
     std::string FileMetaData::DebugString() const {
         std::string r;
         r.append("[");
@@ -36,7 +48,7 @@ namespace leveldb {
         r.append(" meta:");
         r.append(meta_block_handle.DebugString());
         r.append(" data:");
-        for (auto& data : data_block_group_handles) {
+        for (auto &data : data_block_group_handles) {
             r.append(data.DebugString());
             r.append(" ");
         }
@@ -137,6 +149,15 @@ namespace leveldb {
 //        << "'@" << sequence
 //           << ":"
 //           << static_cast<int>(type);
+        return ss.str();
+    }
+
+    std::string ParsedInternalKey::FullDebugString() const {
+        std::ostringstream ss;
+        ss << '\'' << EscapeString(user_key.ToString())
+           << "'@" << sequence
+           << ":"
+           << static_cast<int>(type);
         return ss.str();
     }
 

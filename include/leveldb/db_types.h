@@ -66,6 +66,8 @@ namespace leveldb {
                 : user_key(u), sequence(seq), type(t) {}
 
         std::string DebugString() const;
+
+        std::string FullDebugString() const;
     };
 
     // Modules in this directory should keep internal keys wrapped inside
@@ -114,6 +116,8 @@ namespace leveldb {
                          compaction_status(FileCompactionStatus::NONE) {}
 
         std::string DebugString() const;
+
+        std::string ShortDebugString() const;
 
         int refs;
         int allowed_seeks;  // Seeks allowed until compaction

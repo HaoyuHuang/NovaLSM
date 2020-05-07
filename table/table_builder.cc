@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <nova/logging.hpp>
 #include <fmt/core.h>
+#include <db/dbformat.h>
 
 #include "leveldb/comparator.h"
 #include "leveldb/env.h"
@@ -101,7 +102,17 @@ namespace leveldb {
         assert(!r->closed);
         if (!ok()) return;
         if (r->num_entries > 0) {
-            assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
+            if (r->options.comparator->Compare(key, Slice(r->last_key)) <=
+                0) {
+                ParsedInternalKey ik;
+                ParseInternalKey(key, &ik);
+                ParsedInternalKey lk;
+                ParseInternalKey(r->last_key, &lk);
+                RDMA_ASSERT(false)
+                    << fmt::format("{} {}", ik.FullDebugString(),
+                                   lk.FullDebugString());
+            }
+
         }
 
         if (r->pending_index_entry) {

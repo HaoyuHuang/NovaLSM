@@ -181,7 +181,7 @@ namespace leveldb {
 
     void AtomicMemTable::SetMemTable(leveldb::MemTable *mem) {
         mutex_.lock();
-        l0_file_number_ = 0;
+        l0_file_numbers_.clear();
         is_flushed_ = false;
         is_immutable_ = false;
         RDMA_ASSERT(!memtable_);
@@ -190,12 +190,16 @@ namespace leveldb {
         mutex_.unlock();
     }
 
-    void AtomicMemTable::SetFlushed(const std::string &dbname, uint64_t l0fn) {
+    void AtomicMemTable::SetFlushed(const std::string &dbname,
+                                    const std::vector<uint64_t> &l0_file_numbers) {
         mutex_.lock();
         RDMA_ASSERT(!is_flushed_);
-        RDMA_ASSERT(l0_file_number_ == 0);
+        RDMA_ASSERT(l0_file_numbers_.empty());
         RDMA_ASSERT(is_immutable_);
-        l0_file_number_ = l0fn;
+        l0_file_numbers_.resize(l0_file_numbers.size());
+        for (int i = 0; i < l0_file_numbers.size(); i++) {
+            l0_file_numbers_[i] = l0_file_numbers[i];
+        }
         is_flushed_ = true;
         RDMA_ASSERT(memtable_);
         uint32_t mid = memtable_->memtableid();
@@ -209,18 +213,35 @@ namespace leveldb {
         mutex_.unlock();
     }
 
-    MemTable *AtomicMemTable::Ref(uint64_t *l0_fn) {
-        MemTable *mem = nullptr;
+    AtomicMemTable *AtomicMemTable::Ref(std::vector<uint64_t> *l0fns) {
+        AtomicMemTable *mem = nullptr;
         mutex_.lock();
         if (memtable_ != nullptr) {
-            mem = memtable_;
             memtable_->Ref();
+            mem = this;
         }
-        if (l0_fn) {
-            *l0_fn = l0_file_number_;
+        // make a copy of l0 file numbers.
+        if (l0fns) {
+            *l0fns = l0_file_numbers_;
         }
         mutex_.unlock();
         return mem;
+    }
+
+    void AtomicMemTable::DeleteL0File(std::vector<uint64_t> &l0fns) {
+        RDMA_ASSERT(is_immutable_);
+        RDMA_ASSERT(is_flushed_);
+        mutex_.lock();
+        for (uint64_t deleted_l0 : l0fns) {
+            for (auto it = l0_file_numbers_.begin();
+                 it != l0_file_numbers_.end(); it++) {
+                if (*it == deleted_l0) {
+                    l0_file_numbers_.erase(it);
+                    break;
+                }
+            }
+        }
+        mutex_.unlock();
     }
 
     void AtomicMemTable::Unref(const std::string &dbname) {

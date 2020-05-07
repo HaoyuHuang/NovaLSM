@@ -26,15 +26,11 @@
 #include "port/port.h"
 #include "port/thread_annotations.h"
 #include "memtable.h"
+#include "subrange.h"
+#include "subrange_manager.h"
+#include "compaction.h"
 
 #define MAX_BUCKETS 10000000
-#define SUBRANGE_WARMUP_NPUTS 1000000
-#define SUBRANGE_MAJOR_REORG_INTERVAL 1000000
-#define SUBRANGE_MINOR_REORG_INTERVAL 100000
-#define SUBRANGE_REORG_INTERVAL 100000
-
-#define SUBRANGE_REORG_DIFF_FROM_FAIR_THRESHOLD 20
-#define SUBRANGE_MAJOR_REORG_THRESHOLD 0.3
 
 namespace leveldb {
 
@@ -114,30 +110,6 @@ namespace leveldb {
         void GetApproximateSizes(const Range *range, int n,
                                  uint64_t *sizes) override;
 
-        void CompactRange(const Slice *begin, const Slice *end) override;
-
-        // Extra methods (for testing) that are not in the public DB interface
-
-        // Compact any files in the named level that overlap [*begin,*end]
-        void TEST_CompactRange(int level, const Slice *begin, const Slice *end);
-
-        // Force current memtable contents to be compacted.
-        Status TEST_CompactMemTable();
-
-        // Return an internal iterator over the current state of the database.
-        // The keys of this iterator are internal keys (see format.h).
-        // The returned iterator should be deleted when no longer needed.
-        Iterator *TEST_NewInternalIterator();
-
-        // Return the maximum overlapping data (in bytes) at next level for any
-        // file at a level >= 1.
-        int64_t TEST_MaxNextLevelOverlappingBytes();
-
-        // Record a sample of bytes read at the specified internal key.
-        // Samples are taken approximately once every config::kReadBytesPeriod
-        // bytes.
-        void RecordReadSample(Slice key);
-
         void PerformCompaction(EnvBGThread *bg_thread,
                                const std::vector<EnvBGTask> &tasks) override;
 
@@ -152,7 +124,18 @@ namespace leveldb {
                        uint32_t *recovered_log_records,
                        timeval *rdma_read_complete);
 
+        void
+        CoordinateMajorCompaction() override;
+
     private:
+        void
+        CoordinateLocalMajorCompaction(Version *current);
+
+        void
+        CoordinateStoCMajorCompaction(Version *current);
+
+        std::map<uint64_t, std::vector<uint32_t>> l0fn_memtableids;
+
         class NovaCCRecoveryThread {
         public:
             NovaCCRecoveryThread(
@@ -169,8 +152,6 @@ namespace leveldb {
             uint64_t max_sequence_number = 0;
 
             std::vector<char *> log_replicas_;
-
-
         private:
             std::vector<leveldb::MemTable *> memtables_;
             uint32_t client_id_ = 0;
@@ -181,12 +162,13 @@ namespace leveldb {
         // log-file/memtable and writes a new descriptor iff successful.
         // Errors are recorded in bg_error_.
         bool CompactMemTableStaticPartition(EnvBGThread *bg_thread,
-                                            const std::vector<EnvBGTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
-                mutex_);
+                                            const std::vector<EnvBGTask> &tasks);
+
+        bool CompactMultipleMemTablesStaticPartition(EnvBGThread *bg_thread,
+                                                     const std::vector<EnvBGTask> &tasks);
 
         friend class DB;
 
-        struct CompactionState;
         struct Writer;
 
         DBProfiler *db_profiler_ = nullptr;
@@ -202,42 +184,18 @@ namespace leveldb {
             InternalKey tmp_storage;   // Used to keep track of compaction progress
         };
 
-        // Per level compaction stats.  stats_[level] stores the stats for
-        // compactions that produced data for the specified "level".
-        struct CompactionStats {
-            CompactionStats() : micros(0), bytes_read(0), bytes_written(0) {}
-
-            void Add(const CompactionStats &c) {
-                this->micros += c.micros;
-                this->bytes_read += c.bytes_read;
-                this->bytes_written += c.bytes_written;
-            }
-
-            uint64_t micros;
-            uint64_t num_input_files;
-            uint64_t bytes_read;
-            uint64_t num_output_files;
-            uint64_t bytes_written;
-        };
-
         Iterator *NewInternalIterator(const ReadOptions &,
                                       SequenceNumber *latest_snapshot,
                                       uint32_t *seed);
 
-        Status NewDB();
-
-        // Recover the descriptor from persistent storage.  May do a significant
-        // amount of work to recover recently logged updates.  Any changes to
-        // be made to the descriptor are added to *edit.
-        Status Recover(VersionEdit *edit, bool *save_manifest)
-        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
-        void MaybeIgnoreError(Status *s) const;
-
         // Delete any unneeded files and stale in-memory entries.
         void
-        DeleteObsoleteFiles(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
+        DeleteObsoleteFiles(EnvBGThread *bg_thread,
+                            std::map<uint32_t, std::vector<uint64_t>> *memtableid_l0fns) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
+
+        void CleanUpTableLocator(
+                std::map<uint32_t, std::vector<uint64_t>> &memtableid_l0fns);
 
         void
         DeleteObsoleteVersions(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
@@ -250,41 +208,23 @@ namespace leveldb {
                              const std::vector<EnvBGTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
-
         void RecordBackgroundError(const Status &s);
 
-        void MaybeScheduleCompaction(
-                uint32_t thread_id, MemTable *imm, uint32_t partition_id,
+        void ScheduleBGTask(
+                int thread_id, MemTable *imm, void *compaction,
+                uint32_t partition_id,
                 uint32_t imm_slot,
                 unsigned int *rand_seed) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
         bool
         PerformMajorCompaction(EnvBGThread *bg_thread,
-                               const std::vector<EnvBGTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
+                               const EnvBGTask &task) EXCLUSIVE_LOCKS_REQUIRED(
                 mutex_);
 
-        bool
-        CoordinateMajorCompaction(
-                EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
-                mutex_);
-
-        void CleanupCompaction(CompactionState *compact)
-        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
         Status
-        DoCompactionWork(CompactionState *compact, EnvBGThread *bg_thread)
-        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
-        Status OpenCompactionOutputFile(CompactionState *compact,
-                                        EnvBGThread *bg_thread);
-
-        Status
-        FinishCompactionOutputFile(CompactionState *compact, Iterator *input);
-
-        Status
-        InstallCompactionResults(CompactionState *compact, uint32_t thread_id)
-        EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+        InstallCompactionResults(CompactionState *compact, VersionEdit *edit,
+                                 int target_level);
 
         const Comparator *user_comparator() const {
             return internal_comparator_.user_comparator();
@@ -321,250 +261,18 @@ namespace leveldb {
 
         std::vector<EnvBGThread *> compaction_threads_;
         EnvBGThread *reorg_thread_;
+        EnvBGThread *compaction_coordinator_thread_;
 
         std::atomic_int_fast32_t memtable_id_seq_;
+
+        SubRangeManager *subrange_manager_ = nullptr;
 
         // key -> memtable-id.
         TableLocator *table_locator_ = nullptr;
 
         // memtable pool.
         std::vector<AtomicMemTable *> active_memtables_;
-
-        uint64_t last_major_reorg_seq_ = 0;
-        uint64_t last_minor_reorg_seq_ = 0;
-
-        uint32_t num_major_reorgs = 0;
-        uint32_t num_skipped_major_reorgs = 0;
-        uint32_t num_minor_reorgs = 0;
-        uint32_t num_minor_reorgs_for_dup = 0;
-        uint32_t num_skipped_minor_reorgs = 0;
-
-        struct SubRange {
-            Slice lower;
-            Slice upper;
-            bool lower_inclusive = true;
-            bool upper_inclusive = false;
-            uint32_t num_duplicates = 0;
-
-            uint64_t ninserts = 0;
-            double insertion_ratio = 0;
-
-            static Slice Copy(Slice from) {
-                char *c = new char[from.size()];
-                for (int i = 0; i < from.size(); i++) {
-                    c[i] = from[i];
-                }
-                return Slice(c, from.size());
-            }
-
-            std::string DebugString() {
-                std::string output;
-                uint64_t low;
-                uint64_t up;
-                nova::str_to_int(lower.data(), &low, lower.size());
-                nova::str_to_int(upper.data(), &up, upper.size());
-
-                if (lower_inclusive) {
-                    output += "[";
-                } else {
-                    low++;
-                    output += "(";
-                }
-                output += lower.ToString();
-                output += ",";
-                output += upper.ToString();
-                if (upper_inclusive) {
-                    up++;
-                    output += "]";
-                } else {
-                    output += ")";
-                }
-
-                output += fmt::format(":{}, {}%, d={} keys={}", ninserts,
-                                      (uint32_t) insertion_ratio * 100.0,
-                                      num_duplicates,
-                                      up - low);
-                return output;
-            }
-
-            bool Equals(const SubRange &other, const Comparator *comparator) {
-                if (lower_inclusive != other.lower_inclusive) {
-                    return false;
-                }
-                if (upper_inclusive != other.upper_inclusive) {
-                    return false;
-                }
-                if (num_duplicates != other.num_duplicates) {
-                    return false;
-                }
-                if (comparator->Compare(lower, other.lower) != 0) {
-                    return false;
-                }
-                if (comparator->Compare(upper, other.upper) != 0) {
-                    return false;
-                }
-                return true;
-            }
-
-            bool
-            IsSmallerThanLower(const Slice &key, const Comparator *comparator) {
-                int comp = comparator->Compare(key, lower);
-                if (comp < 0) {
-                    return true;
-                }
-                if (comp == 0 && !lower_inclusive) {
-                    return true;
-                }
-                return false;
-            }
-
-            bool
-            IsGreaterThanLower(const Slice &key, const Comparator *comparator) {
-                int comp = comparator->Compare(key, lower);
-                if (comp > 0) {
-                    return true;
-                }
-                if (comp == 0 && !lower_inclusive) {
-                    return true;
-                }
-                return false;
-            }
-
-            bool
-            IsGreaterThanUpper(const Slice &key, const Comparator *comparator) {
-                int comp = comparator->Compare(key, upper);
-                if (comp > 0) {
-                    return true;
-                }
-                if (comp == 0 && !upper_inclusive) {
-                    return true;
-                }
-                return false;
-            }
-
-            bool IsAPoint(const Comparator *comparator) {
-                if (lower_inclusive && upper_inclusive &&
-                    comparator->Compare(lower, upper) == 0) {
-                    return true;
-                }
-                return false;
-            }
-        };
-
-        class SubRanges {
-        public:
-            ~SubRanges() {
-                for (int i = 0; i < subranges.size(); i++) {
-                    delete subranges[i].lower.data();
-                    delete subranges[i].upper.data();
-                }
-            }
-
-            SubRanges() {}
-
-            SubRanges(const SubRanges &other) {
-                subranges.resize(other.subranges.size());
-                for (int i = 0; i < subranges.size(); i++) {
-                    subranges[i].lower = SubRange::Copy(
-                            other.subranges[i].lower);
-                    subranges[i].upper = SubRange::Copy(
-                            other.subranges[i].upper);
-                    subranges[i].lower_inclusive = other.subranges[i].lower_inclusive;
-                    subranges[i].upper_inclusive = other.subranges[i].upper_inclusive;
-                    subranges[i].ninserts = other.subranges[i].ninserts;
-                    subranges[i].num_duplicates = other.subranges[i].num_duplicates;
-                }
-            }
-
-            std::vector<SubRange> subranges;
-
-            std::string DebugString() {
-                std::string output;
-//                output += std::to_string(subranges.size());
-                output += "\n";
-                for (int i = 0; i < subranges.size(); i++) {
-                    output += std::to_string(i) + " ";
-                    output += subranges[i].DebugString();
-                    output += "\n";
-                }
-                return output;
-            }
-
-            void AssertSubrangeBoundary(const Comparator *comparator) {
-                if (subranges.empty()) {
-                    return;
-                }
-                Slice prior_upper = {};
-                bool upper_inclusive = false;
-                int i = 0;
-                while (i < subranges.size()) {
-                    SubRange &sr = subranges[i];
-                    RDMA_ASSERT(!sr.IsSmallerThanLower(sr.upper, comparator))
-                        << DebugString();
-                    if (!prior_upper.empty()) {
-                        if (upper_inclusive) {
-                            if (sr.lower_inclusive) {
-                                RDMA_ASSERT(
-                                        sr.IsSmallerThanLower(prior_upper,
-                                                              comparator))
-                                    << fmt::format("assert {} {}", i,
-                                                   DebugString());
-                            } else {
-                                RDMA_ASSERT(comparator->Compare(prior_upper,
-                                                                sr.lower) <= 0)
-                                    << fmt::format("assert {} {}", i,
-                                                   DebugString());
-                            }
-                        } else {
-                            // Does not include upper.
-                            RDMA_ASSERT(comparator->Compare(prior_upper,
-                                                            sr.lower) <= 0)
-                                << fmt::format("assert {} {}", i,
-                                               DebugString());
-                        }
-                    }
-                    prior_upper = sr.upper;
-                    upper_inclusive = sr.upper_inclusive;
-                    i++;
-
-                    if (sr.num_duplicates > 0) {
-                        int ndup = 1;
-                        while (ndup < sr.num_duplicates) {
-                            const SubRange &dup = subranges[i];
-                            RDMA_ASSERT(sr.Equals(dup, comparator))
-                                << fmt::format("assert {} {}", i,
-                                               DebugString());;
-                            i++;
-                            ndup++;
-                            RDMA_ASSERT(i < subranges.size());
-                        }
-                    }
-                }
-            }
-        };
-
-        bool BinarySearch(SubRanges *ref, const leveldb::Slice &key,
-                          int *subrange_id);
-
-        bool
-        BinarySearchWithDuplicate(SubRanges *ref, const leveldb::Slice &key,
-                                  unsigned int *rand_seed, int *subrange_id);
-
-        std::atomic<SubRanges *> latest_subranges_;
-
-        // static partition.
-        struct MemTablePartition {
-            MemTablePartition() : background_work_finished_signal_(&mutex) {
-            };
-            MemTable *memtable;
-            port::Mutex mutex;
-            uint32_t partition_id = 0;
-            std::vector<uint32_t> imm_slots;
-            std::queue<uint32_t> available_slots;
-            std::vector<uint32_t> closed_log_files;
-            port::CondVar background_work_finished_signal_ GUARDED_BY(mutex);
-        };
-
+        // partitioned memtables.
         std::vector<MemTablePartition *> partitioned_active_memtables_ GUARDED_BY(
                 mutex_);
         std::vector<uint32_t> partitioned_imms_ GUARDED_BY(
@@ -576,7 +284,6 @@ namespace leveldb {
 
         // Set of table files to protect from deletion because they are
         // part of ongoing compactions.
-        std::set<uint64_t> pending_outputs_ GUARDED_BY(mutex_);
         std::map<uint64_t, FileMetaData> compacted_tables_ GUARDED_BY(mutex_);
         bool is_major_compaciton_running_ = false;
         ManualCompaction *manual_compaction_ GUARDED_BY(mutex_);
@@ -586,7 +293,6 @@ namespace leveldb {
         // Have we encountered a background error in paranoid mode?
         Status bg_error_ GUARDED_BY(mutex_);
 
-        CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
         std::string current_log_file_name_ GUARDED_BY(mutex_);
         std::vector<uint32_t> closed_memtable_log_files_  GUARDED_BY(
                 range_lock_);
@@ -597,20 +303,6 @@ namespace leveldb {
                                   uint32_t partition_id,
                                   bool should_wait, uint64_t last_sequence,
                                   SubRange *subrange);
-
-        void PerformSubrangeMajorReorg(SubRanges *latest,
-                                       double total_inserts);
-
-        void MoveShareDuplicateSubranges(SubRanges *latest, int index);
-
-        bool
-        PerformSubrangeMinorReorgDuplicate(int subrange_id, SubRanges *latest,
-                                           double total_inserts);
-
-        bool MinorReorgDestroyDuplicates(SubRanges *latest, int subrange_id);
-
-        void PerformSubrangeMinorReorg(int subrange_id, SubRanges *latest,
-                                       double total_inserts);
 
         NovaCCMemFile *manifest_file_ = nullptr;
         unsigned int rand_seed_ = 0;

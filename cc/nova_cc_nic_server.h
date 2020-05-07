@@ -38,8 +38,6 @@ namespace nova {
         void VerifyLoad();
 
     private:
-
-
         uint64_t LoadDataWithRangePartition();
 
         std::vector<NovaRDMAComputeComponent *> async_workers_;
@@ -74,6 +72,8 @@ namespace nova {
         std::vector<NovaCCServerAsyncWorker *> cc_server_workers;
         std::vector<leveldb::EnvBGThread *> bgs;
         std::vector<leveldb::EnvBGThread *> reorg_bgs;
+        std::vector<leveldb::EnvBGThread *> compaction_coord_bgs;
+
         NovaStatThread *stat_thread_;
         vector<std::thread> stats_t_;
 
@@ -83,6 +83,7 @@ namespace nova {
         vector<thread> cc_workers;
         vector<thread> compaction_workers;
         vector<thread> reorg_workers;
+        vector<thread> compaction_coord_workers;
         std::vector<std::thread> cc_server_async_workers;
     };
 }

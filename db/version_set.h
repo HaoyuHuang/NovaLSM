@@ -74,6 +74,12 @@ namespace leveldb {
         double score;
     };
 
+    enum GetSearchScope {
+        kAllLevels = 0,
+        kAllL0AndAllLevels = 1,
+        kL1AndAbove = 2
+    };
+
     class Version {
     public:
         // Lookup the value for key.  If found, store it in *val and
@@ -90,21 +96,11 @@ namespace leveldb {
         void AddIterators(const ReadOptions &, std::vector<Iterator *> *iters);
 
         Status Get(const ReadOptions &, const LookupKey &key, std::string *val,
-                   GetStats *stats, bool search_all_l0);
+                   GetStats *stats, GetSearchScope search_scope);
 
-        Status Get(const ReadOptions &, uint64_t fn, const LookupKey &key,
+        Status Get(const ReadOptions &, std::vector<uint64_t> &fns,
+                   const LookupKey &key,
                    std::string *val);
-
-        // Adds "stats" into the current state.  Returns true if a new
-        // compaction may need to be triggered, false otherwise.
-        // REQUIRES: lock is held
-        bool UpdateStats(const GetStats &stats);
-
-        // Record a sample of bytes read at the specified internal key.
-        // Samples are taken approximately once every config::kReadBytesPeriod
-        // bytes.  Returns true if a new compaction may need to be triggered.
-        // REQUIRES: lock is held
-//        bool RecordReadSample(Slice key);
 
         // Reference count management (so Versions do not disappear out from
         // under live iterators)
@@ -116,21 +112,10 @@ namespace leveldb {
                 int level,
                 const InternalKey *begin,  // nullptr means before all keys
                 const InternalKey *end,    // nullptr means after all keys
-                std::vector<FileMetaData *> *inputs);
-
-        // Returns true iff some file in the specified level overlaps
-        // some part of [*smallest_user_key,*largest_user_key].
-        // smallest_user_key==nullptr represents a key smaller than all the DB's keys.
-        // largest_user_key==nullptr represents a key largest than all the DB's keys.
-        bool OverlapInLevel(int level, const Slice *smallest_user_key,
-                            const Slice *largest_user_key);
-
-        // Return the level at which we should place a new memtable compaction
-        // result that covers the range [smallest_user_key,largest_user_key].
-        int PickLevelForMemTableOutput(const Slice &smallest_user_key,
-                                       const Slice &largest_user_key);
-
-        int NumFiles(int level) const { return files_[level].size(); }
+                std::vector<FileMetaData *> *inputs,
+                uint32_t limit = UINT32_MAX,
+                const std::set<uint64_t> &skip_files = {},
+                bool contained = false);
 
         // Return a human readable string that describes this version's contents.
         std::string DebugString() const;
@@ -144,7 +129,7 @@ namespace leveldb {
                 const Comparator *user_comparator);
 
         bool ComputeOverlappingFilesInRange(
-                std::map<uint64_t, FileMetaData *> *files,
+                std::vector<FileMetaData *> *files,
                 int which,
                 Compaction *compaction,
                 const Slice &lower,
@@ -154,8 +139,8 @@ namespace leveldb {
                 const leveldb::Comparator *user_comparator);
 
         void ComputeOverlappingFilesForRange(
-                std::map<uint64_t, FileMetaData *> *l0files,
-                std::map<uint64_t, FileMetaData *> *l1files,
+                std::vector<FileMetaData *> *l0files,
+                std::vector<FileMetaData *> *l1files,
                 const Options *options,
                 std::vector<Compaction *> *compactions,
                 const leveldb::Comparator *user_comparator);
@@ -164,6 +149,16 @@ namespace leveldb {
                 std::map<uint64_t, FileMetaData *> *files,
                 std::vector<OverlappingStats> *num_overlapping,
                 const Comparator *user_comparator);
+
+        void ComputeNonOverlappingSet(std::vector<Compaction *> *compactions,
+                                      const Options *options,
+                                      const Comparator *user_comparator);
+
+        bool
+        AssertNonOverlappingSet(const std::vector<Compaction *> &compactions,
+                                const Options *options,
+                                const Comparator *user_comparator,
+                                std::string *reason);
 
         static std::map<uint64_t, FileMetaData *> last_fnfile;
 
@@ -177,8 +172,12 @@ namespace leveldb {
 
         void Destroy();
 
-        explicit Version(VersionSet *vset, uint32_t version_id)
-                : vset_(vset),
+        explicit Version(const InternalKeyComparator *icmp,
+                         TableCache *table_cache,
+                         const Options *const options, uint32_t version_id)
+                : icmp_(icmp),
+                  table_cache_(table_cache),
+                  options_(options),
                   next_(this),
                   prev_(this),
                   refs_(0),
@@ -214,9 +213,12 @@ namespace leveldb {
         // REQUIRES: user portion of internal_key == user_key.
         void ForEachOverlapping(Slice user_key, Slice internal_key, void *arg,
                                 bool (*func)(void *, int, FileMetaData *),
-                                bool search_all_l0);
+                                GetSearchScope search_scope);
 
-        VersionSet *vset_;  // VersionSet to which this Version belongs
+        const InternalKeyComparator *icmp_;
+        TableCache *table_cache_;
+        const Options *const options_;
+
         Version *next_;     // Next version in linked list
         Version *prev_;     // Previous version in linked list
         int refs_ = 0;          // Number of live refs to this version
@@ -232,8 +234,8 @@ namespace leveldb {
         // Level that should be compacted next and its compaction score.
         // Score < 1 means compaction is not strictly needed.  These fields
         // are initialized by Finalize().
-        double compaction_score_;
-        int compaction_level_;
+        double compaction_score_ = -1;
+        int compaction_level_ = -1;
     };
 
     class AtomicVersion {
@@ -278,6 +280,8 @@ namespace leveldb {
         // Return the current version.
         Version *current() const { return current_; }
 
+        void NewFileNumbers(uint32_t nfiles, std::queue<uint64_t> *new_fns);
+
         // Allocate and return a new file number
         uint64_t NewFileNumber() {
             return next_file_number_.fetch_add(1);
@@ -287,20 +291,8 @@ namespace leveldb {
             return next_file_number_;
         }
 
-        // Arrange to reuse "file_number" unless a newer file number has
-        // already been allocated.
-        // REQUIRES: "file_number" was returned by a call to NewFileNumber().
-        void ReuseFileNumber(uint64_t file_number) {
-            if (next_file_number_ == file_number + 1) {
-                next_file_number_ = file_number;
-            }
-        }
-
         // Return the number of Table files at the specified level.
         int NumLevelFiles(int level) const;
-
-        // Return the combined file size of all files at the specified level.
-        int64_t NumLevelBytes(int level) const;
 
         // Return the last sequence number.
         uint64_t LastSequence() const {
@@ -321,20 +313,6 @@ namespace leveldb {
         // Otherwise returns a pointer to a heap-allocated object that
         // describes the compaction.  Caller should delete the result.
         Compaction *PickCompaction(uint32_t thread_id);
-
-        void ComputeNonOverlappingSet(
-                std::vector<Compaction *> *compactions);
-
-        // Return a compaction object for compacting the range [begin,end] in
-        // the specified level.  Returns nullptr if there is nothing in that
-        // level that overlaps the specified range.  Caller should delete
-        // the result.
-        Compaction *CompactRange(int level, const InternalKey *begin,
-                                 const InternalKey *end);
-
-        // Return the maximum overlapping data (in bytes) at next level for any
-        // file at a level >= 1.
-        int64_t MaxNextLevelOverlappingBytes();
 
         // Create an iterator that reads over the compaction inputs for "*c".
         // The caller should delete the iterator when no longer needed.
@@ -359,14 +337,6 @@ namespace leveldb {
         // "key" as of version "v".
         uint64_t ApproximateOffsetOf(Version *v, const InternalKey &key);
 
-        // Return a human-readable short (single-line) summary of the number
-        // of files per level.  Uses *scratch as backing store.
-        struct LevelSummaryStorage {
-            char buffer[100];
-        };
-
-        const char *LevelSummary(uint32_t thread_id) const;
-
         uint32_t current_version_id() {
             return current_version_id_.load();
         }
@@ -385,9 +355,6 @@ namespace leveldb {
 
         friend class Version;
 
-        bool
-        ReuseManifest(const std::string &dscname, const std::string &dscbase);
-
         void Finalize(Version *v);
 
         void GetRange(const std::vector<FileMetaData *> &inputs,
@@ -399,9 +366,6 @@ namespace leveldb {
                        InternalKey *smallest, InternalKey *largest);
 
         void SetupOtherInputs(Compaction *c);
-
-        // Save current contents to *log
-        Status WriteSnapshot(log::Writer *log);
 
         void AppendVersion(Version *v);
 
@@ -427,11 +391,13 @@ namespace leveldb {
     // A Compaction encapsulates information about a compaction.
     class Compaction {
     public:
-        ~Compaction();
+        std::string DebugString(const Comparator *user_comparator);
 
         // Return the level that is being compacted.  Inputs from "level"
         // and "level+1" will be merged to produce a set of "level+1" files.
         int level() const { return level_; }
+
+        int target_level() const { return target_level_; }
 
         // Return the object that holds the edits to the descriptor done
         // by this compaction.
@@ -439,6 +405,14 @@ namespace leveldb {
 
         // "which" must be either 0 or 1
         int num_input_files(int which) const { return inputs_[which].size(); }
+
+        uint64_t num_input_file_sizes(int which) const {
+            uint64_t size = 0;
+            for (auto meta : inputs_[which]) {
+                size += meta->file_size;
+            }
+            return size;
+        }
 
         // Return the ith input file at "level()+which" ("which" must be 0 or 1).
         FileMetaData *
@@ -454,27 +428,28 @@ namespace leveldb {
         // Add all inputs to this compaction as delete operations to *edit.
         void AddInputDeletions(VersionEdit *edit);
 
-        // Returns true if the information we have available guarantees that
-        // the compaction is producing data in "level+1" for which no data exists
-        // in levels greater than "level+1".
-        bool IsBaseLevelForKey(const Slice &user_key);
-
         // Returns true iff we should stop building the current output
         // before processing "internal_key".
         bool ShouldStopBefore(const Slice &internal_key);
 
         Version *input_version_;
 
+        sem_t complete_signal_;
     private:
         friend class Version;
 
         friend class VersionSet;
 
-        Compaction(const Options *options, int level);
+        Compaction(Version *input_version, const InternalKeyComparator *icmp,
+                   const Options *options,
+                   int level, int target_level);
 
         int level_;
+        int target_level_;
         uint64_t max_output_file_size_;
         VersionEdit edit_;
+        const Options *options_;
+        const InternalKeyComparator *icmp_;
 
         // Each compaction reads inputs from "level_" and "level_+1"
         std::vector<FileMetaData *> inputs_[2];  // The two sets of inputs
@@ -482,9 +457,9 @@ namespace leveldb {
         // State used to check for number of overlapping grandparent files
         // (parent == level_ + 1, grandparent == level_ + 2)
         std::vector<FileMetaData *> grandparents_;
-        size_t grandparent_index_;  // Index in grandparent_starts_
-        bool seen_key_;             // Some output key has been seen
-        int64_t overlapped_bytes_;  // Bytes of overlap between current output
+        size_t grandparent_index_ = 0;  // Index in grandparent_starts_
+        bool seen_key_ = false;             // Some output key has been seen
+        int64_t overlapped_bytes_ = 0;  // Bytes of overlap between current output
         // and grandparent files
 
         // State for implementing IsBaseLevelForKey
@@ -494,6 +469,7 @@ namespace leveldb {
         // higher level than the ones involved in this compaction (i.e. for
         // all L >= level_ + 2).
         size_t level_ptrs_[config::kNumLevels];
+
     };
 
 }  // namespace leveldb

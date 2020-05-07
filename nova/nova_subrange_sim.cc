@@ -36,8 +36,6 @@ using namespace std;
 using namespace rdmaio;
 using namespace nova;
 
-NovaConfig *NovaConfig::config;
-
 DEFINE_uint32(cc_num_memtables, 128, "");
 DEFINE_uint32(cc_num_memtable_partitions, 64, "");
 DEFINE_uint64(cc_iterations, 10000000, "");
@@ -155,6 +153,7 @@ namespace {
     }
 }
 
+NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
 std::atomic_int_fast32_t nova::NovaCCServer::cc_server_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
@@ -346,8 +345,8 @@ int main(int argc, char *argv[]) {
 
     char *edit_memory = (char *) malloc(10240);
     leveldb::VersionEdit edit;
-    edit.UpdateSubRange(0, "0", "1111", true, true);
-    edit.UpdateSubRange(1, "2222", "33333", false, true);
+    edit.UpdateSubRange(0, "0", "1111", true, true, 0);
+    edit.UpdateSubRange(1, "2222", "33333", false, true, 1);
     edit.DeleteFile(0, 3, 123);
     leveldb::InternalKey smallest("haoyu", 4567,
                                   leveldb::ValueType::kTypeValue);

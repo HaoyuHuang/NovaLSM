@@ -7,6 +7,7 @@
 
 #include <string>
 #include <set>
+#include <queue>
 
 #include "leveldb/db_profiler.h"
 #include "db/dbformat.h"
@@ -110,16 +111,21 @@ namespace leveldb {
     public:
         void SetMemTable(MemTable *mem);
 
-        void SetFlushed(const std::string &dbname, uint64_t l0_file_number);
+        void SetFlushed(const std::string &dbname,
+                        const std::vector<uint64_t> &l0_file_numbers);
 
-        MemTable *Ref(uint64_t *l0_fn);
+        AtomicMemTable *Ref(std::vector<uint64_t>* l0fns = nullptr);
+
+        void DeleteL0File(std::vector<uint64_t>& l0fns);
 
         void Unref(const std::string &dbname);
 
         bool locked = false;
         bool is_immutable_ = false;
         bool is_flushed_ = false;
-        uint64_t l0_file_number_ = 0;
+
+        std::vector<uint64_t> l0_file_numbers_;
+
         std::mutex mutex_;
         MemTable *memtable_ = nullptr;
         std::atomic_int_fast32_t nentries_;
@@ -127,7 +133,18 @@ namespace leveldb {
         uint32_t number_of_pending_writes_ = 0;
     };
 
-
+    // static partition.
+    struct MemTablePartition {
+        MemTablePartition() : background_work_finished_signal_(&mutex) {
+        };
+        MemTable *memtable;
+        port::Mutex mutex;
+        uint32_t partition_id = 0;
+        std::vector<uint32_t> imm_slots;
+        std::queue<uint32_t> available_slots;
+        std::vector<uint32_t> closed_log_files;
+        port::CondVar background_work_finished_signal_ GUARDED_BY(mutex);
+    };
 }  // namespace leveldb
 
 #endif  // STORAGE_LEVELDB_DB_MEMTABLE_H_

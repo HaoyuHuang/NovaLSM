@@ -45,8 +45,15 @@ namespace leveldb {
         kStaticPartition = 1,
     };
 
+    enum MajorCompactionType {
+        kMajorDisabled = 0,
+        kMajorSingleThreaded = 1,
+        kMajorCoordinated = 2,
+        kMajorCoordinatedStoC = 3
+    };
 
-// Options to control the behavior of a database (passed to DB::Open)
+
+    // Options to control the behavior of a database (passed to DB::Open)
     struct LEVELDB_EXPORT Options {
         // Create an Options object with default values for all fields.
         Options();
@@ -75,7 +82,7 @@ namespace leveldb {
 
         uint32_t max_num_coordinated_compaction_nonoverlapping_sets = 1;
 
-        uint32_t max_num_sstables_in_nonoverlapping_set = 1;
+        uint32_t max_num_sstables_in_nonoverlapping_set = 20;
 
         std::string zipfian_dist_file_path = "/tmp/zipfian";
 
@@ -91,7 +98,9 @@ namespace leveldb {
         // If true, an error is raised if the database already exists.
         bool error_if_exists = false;
 
-        bool enable_major = false;
+        MajorCompactionType  major_compaction_type;
+
+        bool enable_flush_multiple_memtables = false;
 
         // If true, the implementation will do aggressive checking of the
         // data it is processing and will stop early if it detects any
@@ -109,6 +118,7 @@ namespace leveldb {
 
         std::vector<EnvBGThread *> bg_threads;
         EnvBGThread *reorg_thread;
+        EnvBGThread *compaction_coordinator_thread;
 
         uint32_t num_memtables = 2;
 

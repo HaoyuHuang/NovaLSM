@@ -55,7 +55,8 @@ namespace nova {
                                     leveldb::MemManager *mem_manager,
                                     leveldb::CCClient *cc_client,
                                     std::vector<leveldb::EnvBGThread *> &bg_threads,
-                                    leveldb::EnvBGThread *reorg_thread) {
+                                    leveldb::EnvBGThread *reorg_thread,
+                                    leveldb::EnvBGThread *compaction_coord_thread) {
             leveldb::EnvOptions env_option;
             env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_MEM;
             leveldb::PosixEnv *env = new leveldb::PosixEnv;
@@ -104,7 +105,22 @@ namespace nova {
             options.enable_subranges = NovaConfig::config->enable_subrange;
             options.subrange_reorg_sampling_ratio = 1.0;
             options.reorg_thread = reorg_thread;
-            options.enable_major = NovaConfig::config->enable_major_compaction;
+            options.compaction_coordinator_thread = compaction_coord_thread;
+            options.enable_flush_multiple_memtables = NovaConfig::config->enable_flush_multiple_memtables;
+            options.max_num_sstables_in_nonoverlapping_set = 15;
+            options.max_num_coordinated_compaction_nonoverlapping_sets = bg_threads.size();
+
+            if (NovaConfig::config->major_compaction_type == "no") {
+                options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
+            } else if (NovaConfig::config->major_compaction_type == "st") {
+                options.major_compaction_type = leveldb::MajorCompactionType::kMajorSingleThreaded;
+            } else if (NovaConfig::config->major_compaction_type == "lc") {
+                options.major_compaction_type = leveldb::MajorCompactionType::kMajorCoordinated;
+            } else if (NovaConfig::config->major_compaction_type == "sc") {
+                options.major_compaction_type = leveldb::MajorCompactionType::kMajorCoordinatedStoC;
+            } else {
+                options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
+            }
 
             uint32_t stocid = db_index % NovaConfig::config->dc_servers.size();
             options.manifest_stoc_id = NovaConfig::config->dc_servers[stocid].server_id;
@@ -466,10 +482,13 @@ namespace nova {
         for (int db_index = 0; db_index < ndbs; db_index++) {
             auto reorg = new leveldb::NovaCCCompactionThread(mem_manager);
             reorg_bgs.push_back(reorg);
+
+            auto coord = new leveldb::NovaCCCompactionThread(mem_manager);
+            compaction_coord_bgs.push_back(coord);
             auto client = new leveldb::NovaBlockCCClient(db_index);
             dbs_.push_back(
                     CreateDatabase(db_index, block_cache, pool, mem_manager,
-                                   client, bgs, reorg));
+                                   client, bgs, reorg, coord));
             db_clients.push_back(client);
         }
         for (int db_index = 0; db_index < ndbs; db_index++) {
@@ -690,6 +709,18 @@ namespace nova {
             auto bg = reinterpret_cast<leveldb::NovaCCCompactionThread *>(reorg_bgs[i]);
             reorg_workers.emplace_back(&leveldb::NovaCCCompactionThread::Start,
                                        bg);
+        }
+
+        for (int i = 0; i < compaction_coord_bgs.size(); i++) {
+            auto bg = reinterpret_cast<leveldb::NovaCCCompactionThread *>(compaction_coord_bgs[i]);
+            bg->db_ = dbs_[i];
+            bg->cc_client_ = new leveldb::NovaBlockCCClient(i);
+            bg->cc_client_->ccs_ = async_compaction_workers;
+            bg->thread_id_ = i;
+
+            compaction_coord_workers.emplace_back(
+                    &leveldb::NovaCCCompactionThread::Start,
+                    bg);
         }
 
         for (int db_index = 0; db_index < ndbs; db_index++) {

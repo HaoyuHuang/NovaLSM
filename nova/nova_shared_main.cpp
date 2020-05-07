@@ -93,9 +93,12 @@ DEFINE_double(cc_sampling_ratio, 1, "");
 DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
 DEFINE_string(cc_client_access_pattern, "uniform", "");
 
-DEFINE_bool(cc_enable_major_compaction, false, "enable major compaction");
+DEFINE_bool(cc_enable_flush_multiple_memtables, false, "");
+DEFINE_string(cc_major_compaction_type, "no",
+              "no/st/lc/sc");
 DEFINE_bool(cc_recover_dbs, false, "recovery");
 DEFINE_uint32(cc_num_recovery_threads, 32, "recovery");
+
 
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
 std::atomic_int_fast32_t nova::NovaCCServer::cc_server_seq_id_;
@@ -178,7 +181,8 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->db_path = FLAGS_db_path;
     NovaConfig::config->enable_rdma = FLAGS_enable_rdma;
     NovaConfig::config->enable_load_data = FLAGS_enable_load_data;
-    NovaConfig::config->enable_major_compaction = FLAGS_cc_enable_major_compaction;
+    NovaConfig::config->major_compaction_type = FLAGS_cc_major_compaction_type;
+    NovaConfig::config->enable_flush_multiple_memtables = FLAGS_cc_enable_flush_multiple_memtables;
 
     NovaConfig::config->number_of_recovery_threads = FLAGS_cc_num_recovery_threads;
     NovaConfig::config->recover_dbs = FLAGS_cc_recover_dbs;

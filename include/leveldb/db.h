@@ -202,15 +202,17 @@ namespace leveldb {
         // end==nullptr is treated as a key after all keys in the database.
         // Therefore the following call will compact the entire database:
         //    db->CompactRange(nullptr, nullptr);
-        virtual void CompactRange(const Slice *begin, const Slice *end) = 0;
+//        virtual void CompactRange(const Slice *begin, const Slice *end) = 0;
 
         virtual void PerformCompaction(EnvBGThread *bg_thread,
                                        const std::vector<EnvBGTask> &tasks) = 0;
 
+        virtual void CoordinateMajorCompaction() = 0;
+
         virtual void PerformSubRangeReorganization() = 0;
 
         std::vector<DB *> dbs_;
-        std::vector<nova::NovaMsgCallback*> rdma_threads_;
+        std::vector<nova::NovaMsgCallback *> rdma_threads_;
 
         uint64_t number_of_memtable_hits_ = 0;
         uint64_t number_of_gets_ = 0;

@@ -105,6 +105,7 @@ namespace leveldb {
 
         NovaBlockCCClient *cc_client_ = nullptr;
 
+        void *db_ = nullptr;
     private:
         port::Mutex background_work_mutex_;
         sem_t signal;

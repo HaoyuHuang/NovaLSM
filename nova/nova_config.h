@@ -150,8 +150,9 @@ namespace nova {
 
         bool use_multiple_disks;
         bool enable_subrange;
+        bool enable_flush_multiple_memtables;
         std::string memtable_type;
-        bool enable_major_compaction;
+        std::string major_compaction_type;
 
         uint64_t mem_pool_size_gb;
         uint32_t num_mem_partitions;

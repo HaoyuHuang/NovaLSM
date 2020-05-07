@@ -20,7 +20,7 @@ namespace leveldb {
 
     struct EnvBGTask {
         void *db = nullptr;
-
+        void *compaction_task = nullptr;
 
         // flushing memtable related attributes.
         void *memtable = nullptr;
