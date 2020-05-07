@@ -1161,8 +1161,7 @@ namespace leveldb {
     void DBImpl::CoordinateLocalMajorCompaction(leveldb::Version *current) {
         std::map<uint32_t, std::vector<uint64_t>> mid_l0fns;
         std::vector<Compaction *> compactions;
-        current->ComputeNonOverlappingSet(&compactions, &options_,
-                                          user_comparator_);
+        current->ComputeNonOverlappingSet(&compactions);
         std::string debug = "Coordinated compaction picks compaction sets: ";
         for (auto c : compactions) {
             debug += c->DebugString(user_comparator_);
@@ -1172,10 +1171,7 @@ namespace leveldb {
 
         {
             std::string reason;
-            bool valid = current->AssertNonOverlappingSet(compactions,
-                                                          &options_,
-                                                          user_comparator_,
-                                                          &reason);
+            bool valid = current->AssertNonOverlappingSet(compactions, &reason);
             RDMA_ASSERT(valid) << fmt::format("assertion failed {}", reason);
         }
 
@@ -2273,7 +2269,7 @@ namespace leveldb {
                         100.0 - 100.0;
             }
         }
-        current->QueryStats(db_stats, user_comparator_);
+        current->QueryStats(db_stats);
         versions_->versions_[vid].Unref(dbname_);
     }
 

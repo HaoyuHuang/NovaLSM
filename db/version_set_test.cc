@@ -438,13 +438,10 @@ namespace leveldb {
         CreateFileMetaData(version, 1, 95, 100);
 
         std::vector<Compaction *> compactions;
-        version->ComputeNonOverlappingSet(&compactions, &options,
-                                          icmp.user_comparator());
+        version->ComputeNonOverlappingSet(&compactions);
         PrintCompactions(icmp.user_comparator(), compactions);
         std::string reason;
-        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &options,
-                                                     icmp.user_comparator(),
-                                                     &reason));
+        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &reason));
     }
 
     TEST(VersionTest, TestNonOverlappingSet) {
@@ -473,12 +470,10 @@ namespace leveldb {
         CreateFileMetaData(version, 1, 95, 100);
 
         std::vector<Compaction *> compactions;
-        version->ComputeNonOverlappingSet(&compactions, &options,
-                                          icmp.user_comparator());
+        version->ComputeNonOverlappingSet(&compactions);
         PrintCompactions(icmp.user_comparator(), compactions);
         std::string reason;
-        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &options,
-                                                     icmp.user_comparator(),
+        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions,
                                                      &reason));
     }
 
@@ -489,34 +484,21 @@ namespace leveldb {
         options.max_num_sstables_in_nonoverlapping_set = 4;
         Version *version = new Version(&icmp, nullptr, &options, 1);
         CreateFileMetaData(version, 0, 6, 10);
-        CreateFileMetaData(version, 0, 5, 12);
-        CreateFileMetaData(version, 0, 13, 19);
+        CreateFileMetaData(version, 0, 5, 11);
+        CreateFileMetaData(version, 0, 10, 19);
 
-        CreateFileMetaData(version, 0, 20, 30);
-
-        CreateFileMetaData(version, 0, 45, 50);
 
         CreateFileMetaData(version, 1, 0, 6);
         CreateFileMetaData(version, 1, 6, 12);
-        CreateFileMetaData(version, 1, 12, 15);
-        CreateFileMetaData(version, 1, 25, 35);
-        CreateFileMetaData(version, 1, 43, 47);
-
-        CreateFileMetaData(version, 1, 50, 69);
-        CreateFileMetaData(version, 1, 70, 87);
-        CreateFileMetaData(version, 1, 90, 95);
-        CreateFileMetaData(version, 1, 95, 100);
+        CreateFileMetaData(version, 1, 13, 15);
 
         std::vector<Compaction *> compactions;
-        version->ComputeNonOverlappingSet(&compactions, &options,
-                                          icmp.user_comparator());
+        version->ComputeNonOverlappingSet(&compactions);
         PrintCompactions(icmp.user_comparator(), compactions);
         std::string reason;
-        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &options,
-                                                     icmp.user_comparator(),
+        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions,
                                                      &reason));
     }
-
     TEST(VersionTest, TestNonOverlappingSetDEBUG) {
         InternalKeyComparator icmp(new YCSBKeyComparator);
         Options options;
@@ -540,13 +522,10 @@ namespace leveldb {
         CreateFileMetaData(version, 1, 243655, 264203);
 
         std::vector<Compaction *> compactions;
-        version->ComputeNonOverlappingSet(&compactions, &options,
-                                          icmp.user_comparator());
+        version->ComputeNonOverlappingSet(&compactions);
         PrintCompactions(icmp.user_comparator(), compactions);
         std::string reason;
-        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &options,
-                                                     icmp.user_comparator(),
-                                                     &reason));
+        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &reason));
     }
 
 }  // namespace leveldb

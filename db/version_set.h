@@ -120,13 +120,11 @@ namespace leveldb {
         // Return a human readable string that describes this version's contents.
         std::string DebugString() const;
 
-        void QueryStats(DBStats *stats,
-                        const Comparator *user_comparator);
+        void QueryStats(DBStats *stats);
 
         void ComputeOverlappingFilesStats(
                 std::map<uint64_t, FileMetaData *> *files,
-                std::vector<OverlappingStats> *num_overlapping,
-                const Comparator *user_comparator);
+                std::vector<OverlappingStats> *num_overlapping);
 
         bool ComputeOverlappingFilesInRange(
                 std::vector<FileMetaData *> *files,
@@ -135,29 +133,21 @@ namespace leveldb {
                 const Slice &lower,
                 const Slice &upper,
                 Slice *new_lower,
-                Slice *new_upper,
-                const leveldb::Comparator *user_comparator);
+                Slice *new_upper);
 
         void ComputeOverlappingFilesForRange(
                 std::vector<FileMetaData *> *l0files,
                 std::vector<FileMetaData *> *l1files,
-                const Options *options,
-                std::vector<Compaction *> *compactions,
-                const leveldb::Comparator *user_comparator);
+                Compaction *compaction);
 
         void ComputeOverlappingFilesPerTable(
                 std::map<uint64_t, FileMetaData *> *files,
-                std::vector<OverlappingStats> *num_overlapping,
-                const Comparator *user_comparator);
+                std::vector<OverlappingStats> *num_overlapping);
 
-        void ComputeNonOverlappingSet(std::vector<Compaction *> *compactions,
-                                      const Options *options,
-                                      const Comparator *user_comparator);
+        void ComputeNonOverlappingSet(std::vector<Compaction *> *compactions);
 
         bool
         AssertNonOverlappingSet(const std::vector<Compaction *> &compactions,
-                                const Options *options,
-                                const Comparator *user_comparator,
                                 std::string *reason);
 
         static std::map<uint64_t, FileMetaData *> last_fnfile;
@@ -201,6 +191,26 @@ namespace leveldb {
         Version(const Version &) = delete;
 
         Version &operator=(const Version &) = delete;
+
+        void GetOverlappingInputs(
+                std::vector<FileMetaData *> &inputs,
+                const Slice &begin,  // nullptr means before all keys
+                const Slice &end,    // nullptr means after all keys
+                std::vector<FileMetaData *> *outputs,
+                uint32_t limit = UINT32_MAX,
+                const std::set<uint64_t> &skip_files = {},
+                bool contained = false);
+
+        void GetRange(const std::vector<FileMetaData *> &inputs,
+                      Slice *smallest,
+                      Slice *largest);
+
+        void RemoveOverlapTablesWithRange(std::vector<FileMetaData *> *inputs,
+                                          const Slice &smallest,
+                                          const Slice &largest);
+
+        void RemoveTables(std::vector<FileMetaData *> *inputs,
+                          const std::vector<leveldb::FileMetaData *> &remove_tables);
 
 
         Iterator *
