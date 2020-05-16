@@ -242,7 +242,7 @@ namespace leveldb {
                 ReadOptions r;
                 r.verify_checksums = options_.paranoid_checks;
                 return table_cache_->NewIterator(AccessCaller::kUncategorized,
-                                                 r, meta, meta.number, -1,
+                                                 r, nullptr, meta.number, -1,
                                                  meta.file_size);
             }
 
@@ -385,7 +385,7 @@ namespace leveldb {
                 for (size_t i = 0; i < tables_.size(); i++) {
                     // TODO(opt): separate out into multiple levels
                     const TableInfo &t = tables_[i];
-                    edit_.AddFile(0, 0, t.meta.number, t.meta.file_size,
+                    edit_.AddFile(0, {}, t.meta.number, t.meta.file_size,
                                   t.meta.converted_file_size,
                                   t.meta.flush_timestamp,
                                   t.meta.smallest,

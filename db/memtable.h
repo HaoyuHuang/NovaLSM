@@ -107,24 +107,34 @@ namespace leveldb {
         FileMetaData flushed_meta_;
     };
 
+    struct MemTableL0FilesEdit {
+        std::set<uint64_t> add_fns;
+        std::set<uint64_t> remove_fns;
+        uint32_t version_id;
+
+        std::string DebugString() const;
+    };
+
     class AtomicMemTable {
     public:
         void SetMemTable(MemTable *mem);
 
         void SetFlushed(const std::string &dbname,
-                        const std::vector<uint64_t> &l0_file_numbers);
+                        const std::vector<uint64_t> &l0_file_numbers,
+                        uint32_t version_id);
 
-        AtomicMemTable *Ref(std::vector<uint64_t>* l0fns = nullptr);
+        AtomicMemTable *RefMemTable();
 
-        void DeleteL0File(std::vector<uint64_t>& l0fns);
+        void UpdateL0Files(uint32_t version_id, const MemTableL0FilesEdit &edit);
 
         void Unref(const std::string &dbname);
 
         bool locked = false;
         bool is_immutable_ = false;
         bool is_flushed_ = false;
+        uint32_t last_version_id_ = 0;
 
-        std::vector<uint64_t> l0_file_numbers_;
+        std::set<uint64_t> l0_file_numbers_;
 
         std::mutex mutex_;
         MemTable *memtable_ = nullptr;
@@ -137,7 +147,7 @@ namespace leveldb {
     struct MemTablePartition {
         MemTablePartition() : background_work_finished_signal_(&mutex) {
         };
-        MemTable *memtable;
+        MemTable *memtable = nullptr;
         port::Mutex mutex;
         uint32_t partition_id = 0;
         std::vector<uint32_t> imm_slots;

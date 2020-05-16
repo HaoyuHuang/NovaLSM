@@ -97,10 +97,10 @@ namespace leveldb {
         return Status::OK();
     }
 
-    void TableBuilder::Add(const Slice &key, const Slice &value) {
+    bool TableBuilder::Add(const Slice &key, const Slice &value) {
         Rep *r = rep_;
         assert(!r->closed);
-        if (!ok()) return;
+        if (!ok()) return false;
         if (r->num_entries > 0) {
             if (r->options.comparator->Compare(key, Slice(r->last_key)) <=
                 0) {
@@ -108,11 +108,8 @@ namespace leveldb {
                 ParseInternalKey(key, &ik);
                 ParsedInternalKey lk;
                 ParseInternalKey(r->last_key, &lk);
-                RDMA_ASSERT(false)
-                    << fmt::format("{} {}", ik.FullDebugString(),
-                                   lk.FullDebugString());
+                return false;
             }
-
         }
 
         if (r->pending_index_entry) {
@@ -137,6 +134,7 @@ namespace leveldb {
         if (estimated_block_size >= r->options.block_size) {
             Flush();
         }
+        return true;
     }
 
     void TableBuilder::Flush() {

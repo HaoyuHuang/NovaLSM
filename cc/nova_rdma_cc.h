@@ -16,11 +16,12 @@
 #include "nova/nova_rdma_store.h"
 #include <semaphore.h>
 #include <list>
-#include <cc/nova_cc_client.h>
+#include "cc/nova_cc_client.h"
 #include "log/nova_in_memory_log_manager.h"
 #include "nova_cc_log_writer.h"
 #include "nova_cc_server.h"
 #include "nova/nova_config.h"
+#include "rdma_admission_ctrl.h"
 
 namespace nova {
 
@@ -28,12 +29,16 @@ namespace nova {
         std::string value;
     };
 
+    class NovaCCServer;
+
     class NovaRDMAComputeComponent : public NovaMsgCallback {
     public:
         NovaRDMAComputeComponent(RdmaCtrl *rdma_ctrl,
                                  NovaMemManager *mem_manager,
-                                 const std::vector<leveldb::DB *> &dbs) :
-                rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager), dbs_(dbs) {
+                                 const std::vector<leveldb::DB *> &dbs,
+                                 RDMAAdmissionCtrl *admission_control) :
+                rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager), dbs_(dbs),
+                admission_control_(admission_control) {
             stat_tasks_ = 0;
             sem_init(&sem_, 0, 0);
             should_pause = false;
@@ -44,7 +49,8 @@ namespace nova {
 
         bool
         ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
-                      char *buf, uint32_t imm_data) override;
+                      char *buf, uint32_t imm_data,
+                      bool *generate_a_new_request) override;
 
         void Start();
 
@@ -69,7 +75,7 @@ namespace nova {
         std::atomic_bool paused;
         sem_t sem_;
     private:
-        int ProcessQueue();
+        int ProcessRequestQueue();
 
         struct RequestCtx {
             uint32_t req_id = 0;
@@ -83,8 +89,10 @@ namespace nova {
         NovaMemManager *mem_manager_ = nullptr;
         bool is_running_ = false;
         std::vector<leveldb::DB *> dbs_;
+        RDMAAdmissionCtrl *admission_control_ = nullptr;
         leveldb::port::Mutex mutex_;
-        std::list<leveldb::RDMAAsyncClientRequestTask> queue_;
+        std::list<leveldb::RDMAAsyncClientRequestTask> private_queue_;
+        std::list<leveldb::RDMAAsyncClientRequestTask> public_queue_;
     };
 }
 

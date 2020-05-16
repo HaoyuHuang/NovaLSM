@@ -193,7 +193,7 @@ int main(int argc, char *argv[]) {
                 FLAGS_is_local_disk_bench, FLAGS_disk_horizontal_scalability,
                 FLAGS_server_id);
         server_worker->rtable_ = rtable;
-        store = new NovaRDMARCStore(rdma_worker_buf, worker_id, endpoints,
+        store = new NovaRDMARCStore(rdma_worker_buf, worker_id, endpoints, 0,
                                     FLAGS_rdma_max_num_sends,
                                     FLAGS_rdma_max_msg_size,
                                     FLAGS_rdma_doorbell_batch_size,

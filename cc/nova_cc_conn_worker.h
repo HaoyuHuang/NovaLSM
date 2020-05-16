@@ -150,6 +150,7 @@ namespace nova {
         unsigned int rand_seed = 0;
 
         char *rdma_backing_mem = nullptr;
+        uint32_t rdma_backing_mem_size = 0;
         leveldb::WriteState *replicate_log_record_states;
     };
 }

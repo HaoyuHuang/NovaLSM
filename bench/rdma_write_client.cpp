@@ -69,7 +69,7 @@ namespace nova {
     bool
     RDMAWRITEClient::ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id,
                                    int remote_server_id, char *buf,
-                                   uint32_t req_id) {
+                                   uint32_t req_id, bool *new_request) {
         bool processed = false;
         switch (type) {
             case IBV_WC_SEND:

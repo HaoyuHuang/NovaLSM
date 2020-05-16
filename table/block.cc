@@ -23,12 +23,12 @@ namespace leveldb {
     }
 
     Block::Block(const BlockContents &contents, uint64_t file_number,
-                 uint64_t block_id)
+                 uint64_t block_id, bool adhoc)
             : file_number_(file_number),
               block_id_(block_id),
               data_(contents.data.data()),
               size_(contents.data.size()),
-              owned_(contents.heap_allocated) {
+              owned_(contents.heap_allocated), adhoc_(adhoc) {
         if (size_ < sizeof(uint32_t)) {
             size_ = 0;  // Error marker
         } else {
@@ -45,6 +45,9 @@ namespace leveldb {
     }
 
     Block::~Block() {
+        if (adhoc_) {
+            return;
+        }
         if (owned_) {
             delete[] data_;
         }

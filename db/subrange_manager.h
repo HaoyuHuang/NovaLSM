@@ -7,7 +7,7 @@
 #ifndef LEVELDB_SUBRANGE_MANAGER_H
 #define LEVELDB_SUBRANGE_MANAGER_H
 
-#include "subrange.h"
+#include "leveldb/subrange.h"
 #include "memtable.h"
 #include "version_set.h"
 
@@ -23,12 +23,12 @@ namespace leveldb {
     class SubRangeManager {
     public:
         SubRangeManager(NovaCCMemFile *manifest_file,
-                      const std::string &dbname,
-                      VersionSet *versions,
-                      const Options &options,
-                      const Comparator *user_comparator,
-                      std::vector<MemTablePartition *> *partitioned_active_memtables,
-                      std::vector<uint32_t> *partitioned_imms);
+                        const std::string &dbname,
+                        VersionSet *versions,
+                        const Options &options,
+                        const Comparator *user_comparator,
+                        std::vector<MemTablePartition *> *partitioned_active_memtables,
+                        std::vector<uint32_t> *partitioned_imms);
 
         void PerformSubRangeReorganization(double processed_writes);
 
@@ -49,19 +49,31 @@ namespace leveldb {
         std::atomic<SubRanges *> latest_subranges_;
 
     private:
+        void ConstructRanges(const std::map<uint64_t, double> &userkey_rate,
+                             double total_rate, uint64_t lower, uint64_t upper,
+                             uint32_t num_ranges_to_construct,
+                             bool is_constructing_subranges,
+                             std::vector<Range> *ranges);
+
         void PerformSubrangeMajorReorg(SubRanges *latest,
                                        double processed_writes);
 
         void MoveShareDuplicateSubranges(SubRanges *latest, int index);
 
-        bool
-        PerformSubrangeMinorReorgDuplicate(int subrange_id, SubRanges *latest,
-                                           double total_inserts);
+        bool MinorReorgDestroyDuplicates(SubRanges *latest, int subrange_id,
+                                         bool force);
 
-        bool MinorReorgDestroyDuplicates(SubRanges *latest, int subrange_id);
+        bool MinorRebalancePush(leveldb::SubRanges *latest, int index,
+                                            double total_inserts);
 
-        void PerformSubrangeMinorReorg(int subrange_id, SubRanges *latest,
-                                       double total_inserts);
+        void moveShare(SubRanges *latest, int index);
+
+        int PushTinyRanges(leveldb::SubRanges *latest, int subrangeId,
+                           bool stopWhenBelowFair);
+
+        bool PerformSubrangeMinorReorgDuplicate(
+                leveldb::SubRanges *latest, int subrange_id,
+                double total_inserts);
 
         port::Mutex range_lock_;
         NovaCCMemFile *manifest_file_ = nullptr;

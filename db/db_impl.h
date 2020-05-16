@@ -26,7 +26,7 @@
 #include "port/port.h"
 #include "port/thread_annotations.h"
 #include "memtable.h"
-#include "subrange.h"
+#include "leveldb/subrange.h"
 #include "subrange_manager.h"
 #include "compaction.h"
 
@@ -78,6 +78,8 @@ namespace leveldb {
 
         void EvictFileFromCache(uint64_t file_number) override;
 
+        uint32_t FlushMemTables() override;
+
         Status Delete(const WriteOptions &, const Slice &key) override;
 
         Status Write(const WriteOptions &options, const Slice &key,
@@ -120,7 +122,7 @@ namespace leveldb {
         Status Recover() override;
 
         Status
-        RecoverLogFile(const std::map<std::string, uint64_t> &logfile_buf,
+        RecoverLogFile(const std::unordered_map<std::string, uint64_t> &logfile_buf,
                        uint32_t *recovered_log_records,
                        timeval *rdma_read_complete);
 
@@ -128,13 +130,11 @@ namespace leveldb {
         CoordinateMajorCompaction() override;
 
     private:
-        void
-        CoordinateLocalMajorCompaction(Version *current);
+        void ComputeCompactions(Version *current,
+                                std::vector<Compaction *> *compactions,
+                                VersionEdit *edit);
 
-        void
-        CoordinateStoCMajorCompaction(Version *current);
-
-        std::map<uint64_t, std::vector<uint32_t>> l0fn_memtableids;
+        std::unordered_map<uint64_t, std::vector<uint32_t>> l0fn_memtableids;
 
         class NovaCCRecoveryThread {
         public:
@@ -190,12 +190,20 @@ namespace leveldb {
 
         // Delete any unneeded files and stale in-memory entries.
         void
-        DeleteObsoleteFiles(EnvBGThread *bg_thread,
-                            std::map<uint32_t, std::vector<uint64_t>> *memtableid_l0fns) EXCLUSIVE_LOCKS_REQUIRED(
-                mutex_);
+        ObtainObsoleteFiles(EnvBGThread *bg_thread,
+                            std::vector<std::string> *files_to_delete,
+                            std::unordered_map<uint32_t, std::vector<SSTableRTablePair>> *server_pairs);
 
-        void CleanUpTableLocator(
-                std::map<uint32_t, std::vector<uint64_t>> &memtableid_l0fns);
+        void DeleteFiles(EnvBGThread *bg_thread,
+                         std::vector<std::string> &files_to_delete,
+                         std::unordered_map<uint32_t, std::vector<SSTableRTablePair>> &server_pairs);
+
+        void
+        ObtainTableLocatorEdits(CompactionState *state,
+                                std::unordered_map<uint32_t, MemTableL0FilesEdit> *memtableid_l0fns);
+
+        void UpdateTableLocator(uint32_t version_id,
+                                const std::unordered_map<uint32_t, MemTableL0FilesEdit> &edits);
 
         void
         DeleteObsoleteVersions(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
@@ -284,7 +292,7 @@ namespace leveldb {
 
         // Set of table files to protect from deletion because they are
         // part of ongoing compactions.
-        std::map<uint64_t, FileMetaData> compacted_tables_ GUARDED_BY(mutex_);
+        std::unordered_map<uint64_t, FileMetaData> compacted_tables_ GUARDED_BY(mutex_);
         bool is_major_compaciton_running_ = false;
         ManualCompaction *manual_compaction_ GUARDED_BY(mutex_);
 

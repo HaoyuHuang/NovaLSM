@@ -410,116 +410,175 @@ namespace leveldb {
         uint32_t seq_id = 0;
     };
 
-    TEST(VersionTest, TestNonOverlappingSetWideSSTable) {
+//    TEST(VersionTest, TestNonOverlappingSetWideSSTable) {
+//        InternalKeyComparator icmp(new YCSBKeyComparator);
+//        Options options;
+//        options.max_num_coordinated_compaction_nonoverlapping_sets = 3;
+//        options.max_num_sstables_in_nonoverlapping_set = 4;
+//        Version *version = new Version(&icmp, nullptr, &options, 1);
+//        CreateFileMetaData(version, 0, 0, 100);
+//
+//        CreateFileMetaData(version, 0, 6, 10);
+//        CreateFileMetaData(version, 0, 5, 12);
+//        CreateFileMetaData(version, 0, 11, 19);
+//
+//        CreateFileMetaData(version, 0, 20, 30);
+//
+//        CreateFileMetaData(version, 0, 45, 50);
+//
+//        CreateFileMetaData(version, 1, 0, 6);
+//        CreateFileMetaData(version, 1, 6, 12);
+//        CreateFileMetaData(version, 1, 12, 15);
+//        CreateFileMetaData(version, 1, 25, 35);
+//        CreateFileMetaData(version, 1, 43, 47);
+//
+//        CreateFileMetaData(version, 1, 50, 69);
+//        CreateFileMetaData(version, 1, 70, 87);
+//        CreateFileMetaData(version, 1, 90, 95);
+//        CreateFileMetaData(version, 1, 95, 100);
+//
+//        std::vector<Compaction *> compactions;
+//        version->ComputeNonOverlappingSet(&compactions);
+//        PrintCompactions(icmp.user_comparator(), compactions);
+//        std::string reason;
+//        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &reason));
+//    }
+//
+//    TEST(VersionTest, TestNonOverlappingSet) {
+//        InternalKeyComparator icmp(new YCSBKeyComparator);
+//        Options options;
+//        options.max_num_coordinated_compaction_nonoverlapping_sets = 3;
+//        options.max_num_sstables_in_nonoverlapping_set = 4;
+//        Version *version = new Version(&icmp, nullptr, &options, 1);
+//        CreateFileMetaData(version, 0, 6, 10);
+//        CreateFileMetaData(version, 0, 5, 12);
+//        CreateFileMetaData(version, 0, 11, 19);
+//
+//        CreateFileMetaData(version, 0, 20, 30);
+//
+//        CreateFileMetaData(version, 0, 45, 50);
+//
+//        CreateFileMetaData(version, 1, 0, 6);
+//        CreateFileMetaData(version, 1, 6, 12);
+//        CreateFileMetaData(version, 1, 12, 15);
+//        CreateFileMetaData(version, 1, 25, 35);
+//        CreateFileMetaData(version, 1, 43, 47);
+//
+//        CreateFileMetaData(version, 1, 50, 69);
+//        CreateFileMetaData(version, 1, 70, 87);
+//        CreateFileMetaData(version, 1, 90, 95);
+//        CreateFileMetaData(version, 1, 95, 100);
+//
+//        std::vector<Compaction *> compactions;
+//        version->ComputeNonOverlappingSet(&compactions);
+//        PrintCompactions(icmp.user_comparator(), compactions);
+//        std::string reason;
+//        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions,
+//                                                     &reason));
+//    }
+//
+//    TEST(VersionTest, TestNonOverlappingSetExpandL0) {
+//        InternalKeyComparator icmp(new YCSBKeyComparator);
+//        Options options;
+//        options.max_num_coordinated_compaction_nonoverlapping_sets = 3;
+//        options.max_num_sstables_in_nonoverlapping_set = 4;
+//        Version *version = new Version(&icmp, nullptr, &options, 1);
+//        CreateFileMetaData(version, 0, 6, 10);
+//        CreateFileMetaData(version, 0, 5, 11);
+//        CreateFileMetaData(version, 0, 10, 19);
+//
+//
+//        CreateFileMetaData(version, 1, 0, 6);
+//        CreateFileMetaData(version, 1, 6, 12);
+//        CreateFileMetaData(version, 1, 13, 15);
+//
+//        std::vector<Compaction *> compactions;
+//        version->ComputeNonOverlappingSet(&compactions);
+//        PrintCompactions(icmp.user_comparator(), compactions);
+//        std::string reason;
+//        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions,
+//                                                     &reason));
+//    }
+//
+//    TEST(VersionTest, TestNonOverlappingSetDEBUG) {
+//        InternalKeyComparator icmp(new YCSBKeyComparator);
+//        Options options;
+//        options.max_num_coordinated_compaction_nonoverlapping_sets = 1;
+//        options.max_num_sstables_in_nonoverlapping_set = 15;
+//        Version *version = new Version(&icmp, nullptr, &options, 1);
+//        CreateFileMetaData(version, 0, 117163, 264201);
+//        CreateFileMetaData(version, 0, 264204, 406865);
+//
+//        CreateFileMetaData(version, 1, 0, 24620);
+//        CreateFileMetaData(version, 1, 24621, 49173);
+//        CreateFileMetaData(version, 1, 49174, 73628);
+//        CreateFileMetaData(version, 1, 73629, 98178);
+//        CreateFileMetaData(version, 1, 98180, 117162);
+//
+//        CreateFileMetaData(version, 1, 117163, 142359);
+//        CreateFileMetaData(version, 1, 142360, 167616);
+//        CreateFileMetaData(version, 1, 167619, 192936);
+//        CreateFileMetaData(version, 1, 192937, 218347);
+//        CreateFileMetaData(version, 1, 218348, 243654);
+//        CreateFileMetaData(version, 1, 243655, 264203);
+//
+//        std::vector<Compaction *> compactions;
+//        version->ComputeNonOverlappingSet(&compactions);
+//        PrintCompactions(icmp.user_comparator(), compactions);
+//        std::string reason;
+//        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &reason));
+//    }
+
+//    TEST(VersionTest, TestNonOverlappingSetDEBUG2) {
+//        InternalKeyComparator icmp(new YCSBKeyComparator);
+//        Options options;
+//        options.max_num_coordinated_compaction_nonoverlapping_sets = 1;
+//        options.max_num_sstables_in_nonoverlapping_set = 15;
+//        Version *version = new Version(&icmp, nullptr, &options, 1);
+//
+////        ['2072559,'2775335] fn:110,
+////        ['2080888,'2777627] fn:112,
+////        ['2556565,'5150437] fn:94,
+////        ['2750761,'3453268] fn:111,
+////        ['1391249,'2080409] fn:49,
+////        ['2080413,'2766187] fn:52,
+////        ['2766232,'3457725] fn:54,
+//
+//        CreateFileMetaData(version, 0, 2072559, 2775335);
+//        CreateFileMetaData(version, 0, 2080888, 2777627);
+//        CreateFileMetaData(version, 0, 2556565, 5150437);
+//        CreateFileMetaData(version, 0, 2750761, 3453268);
+//
+//        CreateFileMetaData(version, 1, 1391249, 2080409);
+//        CreateFileMetaData(version, 1, 2080413, 2766187);
+//        CreateFileMetaData(version, 1, 2766232, 3457725);
+//        CreateFileMetaData(version, 1, 3457756, 4147918);
+//
+//        std::vector<Compaction *> compactions;
+//        version->ComputeNonOverlappingSet(&compactions);
+//        PrintCompactions(icmp.user_comparator(), compactions);
+//        std::string reason;
+//        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &reason));
+//    }
+
+    TEST(VersionTest, TestNonOverlappingSetDEBUG3) {
         InternalKeyComparator icmp(new YCSBKeyComparator);
         Options options;
-        options.max_num_coordinated_compaction_nonoverlapping_sets = 3;
-        options.max_num_sstables_in_nonoverlapping_set = 4;
+        options.max_num_coordinated_compaction_nonoverlapping_sets = 2;
+        options.max_num_sstables_in_nonoverlapping_set = 3;
         Version *version = new Version(&icmp, nullptr, &options, 1);
-        CreateFileMetaData(version, 0, 0, 100);
 
-        CreateFileMetaData(version, 0, 6, 10);
-        CreateFileMetaData(version, 0, 5, 12);
-        CreateFileMetaData(version, 0, 11, 19);
+        CreateFileMetaData(version, 0, 0, 8);
+        CreateFileMetaData(version, 0, 10, 15);
 
-        CreateFileMetaData(version, 0, 20, 30);
+        CreateFileMetaData(version, 1, 4, 5);
+        CreateFileMetaData(version, 1, 5, 9);
+        CreateFileMetaData(version, 1, 9, 12);
+        CreateFileMetaData(version, 1, 12, 18);
 
-        CreateFileMetaData(version, 0, 45, 50);
-
-        CreateFileMetaData(version, 1, 0, 6);
-        CreateFileMetaData(version, 1, 6, 12);
-        CreateFileMetaData(version, 1, 12, 15);
-        CreateFileMetaData(version, 1, 25, 35);
-        CreateFileMetaData(version, 1, 43, 47);
-
-        CreateFileMetaData(version, 1, 50, 69);
-        CreateFileMetaData(version, 1, 70, 87);
-        CreateFileMetaData(version, 1, 90, 95);
-        CreateFileMetaData(version, 1, 95, 100);
-
-        std::vector<Compaction *> compactions;
-        version->ComputeNonOverlappingSet(&compactions);
-        PrintCompactions(icmp.user_comparator(), compactions);
-        std::string reason;
-        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &reason));
-    }
-
-    TEST(VersionTest, TestNonOverlappingSet) {
-        InternalKeyComparator icmp(new YCSBKeyComparator);
-        Options options;
-        options.max_num_coordinated_compaction_nonoverlapping_sets = 3;
-        options.max_num_sstables_in_nonoverlapping_set = 4;
-        Version *version = new Version(&icmp, nullptr, &options, 1);
-        CreateFileMetaData(version, 0, 6, 10);
-        CreateFileMetaData(version, 0, 5, 12);
-        CreateFileMetaData(version, 0, 11, 19);
-
-        CreateFileMetaData(version, 0, 20, 30);
-
-        CreateFileMetaData(version, 0, 45, 50);
-
-        CreateFileMetaData(version, 1, 0, 6);
-        CreateFileMetaData(version, 1, 6, 12);
-        CreateFileMetaData(version, 1, 12, 15);
-        CreateFileMetaData(version, 1, 25, 35);
-        CreateFileMetaData(version, 1, 43, 47);
-
-        CreateFileMetaData(version, 1, 50, 69);
-        CreateFileMetaData(version, 1, 70, 87);
-        CreateFileMetaData(version, 1, 90, 95);
-        CreateFileMetaData(version, 1, 95, 100);
-
-        std::vector<Compaction *> compactions;
-        version->ComputeNonOverlappingSet(&compactions);
-        PrintCompactions(icmp.user_comparator(), compactions);
-        std::string reason;
-        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions,
-                                                     &reason));
-    }
-
-    TEST(VersionTest, TestNonOverlappingSetExpandL0) {
-        InternalKeyComparator icmp(new YCSBKeyComparator);
-        Options options;
-        options.max_num_coordinated_compaction_nonoverlapping_sets = 3;
-        options.max_num_sstables_in_nonoverlapping_set = 4;
-        Version *version = new Version(&icmp, nullptr, &options, 1);
-        CreateFileMetaData(version, 0, 6, 10);
-        CreateFileMetaData(version, 0, 5, 11);
-        CreateFileMetaData(version, 0, 10, 19);
-
-
-        CreateFileMetaData(version, 1, 0, 6);
-        CreateFileMetaData(version, 1, 6, 12);
-        CreateFileMetaData(version, 1, 13, 15);
-
-        std::vector<Compaction *> compactions;
-        version->ComputeNonOverlappingSet(&compactions);
-        PrintCompactions(icmp.user_comparator(), compactions);
-        std::string reason;
-        ASSERT_TRUE(version->AssertNonOverlappingSet(compactions,
-                                                     &reason));
-    }
-    TEST(VersionTest, TestNonOverlappingSetDEBUG) {
-        InternalKeyComparator icmp(new YCSBKeyComparator);
-        Options options;
-        options.max_num_coordinated_compaction_nonoverlapping_sets = 1;
-        options.max_num_sstables_in_nonoverlapping_set = 15;
-        Version *version = new Version(&icmp, nullptr, &options, 1);
-        CreateFileMetaData(version, 0, 117163, 264201);
-        CreateFileMetaData(version, 0, 264204, 406865);
-
-        CreateFileMetaData(version, 1, 0, 24620);
-        CreateFileMetaData(version, 1, 24621, 49173);
-        CreateFileMetaData(version, 1, 49174, 73628);
-        CreateFileMetaData(version, 1, 73629, 98178);
-        CreateFileMetaData(version, 1, 98180, 117162);
-
-        CreateFileMetaData(version, 1, 117163, 142359);
-        CreateFileMetaData(version, 1, 142360, 167616);
-        CreateFileMetaData(version, 1, 167619, 192936);
-        CreateFileMetaData(version, 1, 192937, 218347);
-        CreateFileMetaData(version, 1, 218348, 243654);
-        CreateFileMetaData(version, 1, 243655, 264203);
+//        CreateFileMetaData(version, 1, 2080413, 2766187);
+//        CreateFileMetaData(version, 1, 2766232, 3457725);
+//        CreateFileMetaData(version, 1, 3457756, 4147918);
 
         std::vector<Compaction *> compactions;
         version->ComputeNonOverlappingSet(&compactions);
@@ -536,8 +595,8 @@ using namespace nova;
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
-std::atomic_int_fast32_t nova::NovaCCServer::cc_server_seq_id_;
+std::atomic_int_fast32_t nova::NovaCCServer::storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
-std::map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
+std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 
 int main(int argc, char **argv) { return leveldb::test::RunAllTests(); }

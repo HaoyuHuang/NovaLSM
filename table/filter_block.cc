@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include <nova/logging.hpp>
+#include <fmt/core.h>
 #include "table/filter_block.h"
 
 #include "leveldb/filter_policy.h"
@@ -38,12 +40,12 @@ namespace leveldb {
         }
 
         // Append array of per-filter offsets
-        const uint32_t array_offset = result_.size();
+        const uint32_t filter_block_size = result_.size();
         for (size_t i = 0; i < filter_offsets_.size(); i++) {
             PutFixed32(&result_, filter_offsets_[i]);
         }
-
-        PutFixed32(&result_, array_offset);
+        PutFixed32(&result_, filter_offsets_.size());
+        PutFixed32(&result_, filter_block_size);
         result_.push_back(kFilterBaseLg);  // Save encoding parameter in result
         return Slice(result_);
     }
@@ -77,36 +79,55 @@ namespace leveldb {
 
     FilterBlockReader::FilterBlockReader(const FilterPolicy *policy,
                                          const Slice &contents)
-            : policy_(policy), data_(nullptr), offset_(nullptr), num_(0),
+            : policy_(policy), data_(nullptr),
               size_(contents.size()),
               base_lg_(0) {
         size_t n = contents.size();
         if (n < 5)
             return;  // 1 byte for base_lg_ and 4 for start of offset array
         base_lg_ = contents[n - 1];
-        uint32_t last_word = DecodeFixed32(contents.data() + n - 5);
-        if (last_word > n - 5) return;
+        filter_size_ = DecodeFixed32(contents.data() + n - 5);
+        uint32_t num_filter_offsets = DecodeFixed32(contents.data() + n - 9);
+
+        RDMA_ASSERT(base_lg_ == kFilterBaseLg);
+        uint32_t size = filter_size_ + num_filter_offsets * 4 + 4 + 4 + 1;
+        RDMA_ASSERT(size == n) << fmt::format("{} {}", size, n);
         data_ = contents.data();
-        offset_ = data_ + last_word;
-        num_ = (n - 5 - last_word) / 4;
+
+        for (int i = 0; i < num_filter_offsets; i++) {
+            filter_offsets_.push_back(
+                    DecodeFixed32(data_ + filter_size_ + i * 4));
+        }
     }
 
     bool
     FilterBlockReader::KeyMayMatch(uint64_t block_offset, const Slice &key) {
-        uint64_t index = block_offset >> base_lg_;
-        if (index < num_) {
-            uint32_t start = DecodeFixed32(offset_ + index * 4);
-            uint32_t limit = DecodeFixed32(offset_ + index * 4 + 4);
-            if (start <= limit &&
-                limit <= static_cast<size_t>(offset_ - data_)) {
-                Slice filter = Slice(data_ + start, limit - start);
-                return policy_->KeyMayMatch(key, filter);
-            } else if (start == limit) {
-                // Empty filters do not match any keys
-                return false;
-            }
+        uint64_t index = block_offset / kFilterBase;
+        if (index >= filter_offsets_.size()) {
+            return true;
         }
-        return true;  // Errors are treated as potential matches
+        uint32_t start = filter_offsets_[index];
+        uint32_t end = filter_size_;
+        if (index + 1 < filter_offsets_.size()) {
+            end = filter_offsets_[index + 1];
+        }
+        Slice filter = Slice(data_ + start, end - start);
+        return policy_->KeyMayMatch(key, filter);
+    }
+
+    std::string FilterBlockReader::DebugString(uint64_t block_offset,
+                                               const leveldb::Slice &key) {
+        std::string debug;
+        uint64_t index = block_offset / kFilterBase;
+        if (index < filter_offsets_.size()) {
+            uint32_t start = filter_offsets_[index];
+            uint32_t end = filter_size_;
+            if (index + 1 < filter_offsets_.size()) {
+                end = filter_offsets_[index + 1];
+            }
+            debug = fmt::format("{} {}", start, end);
+        }
+        return debug;
     }
 
 }  // namespace leveldb

@@ -6,6 +6,7 @@
 #include <fmt/core.h>
 #include <db/dbformat.h>
 #include <nova/logging.hpp>
+#include <unordered_map>
 #include "leveldb/table.h"
 
 #include "nova/logging.hpp"
@@ -32,18 +33,22 @@ namespace leveldb {
 
         Options options;
         Status status;
+        const FileMetaData *meta;
         RandomAccessFile *file;
         uint64_t cache_id;
         FilterBlockReader *filter;
         const char *filter_data;
         int level;
         uint64_t file_number;
+        std::unordered_map<uint64_t, uint64_t> rtable_data_relative_offset;
 
         BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
         Block *index_block;
     };
 
-    Status Table::Open(const Options &options, const ReadOptions &read_options,
+    Status Table::Open(const Options &options,
+                       const ReadOptions &read_options,
+                       const FileMetaData *meta,
                        RandomAccessFile *file,
                        uint64_t size, int level,
                        uint64_t file_number, Table **table,
@@ -63,6 +68,9 @@ namespace leveldb {
         Status s = f->Read(read_options, h, size - Footer::kEncodedLength,
                            Footer::kEncodedLength,
                            &footer_input, footer_space);
+        RDMA_ASSERT(footer_input.size() == Footer::kEncodedLength)
+            << fmt::format("{} {} {}", footer_input.size(),
+                           Footer::kEncodedLength, meta->DebugString());
         if (!s.ok()) return s;
 
         Footer footer;
@@ -89,6 +97,7 @@ namespace leveldb {
             Rep *rep = new Table::Rep;
             rep->options = options;
             rep->file = file;
+            rep->meta = meta;
             rep->metaindex_handle = footer.metaindex_handle();
             rep->index_block = index_block;
             rep->cache_id = (options.block_cache ? options.block_cache->NewId()
@@ -100,6 +109,15 @@ namespace leveldb {
             (*table)->rep_ = rep;
             (*table)->ReadMeta(footer);
             (*table)->db_profiler_ = db_profiler;
+            uint64_t offset = 0;
+            for (const auto &handle : meta->data_block_group_handles) {
+                auto sid = static_cast<uint64_t>(handle.server_id);
+                uint64_t id = (sid << 32) | handle.rtable_id;
+                RDMA_ASSERT(rep->rtable_data_relative_offset.find(id) ==
+                            rep->rtable_data_relative_offset.end());
+                rep->rtable_data_relative_offset[id] = offset;
+                offset += handle.size;
+            }
 
 //            auto it = index_block->NewIterator(options.comparator);
 //            it->SeekToFirst();
@@ -139,10 +157,7 @@ namespace leveldb {
         RTableHandle h = {};
         h.offset = footer.metaindex_handle().offset();
         h.size = footer.metaindex_handle().size();
-        if (!ReadBlock(rep_->file, opt, h, &contents).ok()) {
-            // Do not propagate errors since meta info is not needed for operation
-            return;
-        }
+        RDMA_ASSERT(ReadBlock(rep_->file, opt, h, &contents).ok());
         Block *meta = new Block(contents,
                                 rep_->file_number,
                                 footer.metaindex_handle().offset());
@@ -151,9 +166,8 @@ namespace leveldb {
         std::string key = "filter.";
         key.append(rep_->options.filter_policy->Name());
         iter->Seek(key);
-        if (iter->Valid() && iter->key() == Slice(key)) {
-            ReadFilter(iter->value());
-        }
+        RDMA_ASSERT(iter->Valid() && iter->key() == Slice(key));
+        ReadFilter(iter->value());
         delete iter;
         delete meta;
     }
@@ -161,10 +175,7 @@ namespace leveldb {
     void Table::ReadFilter(const Slice &filter_handle_value) {
         Slice v = filter_handle_value;
         BlockHandle filter_handle;
-        if (!filter_handle.DecodeFrom(&v).ok()) {
-            return;
-        }
-
+        RDMA_ASSERT(filter_handle.DecodeFrom(&v).ok());
         // We might want to unify with ReadBlock() if we start
         // requiring checksum verification in Table::Open.
         ReadOptions opt;
@@ -175,9 +186,7 @@ namespace leveldb {
         RTableHandle h = {};
         h.offset = filter_handle.offset();
         h.size = filter_handle.size();
-        if (!ReadBlock(rep_->file, opt, h, &block).ok()) {
-            return;
-        }
+        RDMA_ASSERT(ReadBlock(rep_->file, opt, h, &block).ok());
         if (block.heap_allocated) {
             rep_->filter_data = block.data.data();  // Will need to delete later
         }
@@ -320,6 +329,15 @@ namespace leveldb {
                 &Table::DataBlockReader, const_cast<Table *>(this), options);
     }
 
+    uint64_t Table::TranslateToDataBlockOffset(
+            const leveldb::RTableHandle &handle) {
+        uint64_t sid = handle.server_id;
+        uint64_t id = (sid << 32) | handle.rtable_id;
+        auto it = rep_->rtable_data_relative_offset.find(id);
+        RDMA_ASSERT(it != rep_->rtable_data_relative_offset.end());
+        return it->second + handle.offset;
+    }
+
     Status
     Table::InternalGet(const ReadOptions &options, const Slice &k, void *arg,
                        void (*handle_result)(void *, const Slice &,
@@ -344,27 +362,29 @@ namespace leveldb {
         if (iiter->Valid()) {
             Slice handle_value = iiter->value();
             FilterBlockReader *filter = rep_->filter;
-            BlockHandle handle;
+            RTableHandle handle;
             bool found = true;
-            // TODO: Support filter block.
-//            if (filter != nullptr && handle.DecodeFrom(&handle_value).ok()) {
-//                // Not found
-//                if (db_profiler_ != nullptr) {
-//                    Access access = {
-//                            .trace_type = TraceType::FILTER_BLOCK,
-//                            .access_caller = AccessCaller::kUserGet,
-//                            .block_id = 0,
-//                            .sstable_id = rep_->file_number,
-//                            .level = rep_->level,
-//                            .size = rep_->filter->size()
-//                    };
-//                    db_profiler_->Trace(access);
-//                }
-//
-//                if (!filter->KeyMayMatch(handle.offset(), k)) {
-//                    found = false;
-//                }
-//            }
+            bool key_doest_not_exist = false;
+            uint64_t data_block_offset = 0;
+            RDMA_ASSERT(filter != nullptr);
+            RDMA_ASSERT(RTableHandle::DecodeHandle(&handle_value, &handle));
+            // Not found
+            if (db_profiler_ != nullptr) {
+                Access access = {
+                        .trace_type = TraceType::FILTER_BLOCK,
+                        .access_caller = AccessCaller::kUserGet,
+                        .block_id = 0,
+                        .sstable_id = rep_->file_number,
+                        .level = rep_->level,
+                        .size = rep_->filter->size()
+                };
+                db_profiler_->Trace(access);
+            }
+            data_block_offset = TranslateToDataBlockOffset(handle);
+            if (!filter->KeyMayMatch(data_block_offset, k)) {
+                found = false;
+                key_doest_not_exist = true;
+            }
             if (found) {
                 BlockReadContext context{
                         .caller = AccessCaller::kUserGet,
@@ -376,8 +396,26 @@ namespace leveldb {
                                                        iiter->value());
                 block_iter->Seek(k);
                 if (block_iter->Valid()) {
-                    (*handle_result)(arg, block_iter->key(),
-                                     block_iter->value());
+                    if (handle_result) {
+                        (*handle_result)(arg, block_iter->key(),
+                                         block_iter->value());
+                    }
+                    if (BytewiseComparator()->Compare(
+                            ExtractUserKey(block_iter->key()),
+                            ExtractUserKey(k)) == 0 &&
+                        key_doest_not_exist) {
+                        RDMA_LOG(rdmaio::INFO)
+                            << fmt::format(
+                                    "found:{} handle:{} offset:{} k:{} key:{} debug:{} meta:{} ",
+                                    found,
+                                    handle.DebugString(),
+                                    data_block_offset,
+                                    ExtractUserKey(
+                                            block_iter->key()).ToString(),
+                                    ExtractUserKey(k).ToString(),
+                                    filter->DebugString(data_block_offset, k),
+                                    rep_->meta->DebugString());
+                    }
                 }
                 s = block_iter->status();
                 delete block_iter;

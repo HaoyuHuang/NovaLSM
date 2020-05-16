@@ -191,6 +191,7 @@ namespace nova {
         read_options.mem_manager = worker->mem_manager_;
         read_options.thread_id = worker->thread_id_;
         read_options.rdma_backing_mem = worker->rdma_backing_mem;
+        read_options.rdma_backing_mem_size = worker->rdma_backing_mem_size;
 
         leveldb::Status s = db->Get(read_options, key, &value);
         RDMA_ASSERT(s.ok())
@@ -394,7 +395,8 @@ namespace nova {
                 total_writes.fetch_add(1, std::memory_order_relaxed) + 1;
         option.replicate_log_record_states = worker->replicate_log_record_states;
         option.rdma_backing_mem = worker->rdma_backing_mem;
-        option.update_subranges = true;
+        option.rdma_backing_mem_size = worker->rdma_backing_mem_size;
+        option.is_loading_db = false;
 
 //        worker->stats.nputs * NovaCCConfig::cc_config->num_conn_workers;//
         CCFragment *frag = NovaConfig::home_fragment(hv);

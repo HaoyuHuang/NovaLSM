@@ -8,16 +8,26 @@
 #define LEVELDB_NOVA_CC_SERVER_H
 
 #include <semaphore.h>
+#include <unordered_map>
 
 #include "leveldb/db_types.h"
+#include "db/table_cache.h"
+#include "db/compaction.h"
+
 #include "nova/nova_rdma_rc_store.h"
 #include "mc/nova_mem_manager.h"
 #include "log/nova_in_memory_log_manager.h"
 #include "nova_rtable.h"
+#include "nova_storage_worker.h"
+#include "rdma_admission_ctrl.h"
+
+namespace leveldb {
+    class CompactionState;
+}
 
 namespace nova {
 
-    struct NovaServerAsyncTask {
+    struct NovaStorageTask {
         leveldb::CCRequestType request_type;
         uint32_t cc_server_thread_id = 0;
         uint32_t dc_req_id = 0;
@@ -32,11 +42,14 @@ namespace nova {
 
         // Persist request
         std::vector<leveldb::SSTableRTablePair> persist_pairs;
+
+        // Compaction request
+        leveldb::CompactionRequest *compaction_request = nullptr;
     };
 
     struct NovaServerCompleteTask {
         leveldb::CCRequestType request_type;
-        uint32_t remote_server_id = 0;
+        int remote_server_id = -1;
         uint32_t dc_req_id = 0;
 
         // Read result.
@@ -45,9 +58,11 @@ namespace nova {
         leveldb::RTableHandle rtable_handle = {};
         // Persist result.
         std::vector<leveldb::RTableHandle> rtable_handles = {};
+        leveldb::CompactionState *compaction_state = nullptr;
+        leveldb::CompactionRequest *compaction_request = nullptr;
     };
 
-    class NovaCCServerAsyncWorker;
+    class NovaStorageWorker;
 
     struct RequestContext {
         leveldb::CCRequestType request_type;
@@ -69,11 +84,13 @@ namespace nova {
                      NovaMemManager *mem_manager,
                      leveldb::NovaRTableManager *rtable_manager,
                      InMemoryLogFileManager *log_manager,
-                     uint32_t thread_id, bool is_compaction_thread);
+                     uint32_t thread_id, bool is_compaction_thread,
+                     RDMAAdmissionCtrl *admission_control);
 
         bool
         ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
-                      char *buf, uint32_t imm_data) override;
+                      char *buf, uint32_t imm_data,
+                      bool *generate_a_new_request) override;
 
         NovaRDMAStore *rdma_store_;
 
@@ -81,17 +98,21 @@ namespace nova {
 
         void AddCompleteTask(const NovaServerCompleteTask &task);
 
-        int PullAsyncCQ() override;
+        int ProcessCompletionQueue() override;
 
-        std::vector<NovaCCServerAsyncWorker *> async_workers_;
+        std::vector<NovaStorageWorker *> storage_workers_;
+        std::vector<NovaStorageWorker *> compaction_storage_workers_;
 
-        static std::atomic_int_fast32_t cc_server_seq_id_;
+        static std::atomic_int_fast32_t storage_worker_seq_id_;
+        static std::atomic_int_fast32_t compaction_storage_worker_seq_id_;
 
     private:
         bool is_running_ = true;
         bool is_compaction_thread_ = false;
 
-        void AddAsyncTask(const NovaServerAsyncTask &task);
+        void AddStorageTask(const NovaStorageTask &task);
+
+        void AddCompactionStorageTask(const NovaStorageTask &task);
 
         uint32_t thread_id_;
         rdmaio::RdmaCtrl *rdma_ctrl_;
@@ -99,38 +120,14 @@ namespace nova {
         InMemoryLogFileManager *log_manager_;
         leveldb::NovaRTableManager *rtable_manager_;
         leveldb::NovaRTable *current_rtable_ = nullptr;
-
+        RDMAAdmissionCtrl *admission_control_ = nullptr;
         std::mutex mutex_;
-        std::list<NovaServerCompleteTask> async_cq_;
+        std::list<NovaServerCompleteTask> private_cq_;
+        std::list<NovaServerCompleteTask> public_cq_;
 
         uint32_t current_worker_id_ = 0;
 
-        std::map<uint64_t, RequestContext> request_context_map_;
-    };
-
-
-    class NovaCCServerAsyncWorker {
-    public:
-        NovaCCServerAsyncWorker(leveldb::NovaRTableManager *rtable_manager,
-                                std::vector<NovaCCServer *> cc_servers);
-
-        void AddTask(const NovaServerAsyncTask &task);
-
-        void Start();
-
-        std::atomic_int_fast32_t stat_tasks_;
-        std::atomic_int_fast64_t stat_read_bytes_;
-        std::atomic_int_fast64_t stat_write_bytes_;
-
-    private:
-        leveldb::NovaRTableManager *rtable_manager_;
-        std::vector<NovaCCServer *> cc_servers_;
-
-        bool is_running_ = true;
-
-        std::mutex mutex_;
-        std::list<NovaServerAsyncTask> queue_;
-        sem_t sem_;
+        std::unordered_map<uint64_t, RequestContext> request_context_map_;
     };
 }
 

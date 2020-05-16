@@ -155,10 +155,11 @@ namespace {
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
-std::atomic_int_fast32_t nova::NovaCCServer::cc_server_seq_id_;
+std::atomic_int_fast32_t nova::NovaCCServer::storage_worker_seq_id_;
+std::atomic_int_fast32_t nova::NovaCCServer::compaction_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
-std::map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
-
+std::atomic_int_fast32_t nova::NovaStorageWorker::storage_file_number_seq;
+std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 
 void start(NovaCCNICServer *server) {
     server->Start();
@@ -264,7 +265,6 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->max_msg_size = 1024;
     NovaConfig::config->rdma_max_num_sends = 256;
     NovaConfig::config->rdma_doorbell_batch_size = 8;
-    NovaConfig::config->rdma_pq_batch_size = 8;
 
     NovaConfig::config->block_cache_mb = 0;
     NovaConfig::config->row_cache_mb = 0;
@@ -314,7 +314,7 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config->num_conn_workers = 1;
     NovaConfig::config->num_conn_async_workers = 1;
-    NovaConfig::config->num_cc_server_workers = 1;
+    NovaConfig::config->num_storage_workers = 1;
     NovaConfig::config->num_compaction_workers = 1;
     NovaConfig::config->num_rdma_compaction_workers = 1;
     NovaConfig::config->num_memtables = FLAGS_cc_num_memtables;
@@ -334,9 +334,10 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->enable_table_locator = true;
 
     leveldb::EnvBGThread::bg_thread_id_seq = 0;
-    nova::NovaCCServer::cc_server_seq_id_ = 0;
+    nova::NovaCCServer::storage_worker_seq_id_ = 0;
     leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
     NovaConfig::config->use_multiple_disks = false;
+    nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;
 
     NovaConfig::config->subrange_sampling_ratio = FLAGS_cc_sampling_ratio;
     NovaConfig::config->zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
@@ -345,9 +346,28 @@ int main(int argc, char *argv[]) {
 
     char *edit_memory = (char *) malloc(10240);
     leveldb::VersionEdit edit;
-    edit.UpdateSubRange(0, "0", "1111", true, true, 0);
-    edit.UpdateSubRange(1, "2222", "33333", false, true, 1);
-    edit.DeleteFile(0, 3, 123);
+    {
+        std::vector<leveldb::Range> tiny_ranges;
+        leveldb::Range r = {};
+        r.lower = "0";
+        r.upper = "1111";
+        r.lower_inclusive = true;
+        r.upper_inclusive = true;
+        tiny_ranges.push_back(r);
+        edit.UpdateSubRange(0, tiny_ranges, 0);
+    }
+
+    {
+        std::vector<leveldb::Range> tiny_ranges;
+        leveldb::Range r;
+        r.lower = "2222";
+        r.upper = "33333";
+        r.lower_inclusive = false;
+        r.upper_inclusive = true;
+        tiny_ranges.push_back(r);
+        edit.UpdateSubRange(1, tiny_ranges, 1);
+    }
+    edit.DeleteFile(0, 123);
     leveldb::InternalKey smallest("haoyu", 4567,
                                   leveldb::ValueType::kTypeValue);
     leveldb::InternalKey largest("lulu", 4568, leveldb::ValueType::kTypeValue);
@@ -367,9 +387,9 @@ int main(int argc, char *argv[]) {
     data_handle2.rtable_id = 4;
     data_handle2.offset = 5555;
     data_handle2.size = 111;
-    edit.AddFile(0, 4, 333, 102400, 10240, 99999, smallest, largest,
+    edit.AddFile(0, {4}, 333, 102400, 10240, 99999, smallest, largest,
                  meta_handle, {data_handle});
-    edit.AddFile(0, 5, 444, 232323, 45464, 32341, smallest, largest,
+    edit.AddFile(0, {5}, 444, 232323, 45464, 32341, smallest, largest,
                  meta_handle, {data_handle2});
     edit.SetNextFile(45555);
     edit.SetLastSequence(9999999);

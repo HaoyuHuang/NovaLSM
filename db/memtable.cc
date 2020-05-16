@@ -191,15 +191,14 @@ namespace leveldb {
     }
 
     void AtomicMemTable::SetFlushed(const std::string &dbname,
-                                    const std::vector<uint64_t> &l0_file_numbers) {
+                                    const std::vector<uint64_t> &l0_file_numbers,
+                                    uint32_t version_id) {
         mutex_.lock();
         RDMA_ASSERT(!is_flushed_);
         RDMA_ASSERT(l0_file_numbers_.empty());
         RDMA_ASSERT(is_immutable_);
-        l0_file_numbers_.resize(l0_file_numbers.size());
-        for (int i = 0; i < l0_file_numbers.size(); i++) {
-            l0_file_numbers_[i] = l0_file_numbers[i];
-        }
+        last_version_id_ = std::max(last_version_id_, version_id);
+        l0_file_numbers_.insert(l0_file_numbers.begin(), l0_file_numbers.end());
         is_flushed_ = true;
         RDMA_ASSERT(memtable_);
         uint32_t mid = memtable_->memtableid();
@@ -213,33 +212,46 @@ namespace leveldb {
         mutex_.unlock();
     }
 
-    AtomicMemTable *AtomicMemTable::Ref(std::vector<uint64_t> *l0fns) {
+    std::string MemTableL0FilesEdit::DebugString() const {
+        std::string added;
+        std::string removed;
+        for (auto add : add_fns) {
+            added += std::to_string(add);
+            added += ",";
+        }
+        for (auto rm : remove_fns) {
+            removed += std::to_string(rm);
+            removed += ",";
+        }
+        std::string output = fmt::format("vid: {} add:[{}] rm:[{}]", version_id,
+                                         added,
+                                         removed);
+        return output;
+    }
+
+    AtomicMemTable *AtomicMemTable::RefMemTable() {
         AtomicMemTable *mem = nullptr;
         mutex_.lock();
         if (memtable_ != nullptr) {
             memtable_->Ref();
             mem = this;
-        }
-        // make a copy of l0 file numbers.
-        if (l0fns) {
-            *l0fns = l0_file_numbers_;
+            mutex_.unlock();
+            return mem;
         }
         mutex_.unlock();
         return mem;
     }
 
-    void AtomicMemTable::DeleteL0File(std::vector<uint64_t> &l0fns) {
+    void AtomicMemTable::UpdateL0Files(uint32_t version_id, const MemTableL0FilesEdit &edit) {
         RDMA_ASSERT(is_immutable_);
         RDMA_ASSERT(is_flushed_);
         mutex_.lock();
-        for (uint64_t deleted_l0 : l0fns) {
-            for (auto it = l0_file_numbers_.begin();
-                 it != l0_file_numbers_.end(); it++) {
-                if (*it == deleted_l0) {
-                    l0_file_numbers_.erase(it);
-                    break;
-                }
-            }
+        last_version_id_ = std::max(last_version_id_, version_id);
+        for (auto add : edit.add_fns) {
+            l0_file_numbers_.insert(add);
+        }
+        for (auto rm : edit.remove_fns) {
+            l0_file_numbers_.erase(rm);
         }
         mutex_.unlock();
     }

@@ -11,18 +11,11 @@
 #include <util/crc32c.h>
 
 #include "nova_cc.h"
-
+#include "storage_selector.h"
 #include "db/filename.h"
 #include "nova/nova_config.h"
 
 namespace leveldb {
-    namespace {
-        bool dc_stats_comparator(const DCStatsStatus &s1,
-                                 const DCStatsStatus &s2) {
-            return s1.response.dc_queue_depth < s2.response.dc_queue_depth;
-        }
-    }
-
     NovaCCMemFile::NovaCCMemFile(Env *env, const Options &options,
                                  uint64_t file_number,
                                  MemManager *mem_manager,
@@ -31,7 +24,7 @@ namespace leveldb {
                                  uint64_t thread_id,
                                  uint64_t file_size, unsigned int *rand_seed,
                                  std::string &filename)
-            : env_(env), options_(options), file_number_(file_number),
+            : mem_env_(env), options_(options), file_number_(file_number),
               fname_(filename),
               mem_manager_(mem_manager),
               cc_client_(cc_client),
@@ -61,6 +54,9 @@ namespace leveldb {
             RDMA_LOG(rdmaio::DEBUG) << fmt::format(
                         "Free remote memory file tid:{} fn:{} size:{}",
                         thread_id_, fname_, allocated_size_);
+        }
+        if (index_block_) {
+            delete index_block_;
         }
     }
 
@@ -164,25 +160,21 @@ namespace leveldb {
 
         // Read the index block
         BlockContents index_block_contents;
-        const char *buf = backing_mem_ + footer.index_handle().offset();
-        Slice contents(buf, footer.index_handle().size());
+        const char *index_block_buf =
+                backing_mem_ + footer.index_handle().offset();
+        Slice contents(index_block_buf, footer.index_handle().size());
         RTableHandle index_handle = {};
         index_handle.offset = footer.index_handle().offset();
         index_handle.size = footer.index_handle().size();
-        s = Table::ReadBlock(buf, contents, ReadOptions(),
+        s = Table::ReadBlock(index_block_buf, contents, ReadOptions(),
                              index_handle, &index_block_contents);
         RDMA_ASSERT(s.ok());
 
         index_block_ = new Block(index_block_contents,
                                  file_number_,
-                                 footer.index_handle().offset());
-        // 4 KB 250 = 1 MB
+                                 footer.index_handle().offset(), true);
         int min_num_data_blocks_in_group = num_data_blocks_ /
                                            nova::NovaConfig::config->num_rtable_num_servers_scatter_data_blocks;
-//        if (num_data_blocks_ <= 250) {
-//            min_num_data_blocks_in_group = num_data_blocks_;
-//        }
-
         uint32_t assigned_blocks = 0;
         while (assigned_blocks < num_data_blocks_) {
             int remaining_blocks = num_data_blocks_ - assigned_blocks;
@@ -207,72 +199,10 @@ namespace leveldb {
         int group_id = 0;
 
         auto client = reinterpret_cast<NovaBlockCCClient *> (cc_client_);
-        int scatter_dcs[nblocks_in_group_.size()];
-        std::vector<uint32_t> dc_ids;
-        if (nova::NovaConfig::config->scatter_policy ==
-            nova::ScatterPolicy::POWER_OF_TWO) {
-            uint32_t start_dc_id = rand_r(rand_seed_) %
-                                   nova::NovaConfig::config->dc_servers.size();
-            for (int i = 0; i < 2; i++) {
-                dc_ids.push_back(start_dc_id);
-                start_dc_id = (start_dc_id + 1) %
-                              nova::NovaConfig::config->dc_servers.size();
-            }
-        } else if (nova::NovaConfig::config->scatter_policy ==
-                   nova::ScatterPolicy::POWER_OF_THREE) {
-            uint32_t start_dc_id = rand_r(rand_seed_) %
-                                   nova::NovaConfig::config->dc_servers.size();
-            for (int i = 0; i < 3; i++) {
-                dc_ids.push_back(start_dc_id);
-                start_dc_id = (start_dc_id + 1) %
-                              nova::NovaConfig::config->dc_servers.size();
-            }
-        } else if (nova::NovaConfig::config->scatter_policy ==
-                   nova::ScatterPolicy::SCATTER_DC_STATS) {
-            for (int i = 0;
-                 i < nova::NovaConfig::config->dc_servers.size(); i++) {
-                dc_ids.push_back(i);
-            }
-        } else {
-            // Random.
-            uint32_t start_dc_id = rand_r(rand_seed_) %
-                                   nova::NovaConfig::config->dc_servers.size();
-            for (int i = 0; i < nblocks_in_group_.size(); i++) {
-                scatter_dcs[i] = nova::NovaConfig::config->dc_servers[start_dc_id].server_id;
-                start_dc_id = (start_dc_id + 1) %
-                              nova::NovaConfig::config->dc_servers.size();
-            }
-        }
-
-        if (!dc_ids.empty()) {
-            for (int i = 0;
-                 i < dc_ids.size(); i++) {
-                uint32_t server_id = nova::NovaConfig::config->dc_servers[dc_ids[i]].server_id;
-                uint32_t req_id = client->InitiateReadDCStats(server_id);
-                DCStatsStatus status;
-                status.remote_dc_id = server_id;
-                status.req_id = req_id;
-                dc_stats_status_.push_back(status);
-            }
-
-            for (int i = 0;
-                 i < dc_stats_status_.size(); i++) {
-                client->Wait();
-            }
-
-            for (int i = 0;
-                 i < dc_stats_status_.size(); i++) {
-                RDMA_ASSERT(client->IsDone(dc_stats_status_[i].req_id,
-                                           &dc_stats_status_[i].response,
-                                           nullptr));
-            }
-            // sort the dc stats.
-            std::sort(dc_stats_status_.begin(), dc_stats_status_.end(),
-                      dc_stats_comparator);
-            for (int i = 0; i < nblocks_in_group_.size(); i++) {
-                scatter_dcs[i] = dc_stats_status_[i].remote_dc_id;
-            }
-        }
+        std::vector<uint32_t> scatter_dcs;
+        StorageSelector selector(client, rand_seed_);
+        selector.SelectStorageServers(nova::NovaConfig::config->scatter_policy,
+                                      nblocks_in_group_.size(), &scatter_dcs);
 
         uint32_t sid = 0;
         uint32_t dbid = 0;
@@ -305,7 +235,7 @@ namespace leveldb {
                         size, false);
                 RDMA_LOG(rdmaio::DEBUG)
                     << fmt::format(
-                            "t[{}]: Initiate WRITE data blocks s:{} req:{} db:{} fn:{}",
+                            "t[{}]: Initiated WRITE data blocks s:{} req:{} db:{} fn:{}",
                             thread_id_, scatter_dcs[group_id], req_id,
                             dbname_, file_number_);
 
@@ -362,19 +292,17 @@ namespace leveldb {
         Iterator *it = index_block_->NewIterator(options_.comparator);
         it->SeekToFirst();
 
-        RTableHandle db_handle = status_[0].result_handle;
-        RTableHandle index_handle = db_handle;
+        RTableHandle current_rtable_handle = status_[0].result_handle;
+        RTableHandle index_handle = current_rtable_handle;
         uint64_t relative_offset = 0;
         int group_id = 0;
         int n = 0;
         char handle_buf[RTableHandle::HandleSize()];
-        uint64_t filter_block_offset = 0;
+        uint64_t filter_block_start_offset = 0;
         while (it->Valid()) {
             Slice key = it->key();
             Slice value = it->value();
 
-//            leveldb::ParsedInternalKey ikey;
-//            leveldb::ParseInternalKey(key, &ikey);
             BlockHandle handle;
             s = handle.DecodeFrom(&value);
 
@@ -384,33 +312,26 @@ namespace leveldb {
                 relative_offset = handle.offset();
             }
 
-            filter_block_offset =
+            filter_block_start_offset =
                     handle.offset() + handle.size() + kBlockTrailerSize;
 
             index_handle.offset =
-                    (handle.offset() - relative_offset) + db_handle.offset;
+                    (handle.offset() - relative_offset) +
+                    current_rtable_handle.offset;
+            RDMA_ASSERT(index_handle.offset == handle.offset());
             // Does not include crc.
             index_handle.size = handle.size();
             index_handle.EncodeHandle(handle_buf);
             index_block_builder.Add(key, Slice(handle_buf,
                                                RTableHandle::HandleSize()));
 
-//            RDMA_LOG(rdmaio::DEBUG)
-//                << fmt::format(
-//                        "ikey:{} off:{} size:{} rserver:{} rtable:{} roff:{} rsize:{}",
-//                        ikey.user_key.ToString(),
-//                        handle.offset(),
-//                        handle.size(), index_handle.server_id,
-//                        index_handle.rtable_id, index_handle.offset,
-//                        index_handle.size);
-
-
             it->Next();
             n++;
 
             if (n == nblocks_in_group_[group_id]) {
                 // Cover the block handle in the RTable.
-                RDMA_ASSERT(db_handle.offset + db_handle.size ==
+                RDMA_ASSERT(current_rtable_handle.offset +
+                            current_rtable_handle.size ==
                             index_handle.offset + index_handle.size +
                             kBlockTrailerSize);
                 group_id++;
@@ -420,8 +341,8 @@ namespace leveldb {
                     RDMA_ASSERT(!it->Valid());
                     break;
                 }
-                db_handle = status_[group_id].result_handle;
-                index_handle = db_handle;
+                current_rtable_handle = status_[group_id].result_handle;
+                index_handle = current_rtable_handle;
             }
         }
 
@@ -431,16 +352,51 @@ namespace leveldb {
 
         // Rewrite index handle for filter block.
         uint32_t filter_block_size =
-                footer.metaindex_handle().offset() - filter_block_offset -
+                footer.metaindex_handle().offset() - filter_block_start_offset -
                 kBlockTrailerSize;
         uint64_t new_file_size = filter_block_size + kBlockTrailerSize;
-        const uint64_t rewrite_start_offset =
-                footer.metaindex_handle().offset() - new_file_size;
+
+        // point to start of filter block.
+        const uint64_t rewrite_start_offset = filter_block_start_offset;
+
+        {
+//            BlockContents metaindex_block_contents;
+//            const char *metaindex_block_buf =
+//                    backing_mem_ + footer.metaindex_handle().offset();
+//            Slice contents(metaindex_block_buf,
+//                           footer.metaindex_handle().size());
+//            RTableHandle metaindex_handle = {};
+//            metaindex_handle.offset = footer.metaindex_handle().offset();
+//            metaindex_handle.size = footer.metaindex_handle().size();
+//            s = Table::ReadBlock(metaindex_block_buf, contents, ReadOptions(),
+//                                 metaindex_handle, &metaindex_block_contents);
+//            RDMA_ASSERT(s.ok());
+//            Block *metaindex_block = new Block(metaindex_block_contents,
+//                                               file_number_,
+//                                               footer.metaindex_handle().offset(), true);
+//
+//            Iterator *iter = metaindex_block->NewIterator(BytewiseComparator());
+//            std::string key = "filter.";
+//            key.append(options_.filter_policy->Name());
+//            iter->Seek(key);
+//            RDMA_ASSERT(iter->Valid() && iter->key() == Slice(key));
+//            BlockHandle filter_handle;
+//            Slice v = iter->value();
+//            RDMA_ASSERT(filter_handle.DecodeFrom(&v).ok());
+//            RDMA_ASSERT(filter_block_start_offset == filter_handle.offset())
+//                << fmt::format("{} {}", filter_block_start_offset,
+//                               filter_handle.offset());
+//            RDMA_ASSERT(filter_block_size == filter_handle.size())
+//                << fmt::format("{} {}", filter_block_size,
+//                               filter_handle.size());
+//            delete iter;
+//            delete metaindex_block;
+        }
 
         BlockHandle new_filter_handle = {};
         new_filter_handle.set_offset(0);
         new_filter_handle.set_size(filter_block_size);
-        BlockHandle new_meta_handle = {};
+        BlockHandle new_metaindex_handle = {};
         BlockHandle new_idx_handle = {};
         {
             // rewrite meta index block.
@@ -453,8 +409,8 @@ namespace leveldb {
             meta_index_block.Add(key, handle_encoding);
             uint32_t size = WriteBlock(&meta_index_block,
                                        rewrite_start_offset + new_file_size);
-            new_meta_handle.set_offset(new_file_size);
-            new_meta_handle.set_size(size - kBlockTrailerSize);
+            new_metaindex_handle.set_offset(new_file_size);
+            new_metaindex_handle.set_size(size - kBlockTrailerSize);
             new_file_size += size;
         }
 
@@ -469,7 +425,7 @@ namespace leveldb {
 
         // Add new footer.
         Footer new_footer;
-        new_footer.set_metaindex_handle(new_meta_handle);
+        new_footer.set_metaindex_handle(new_metaindex_handle);
         new_footer.set_index_handle(new_idx_handle);
         std::string new_footer_encoding;
         new_footer.EncodeTo(&new_footer_encoding);
@@ -477,17 +433,16 @@ namespace leveldb {
         new_file_size += new_footer_encoding.size();
 
         RDMA_ASSERT(rewrite_start_offset + new_file_size < allocated_size_);
-
         RDMA_LOG(rdmaio::DEBUG) << fmt::format(
                     "New SSTable {} size:{} old-start-offset:{} filter-block-size:{} meta_index_block:{}:{}. index_handle:{}:{}",
                     fname_, new_file_size, rewrite_start_offset,
                     filter_block_size,
-                    new_meta_handle.offset(), new_meta_handle.size(),
+                    new_metaindex_handle.offset(), new_metaindex_handle.size(),
                     new_idx_handle.offset(), new_idx_handle.size());
 
         WritableFile *writable_file;
         EnvFileMetadata meta = {};
-        s = env_->NewWritableFile(fname_, meta, &writable_file);
+        s = mem_env_->NewWritableFile(fname_, meta, &writable_file);
         RDMA_ASSERT(s.ok());
         Slice sstable_rtable(backing_mem_ + rewrite_start_offset,
                              new_file_size);
@@ -580,7 +535,7 @@ namespace leveldb {
 
     NovaCCRandomAccessFile::NovaCCRandomAccessFile(
             Env *env, const std::string &dbname, uint64_t file_number,
-            const leveldb::FileMetaData &meta, leveldb::CCClient *dc_client,
+            const leveldb::FileMetaData *meta, leveldb::CCClient *dc_client,
             leveldb::MemManager *mem_manager,
             uint64_t thread_id,
             bool prefetch_all, std::string &filename) : env_(env),
@@ -605,7 +560,6 @@ namespace leveldb {
         auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client);
         RDMA_ASSERT(dc);
         dc->set_dbid(dbid_);
-
         if (prefetch_all_) {
             RDMA_ASSERT(ReadAll(dc_client).ok());
         }
@@ -639,12 +593,12 @@ namespace leveldb {
         } else {
             RDMA_ASSERT(n < MAX_BLOCK_SIZE);
             char *backing_mem_block = read_options.rdma_backing_mem;
-
             RDMA_ASSERT(backing_mem_block);
             auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(read_options.dc_client);
             dc->set_dbid(dbid_);
             uint32_t req_id = dc->InitiateRTableReadDataBlock(
-                    rtable_handle, offset, n, backing_mem_block, "");
+                    rtable_handle, offset, n, backing_mem_block,
+                    read_options.rdma_backing_mem_size, "");
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("t[{}]: CCRead req:{} start db:{} fn:{} s:{}",
                                read_options.thread_id,
@@ -662,11 +616,6 @@ namespace leveldb {
             ptr = backing_mem_block;
             memcpy(scratch, ptr, n);
             *result = Slice(scratch, n);
-
-//            // Return the buf.
-//            mutex_.lock();
-//            backing_mem_blocks_.push(buf);
-//            mutex_.unlock();
         }
         return Status::OK();
     }
@@ -678,7 +627,7 @@ namespace leveldb {
 
         if (backing_mem_table_) {
             uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                      meta_.file_size);
+                                                      meta_->file_size);
             mem_manager_->FreeItem(thread_id_, backing_mem_table_, scid);
             backing_mem_table_ = nullptr;
         }
@@ -702,17 +651,15 @@ namespace leveldb {
 
     Status NovaCCRandomAccessFile::ReadAll(CCClient *dc_client) {
         uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                  meta_.file_size);
+                                                  meta_->file_size);
         backing_mem_table_ = mem_manager_->ItemAlloc(thread_id_, scid);
         RDMA_ASSERT(backing_mem_table_) << "Running out of memory";
         uint64_t offset = 0;
-
-        uint32_t reqs[meta_.data_block_group_handles.size()];
+        uint32_t reqs[meta_->data_block_group_handles.size()];
         auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client);
         dc->set_dbid(dbid_);
-
-        for (int i = 0; i < meta_.data_block_group_handles.size(); i++) {
-            RTableHandle &handle = meta_.data_block_group_handles[i];
+        for (int i = 0; i < meta_->data_block_group_handles.size(); i++) {
+            const RTableHandle &handle = meta_->data_block_group_handles[i];
             uint64_t id =
                     (((uint64_t) handle.server_id) << 32) |
                     handle.rtable_id;
@@ -720,7 +667,9 @@ namespace leveldb {
                                                       handle.offset,
                                                       handle.size,
                                                       backing_mem_table_ +
-                                                      offset, "");
+                                                      offset,
+                                                      meta_->file_size - offset,
+                                                      "");
             DataBlockRTableLocalBuf buf = {};
             buf.offset = handle.offset;
             buf.size = handle.size;
@@ -730,12 +679,12 @@ namespace leveldb {
         }
 
         // Wait for all reads to complete.
-        for (int i = 0; i < meta_.data_block_group_handles.size(); i++) {
+        for (int i = 0; i < meta_->data_block_group_handles.size(); i++) {
             dc->Wait();
         }
         offset = 0;
-        for (int i = 0; i < meta_.data_block_group_handles.size(); i++) {
-            RTableHandle &handle = meta_.data_block_group_handles[i];
+        for (int i = 0; i < meta_->data_block_group_handles.size(); i++) {
+            const RTableHandle &handle = meta_->data_block_group_handles[i];
             RDMA_ASSERT(dc->IsDone(reqs[i], nullptr, nullptr));
             RDMA_ASSERT(nova::IsRDMAWRITEComplete(backing_mem_table_ + offset,
                                                   handle.size));

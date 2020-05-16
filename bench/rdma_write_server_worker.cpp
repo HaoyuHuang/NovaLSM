@@ -141,8 +141,8 @@ namespace nova {
 
         while (true) {
             if (eval_disk_horizontal_scalability_ && server_id_ != 0) {
-                rdma_store_->PollSQ();
-                rdma_store_->PollRQ();
+//                rdma_store_->PollSQ();
+//                rdma_store_->PollRQ();
                 PullAsyncCQ();
                 processed_number_of_req_ += 1;
                 if (processed_number_of_req_ % 10000 == 0) {
@@ -161,8 +161,8 @@ namespace nova {
             processed_number_of_req_ += 1;
 
             while (!client_->IsDone(req_id)) {
-                rdma_store_->PollSQ();
-                rdma_store_->PollRQ();
+//                rdma_store_->PollSQ();
+//                rdma_store_->PollRQ();
                 PullAsyncCQ();
             }
 
@@ -182,8 +182,8 @@ namespace nova {
 
         usleep(100000);
         for (int i = 0; i < 1000000; i++) {
-            rdma_store_->PollSQ();
-            rdma_store_->PollRQ();
+//            rdma_store_->PollSQ();
+//            rdma_store_->PollRQ();
             PullAsyncCQ();
         }
     }
@@ -191,10 +191,10 @@ namespace nova {
     bool
     RDMAWRITEServerWorker::ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id,
                                          int remote_server_id, char *buf,
-                                         uint32_t req_id) {
+                                         uint32_t req_id, bool *new_request) {
         bool processed_by_client = client_->ProcessRDMAWC(type, wr_id,
                                                           remote_server_id, buf,
-                                                          req_id);
+                                                          req_id, new_request);
         bool processed_by_server = false;
 
         switch (type) {

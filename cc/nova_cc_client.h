@@ -8,11 +8,12 @@
 #define LEVELDB_NOVA_CC_CLIENT_H
 
 #include <semaphore.h>
+#include <unordered_map>
 
 #include "util/env_mem.h"
 #include "db/version_edit.h"
-#include "include/leveldb/db_types.h"
-#include "include/leveldb/cc_client.h"
+#include "leveldb/db_types.h"
+#include "leveldb/cc_client.h"
 #include "nova/nova_common.h"
 #include "nova/nova_rdma_rc_store.h"
 #include "cc/nova_cc_log_writer.h"
@@ -29,7 +30,11 @@ namespace leveldb {
 
     class NovaBlockCCClient : public CCClient {
     public:
-        NovaBlockCCClient(uint32_t client_id);
+        NovaBlockCCClient(uint32_t client_id,
+                          NovaRTableManager *rtable_manager);
+
+        uint32_t InitiateCompaction(uint32_t remote_server_id,
+                                    CompactionRequest *compaction_request) override;
 
         uint32_t
         InitiateDeleteTables(uint32_t server_id,
@@ -39,16 +44,17 @@ namespace leveldb {
         InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
                                     uint64_t offset, uint32_t size,
                                     char *result,
+                                    uint32_t result_size,
                                     std::string filename) override;
 
         uint32_t
         InitiateFileNameRTableMapping(uint32_t stoc_id,
-                                      const std::map<std::string, uint32_t> &fn_rtableid) override;
+                                      const std::unordered_map<std::string, uint32_t> &fn_rtableid) override;
 
         uint32_t
         InitiateQueryLogFile(uint32_t storage_server_id, uint32_t server_id,
                              uint32_t dbid,
-                             std::map<std::string, uint64_t> *logfile_offset) override;
+                             std::unordered_map<std::string, uint64_t> *logfile_offset) override;
 
         uint32_t
         InitiateReadInMemoryLogFile(char *local_buf, uint32_t remote_server_id,
@@ -81,7 +87,7 @@ namespace leveldb {
 
         bool OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                     int remote_server_id, char *buf,
-                    uint32_t imm_data) {
+                    uint32_t imm_data, bool* generate_a_new_request) override {
             RDMA_ASSERT(false);
             return false;
         };
@@ -103,10 +109,11 @@ namespace leveldb {
         static std::atomic_int_fast32_t rdma_worker_seq_id_;
         sem_t sem_;
     private:
-        std::map<uint32_t, CCResponse *> req_response;
+        std::unordered_map<uint32_t, CCResponse *> req_response;
 
         void AddAsyncTask(const RDMAAsyncClientRequestTask &task);
 
+        NovaRTableManager *rtable_manager_;
         uint32_t current_cc_id_ = 0;
         uint32_t req_id_ = 0;
         uint32_t dbid_ = 0;
@@ -118,20 +125,22 @@ namespace leveldb {
     public:
         NovaCCClient(uint32_t dc_client_id, nova::NovaRDMAStore *rdma_store,
                      nova::NovaMemManager *mem_manager,
-                     NovaRTableManager *rtable_manager,
                      leveldb::RDMALogWriter *rdma_log_writer,
                      uint32_t lower_req_id, uint32_t upper_req_id,
                      CCServer *cc_server)
                 : cc_client_id_(dc_client_id), rdma_store_(rdma_store),
-                  mem_manager_(mem_manager), rtable_manager_(rtable_manager),
+                  mem_manager_(mem_manager),
                   rdma_log_writer_(rdma_log_writer),
                   lower_req_id_(lower_req_id), upper_req_id_(upper_req_id),
                   current_req_id_(lower_req_id), cc_server_(cc_server) {
         }
 
+        uint32_t InitiateCompaction(uint32_t remote_server_id,
+                                    CompactionRequest *compaction_request) override;
+
         uint32_t
         InitiateFileNameRTableMapping(uint32_t stoc_id,
-                                      const std::map<std::string, uint32_t> &fn_rtableid) override;
+                                      const std::unordered_map<std::string, uint32_t> &fn_rtableid) override;
 
         uint32_t
         InitiateDeleteTables(uint32_t server_id,
@@ -141,6 +150,7 @@ namespace leveldb {
         InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
                                     uint64_t offset, uint32_t size,
                                     char *result,
+                                    uint32_t result_size,
                                     std::string filename) override;
 
         uint32_t
@@ -152,7 +162,7 @@ namespace leveldb {
                 uint32_t storage_server_id,
                 uint32_t server_id,
                 uint32_t dbid,
-                std::map<std::string, uint64_t> *logfile_offset) override;
+                std::unordered_map<std::string, uint64_t> *logfile_offset) override;
 
         uint32_t
         InitiateRTableWriteDataBlocks(uint32_t server_id, uint32_t thread_id,
@@ -179,7 +189,7 @@ namespace leveldb {
 
         bool OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                     int remote_server_id, char *buf,
-                    uint32_t imm_data) override;
+                    uint32_t imm_data, bool* generate_a_new_request) override;
 
         bool IsDone(uint32_t req_id, CCResponse *response,
                     uint64_t *timeout) override;
@@ -192,14 +202,13 @@ namespace leveldb {
         uint32_t cc_client_id_ = 0;
         nova::NovaRDMAStore *rdma_store_;
         nova::NovaMemManager *mem_manager_;
-        NovaRTableManager *rtable_manager_;
         CCServer *cc_server_;
         leveldb::RDMALogWriter *rdma_log_writer_ = nullptr;
 
         uint32_t current_req_id_ = 1;
         uint32_t lower_req_id_;
         uint32_t upper_req_id_;
-        std::map<uint32_t, CCRequestContext> request_context_;
+        std::unordered_map<uint32_t, CCRequestContext> request_context_;
 
     };
 }

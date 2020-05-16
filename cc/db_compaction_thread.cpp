@@ -36,7 +36,6 @@ namespace leveldb {
     }
 
 
-
     void NovaCCCompactionThread::Start() {
         nova::NovaConfig::config->add_tid_mapping();
 
@@ -47,11 +46,12 @@ namespace leveldb {
         rand_seed_ = thread_id_ + 100000;
 
         if (db_) {
-            leveldb::DB *db = reinterpret_cast<leveldb::DB*>(db_);
+            leveldb::DB *db = reinterpret_cast<leveldb::DB *>(db_);
             db->CoordinateMajorCompaction();
         }
 
-        RDMA_LOG(rdmaio::INFO) << "Compaction workers started";
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("{} Compaction worker started.", thread_id_);
         while (is_running_) {
             sem_wait(&signal);
 
@@ -82,10 +82,12 @@ namespace leveldb {
                 continue;
             }
 
-            std::map<void *, std::vector<EnvBGTask>> db_tasks;
+            std::unordered_map<void *, std::vector<EnvBGTask>> db_tasks;
             for (auto &task : tasks) {
                 db_tasks[task.db].push_back(task);
-                memtable_size[task.memtable_size_mb] += 1;
+                if (task.memtable) {
+                    memtable_size[task.memtable_size_mb] += 1;
+                }
             }
 
             for (auto &it : db_tasks) {

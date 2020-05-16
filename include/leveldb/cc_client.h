@@ -11,7 +11,9 @@
 #include <vector>
 #include <infiniband/verbs.h>
 #include <semaphore.h>
+#include <unordered_map>
 
+#include "subrange.h"
 #include "db_types.h"
 
 namespace leveldb {
@@ -31,6 +33,26 @@ namespace leveldb {
     struct WriteState {
         WriteResult result;
         int rdma_wr_id;
+    };
+
+    struct CompactionRequest {
+        std::string dbname;
+        uint64_t smallest_snapshot;
+        std::vector<FileMetaData *> inputs[2];
+        std::vector<FileMetaData *> guides;
+        std::vector<SubRange> subranges;
+        uint32_t source_level = 0;
+        uint32_t target_level = 0;
+
+        std::vector<FileMetaData *> outputs;
+
+        uint32_t EncodeRequest(char *buf);
+
+        void DecodeRequest(char *buf, uint32_t buf_size);
+
+        void FreeMemoryLTC();
+
+        void FreeMemoryStoC();
     };
 
     std::string write_result_str(WriteResult wr);
@@ -62,35 +84,38 @@ namespace leveldb {
         CC_QUERY_LOG_FILES_RESPONSE = 'x',
         CC_FILENAME_RTABLEID = 'y',
         CC_FILENAME_RTABLEID_RESPONSE = 'z',
+        CC_COMPACTION = 'C',
+        CC_COMPACTION_RESPONSE = 'R'
     };
 
     struct CCRequestContext {
         CCRequestType req_type;
-        uint32_t remote_server_id;
+        uint32_t remote_server_id = 0;
         std::string dbname;
-        uint64_t file_number;
-        char *backing_mem;
-        uint32_t size;
-        bool done;
+        uint64_t file_number = 0;
+        char *backing_mem = nullptr;
+        uint32_t size = 0;
+        bool done = false;
 
         uint64_t wr_id = 0;
         uint32_t rtable_id = 0;
         std::vector<RTableHandle> rtable_handles;
 
-        uint64_t dc_queue_depth;
-        uint64_t dc_pending_read_bytes;
-        uint64_t dc_pending_write_bytes;
+        uint64_t dc_queue_depth = 0;
+        uint64_t dc_pending_read_bytes = 0;
+        uint64_t dc_pending_write_bytes = 0;
 
         // log records.
         char *log_record_mem = nullptr;
         uint64_t log_record_size = 0;
         std::string log_file_name;
-        uint64_t thread_id;
-        uint32_t db_id;
-        uint32_t memtable_id;
-        WriteState *replicate_log_record_states;
-
-        std::map<std::string, uint64_t> *logfile_offset;
+        uint64_t thread_id = 0;
+        uint32_t db_id = 0;
+        uint32_t memtable_id = 0;
+        WriteState *replicate_log_record_states = nullptr;
+        std::unordered_map<std::string, uint64_t> *logfile_offset = nullptr;
+        // compaction request.
+        CompactionRequest *compaction = nullptr;
     };
 
     struct CCResponse {
@@ -112,12 +137,13 @@ namespace leveldb {
         RDMA_ASYNC_REQ_QUERY_LOG_FILES = 'g',
         RDMA_ASYNC_READ_LOG_FILE = 'h',
         RDMA_ASYNC_FILENAME_RTABLE_MAPPING = 'i',
+        RDMA_ASYNC_COMPACTION = 'j',
     };
 
     struct LevelDBLogRecord {
         Slice key;
         Slice value;
-        uint64_t sequence_number;
+        uint64_t sequence_number = 0;
     };
 
     struct RDMAAsyncClientRequestTask {
@@ -125,55 +151,58 @@ namespace leveldb {
         sem_t *sem = nullptr;
 
         char *rdma_log_record_backing_mem = nullptr;
-        uint64_t remote_dc_offset;
+        uint64_t remote_dc_offset = 0;
 
-        RTableHandle rtable_handle;
-        uint64_t offset;
-        uint32_t size;
+        RTableHandle rtable_handle = {};
+        uint64_t offset = 0;
+        uint32_t size = 0;
         char *result = nullptr;
         std::string filename;
 
         std::string log_file_name;
-        uint64_t thread_id;
-        uint32_t dbid;
-        uint32_t memtable_id;
-        LevelDBLogRecord log_record;
+        uint64_t thread_id = 0;
+        uint32_t dbid = 0;
+        uint32_t memtable_id = 0;
+        LevelDBLogRecord log_record = {};
 
-        uint32_t server_id;
+        int server_id = -1;
         std::vector<SSTableRTablePair> rtable_ids;
 
         char *write_buf = nullptr;
         std::string dbname;
-        uint64_t file_number;
-        uint32_t write_size;
-        bool is_meta_blocks;
+        uint64_t file_number = 0;
+        uint32_t write_size = 0;
+        bool is_meta_blocks = false;
+
+        CompactionRequest *compaction_request = nullptr;
 
         WriteState *replicate_log_record_states = nullptr;
-        std::map<std::string, uint64_t> *logfile_offset = nullptr;
-
-        std::map<std::string, uint32_t> fn_rtableid;
-
+        std::unordered_map<std::string, uint64_t> *logfile_offset = nullptr;
+        std::unordered_map<std::string, uint32_t> fn_rtableid;
         CCResponse *response = nullptr;
     };
 
-
     class LEVELDB_EXPORT CCClient {
     public:
+        virtual uint32_t InitiateCompaction(uint32_t remote_server_id,
+                                            CompactionRequest *compaction_request) = 0;
 
         virtual uint32_t
         InitiateFileNameRTableMapping(uint32_t stoc_id,
-                                      const std::map<std::string, uint32_t> &fn_rtableid) = 0;
+                                      const std::unordered_map<std::string, uint32_t> &fn_rtableid) = 0;
 
         virtual uint32_t
         InitiateRTableReadDataBlock(const RTableHandle &rtable_handle,
-                                    uint64_t offset, uint32_t size,
+                                    uint64_t offset,
+                                    uint32_t size,
                                     char *result,
+                                    uint32_t result_size,
                                     std::string filename) = 0;
 
         virtual uint32_t InitiateQueryLogFile(
                 uint32_t storage_server_id, uint32_t server_id,
                 uint32_t dbid,
-                std::map<std::string, uint64_t> *logfile_offset) = 0;
+                std::unordered_map<std::string, uint64_t> *logfile_offset) = 0;
 
         virtual uint32_t
         InitiateRTableWriteDataBlocks(uint32_t server_id, uint32_t thread_id,
@@ -209,7 +238,7 @@ namespace leveldb {
 
         virtual bool OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                             int remote_server_id, char *buf,
-                            uint32_t imm_data) = 0;
+                            uint32_t imm_data, bool* generate_a_new_request) = 0;
 
         virtual bool
         IsDone(uint32_t req_id, CCResponse *response, uint64_t *timeout) = 0;

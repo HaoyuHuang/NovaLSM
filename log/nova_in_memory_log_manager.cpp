@@ -62,7 +62,7 @@ namespace nova {
     }
 
     void InMemoryLogFileManager::QueryLogFiles(uint32_t sid, uint32_t range_id,
-                                       std::map<std::string, uint64_t> *logfile_offset) {
+                                       std::unordered_map<std::string, uint64_t> *logfile_offset) {
         DBLogFiles *db = server_db_log_files_[sid][range_id];
         db->mutex_.Lock();
         for (const auto &it : db->logfiles_) {

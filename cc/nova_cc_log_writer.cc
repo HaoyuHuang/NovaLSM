@@ -140,7 +140,6 @@ namespace leveldb {
                 it.stoc_bufs[stoc_server_id].offset += log_record_size;
                 replicate_log_record_states[stoc_server_id].result = WriteResult::WAIT_FOR_WRITE;
             }
-            store_->FlushPendingSends(stoc_server_id);
         }
         return true;
     }
@@ -199,7 +198,6 @@ namespace leveldb {
             leveldb::EncodeStr(buf, log_file_name);
             store_->PostSend(send_buf, 1 + 4 + log_file_name.size(),
                              stoc_server_id, client_req_id);
-            store_->FlushPendingSends(stoc_server_id);
         }
         return Status::OK();
     }

@@ -89,7 +89,7 @@ namespace leveldb {
                   char *backing_buf);
 
         nova::NovaRDMAStore *store_;
-        std::map<std::string, LogFileMetadata> logfile_last_buf_;
+        std::unordered_map<std::string, LogFileMetadata> logfile_last_buf_;
 
         MemManager *mem_manager_;
         nova::InMemoryLogFileManager *log_manager_;

@@ -19,7 +19,7 @@ namespace nova {
 
         bool
         ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
-                      char *buf, uint32_t imm_data);
+                      char *buf, uint32_t imm_data, bool *new_request);
 
         uint32_t Initiate();
 
@@ -41,8 +41,7 @@ namespace nova {
         uint32_t write_size_kb_ = 0;
         uint32_t my_server_id_ = 0;
         char *buf_ = nullptr;
-
-                std::map<uint32_t, RequestContext> req_context_;
+        std::map<uint32_t, RequestContext> req_context_;
 
     };
 }

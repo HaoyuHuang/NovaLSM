@@ -10,9 +10,10 @@
 #include <fmt/core.h>
 #include <getopt.h>
 #include <nova/nova_common.h>
-#include <cc/nova_cc.h>
+#include "cc/nova_cc.h"
 #include "nova/logging.hpp"
 
+#include "db/compaction.h"
 #include "db/filename.h"
 #include "db/log_reader.h"
 #include "leveldb/log_writer.h"
@@ -26,50 +27,6 @@
 #include "util/logging.h"
 
 namespace leveldb {
-
-    static size_t TargetFileSize(const Options *options) {
-        return options->max_file_size;
-    }
-
-// Maximum bytes of overlaps in grandparent (i.e., level+2) before we
-// stop building a single file in a level->level+1 compaction.
-    static int64_t MaxGrandParentOverlapBytes(const Options *options) {
-        return 10 * TargetFileSize(options);
-    }
-
-// Maximum number of bytes in all compacted files.  We avoid expanding
-// the lower level file set of a compaction if it would make the
-// total compaction cover more than this many bytes.
-    static int64_t ExpandedCompactionByteSizeLimit(const Options *options) {
-        return 25 * TargetFileSize(options);
-    }
-
-    static double MaxBytesForLevel(const Options &options, int level) {
-        // Note: the result for level zero is not really used since we set
-        // the level-0 compaction threshold based on number of files.
-
-        // Result for both level-0 and level-1
-        double result = 10. * 1048576.0; // 10 MB.
-        while (level > 1) {
-            result *= 10;
-            level--;
-        }
-        return result;
-    }
-
-    static uint64_t MaxFileSizeForLevel(const Options *options, int level) {
-        // We could vary per level to reduce number of files?
-        return TargetFileSize(options);
-    }
-
-    static int64_t TotalFileSize(const std::vector<FileMetaData *> &files) {
-        int64_t sum = 0;
-        for (size_t i = 0; i < files.size(); i++) {
-            sum += files[i]->file_size;
-        }
-        return sum;
-    }
-
     void Version::Destroy() {
         assert(refs_ == 0);
 
@@ -232,24 +189,17 @@ namespace leveldb {
     GetFileIterator(void *arg, BlockReadContext context,
                     const ReadOptions &options,
                     const Slice &file_value) {
-        Version *v = reinterpret_cast<Version *>(arg);
+        VersionFileMap *v = reinterpret_cast<VersionFileMap *>(arg);
         RDMA_ASSERT(v);
         RDMA_ASSERT(file_value.size() == 8);
         uint64_t fn = DecodeFixed64(file_value.data());
         FileMetaData *meta = v->file_meta(fn);
         RDMA_ASSERT(meta) << fn;
-        return v->table_cache()->NewIterator(context.caller, options, *meta,
+        return v->table_cache()->NewIterator(context.caller, options,
+                                             meta,
                                              meta->number,
                                              context.level,
                                              meta->converted_file_size);
-    }
-
-    TableCache *Version::table_cache() {
-        return table_cache_;
-    }
-
-    FileMetaData *Version::file_meta(uint64_t fn) {
-        return fn_files_[fn];
     }
 
     Iterator *Version::NewConcatenatingIterator(const ReadOptions &options,
@@ -272,7 +222,7 @@ namespace leveldb {
         for (size_t i = 0; i < files_[0].size(); i++) {
             iters->push_back(table_cache_->NewIterator(
                     AccessCaller::kUserIterator,
-                    options, *files_[0][i], files_[0][i]->number, 0,
+                    options, files_[0][i], files_[0][i]->number, 0,
                     files_[0][i]->converted_file_size));
         }
 
@@ -298,6 +248,7 @@ namespace leveldb {
             SaverState state;
             const Comparator *ucmp;
             Slice user_key;
+            SequenceNumber *seq;
             std::string *value;
         };
     }  // namespace
@@ -311,6 +262,7 @@ namespace leveldb {
                 s->state = (parsed_key.type == kTypeValue) ? kFound : kDeleted;
                 if (s->state == kFound) {
                     s->value->assign(v.data(), v.size());
+                    *s->seq = parsed_key.sequence;
                 }
             }
         }
@@ -378,12 +330,18 @@ namespace leveldb {
 
     Status Version::Get(const leveldb::ReadOptions &options,
                         std::vector<uint64_t> &fns,
-                        const leveldb::LookupKey &key, std::string *val) {
+                        const leveldb::LookupKey &key,
+                        SequenceNumber *seq,
+                        std::string *val) {
+        bool found = false;
         for (int i = fns.size() - 1; i >= 0; i--) {
             auto fn = fns[i];
-            RDMA_ASSERT(fn < MAX_LIVE_MEMTABLES);
+            if (fn_files_.find(fn) == fn_files_.end()) {
+                return Status::IOError(fmt::format("fn {} not found", fn));
+            }
+
             FileMetaData *file = fn_files_[fn];
-            RDMA_ASSERT(file);
+            RDMA_ASSERT(file) << fn;
             RDMA_ASSERT(file->number == fn);
 
             if (icmp_->user_comparator()->Compare(
@@ -395,26 +353,39 @@ namespace leveldb {
                 continue;
             }
 
+            std::string tmp_val;
+            SequenceNumber tmp_seq;
             Saver saver;
             saver.state = kNotFound;
             saver.ucmp = icmp_->user_comparator();
             saver.user_key = key.user_key();
-            saver.value = val;
+            saver.value = &tmp_val;
+            saver.seq = &tmp_seq;
             Status s = table_cache_->Get(options,
-                                         *file,
+                                         file,
                                          file->number,
                                          file->converted_file_size,
                                          0,
                                          key.internal_key(),
                                          &saver,
                                          SaveValue);
-            RDMA_ASSERT(saver.state == kFound);
-            return s;
+            if (saver.state == kFound) {
+                found = true;
+                if (tmp_seq > *seq) {
+                    // A newer value.
+                    *seq = tmp_seq;
+                    val->assign(tmp_val);
+                }
+            }
         }
-        RDMA_ASSERT(false) << "key not found";
+        if (found) {
+            return Status::OK();
+        }
+        return Status::NotFound("Not found in L0");
     }
 
     Status Version::Get(const ReadOptions &options, const LookupKey &k,
+                        SequenceNumber *seq,
                         std::string *value, GetStats *stats,
                         GetSearchScope search_scope) {
         stats->seek_file = nullptr;
@@ -444,7 +415,7 @@ namespace leveldb {
                 state->last_file_read = f;
                 state->last_file_read_level = level;
                 state->s = state->table_cache->Get(*state->options,
-                                                   *f,
+                                                   f,
                                                    f->number,
                                                    f->converted_file_size,
                                                    level,
@@ -491,12 +462,12 @@ namespace leveldb {
         state.saver.state = kNotFound;
         state.saver.ucmp = icmp_->user_comparator();
         state.saver.user_key = k.user_key();
+        state.saver.seq = seq;
         state.saver.value = value;
 
         ForEachOverlapping(state.saver.user_key, state.ikey, &state,
                            &State::Match, search_scope);
-
-        return state.found ? state.s : Status::NotFound(Slice());
+        return state.found ? state.s : Status::NotFound("Not found in L1.");
     }
 
     void Version::Ref() {
@@ -562,7 +533,7 @@ namespace leveldb {
     }
 
     void Version::ComputeOverlappingFilesPerTable(
-            std::map<uint64_t, leveldb::FileMetaData *> *files,
+            std::unordered_map<uint64_t, leveldb::FileMetaData *> *files,
             std::vector<leveldb::OverlappingStats> *num_overlapping) {
         for (auto pivot_it = files->begin();
              pivot_it != files->end(); pivot_it++) {
@@ -606,7 +577,7 @@ namespace leveldb {
         }
     }
 
-    bool Version::ComputeOverlappingFilesInRange(
+    Version::OverlappingFileResult Version::ComputeOverlappingFilesInRange(
             std::vector<FileMetaData *> *files,
             int which,
             Compaction *compaction,
@@ -614,7 +585,9 @@ namespace leveldb {
             const Slice &upper,
             Slice *new_lower,
             Slice *new_upper) {
-        bool found_new_tables = false;
+        *new_lower = lower;
+        *new_upper = upper;
+        Version::OverlappingFileResult result = OVERLAP_NO_NEW_TABLES;
         auto it = files->begin();
         // Find all overlapping tables.
         while (it != files->end()) {
@@ -631,63 +604,76 @@ namespace leveldb {
                 it++;
                 continue;
             }
+
             // overlap.
-            found_new_tables = true;
+            result = OVERLAP_FOUND_NEW_TABLES;
             compaction->inputs_[which].push_back(file);
             // Take the smallest user key.
             if (icmp_->user_comparator()->Compare(file->smallest.user_key(),
-                                                  lower) <
+                                                  *new_lower) <
                 0) {
                 *new_lower = file->smallest.user_key();
             }
             if (icmp_->user_comparator()->Compare(file->largest.user_key(),
-                                                  upper) >
+                                                  *new_upper) >
                 0) {
                 *new_upper = file->largest.user_key();
             }
+            if (compaction->inputs_[which].size() >
+                options_->max_num_sstables_in_nonoverlapping_set) {
+                return OVERLAP_EXCEED_MAX;
+            }
             it = files->erase(it);
         }
-        return found_new_tables;
+        return result;
     }
 
     void Version::ComputeOverlappingFilesForRange(
-            std::vector<FileMetaData *> *l0files,
-            std::vector<FileMetaData *> *l1files,
+            std::vector<FileMetaData *> *l0inputs,
+            std::vector<FileMetaData *> *l1inputs,
             Compaction *compaction) {
-        Slice lower = (*l0files->begin())->smallest.user_key();
-        Slice upper = (*l0files->begin())->largest.user_key();;
+        Slice lower = (*l0inputs->begin())->smallest.user_key();
+        Slice upper = (*l0inputs->begin())->largest.user_key();;
         Slice new_lower = lower;
         Slice new_upper = upper;
 
         while (true) {
-            bool found_new_l0 = ComputeOverlappingFilesInRange(l0files, 0,
-                                                               compaction,
-                                                               lower, upper,
-                                                               &new_lower,
-                                                               &new_upper);
-            if (found_new_l0) {
-                lower = new_lower;
-                upper = new_upper;
-            }
-            bool found_new_l1 = ComputeOverlappingFilesInRange(l1files, 1,
-                                                               compaction,
-                                                               lower, upper,
-                                                               &new_lower,
-                                                               &new_upper);
-            if (found_new_l1) {
-                lower = new_lower;
-                upper = new_upper;
-            }
-            if (found_new_l0 || found_new_l1) {
-                continue;
-            } else {
+            OverlappingFileResult l0_result = ComputeOverlappingFilesInRange(
+                    l0inputs, 0,
+                    compaction,
+                    lower, upper,
+                    &new_lower,
+                    &new_upper);
+            lower = new_lower;
+            upper = new_upper;
+            OverlappingFileResult l1_result = ComputeOverlappingFilesInRange(
+                    l1inputs, 1,
+                    compaction,
+                    lower, upper,
+                    &new_lower,
+                    &new_upper);
+            lower = new_lower;
+            upper = new_upper;
+
+            if (compaction->num_input_files(0) +
+                compaction->num_input_files(1) >
+                options_->max_num_sstables_in_nonoverlapping_set) {
                 break;
             }
+            if (l0_result == OVERLAP_EXCEED_MAX ||
+                l1_result == OVERLAP_EXCEED_MAX) {
+                break;
+            }
+            if (l0_result == OVERLAP_FOUND_NEW_TABLES ||
+                l1_result == OVERLAP_FOUND_NEW_TABLES) {
+                continue;
+            }
+            break;
         }
     }
 
     void Version::ComputeOverlappingFilesStats(
-            std::map<uint64_t, leveldb::FileMetaData *> *files,
+            std::unordered_map<uint64_t, leveldb::FileMetaData *> *files,
             std::vector<OverlappingStats> *num_overlapping) {
         // Compute overlapping sstables at L0.
         while (!files->empty()) {
@@ -748,10 +734,25 @@ namespace leveldb {
         }
     }
 
-    void Version::QueryStats(leveldb::DBStats *stats) {
-        std::map<uint64_t, FileMetaData *> all_fnfile;
-        std::map<uint64_t, FileMetaData *> new_fnfile;
-
+    void Version::QueryStats(leveldb::DBStats *stats, bool detailed_stats) {
+        if (!detailed_stats) {
+            for (int level = 0; level < config::kNumLevels; level++) {
+                const std::vector<FileMetaData *> &files = files_[level];
+                if (level == 0) {
+                    stats->nsstables += files.size();
+                }
+                for (size_t i = 0; i < files.size(); i++) {
+                    stats->dbsize += files[i]->file_size;
+                    if (stats->sstable_size_dist) {
+                        stats->sstable_size_dist[files[i]->file_size / 1024 /
+                                                 1024] += 1;
+                    }
+                }
+            }
+            return;
+        }
+        std::unordered_map<uint64_t, FileMetaData *> all_fnfile;
+        std::unordered_map<uint64_t, FileMetaData *> new_fnfile;
         for (int level = 0; level < config::kNumLevels; level++) {
             const std::vector<FileMetaData *> &files = files_[level];
             if (level == 0) {
@@ -788,6 +789,8 @@ namespace leveldb {
 
     std::string Version::DebugString() const {
         std::string r;
+        r.append("vid: ");
+        AppendNumberTo(&r, version_id_);
         r.append("compaction-level: ");
         AppendNumberTo(&r, compaction_level_);
 
@@ -858,7 +861,7 @@ namespace leveldb {
     public:
         // Initialize a builder with the files from *base and other info from *vset
         Builder(VersionSet *vset, Version *base) : vset_(vset), base_(base) {
-            Version *v = vset->versions_[base->version_id_].Ref();
+            Version *v = vset->versions_[base->version_id_]->Ref();
             RDMA_ASSERT(v == base);
             BySmallestKey cmp;
             cmp.internal_comparator = &vset_->icmp_;
@@ -886,7 +889,7 @@ namespace leveldb {
                     }
                 }
             }
-            vset_->versions_[base_->version_id_].Unref(vset_->dbname_);
+            vset_->versions_[base_->version_id_]->Unref(vset_->dbname_);
         }
 
         // Apply all of the edits in *edit to the current state.
@@ -994,14 +997,14 @@ namespace leveldb {
                     RDMA_ASSERT(vset_->icmp_.Compare(
                             (*files)[files->size() - 1]->largest,
                             f->smallest) < 0)
-                        << fmt::format("level:{} fn:{} v:{}", level, f->number,
+                        << fmt::format("level:{} fn:{} f:{} v:{}", level,
+                                       f->number, f->DebugString(),
                                        v->DebugString());
                 }
                 f->refs++;
                 files->push_back(f);
-                RDMA_ASSERT(f->number < MAX_LIVE_MEMTABLES);
-//                RDMA_ASSERT(v->fn_files_[f->number] == nullptr)
-//                    << fmt::format("{}@{}", f->number, level);
+                RDMA_ASSERT(v->fn_files_.find(f->number) == v->fn_files_.end())
+                    << fmt::format("{}@{}", f->number, level);
                 v->fn_files_[f->number] = f;
             }
         }
@@ -1016,18 +1019,23 @@ namespace leveldb {
               table_cache_(table_cache),
               icmp_(*cmp),
               next_file_number_(2),
-              last_sequence_(0),
+              last_sequence_(1),
               descriptor_file_(nullptr),
               descriptor_log_(nullptr),
               version_id_seq_(0),
               dummy_versions_(cmp, table_cache, options, version_id_seq_++),
               current_(nullptr) {
+        for (int i = 0; i < MAX_LIVE_MEMTABLES; i++) {
+            mid_table_mapping_[i] = new AtomicMemTable;
+            mid_table_mapping_[i]->nentries_ = 0;
+            versions_[i] = new AtomicVersion;
+        }
         AppendVersion(
                 new Version(cmp, table_cache, options, version_id_seq_++));
     }
 
     VersionSet::~VersionSet() {
-        versions_[current_->version_id_].Unref(dbname_);
+        versions_[current_->version_id_]->Unref(dbname_);
         assert(dummy_versions_.next_ ==
                &dummy_versions_);  // List must be empty
         delete descriptor_log_;
@@ -1039,7 +1047,7 @@ namespace leveldb {
         assert(v->refs_ == 0);
         assert(v != current_);
         if (current_ != nullptr) {
-            versions_[current_->version_id_].Unref(dbname_);
+            versions_[current_->version_id_]->Unref(dbname_);
         }
         current_ = v;
 
@@ -1049,7 +1057,7 @@ namespace leveldb {
         v->prev_->next_ = v;
         v->next_->prev_ = v;
 
-        versions_[v->version_id_].SetVersion(v);
+        versions_[v->version_id_]->SetVersion(v);
         current_version_id_.store(v->version_id_);
     }
 
@@ -1077,21 +1085,23 @@ namespace leveldb {
         manifest_lock_.unlock();
     }
 
-    Status VersionSet::LogAndApply(VersionEdit *edit, Version *v) {
+    Status VersionSet::LogAndApply(VersionEdit *edit, Version *v,
+                                   bool install_new_version) {
         {
             Builder builder(this, current_);
             builder.Apply(edit);
             builder.SaveTo(v);
         }
         Finalize(v);
-        AppendVersion(v);
-        RDMA_LOG(rdmaio::DEBUG)
-            << fmt::format("New version: {}", v->DebugString());
+        RDMA_LOG(rdmaio::DEBUG) << v->DebugString();
+        if (install_new_version) {
+            AppendVersion(v);
+        }
         return Status::OK();
     }
 
     Status VersionSet::Recover(Slice record,
-                               std::vector<VersionSubRange> *subrange_edits) {
+                               std::vector<SubRange> *subrange_edits) {
         uint64_t next_file = 0;
         uint64_t last_sequence = 0;
         Builder builder(this, current_);
@@ -1126,8 +1136,8 @@ namespace leveldb {
                 subrange_edits->clear();
                 subrange_edits->resize(edit.new_subranges_.size());
                 for (int i = 0; i < edit.new_subranges_.size(); i++) {
-                    VersionSubRange &sr = edit.new_subranges_[i];
-                    (*subrange_edits)[sr.subrange_id] = sr;
+                    SubRange &sr = edit.new_subranges_[i];
+                    (*subrange_edits)[sr.decoded_subrange_id] = sr;
                 }
             }
         }
@@ -1234,7 +1244,7 @@ namespace leveldb {
         Version *v = dummy_versions_.next_;
         while (v != &dummy_versions_) {
             Version *next = v->next_;
-            if (versions_[v->version_id()].deleted) {
+            if (versions_[v->version_id()]->deleted) {
                 v->Destroy();
                 delete v;
                 v = nullptr;
@@ -1292,7 +1302,7 @@ namespace leveldb {
     }
 
     void VersionSet::AddCompactedInputs(leveldb::Compaction *c,
-                                        std::map<uint64_t, leveldb::FileMetaData> *map) {
+                                        std::unordered_map<uint64_t, leveldb::FileMetaData> *map) {
         for (int which = 0; which < 2; which++) {
             if (!c->inputs_[which].empty()) {
                 const std::vector<FileMetaData *> &files = c->inputs_[which];
@@ -1304,7 +1314,8 @@ namespace leveldb {
     }
 
     Iterator *
-    VersionSet::MakeInputIterator(Compaction *c, EnvBGThread *bg_thread) {
+    Compaction::MakeInputIterator(TableCache *table_cache,
+                                  EnvBGThread *bg_thread) {
         ReadOptions options;
         options.verify_checksums = options_->paranoid_checks;
         options.fill_cache = false;
@@ -1315,19 +1326,19 @@ namespace leveldb {
         // Level-0 files have to be merged together.  For other levels,
         // we will make a concatenating iterator per level.
         // TODO(opt): use concatenating iterator for level-0 if there is no overlap
-        const int space = (c->level() == 0 ? c->inputs_[0].size() + 1 : 2);
+        const int space = (level_ == 0 ? inputs_[0].size() + 1 : 2);
         Iterator **list = new Iterator *[space];
         int num = 0;
         for (int which = 0; which < 2; which++) {
-            if (!c->inputs_[which].empty()) {
-                if (c->level() + which == 0) {
-                    const std::vector<FileMetaData *> &files = c->inputs_[which];
+            if (!inputs_[which].empty()) {
+                if (level_ + which == 0) {
+                    const std::vector<FileMetaData *> &files = inputs_[which];
                     for (size_t i = 0; i < files.size(); i++) {
-                        list[num++] = table_cache_->NewIterator(
+                        list[num++] = table_cache->NewIterator(
                                 AccessCaller::kCompaction, options,
-                                *files[i],
+                                files[i],
                                 files[i]->number,
-                                c->level() + which,
+                                level_ + which,
                                 files[i]->converted_file_size);
                     }
                 } else {
@@ -1335,18 +1346,18 @@ namespace leveldb {
                     BlockReadContext context = {
                             .caller = AccessCaller::kCompaction,
                             .file_number = 0,
-                            .level = c->level() + which,
+                            .level = level_ + which,
                     };
                     list[num++] = NewTwoLevelIterator(
-                            new Version::LevelFileNumIterator(icmp_,
-                                                              &c->inputs_[which]),
+                            new Version::LevelFileNumIterator(*icmp_,
+                                                              &inputs_[which]),
                             context,
-                            &GetFileIterator, c->input_version_, options);
+                            &GetFileIterator, input_version_, options);
                 }
             }
         }
         assert(num <= space);
-        Iterator *result = NewMergingIterator(&icmp_, list, num);
+        Iterator *result = NewMergingIterator(icmp_, list, num);
         delete[] list;
         return result;
     }
@@ -1467,7 +1478,7 @@ namespace leveldb {
                 std::vector<FileMetaData *> l0copy(l0files);
                 std::vector<FileMetaData *> l1copy(l1files);
                 ComputeOverlappingFilesForRange(&l0copy, &l1copy, compaction);
-                RDMA_LOG(rdmaio::INFO)
+                RDMA_LOG(rdmaio::DEBUG)
                     << fmt::format("Original set {}: {}", set_index,
                                    compaction->DebugString(
                                            icmp_->user_comparator()));
@@ -1491,15 +1502,18 @@ namespace leveldb {
                 Slice largest = compaction->inputs_[0][0]->largest.user_key();
                 GetOverlappingInputs(l1files, smallest, largest,
                                      &compaction->inputs_[1]);
+
+
                 int new_l1files = compaction->num_input_files(1);
 
                 std::set<uint64_t> skip_files;
                 skip_files.insert(compaction->inputs_[0][0]->number);
+                RDMA_ASSERT(compaction->num_input_files(0) == 1);
 
                 if (1 + new_l1files >
                     options_->max_num_sstables_in_nonoverlapping_set) {
-                    update_reason = fmt::format("Merge wide sstable l1:{}",
-                                                new_l1files);
+                    update_reason += fmt::format(" Merge wide sstable l1:{}",
+                                                 new_l1files);
                     remove_overlapping_tables = false;
                     // Merge this wide L0 SSTable.
                     GetOverlappingInputs(l0files, smallest, largest,
@@ -1512,14 +1526,11 @@ namespace leveldb {
                         compaction->grandparents_.push_back(l1o);
                     }
                     compaction->inputs_[1].clear();
-
-                    if (compaction->inputs_[0].size() >
-                        options_->max_num_sstables_in_nonoverlapping_set) {
-                        compaction->inputs_[0].resize(
+                    RDMA_ASSERT(compaction->inputs_[0].size() <=
                                 options_->max_num_sstables_in_nonoverlapping_set);
-                    }
                     compaction->target_level_ = 0;
-                } else if (new_l1files > 0) {
+                } else if (new_l1files > 0 && 1 + new_l1files <
+                                              options_->max_num_sstables_in_nonoverlapping_set) {
                     // Expand the compaction set to include more sstables at L0.
                     smallest = compaction->inputs_[1][0]->smallest.user_key();
                     largest = compaction->inputs_[1][new_l1files -
@@ -1527,25 +1538,27 @@ namespace leveldb {
                     int limit =
                             options_->max_num_sstables_in_nonoverlapping_set -
                             new_l1files - 1;
+                    update_reason += fmt::format(
+                            " Expand L0 tables: l0:{} l1:{} limit:{}",
+                            compaction->inputs_[0].size(),
+                            compaction->inputs_[1].size(),
+                            limit);
                     // Only add L0 files that are within the range.
                     GetOverlappingInputs(l0files, smallest, largest,
                                          &compaction->inputs_[0], limit,
                                          skip_files, true);
                 }
             }
-            RDMA_ASSERT(compaction->num_input_files(0) +
-                        compaction->num_input_files(1) <=
-                        options_->max_num_sstables_in_nonoverlapping_set);
             if (!update_reason.empty()) {
-                RDMA_LOG(rdmaio::INFO)
+                RDMA_LOG(rdmaio::DEBUG)
                     << fmt::format("Updated set {}: {} Reason:{}", set_index,
                                    compaction->DebugString(
                                            icmp_->user_comparator()),
                                    update_reason);
             }
-            RemoveTables(&l0files, compaction->inputs_[0]);
-            RemoveTables(&l1files, compaction->inputs_[1]);
-
+            RDMA_ASSERT(compaction->num_input_files(0) +
+                        compaction->num_input_files(1) <=
+                        options_->max_num_sstables_in_nonoverlapping_set);
             if (remove_overlapping_tables) {
                 Slice smallest;
                 Slice largest;
@@ -1553,10 +1566,20 @@ namespace leveldb {
                 tables.insert(tables.end(), compaction->inputs_[1].begin(),
                               compaction->inputs_[1].end());
                 GetRange(tables, &smallest, &largest);
+                // Expand the range with boundary sstables.
+                ExpandRangeWithBoundaries(l1files, &smallest, &largest);
                 RemoveOverlapTablesWithRange(&l0files, smallest, largest);
                 RemoveOverlapTablesWithRange(&l1files, smallest, largest);
             }
+            RemoveTables(&l0files, compaction->inputs_[0]);
+            RemoveTables(&l1files, compaction->inputs_[1]);
             set_index++;
+
+            std::sort(compaction->inputs_[1].begin(),
+                      compaction->inputs_[1].end(),
+                      [&](FileMetaData *f1, FileMetaData *f2) {
+                          return icmp_->Compare(f1->smallest, f2->smallest) < 0;
+                      });
             compactions->push_back(compaction);
         }
     }
@@ -1566,6 +1589,9 @@ namespace leveldb {
             const leveldb::Slice &begin, const leveldb::Slice &end,
             std::vector<leveldb::FileMetaData *> *outputs, uint32_t limit,
             const std::set<uint64_t> &skip_files, bool contained) {
+        if (limit == 0) {
+            return;
+        }
         int new_files = 0;
         const Comparator *user_cmp = icmp_->user_comparator();
         for (int i = 0; i < inputs.size(); i++) {
@@ -1601,6 +1627,49 @@ namespace leveldb {
         }
     }
 
+    void Version::ExpandRangeWithBoundaries(
+            const std::vector<leveldb::FileMetaData *> &inputs,
+            leveldb::Slice *smallest, leveldb::Slice *largest) {
+        int lower = -1;
+        int upper = inputs.size();
+        for (size_t i = 0; i < inputs.size(); i++) {
+            FileMetaData *f = inputs[i];
+            if (icmp_->user_comparator()->Compare(f->smallest.user_key(),
+                                                  *smallest) == 0) {
+                lower = i;
+            }
+            if (icmp_->user_comparator()->Compare(f->largest.user_key(),
+                                                  *largest) == 0) {
+                upper = i;
+                break;
+            }
+        }
+        RDMA_ASSERT(lower <= upper);
+        while (lower > 0) {
+            auto prior = inputs[lower - 1];
+            if (icmp_->user_comparator()->Compare(*smallest,
+                                                  prior->largest.user_key()) ==
+                0) {
+                *smallest = prior->smallest.user_key();
+                lower--;
+                continue;
+            }
+            break;
+        }
+        int size = (int) inputs.size() - 1;
+        while (upper < size) {
+            auto next = inputs[upper + 1];
+            if (icmp_->user_comparator()->Compare(*largest,
+                                                  next->smallest.user_key()) ==
+                0) {
+                *largest = next->largest.user_key();
+                upper++;
+                continue;
+            }
+            break;
+        }
+    }
+
     void Version::GetRange(const std::vector<leveldb::FileMetaData *> &inputs,
                            leveldb::Slice *smallest, leveldb::Slice *largest) {
         for (size_t i = 0; i < inputs.size(); i++) {
@@ -1628,12 +1697,12 @@ namespace leveldb {
         auto it = inputs->begin();
         while (it != inputs->end()) {
             FileMetaData *f = *it;
-            const Slice file_start = f->smallest.user_key();
-            const Slice file_limit = f->largest.user_key();
-            if (user_cmp->Compare(file_limit, smallest) < 0) {
+            const Slice lower = f->smallest.user_key();
+            const Slice upper = f->largest.user_key();
+            if (user_cmp->Compare(upper, smallest) < 0) {
                 // "f" is completely before specified range; skip it
                 it++;
-            } else if (user_cmp->Compare(file_start, largest) > 0) {
+            } else if (user_cmp->Compare(lower, largest) > 0) {
                 // "f" is completely after specified range; skip it
                 it++;
             } else {
@@ -1692,7 +1761,7 @@ namespace leveldb {
         }
 
         c->input_version_ = current_;
-        versions_[current_->version_id()].Ref();
+        versions_[current_->version_id()]->Ref();
 
         // Files in level 0 may overlap each other, so pick up all overlapping ones
         {
@@ -1882,95 +1951,6 @@ namespace leveldb {
         c->edit_.SetCompactPointer(level, largest);
     }
 
-    Compaction::Compaction(Version *input_version,
-                           const InternalKeyComparator *icmp,
-                           const Options *options, int level, int target_level)
-            : level_(level),
-              target_level_(target_level),
-              icmp_(icmp),
-              options_(options),
-              max_output_file_size_(MaxFileSizeForLevel(options, level)),
-              input_version_(input_version),
-              grandparent_index_(0),
-              seen_key_(false),
-              overlapped_bytes_(0) {
-        sem_init(&complete_signal_, 0, 0);
-        for (int i = 0; i < config::kNumLevels; i++) {
-            level_ptrs_[i] = 0;
-        }
-    }
-
-    std::string Compaction::DebugString(const Comparator *user_comparator) {
-        Slice smallest = {};
-        Slice largest = {};
-
-        std::string files;
-        for (int which = 0; which < 2; which++) {
-            for (auto file : inputs_[which]) {
-                if (smallest.empty() ||
-                    user_comparator->Compare(file->smallest.user_key(),
-                                             smallest) < 0) {
-                    smallest = file->smallest.user_key();
-                }
-                if (largest.empty() ||
-                    user_comparator->Compare(file->largest.user_key(),
-                                             largest) > 0) {
-                    largest = file->largest.user_key();
-                }
-                files += file->ShortDebugString();
-                files += ",";
-            }
-        }
-
-        std::string debug = fmt::format("{}@0 + {}@1 s:{} l:{} {}",
-                                        inputs_[0].size(), inputs_[1].size(),
-                                        smallest.ToString(), largest.ToString(),
-                                        files);
-        return debug;
-    }
-
-    bool Compaction::IsTrivialMove() const {
-//        return false;
-        // Avoid a move if there is lots of overlapping grandparent data.
-        // Otherwise, the move could create a parent file that will require
-        // a very expensive merge later on.
-        return (num_input_files(0) == 1 && num_input_files(1) == 0 &&
-                TotalFileSize(grandparents_) <=
-                MaxGrandParentOverlapBytes(options_));
-    }
-
-    void Compaction::AddInputDeletions(VersionEdit *edit) {
-        for (int which = 0; which < 2; which++) {
-            for (size_t i = 0; i < inputs_[which].size(); i++) {
-                int delete_level = level_ + which;
-                auto *f = inputs_[which][i];
-                edit->DeleteFile(delete_level, f->memtable_id, f->number);
-            }
-        }
-    }
-
-    bool Compaction::ShouldStopBefore(const Slice &internal_key) {
-        // Scan to find earliest grandparent file that contains key.
-        while (grandparent_index_ < grandparents_.size() &&
-               icmp_->Compare(internal_key,
-                              grandparents_[grandparent_index_]->largest.Encode()) >
-               0) {
-            if (seen_key_) {
-                overlapped_bytes_ += grandparents_[grandparent_index_]->file_size;
-            }
-            grandparent_index_++;
-        }
-        seen_key_ = true;
-
-        if (overlapped_bytes_ > MaxGrandParentOverlapBytes(options_)) {
-            // Too much overlap for current output; start new output
-            overlapped_bytes_ = 0;
-            return true;
-        } else {
-            return false;
-        }
-    }
-
     void AtomicVersion::SetVersion(leveldb::Version *v) {
         mutex.lock();
         RDMA_ASSERT(!version);
@@ -1982,7 +1962,7 @@ namespace leveldb {
     Version *AtomicVersion::Ref() {
         Version *v = nullptr;
         mutex.lock();
-        if (version != nullptr) {
+        if (version != nullptr && !deleted) {
             v = version;
             v->Ref();
         }
@@ -1992,14 +1972,10 @@ namespace leveldb {
 
     void AtomicVersion::Unref(const std::string &dbname) {
         mutex.lock();
-        if (version) {
+        if (version && !deleted) {
             uint32_t vid = version->version_id();
             uint32_t refs = version->Unref();
             if (refs <= 0) {
-//                RDMA_LOG(rdmaio::INFO)
-//                    << fmt::format("delete vid-{}", vid);
-//                delete version;
-//                version = nullptr;
                 deleted = true;
             }
         }

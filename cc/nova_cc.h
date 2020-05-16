@@ -18,12 +18,6 @@
 
 namespace leveldb {
 
-    struct DCStatsStatus {
-        uint32_t remote_dc_id = 0;
-        uint32_t req_id = 0;
-        CCResponse response;
-    };
-
     class NovaCCMemFile : public MemFile {
     public:
         NovaCCMemFile(Env *env,
@@ -101,25 +95,24 @@ namespace leveldb {
                                CompressionType type,
                                uint64_t offset);
 
-        Env *env_;
-        unsigned int *rand_seed_;
-        uint64_t file_number_;
+        Env *mem_env_ = nullptr;
+        unsigned int *rand_seed_ = nullptr;
+        uint64_t file_number_ = 0;
         const std::string fname_;
-        MemManager *mem_manager_;
-        CCClient *cc_client_;
+        MemManager *mem_manager_ = nullptr;
+        CCClient *cc_client_ = nullptr;
         const std::string &dbname_;
         FileMetaData meta_;
-        uint64_t thread_id_;
+        uint64_t thread_id_= 0;
 
-        Block *index_block_;
-        int num_data_blocks_;
+        Block *index_block_ = nullptr;
+        int num_data_blocks_ = 0;
         const Options &options_;
 
         char *backing_mem_ = nullptr;
         uint64_t allocated_size_ = 0;
         uint64_t used_size_ = 0;
         std::vector<int> nblocks_in_group_;
-        std::vector<DCStatsStatus> dc_stats_status_;
         std::vector<PersistStatus> status_;
         RTableHandle meta_block_handle_;
     };
@@ -128,7 +121,7 @@ namespace leveldb {
     public:
         NovaCCRandomAccessFile(Env *env, const std::string &dbname,
                                uint64_t file_number,
-                               const FileMetaData &meta,
+                               const FileMetaData *meta,
                                CCClient *dc_client,
                                MemManager *mem_manager,
                                uint64_t thread_id,
@@ -157,13 +150,13 @@ namespace leveldb {
 
         const std::string &dbname_;
         uint64_t file_number_;
-        FileMetaData meta_;
+        const FileMetaData *meta_;
         const std::string filename;
 
         bool prefetch_all_ = false;
         char *backing_mem_table_ = nullptr;
 
-        std::map<uint64_t, DataBlockRTableLocalBuf> rtable_local_offset_;
+        std::unordered_map<uint64_t, DataBlockRTableLocalBuf> rtable_local_offset_;
         std::mutex mutex_;
 
         MemManager *mem_manager_ = nullptr;

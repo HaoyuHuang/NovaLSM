@@ -167,10 +167,16 @@ namespace leveldb {
         return true;
     }
 
-    inline bool DecodeStr(Slice *ptr, Slice *str) {
+    inline bool DecodeStr(Slice *ptr, Slice *str, bool copy) {
         uint32_t n = 0;
         if (DecodeFixed32(ptr, &n) && ptr->size() >= n) {
-            *str = Slice(ptr->data(), n);
+            if (copy) {
+                char *mem = new char[n];
+                memcpy(mem, ptr->data(), n);
+                *str = Slice(mem, n);
+            } else {
+                *str = Slice(ptr->data(), n);
+            }
             *ptr = Slice(ptr->data() + n, ptr->size() - n);
             return true;
         }
@@ -212,6 +218,19 @@ namespace leveldb {
         uint32_t size = DecodeFixed32(src);
         Slice slice(src + 4, size);
         return slice;
+    }
+
+    inline bool DecodeStr(Slice *src, std::string *result) {
+        uint32_t size;
+        if (!DecodeFixed32(src, &size)) {
+            return false;
+        }
+        if (src->size() < size) {
+            return false;
+        }
+        result->append(src->data(), size);
+        *src = Slice(src->data() + size, src->size() - size);
+        return true;
     }
 
 // Internal routine for use by fallback path of GetVarint32Ptr

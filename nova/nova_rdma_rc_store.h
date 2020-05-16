@@ -24,6 +24,7 @@ namespace nova {
     public:
         NovaRDMARCStore(char *buf, int thread_id,
                         const std::vector<QPEndPoint> &end_points,
+                        int total_num_servers,
                         uint32_t max_num_sends,
                         uint32_t max_msg_size,
                         uint32_t doorbell_batch_size,
@@ -44,14 +45,14 @@ namespace nova {
                 rdma_port_(rdma_port),
                 callback_(callback) {
             RDMA_LOG(INFO)
-                << fmt::format("rc[{}]: create rdma {} {} {} {} {} {}.",
+                << fmt::format("rc[{}]: create rdma {} {} {} {} {} {} {}.",
                                thread_id_,
                                max_num_sends_,
                                max_msg_size_,
                                doorbell_batch_size_,
                                my_server_id_,
                                mr_size_,
-                               rdma_port_);
+                               rdma_port_, end_points_.size());
             int max_num_wrs = max_num_sends;
             int num_servers = end_points_.size();
 
@@ -73,6 +74,11 @@ namespace nova {
             uint64_t nbuf = nsendbuf + nrecvbuf;
 
             char *rdma_buf_start = buf;
+            server_qp_idx_map_ = new int[total_num_servers];
+            for (int i = 0; i < total_num_servers; i++) {
+                server_qp_idx_map_[i] = -1;
+            }
+
             for (int i = 0; i < num_servers; i++) {
                 npending_send_[i] = 0;
                 psend_index_[i] = 0;
@@ -94,9 +100,8 @@ namespace nova {
                     memset(&send_sges_[i][j], 0, sizeof(struct ibv_sge));
                     memset(&send_wrs_[i][j], 0, sizeof(struct ibv_send_wr));
                 }
-                server_qp_idx_map[end_points[i].server_id] = i;
+                server_qp_idx_map_[end_points[i].server_id] = i;
             }
-            RDMA_LOG(INFO) << "rc[" << thread_id << "]: " << "created rdma";
         }
 
         void Init(RdmaCtrl *rdma_ctrl);
@@ -116,17 +121,13 @@ namespace nova {
 
         void FlushPendingSends(int peer_sid) override;
 
-        uint32_t PollSQ(int peer_sid);
-
-        uint32_t PollSQ();
+        uint32_t PollSQ(int peer_sid, uint32_t *new_requests);
 
         void PostRecv(int peer_sid, int recv_buf_index);
 
         void FlushPendingRecvs();
 
-        uint32_t PollRQ();
-
-        uint32_t PollRQ(int peer_sid);
+        uint32_t PollRQ(int peer_sid, uint32_t *new_requests);
 
         char *GetSendBuf();
 
@@ -136,8 +137,14 @@ namespace nova {
 
         void ReinitializeQPs(rdmaio::RdmaCtrl *rdma_ctrl);
 
+        const std::vector<QPEndPoint> &end_points() {
+            return end_points_;
+        }
+
     private:
         uint32_t to_qp_idx(uint32_t server_id);
+
+        void FlushSendsOnQP(int qp_idx);
 
         uint64_t
         PostRDMASEND(const char *localbuf, ibv_wr_opcode type, uint32_t size,
@@ -146,33 +153,33 @@ namespace nova {
                      uint64_t remote_addr, bool is_offset,
                      uint32_t imm_data);
 
-        const uint32_t my_server_id_;
-        const char *mr_buf_;
-        const uint64_t mr_size_;
-        const uint64_t rdma_port_;
-        const uint32_t max_num_sends_;
-        const uint32_t max_msg_size_;
-        const uint32_t doorbell_batch_size_;
+        const uint32_t my_server_id_ = 0;
+        const char *mr_buf_ = nullptr;
+        const uint64_t mr_size_ = 0;
+        const uint64_t rdma_port_ = 0;
+        const uint32_t max_num_sends_ = 0;
+        const uint32_t max_msg_size_ = 0;
+        const uint32_t doorbell_batch_size_ = 0;
 
-        const int thread_id_;
-        const char *rdma_buf_;
+        const int thread_id_ = 0;
+        const char *rdma_buf_ = nullptr;
 
         // RDMA variables
-        std::map<uint32_t, int> server_qp_idx_map;
+        int *server_qp_idx_map_;
         std::vector<QPEndPoint> end_points_;
-        ibv_wc *wcs_;
-        RCQP **qp_;
-        char **rdma_send_buf_;
-        char **rdma_recv_buf_;
+        ibv_wc *wcs_ = nullptr;
+        RCQP **qp_ = nullptr;
+        char **rdma_send_buf_ = nullptr;
+        char **rdma_recv_buf_ = nullptr;
 
-        struct ibv_sge **send_sges_;
-        ibv_send_wr **send_wrs_;
+        struct ibv_sge **send_sges_ = nullptr;
+        ibv_send_wr **send_wrs_ = nullptr;
 
         // pending sends.
-        int *send_sge_index_;
-        int *npending_send_;
-        int *psend_index_;
-        NovaMsgCallback *callback_;
+        int *send_sge_index_ = nullptr;
+        int *npending_send_ = nullptr;
+        int *psend_index_ = nullptr;
+        NovaMsgCallback *callback_ = nullptr;
 
         void InitializeQPs(RdmaCtrl *rdma_ctrl);
 

@@ -33,8 +33,6 @@ using namespace std;
 using namespace rdmaio;
 using namespace nova;
 
-NovaConfig *NovaConfig::config;
-
 DEFINE_string(db_path, "/tmp/nova", "level db path");
 DEFINE_string(rtable_path, "/tmp/rtables", "RTable path");
 
@@ -50,8 +48,6 @@ DEFINE_uint64(rdma_max_msg_size, 0, "The maximum message size used by RDMA.");
 DEFINE_uint64(rdma_max_num_sends, 0,
               "The maximum number of pending RDMA sends. This includes READ/WRITE/SEND. We also post the same number of RECV events. ");
 DEFINE_uint64(rdma_doorbell_batch_size, 0, "The doorbell batch size.");
-DEFINE_uint64(rdma_pq_batch_size, 0,
-              "The number of pending requests a worker thread waits before polling RNIC.");
 DEFINE_bool(enable_rdma, false, "Enable RDMA messaging.");
 DEFINE_bool(enable_load_data, false, "Enable loading data.");
 
@@ -64,8 +60,8 @@ DEFINE_uint32(cc_num_compaction_workers, 0,
 DEFINE_uint32(cc_num_rdma_compaction_workers, 0,
               "Number of rdma compaction worker threads.");
 
-DEFINE_uint32(cc_num_cc_server_workers, 0,
-              "Number of compaction worker threads.");
+DEFINE_uint32(cc_num_storage_workers, 0,
+              "Number of storage worker threads.");
 DEFINE_uint32(cc_rtable_num_servers_scatter_data_blocks, 0,
               "Number of servers to scatter data blocks ");
 
@@ -93,17 +89,23 @@ DEFINE_double(cc_sampling_ratio, 1, "");
 DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
 DEFINE_string(cc_client_access_pattern, "uniform", "");
 
-DEFINE_bool(cc_enable_flush_multiple_memtables, false, "");
-DEFINE_string(cc_major_compaction_type, "no",
-              "no/st/lc/sc");
 DEFINE_bool(cc_recover_dbs, false, "recovery");
 DEFINE_uint32(cc_num_recovery_threads, 32, "recovery");
 
+DEFINE_bool(cc_enable_detailed_db_stats, false, "");
+DEFINE_bool(cc_enable_flush_multiple_memtables, false, "");
+DEFINE_string(cc_major_compaction_type, "no", "no/st/lc/sc");
+DEFINE_uint32(cc_major_compaction_max_parallism, 1, "");
+DEFINE_uint32(cc_major_compaction_max_tables_in_a_set, 15, "");
 
+
+NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
-std::atomic_int_fast32_t nova::NovaCCServer::cc_server_seq_id_;
+std::atomic_int_fast32_t nova::NovaCCServer::storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
-std::map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
+std::atomic_int_fast32_t nova::NovaStorageWorker::storage_file_number_seq;
+std::atomic_int_fast32_t nova::NovaCCServer::compaction_storage_worker_seq_id_;
+std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 
 void start(NovaCCNICServer *server) {
     server->Start();
@@ -160,10 +162,10 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config->mem_pool_size_gb = FLAGS_mem_pool_size_gb;
     if (!FLAGS_cc_multiple_disks) {
-        if (FLAGS_server_id < FLAGS_number_of_ccs) {
-            // I'm a CC.
-            NovaConfig::config->mem_pool_size_gb = 10;
-        }
+//        if (FLAGS_server_id < FLAGS_number_of_ccs) {
+//            // I'm a CC.
+//            NovaConfig::config->mem_pool_size_gb = 10;
+//        }
     }
 
     NovaConfig::config->load_default_value_size = FLAGS_use_fixed_value_size;
@@ -172,7 +174,6 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->max_msg_size = FLAGS_rdma_max_msg_size;
     NovaConfig::config->rdma_max_num_sends = FLAGS_rdma_max_num_sends;
     NovaConfig::config->rdma_doorbell_batch_size = FLAGS_rdma_doorbell_batch_size;
-    NovaConfig::config->rdma_pq_batch_size = FLAGS_rdma_pq_batch_size;
 
     NovaConfig::config->block_cache_mb = FLAGS_cc_block_cache_mb;
     NovaConfig::config->row_cache_mb = FLAGS_cc_row_cache_mb;
@@ -183,6 +184,8 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->enable_load_data = FLAGS_enable_load_data;
     NovaConfig::config->major_compaction_type = FLAGS_cc_major_compaction_type;
     NovaConfig::config->enable_flush_multiple_memtables = FLAGS_cc_enable_flush_multiple_memtables;
+    NovaConfig::config->major_compaction_max_parallism = FLAGS_cc_major_compaction_max_parallism;
+    NovaConfig::config->major_compaction_max_tables_in_a_set = FLAGS_cc_major_compaction_max_tables_in_a_set;
 
     NovaConfig::config->number_of_recovery_threads = FLAGS_cc_num_recovery_threads;
     NovaConfig::config->recover_dbs = FLAGS_cc_recover_dbs;
@@ -239,7 +242,7 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config->num_conn_workers = FLAGS_cc_num_conn_workers;
     NovaConfig::config->num_conn_async_workers = FLAGS_cc_num_async_workers;
-    NovaConfig::config->num_cc_server_workers = FLAGS_cc_num_cc_server_workers;
+    NovaConfig::config->num_storage_workers = FLAGS_cc_num_storage_workers;
     NovaConfig::config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
     NovaConfig::config->num_rdma_compaction_workers = FLAGS_cc_num_rdma_compaction_workers;
     NovaConfig::config->num_memtables = FLAGS_cc_num_memtables;
@@ -275,10 +278,13 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
     NovaConfig::config->ReadZipfianDist();
     NovaConfig::config->client_access_pattern = FLAGS_cc_client_access_pattern;
+    NovaConfig::config->enable_detailed_db_stats = FLAGS_cc_enable_detailed_db_stats;
 
     leveldb::EnvBGThread::bg_thread_id_seq = 0;
-    nova::NovaCCServer::cc_server_seq_id_ = 0;
+    nova::NovaCCServer::storage_worker_seq_id_ = 0;
     leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
+    nova::NovaStorageWorker::storage_file_number_seq = 0;
+    nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;
 
     NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
     InitializeCC();

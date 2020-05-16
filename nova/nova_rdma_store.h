@@ -8,6 +8,7 @@
 #define RLIB_NOVA_RDMA_STORE_H
 
 #include "rdma_ctrl.hpp"
+#include "nova_common.h"
 
 namespace nova {
     using namespace rdmaio;
@@ -33,23 +34,21 @@ namespace nova {
 
         virtual void FlushPendingSends(int peer_sid) = 0;
 
-        virtual uint32_t PollSQ(int peer_sid) = 0;
-
-        virtual uint32_t PollSQ() = 0;
+        virtual uint32_t PollSQ(int peer_sid, uint32_t* new_requests) = 0;
 
         virtual void PostRecv(int peer_sid, int recv_buf_index) = 0;
 
         virtual void FlushPendingRecvs() = 0;
 
-        virtual uint32_t PollRQ() = 0;
-
-        virtual uint32_t PollRQ(int peer_sid) = 0;
+        virtual uint32_t PollRQ(int peer_sid, uint32_t* new_requests) = 0;
 
         virtual char *GetSendBuf() = 0;
 
         virtual char *GetSendBuf(int server_id) = 0;
 
         virtual uint32_t store_id() = 0;
+
+        virtual const std::vector<QPEndPoint> &end_points() = 0;
     };
 
 
@@ -71,23 +70,22 @@ namespace nova {
 
         void FlushPendingSends() {}
 
-        uint32_t PollSQ(int peer_sid) { return 0; }
-
-        uint32_t PollSQ() { return 0; }
+        uint32_t PollSQ(int peer_sid, uint32_t* new_requests) { return 0; }
 
         void PostRecv(int peer_sid, int recv_buf_index) {}
 
         void FlushPendingRecvs() {}
 
-        uint32_t PollRQ() { return 0; }
-
-        uint32_t PollRQ(int peer_sid) { return 0; }
+        uint32_t PollRQ(int peer_sid, uint32_t* new_requests) { return 0; }
 
         char *GetSendBuf() { return NULL; }
 
         char *GetSendBuf(int server_id) { return NULL; }
 
         uint32_t store_id() { return 0; }
+
+        const std::vector<QPEndPoint> &end_points() { return dummy_; }
+        std::vector<QPEndPoint> dummy_;
     };
 }
 #endif //RLIB_NOVA_RDMA_STORE_H

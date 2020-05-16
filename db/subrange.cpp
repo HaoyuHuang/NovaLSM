@@ -4,10 +4,40 @@
 // Copyright (c) 2020 University of Southern California. All rights reserved.
 //
 
-#include "subrange.h"
+#include "leveldb/subrange.h"
+#include "nova/nova_common.h"
 
 namespace leveldb {
-    std::string SubRange::DebugString() {
+
+    uint64_t Range::lower_int() const {
+        uint64_t low = 0;
+        nova::str_to_int(lower.data(), &low, lower.size());
+        return low;
+    }
+
+    uint64_t Range::upper_int() const {
+        uint64_t up = 0;
+        nova::str_to_int(upper.data(), &up, upper.size());
+        return up;
+    }
+
+    uint32_t Range::Encode(char *dst) const {
+        uint32_t msg_size = 0;
+        msg_size += EncodeStr(dst + msg_size, lower);
+        msg_size += EncodeStr(dst + msg_size, upper);
+        msg_size += EncodeBool(dst + msg_size, lower_inclusive);
+        msg_size += EncodeBool(dst + msg_size, upper_inclusive);
+        return msg_size;
+    }
+
+    bool Range::Decode(leveldb::Slice *input) {
+        return DecodeStr(input, &lower) &&
+               DecodeStr(input, &upper) &&
+               DecodeBool(input, &lower_inclusive) &&
+               DecodeBool(input, &upper_inclusive);
+    }
+
+    std::string Range::DebugString() const {
         std::string output;
         uint64_t low;
         uint64_t up;
@@ -20,9 +50,9 @@ namespace leveldb {
             low++;
             output += "(";
         }
-        output += lower.ToString();
+        output += lower;
         output += ",";
-        output += upper.ToString();
+        output += upper;
         if (upper_inclusive) {
             up++;
             output += "]";
@@ -32,19 +62,19 @@ namespace leveldb {
 
         output += fmt::format(":{}, {}%, d={} keys={}", ninserts,
                               (uint32_t) insertion_ratio * 100.0,
-                              num_duplicates,
+                              is_duplicated,
                               up - low);
         return output;
     }
 
-    bool SubRange::Equals(const SubRange &other, const Comparator *comparator) {
+    bool Range::Equals(const Range &other, const Comparator *comparator) const {
         if (lower_inclusive != other.lower_inclusive) {
             return false;
         }
         if (upper_inclusive != other.upper_inclusive) {
             return false;
         }
-        if (num_duplicates != other.num_duplicates) {
+        if (is_duplicated != other.is_duplicated) {
             return false;
         }
         if (comparator->Compare(lower, other.lower) != 0) {
@@ -57,7 +87,8 @@ namespace leveldb {
     }
 
     bool
-    SubRange::IsSmallerThanLower(const Slice &key, const Comparator *comparator) {
+    Range::IsSmallerThanLower(const Slice &key,
+                              const Comparator *comparator) const {
         int comp = comparator->Compare(key, lower);
         if (comp < 0) {
             return true;
@@ -69,7 +100,8 @@ namespace leveldb {
     }
 
     bool
-    SubRange::IsGreaterThanLower(const Slice &key, const Comparator *comparator) {
+    Range::IsGreaterThanLower(const Slice &key,
+                              const Comparator *comparator) const {
         int comp = comparator->Compare(key, lower);
         if (comp > 0) {
             return true;
@@ -81,7 +113,8 @@ namespace leveldb {
     }
 
     bool
-    SubRange::IsGreaterThanUpper(const Slice &key, const Comparator *comparator) {
+    Range::IsGreaterThanUpper(const Slice &key,
+                              const Comparator *comparator) const {
         int comp = comparator->Compare(key, upper);
         if (comp > 0) {
             return true;
@@ -92,38 +125,190 @@ namespace leveldb {
         return false;
     }
 
-    bool SubRange::IsAPoint(const Comparator *comparator) {
-        if (lower_inclusive && upper_inclusive &&
-            comparator->Compare(lower, upper) == 0) {
+    bool Range::IsAPoint(const Comparator *comparator) const {
+        if (upper_int() - lower_int() == 1) {
             return true;
         }
+//        if (lower_inclusive && upper_inclusive &&
+//            comparator->Compare(lower, upper) == 0) {
+//            return true;
+//        }
         return false;
     }
 
-    SubRanges::~SubRanges() {
-        for (int i = 0; i < subranges.size(); i++) {
-            delete subranges[i].lower.data();
-            delete subranges[i].upper.data();
+    uint32_t SubRange::Encode(char *buf, uint32_t subrange_id) const {
+        uint32_t msg_size = 0;
+        msg_size += EncodeFixed32(buf + msg_size, subrange_id);
+        msg_size += EncodeFixed32(buf + msg_size, num_duplicates);
+        msg_size += EncodeFixed32(buf + msg_size, tiny_ranges.size());
+        for (auto &range : tiny_ranges) {
+            msg_size += range.Encode(buf + msg_size);
+        }
+        return msg_size;
+    }
+
+    bool SubRange::Decode(Slice *input) {
+        if (!DecodeFixed32(input, &decoded_subrange_id)) {
+            return false;
+        }
+        if (!DecodeFixed32(input, &num_duplicates)) {
+            return false;
+        }
+        uint32_t nranges = 0;
+        if (!DecodeFixed32(input, &nranges)) {
+            return false;
+        }
+        for (int i = 0; i < nranges; i++) {
+            Range r = {};
+            if (!r.Decode(input)) {
+                return false;
+            }
+            tiny_ranges.push_back(std::move(r));
         }
     }
 
-    SubRanges::SubRanges(const SubRanges &other) {
-        subranges.resize(other.subranges.size());
+    uint32_t
+    SubRange::EncodeForCompaction(char *buf, uint32_t subrange_id) const {
+        uint32_t msg_size = 0;
+        msg_size += EncodeFixed32(buf + msg_size, subrange_id);
+        msg_size += EncodeFixed32(buf + msg_size, num_duplicates);
+        Range r;
+        r.lower = lower();
+        r.lower_inclusive = lower_inclusive();
+        r.upper = upper();
+        r.upper_inclusive = upper_inclusive();
+        msg_size += r.Encode(buf + msg_size);
+        return msg_size;
+    }
+
+    bool SubRange::DecodeForCompaction(Slice *input) {
+        if (!DecodeFixed32(input, &decoded_subrange_id)) {
+            return false;
+        }
+        if (!DecodeFixed32(input, &num_duplicates)) {
+            return false;
+        }
+        Range r = {};
+        if (!r.Decode(input)) {
+            return false;
+        }
+        tiny_ranges.push_back(std::move(r));
+        return true;
+    }
+
+    std::string SubRange::DebugString() const {
+        std::string output;
+        output += std::to_string(num_duplicates);
+        output += ",";
+        for (auto &range : tiny_ranges) {
+            output += range.DebugString();
+            output += ",";
+        }
+        return output;
+    }
+
+    void SubRange::UpdateStats() {
+        ninserts = 0;
+        for (auto &r : tiny_ranges) {
+            ninserts += r.ninserts;
+        }
+    }
+
+    bool SubRange::BinarySearch(const leveldb::Slice &key, int *tinyrange_id,
+                                const leveldb::Comparator *user_comparator) {
+        int l = 0, r = tiny_ranges.size() - 1;
+        while (l <= r) {
+            int m = l + (r - l) / 2;
+            Range &range = tiny_ranges[m];
+            if (range.IsSmallerThanLower(key, user_comparator)) {
+                r = m - 1;
+            } else if (range.IsGreaterThanUpper(key, user_comparator)) {
+                l = m + 1;
+            } else {
+                *tinyrange_id = m;
+                return true;
+            }
+        }
+        *tinyrange_id = -1;
+        return false;
+    }
+
+    bool SubRange::Equals(const SubRange &other,
+                          const Comparator *comparator) const {
+        if (num_duplicates != other.num_duplicates) {
+            return false;
+        }
+        if (tiny_ranges.size() != other.tiny_ranges.size()) {
+            return false;
+        }
+        for (int i = 0; i < tiny_ranges.size(); i++) {
+            if (!tiny_ranges[i].Equals(other.tiny_ranges[i], comparator)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool
+    SubRange::IsSmallerThanLower(const Slice &key,
+                                 const Comparator *comparator) const {
+        RDMA_ASSERT(!tiny_ranges.empty());
+        return tiny_ranges[0].IsSmallerThanLower(key, comparator);
+    }
+
+    bool
+    SubRange::IsGreaterThanLower(const Slice &key,
+                                 const Comparator *comparator) const {
+        RDMA_ASSERT(!tiny_ranges.empty());
+        return tiny_ranges[0].IsGreaterThanLower(key,
+                                                 comparator);
+    }
+
+    bool
+    SubRange::IsGreaterThanUpper(const Slice &key,
+                                 const Comparator *comparator) const {
+        RDMA_ASSERT(!tiny_ranges.empty());
+        return tiny_ranges[tiny_ranges.size() - 1].IsGreaterThanUpper(key,
+                                                                      comparator);
+    }
+
+    bool SubRange::IsAPoint(const Comparator *comparator) {
+        if (tiny_ranges.size() != 1) {
+            return false;
+        }
+        return tiny_ranges[0].IsAPoint(comparator);
+    }
+
+
+    SubRanges::~SubRanges() {
+    }
+
+    SubRanges::SubRanges(const SubRanges &other) : SubRanges(other.subranges) {
+    }
+
+    SubRanges::SubRanges(const std::vector<SubRange> &other) {
         for (int i = 0; i < subranges.size(); i++) {
-            subranges[i].lower = SubRange::Copy(
-                    other.subranges[i].lower);
-            subranges[i].upper = SubRange::Copy(
-                    other.subranges[i].upper);
-            subranges[i].lower_inclusive = other.subranges[i].lower_inclusive;
-            subranges[i].upper_inclusive = other.subranges[i].upper_inclusive;
-            subranges[i].ninserts = other.subranges[i].ninserts;
-            subranges[i].num_duplicates = other.subranges[i].num_duplicates;
+            SubRange sr = {};
+            const SubRange &other_sr = other[i];
+            sr.ninserts = other_sr.ninserts;
+            sr.num_duplicates = other_sr.num_duplicates;
+            for (int j = 0; j < sr.tiny_ranges.size(); j++) {
+                Range r = {};
+                const Range &o = other_sr.tiny_ranges[j];
+                r.lower = o.lower;
+                r.upper = o.upper;
+                r.lower_inclusive = o.lower_inclusive;
+                r.upper_inclusive = o.upper_inclusive;
+                r.is_duplicated = o.is_duplicated;
+                r.ninserts = o.ninserts;
+                sr.tiny_ranges.push_back(std::move(r));
+            }
+            subranges.push_back(std::move(sr));
         }
     }
 
     std::string SubRanges::DebugString() {
         std::string output;
-//                output += std::to_string(subranges.size());
         output += "\n";
         for (int i = 0; i < subranges.size(); i++) {
             output += std::to_string(i) + " ";
@@ -142,11 +327,11 @@ namespace leveldb {
         int i = 0;
         while (i < subranges.size()) {
             SubRange &sr = subranges[i];
-            RDMA_ASSERT(!sr.IsSmallerThanLower(sr.upper, comparator))
+            RDMA_ASSERT(!sr.IsSmallerThanLower(sr.upper(), comparator))
                 << DebugString();
             if (!prior_upper.empty()) {
                 if (upper_inclusive) {
-                    if (sr.lower_inclusive) {
+                    if (sr.lower_inclusive()) {
                         RDMA_ASSERT(
                                 sr.IsSmallerThanLower(prior_upper,
                                                       comparator))
@@ -154,20 +339,20 @@ namespace leveldb {
                                            DebugString());
                     } else {
                         RDMA_ASSERT(comparator->Compare(prior_upper,
-                                                        sr.lower) <= 0)
+                                                        sr.lower()) <= 0)
                             << fmt::format("assert {} {}", i,
                                            DebugString());
                     }
                 } else {
                     // Does not include upper.
                     RDMA_ASSERT(comparator->Compare(prior_upper,
-                                                    sr.lower) <= 0)
+                                                    sr.lower()) <= 0)
                         << fmt::format("assert {} {}", i,
                                        DebugString());
                 }
             }
-            prior_upper = sr.upper;
-            upper_inclusive = sr.upper_inclusive;
+            prior_upper = sr.upper();
+            upper_inclusive = sr.upper_inclusive();
             i++;
 
             if (sr.num_duplicates > 0) {
@@ -204,7 +389,7 @@ namespace leveldb {
         }
         // if we reach here, then element was
         // not present
-        if (subranges.size() > 0) {
+        if (!subranges.empty()) {
             if (l == subranges.size()) {
                 l--;
             }
@@ -222,9 +407,9 @@ namespace leveldb {
 
     bool
     SubRanges::BinarySearchWithDuplicate(const leveldb::Slice &key,
-                                                 unsigned int *rand_seed,
-                                                 int *subrange_id,
-                                                 const Comparator *user_comparator) {
+                                         unsigned int *rand_seed,
+                                         int *subrange_id,
+                                         const Comparator *user_comparator) {
         bool found = BinarySearch(key, subrange_id, user_comparator);
         if (!found) {
             return false;

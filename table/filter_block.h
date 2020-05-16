@@ -60,15 +60,17 @@ namespace leveldb {
 
         bool KeyMayMatch(uint64_t block_offset, const Slice &key);
 
-        uint64_t size() const { return size_; }
+        uint64_t size() const {return size_;}
+
+        std::string DebugString(uint64_t block_offset, const Slice &key);
 
     private:
         const FilterPolicy *policy_;
         const char *data_;    // Pointer to filter data (at block-start)
-        const char *offset_;  // Pointer to beginning of offset array (at block-end)
-        size_t num_;          // Number of entries in offset array
         size_t base_lg_;      // Encoding parameter (see kFilterBaseLg in .cc file)
         const uint64_t size_; // size of the filter block.
+        std::vector<uint32_t> filter_offsets_;
+        uint32_t filter_size_ = 0;
     };
 
 }  // namespace leveldb

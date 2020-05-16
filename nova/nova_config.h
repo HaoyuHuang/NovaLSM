@@ -57,9 +57,9 @@ namespace nova {
             return ndbs.size();
         }
 
-        static std::map<uint32_t, std::set<uint32_t >>
+        static std::unordered_map<uint32_t, std::set<uint32_t >>
         ReadDatabases(const std::vector<CCFragment *> &fragments) {
-            std::map<uint32_t, std::set<uint32_t >> server_dbs;
+            std::unordered_map<uint32_t, std::set<uint32_t >> server_dbs;
             for (int i = 0; i < fragments.size(); i++) {
                 uint32_t sid = fragments[i]->cc_server_id;
                 uint32_t dbid = fragments[i]->dbid;
@@ -139,7 +139,6 @@ namespace nova {
         std::string db_path;
 
         int rdma_port;
-        int rdma_pq_batch_size;
         int rdma_max_num_sends;
         int rdma_doorbell_batch_size;
 
@@ -153,6 +152,8 @@ namespace nova {
         bool enable_flush_multiple_memtables;
         std::string memtable_type;
         std::string major_compaction_type;
+        uint32_t major_compaction_max_parallism;
+        uint32_t major_compaction_max_tables_in_a_set;
 
         uint64_t mem_pool_size_gb;
         uint32_t num_mem_partitions;
@@ -168,6 +169,7 @@ namespace nova {
         std::string zipfian_dist_file_path;
         ZipfianDist zipfian_dist;
         std::string client_access_pattern;
+        bool enable_detailed_db_stats;
 
         vector<Host> cc_servers;
         vector<Host> dc_servers;
@@ -175,7 +177,7 @@ namespace nova {
         int num_conn_async_workers;
         int num_compaction_workers;
         int num_rdma_compaction_workers;
-        int num_cc_server_workers;
+        int num_storage_workers;
 
         int block_cache_mb;
         int row_cache_mb;

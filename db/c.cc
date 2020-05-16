@@ -261,8 +261,8 @@ void leveldb_approximate_sizes(leveldb_t *db, int num_ranges,
                                uint64_t *sizes) {
     Range *ranges = new Range[num_ranges];
     for (int i = 0; i < num_ranges; i++) {
-        ranges[i].start = Slice(range_start_key[i], range_start_key_len[i]);
-        ranges[i].limit = Slice(range_limit_key[i], range_limit_key_len[i]);
+        ranges[i].lower = std::string(range_start_key[i], range_start_key_len[i]);
+        ranges[i].upper = std::string(range_limit_key[i], range_limit_key_len[i]);
     }
     db->rep->GetApproximateSizes(ranges, num_ranges, sizes);
     delete[] ranges;

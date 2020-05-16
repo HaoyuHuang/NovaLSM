@@ -73,7 +73,7 @@ namespace nova {
         int flushed_memtable_size[BUCKET_SIZE];
         while (true) {
             usleep(10000000);
-            output = "frdma:";
+            output = "frdma,";
             for (int i = 0; i < foreground_rdma_tasks.size(); i++) {
                 uint32_t tasks = async_workers_[i]->stat_tasks_;
                 output += std::to_string(tasks - foreground_rdma_tasks[i]);
@@ -82,7 +82,7 @@ namespace nova {
             }
             output += "\n";
 
-            output += "brdma:";
+            output += "brdma,";
             for (int i = 0; i < bg_rdma_tasks.size(); i++) {
                 uint32_t tasks = async_compaction_workers_[i]->stat_tasks_;
                 output += std::to_string(tasks - bg_rdma_tasks[i]);
@@ -91,7 +91,7 @@ namespace nova {
             }
             output += "\n";
 
-            output += "compaction:";
+            output += "compaction,";
             for (int i = 0; i < compaction_stats.size(); i++) {
                 uint32_t tasks = bgs_[i]->num_running_tasks();
                 output += std::to_string(tasks - compaction_stats[i]);
@@ -100,7 +100,7 @@ namespace nova {
             }
             output += "\n";
 
-            output += "storage:";
+            output += "storage,";
             for (int i = 0; i < cc_server_workers_.size(); i++) {
                 uint32_t tasks = cc_server_workers_[i]->stat_tasks_;
                 output += std::to_string(tasks - stats[i].tasks);
@@ -109,7 +109,7 @@ namespace nova {
             }
             output += "\n";
 
-            output += "storage-read:";
+            output += "storage-read,";
             for (int i = 0; i < cc_server_workers_.size(); i++) {
                 uint32_t tasks = cc_server_workers_[i]->stat_read_bytes_;
                 output += std::to_string(tasks - stats[i].read_bytes);
@@ -118,7 +118,7 @@ namespace nova {
             }
             output += "\n";
 
-            output += "storage-write:";
+            output += "storage-write,";
             for (int i = 0; i < cc_server_workers_.size(); i++) {
                 uint32_t tasks = cc_server_workers_[i]->stat_write_bytes_;
                 output += std::to_string(tasks - stats[i].write_bytes);
@@ -127,14 +127,14 @@ namespace nova {
             }
             output += "\n";
 
-            output += "active-memtables:";
+            output += "active-memtables,";
             for (int i = 0; i < dbs_.size(); i++) {
                 output += std::to_string(dbs_[i]->number_of_active_memtables_);
                 output += ",";
             }
             output += "\n";
 
-            output += "immutable-memtables:";
+            output += "immutable-memtables,";
             for (int i = 0; i < dbs_.size(); i++) {
                 output += std::to_string(
                         dbs_[i]->number_of_immutable_memtables_);
@@ -142,21 +142,21 @@ namespace nova {
             }
             output += "\n";
 
-            output += "steals:";
+            output += "steals,";
             for (int i = 0; i < dbs_.size(); i++) {
                 output += std::to_string(dbs_[i]->number_of_steals_);
                 output += ",";
             }
             output += "\n";
 
-            output += "puts:";
+            output += "puts,";
             for (int i = 0; i < dbs_.size(); i++) {
                 output += std::to_string(dbs_[i]->processed_writes_);
                 output += ",";
             }
             output += "\n";
 
-            output += "wait-due-to-contention:";
+            output += "wait-due-to-contention,";
             for (int i = 0; i < dbs_.size(); i++) {
                 output += std::to_string(
                         dbs_[i]->number_of_wait_due_to_contention_);
@@ -164,14 +164,14 @@ namespace nova {
             }
             output += "\n";
 
-            output += "gets:";
+            output += "gets,";
             for (int i = 0; i < dbs_.size(); i++) {
                 output += std::to_string(dbs_[i]->number_of_gets_);
                 output += ",";
             }
             output += "\n";
 
-            output += "hits:";
+            output += "hits,";
             for (int i = 0; i < dbs_.size(); i++) {
                 output += std::to_string(dbs_[i]->number_of_memtable_hits_);
                 output += ",";
@@ -181,7 +181,7 @@ namespace nova {
             for (int j = 0; j < BUCKET_SIZE; j++) {
                 flushed_memtable_size[j] = 0;
             }
-            output += "memtable-hist:";
+            output += "memtable-hist,";
             for (int i = 0; i < bgs_.size(); i++) {
                 for (int j = 0; j < BUCKET_SIZE; j++) {
                     flushed_memtable_size[j] += bgs_[i]->memtable_size[j];
@@ -194,14 +194,14 @@ namespace nova {
             }
             output += "\n";
 
-            output += "puts-no-wait:";
+            output += "puts-no-wait,";
             for (int i = 0; i < dbs_.size(); i++) {
                 output += std::to_string(dbs_[i]->number_of_puts_no_wait_);
                 output += ",";
             }
             output += "\n";
 
-            output += "puts-wait:";
+            output += "puts-wait,";
             for (int i = 0; i < dbs_.size(); i++) {
                 output += std::to_string(dbs_[i]->number_of_puts_wait_);
                 output += ",";
@@ -219,7 +219,7 @@ namespace nova {
 
             for (int i = 0; i < dbs_.size(); i++) {
                 output += "db-overlapping-sstable-stats-" + std::to_string(i) +
-                          ":";
+                          ",";
                 leveldb::DBStats stats = {};
                 uint32_t size_dist[BUCKET_SIZE];
                 for (int j = 0; j < BUCKET_SIZE; j++) {
@@ -280,8 +280,8 @@ namespace nova {
                 output += std::to_string(stats.num_minor_reorgs_for_dup);
                 output += "\n";
 
-                output += "db-size-stats-" + std::to_string(i) + ":";
-                output += std::to_string(stats.dbsize / 1024 / 1024 / 1024);
+                output += "db-size-stats-" + std::to_string(i) + ",";
+                output += std::to_string(stats.dbsize / 1024 / 1024);
                 output += ",";
                 output += std::to_string(stats.nsstables);
                 output += ",";
@@ -292,22 +292,22 @@ namespace nova {
                 }
                 output += "\n";
 
-                output += "db-overlap-overall-" + std::to_string(i) + ":";
+                output += "db-overlap-overall-" + std::to_string(i) + ",";
                 for (auto &overlap : stats.num_overlapping_sstables) {
                     output += overlap.DebugString();
                     output += ",";
                 }
                 output += "\n";
 
-                output += "db-overlap-" + std::to_string(i) + ":";
+                output += "db-overlap-" + std::to_string(i) + ",";
                 for (auto &overlap : stats.num_overlapping_sstables_since_last_query) {
                     output += overlap.DebugString();
                     output += ",";
                 }
                 output += "\n";
             }
-            output += "db:" + std::to_string(
-                    aggregated_stats.dbsize / 1024 / 1024 / 1024);
+            output += "db," + std::to_string(
+                    aggregated_stats.dbsize / 1024 / 1024);
             output += ",";
             output += std::to_string(aggregated_stats.nsstables);
             output += ",";

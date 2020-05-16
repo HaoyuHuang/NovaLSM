@@ -67,7 +67,7 @@ namespace leveldb {
         // REQUIRES: The client must ensure that the comparator supplied
         // here has the same name and orders keys *exactly* the same as the
         // comparator provided to previous open calls on the same DB.
-        const Comparator *comparator;
+        const Comparator *comparator = nullptr;
 
         bool debug = false;
 
@@ -76,7 +76,7 @@ namespace leveldb {
 
         CCClient *dc_client = nullptr;
 
-        uint32_t manifest_stoc_id;
+        uint32_t manifest_stoc_id = 0;
 
         double subrange_reorg_sampling_ratio = 1.0;
 
@@ -87,7 +87,7 @@ namespace leveldb {
         std::string zipfian_dist_file_path = "/tmp/zipfian";
 
         // Enable tracing accesses.
-        bool enable_tracing;
+        bool enable_tracing = false;
 
         // Trace file path to log accesses.
         std::string trace_file_path = "/tmp/leveldb_trace_log";
@@ -98,7 +98,7 @@ namespace leveldb {
         // If true, an error is raised if the database already exists.
         bool error_if_exists = false;
 
-        MajorCompactionType  major_compaction_type;
+        MajorCompactionType major_compaction_type = MajorCompactionType::kMajorSingleThreaded;
 
         bool enable_flush_multiple_memtables = false;
 
@@ -114,17 +114,19 @@ namespace leveldb {
         // Use the specified object to interact with the environment,
         // e.g. to read/write files, schedule background work, etc.
         // Default: Env::Default()
-        Env *env;
+        Env *env = nullptr;
 
-        std::vector<EnvBGThread *> bg_threads;
-        EnvBGThread *reorg_thread;
-        EnvBGThread *compaction_coordinator_thread;
+        std::vector<EnvBGThread *> bg_threads = {};
+        EnvBGThread *reorg_thread = nullptr;
+        EnvBGThread *compaction_coordinator_thread = nullptr;
 
         uint32_t num_memtables = 2;
 
-        MemTableType memtable_type;
+        MemTableType memtable_type = MemTableType::kStaticPartition;
 
         bool enable_subranges = false;
+
+        bool enable_detailed_stats = true;
 
         uint32_t l0_stop_writes_trigger = 12;
 
@@ -226,7 +228,7 @@ namespace leveldb {
         // NewBloomFilterPolicy() here.
         const FilterPolicy *filter_policy = nullptr;
 
-        MemTablePool *memtable_pool;
+        MemTablePool *memtable_pool = nullptr;
     };
 
 // Options that control read operations
@@ -247,6 +249,7 @@ namespace leveldb {
 
         CCClient *dc_client = nullptr;
         char *rdma_backing_mem = nullptr;
+        uint32_t rdma_backing_mem_size = 0;
 
         uint64_t hash = 0;
 
@@ -279,7 +282,7 @@ namespace leveldb {
 
         bool local_write = false;
         unsigned int *rand_seed;
-        bool update_subranges = true;
+        bool is_loading_db = false;
 
         uint64_t hash = 0;
         // For replicating log records.
@@ -288,6 +291,7 @@ namespace leveldb {
 
         uint64_t total_writes = 0;
         char *rdma_backing_mem = nullptr;
+        uint32_t rdma_backing_mem_size = 0;
         WriteState *replicate_log_record_states = nullptr;
     };
 

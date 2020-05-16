@@ -14,15 +14,146 @@
 
 namespace leveldb {
 
+    void CompactionRequest::FreeMemoryLTC() {
+        for (auto f : outputs) {
+            delete f;
+        }
+    }
+
+    void CompactionRequest::FreeMemoryStoC() {
+        for (int which = 0; which < 2; which++) {
+            for (int i = 0; i < inputs[which].size(); i++) {
+                delete inputs[which][i];
+            }
+        }
+        for (auto f : guides) {
+            delete f;
+        }
+    }
+
+    uint32_t CompactionRequest::EncodeRequest(char *buf) {
+        char *sendbuf = buf;
+        uint32_t msg_size = 0;
+        msg_size += EncodeStr(sendbuf + msg_size, dbname);
+        msg_size += EncodeFixed64(sendbuf + msg_size, smallest_snapshot);
+        msg_size += EncodeFixed32(sendbuf + msg_size, source_level);
+        msg_size += EncodeFixed32(sendbuf + msg_size, target_level);
+        for (int which = 0; which < 2; which++) {
+            msg_size += leveldb::EncodeFixed32(sendbuf + msg_size,
+                                               inputs[which].size());
+            for (auto &input : inputs[which]) {
+                msg_size += input->Encode(sendbuf + msg_size);
+            }
+        }
+        msg_size += leveldb::EncodeFixed32(sendbuf + msg_size, guides.size());
+        for (auto &guide : guides) {
+            msg_size += guide->Encode(sendbuf + msg_size);
+        }
+        msg_size += leveldb::EncodeFixed32(sendbuf + msg_size,
+                                           subranges.size());
+        for (int i = 0; i < subranges.size(); i++) {
+            const auto &sr = subranges[i];
+            msg_size += sr.EncodeForCompaction(sendbuf + msg_size, i);
+        }
+        return msg_size;
+    }
+
+    void CompactionRequest::DecodeRequest(char *buf, uint32_t buf_size) {
+        uint32_t num_inputs = 0;
+        uint32_t num_guides = 0;
+        uint32_t num_subranges = 0;
+
+        char *sendbuf = buf;
+        sendbuf += DecodeStr(sendbuf, &dbname);
+
+        Slice input(sendbuf, buf_size);
+        RDMA_ASSERT(DecodeFixed64(&input, &smallest_snapshot));
+        RDMA_ASSERT(DecodeFixed32(&input, &source_level));
+        RDMA_ASSERT(DecodeFixed32(&input, &target_level));
+        for (int which = 0; which < 2; which++) {
+            RDMA_ASSERT(DecodeFixed32(&input, &num_inputs));
+            for (int i = 0; i < num_inputs; i++) {
+                FileMetaData *meta = new FileMetaData;
+                RDMA_ASSERT(meta->Decode(&input, false));
+                inputs[which].push_back(meta);
+            }
+        }
+        RDMA_ASSERT(DecodeFixed32(&input, &num_guides));
+        for (int i = 0; i < num_guides; i++) {
+            FileMetaData *meta = new FileMetaData;
+            RDMA_ASSERT(meta->Decode(&input, false));
+            guides.push_back(meta);
+        }
+        RDMA_ASSERT(DecodeFixed32(&input, &num_subranges));
+        RDMA_ASSERT(num_subranges == 0);
+        for (int i = 0; i < num_subranges; i++) {
+            SubRange sr = {};
+            RDMA_ASSERT(sr.DecodeForCompaction(&input));
+            subranges.push_back(std::move(sr));
+        }
+    }
+
+    uint32_t FileMetaData::Encode(char *buf) const {
+        char *dst = buf;
+        uint32_t msg_size = 0;
+        msg_size += EncodeFixed64(dst + msg_size, number);
+        msg_size += EncodeFixed64(dst + msg_size, file_size);
+        msg_size += EncodeFixed64(dst + msg_size, converted_file_size);
+        msg_size += EncodeStr(dst + msg_size,
+                              smallest.Encode().ToString());
+        msg_size += EncodeStr(dst + msg_size,
+                              largest.Encode().ToString());
+        msg_size += EncodeFixed64(dst + msg_size, flush_timestamp);
+        msg_size += EncodeFixed32(dst + msg_size, level);
+        meta_block_handle.EncodeHandle(dst + msg_size);
+        msg_size += RTableHandle::HandleSize();
+
+        msg_size += EncodeFixed32(dst + msg_size,
+                                  data_block_group_handles.size());
+        for (auto &handle : data_block_group_handles) {
+            handle.EncodeHandle(dst + msg_size);
+            msg_size += RTableHandle::HandleSize();
+        }
+        return msg_size;
+    }
+
+    static bool GetInternalKey(Slice *input, InternalKey *dst, bool copy) {
+        Slice str;
+        if (DecodeStr(input, &str, copy)) {
+            return dst->DecodeFrom(str);
+        } else {
+            return false;
+        }
+    }
+
+    bool FileMetaData::Decode(leveldb::Slice *input, bool copy) {
+        return DecodeFixed64(input, &number) &&
+               DecodeFixed64(input, &file_size) &&
+               DecodeFixed64(input, &converted_file_size) &&
+               GetInternalKey(input, &smallest, copy) &&
+               GetInternalKey(input, &largest, copy) &&
+               DecodeFixed64(input, &flush_timestamp) &&
+               DecodeFixed32(input, &level) &&
+               RTableHandle::DecodeHandle(input,
+                                          &meta_block_handle) &&
+               RTableHandle::DecodeHandles(input,
+                                           &data_block_group_handles);
+    }
+
     std::string FileMetaData::ShortDebugString() const {
         std::string r;
+        r.append("fn:");
+        AppendNumberTo(&r, number);
+        r.append(" size:");
+        AppendNumberTo(&r, file_size);
+        r.append(" cs:");
+        AppendNumberTo(&r, converted_file_size);
         r.append("[");
         r.append(smallest.DebugString());
         r.append(",");
         r.append(largest.DebugString());
         r.append("]");
-        r.append(" fn:");
-        AppendNumberTo(&r, number);
+
         return r;
     }
 
@@ -39,8 +170,11 @@ namespace leveldb {
         AppendNumberTo(&r, file_size);
         r.append(" cfs:");
         AppendNumberTo(&r, converted_file_size);
-        r.append(" mid:");
-        AppendNumberTo(&r, memtable_id);
+        r.append(" mids:");
+        for (auto id : memtable_ids) {
+            AppendNumberTo(&r, id);
+            r.append(" ");
+        }
         r.append(" time:");
         AppendNumberTo(&r, flush_timestamp);
         r.append(" level:");
@@ -55,61 +189,11 @@ namespace leveldb {
         return r;
     }
 
-    uint32_t
-    EncodeFileMetaData(const FileMetaData &meta, char *buf, uint32_t buf_size) {
-        char *tmp = buf;
-        uint32_t used_size = 0;
-        EncodeFixed64(tmp + used_size, meta.number);
-        used_size += 8;
-        EncodeFixed64(tmp + used_size, meta.file_size);
-        used_size += 8;
-        EncodeFixed64(tmp + used_size, meta.converted_file_size);
-        used_size += 8;
-        EncodeFixed32(tmp + used_size, meta.data_block_group_handles.size());
-        used_size += 4;
-        for (auto handle : meta.data_block_group_handles) {
-
-        }
-
-        Slice smallest = meta.smallest.Encode();
-        Slice largest = meta.largest.Encode();
-        EncodeFixed32(tmp + used_size, smallest.size());
-        used_size += 4;
-        EncodeFixed32(tmp + used_size, largest.size());
-        used_size += 4;
-        memcpy(tmp + used_size, smallest.data(), smallest.size());
-        used_size += smallest.size();
-        memcpy(tmp + used_size, largest.data(), largest.size());
-        used_size += largest.size();
-
-
-        RDMA_ASSERT(used_size < buf_size);
-        return used_size;
-    }
-
-    void DecodeFileMetaData(const Slice &s, FileMetaData *meta) {
-        const char *mem = s.data();
-        uint32_t used_size = 0;
-        meta->number = DecodeFixed64(mem + used_size);
-        used_size += 8;
-        meta->file_size = DecodeFixed64(mem + used_size);
-        used_size += 8;
-        uint32_t smallest_size = DecodeFixed32(mem + used_size);
-        used_size += 4;
-        uint32_t largest_size = DecodeFixed32(mem + used_size);
-        used_size += 4;
-        Slice smallest_ik(mem + used_size, smallest_size);
-        Slice largest_ik(mem + used_size + smallest_size, largest_size);
-        RDMA_ASSERT(meta->smallest.DecodeFrom(smallest_ik, true));
-        RDMA_ASSERT(meta->largest.DecodeFrom(largest_ik, true));
-    }
-
     static uint64_t PackSequenceAndType(uint64_t seq, ValueType t) {
         assert(seq <= kMaxSequenceNumber);
         assert(t <= kValueTypeForSeek);
         return (seq << 8) | t;
     }
-
 
     InternalKey::InternalKey(const leveldb::Slice &user_key,
                              leveldb::SequenceNumber s, leveldb::ValueType t) {

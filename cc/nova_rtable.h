@@ -9,6 +9,8 @@
 
 #include <string>
 #include <list>
+#include <unordered_map>
+
 #include "leveldb/env.h"
 #include "table/format.h"
 
@@ -22,18 +24,21 @@ namespace leveldb {
                    MemManager *mem_manager,
                    uint32_t thread_id, uint32_t rtable_size);
 
-        Status Read(uint64_t offset, uint32_t size, char *scratch, Slice *result);
+        Status
+        Read(uint64_t offset, uint32_t size, char *scratch, Slice *result);
 
-        uint64_t Persist();
+        uint64_t Persist(uint32_t given_rtable_id_for_assertion);
 
         uint64_t AllocateBuf(const std::string &sstable_id,
                              uint32_t size, bool is_meta_blocks);
 
-        void MarkOffsetAsWritten(uint64_t offset);
+        bool MarkOffsetAsWritten(uint32_t given_rtable_id_for_assertion,
+                                 uint64_t offset);
 
         BlockHandle Handle(const std::string &sstable_id, bool is_meta_blocks);
 
-        bool DeleteSSTable(const std::string &sstable_id);
+        bool DeleteSSTable(uint32_t given_rtable_id_for_assertion,
+                           const std::string &sstable_id);
 
         void Close();
 
@@ -70,8 +75,8 @@ namespace leveldb {
         Env *env_ = nullptr;
         ReadWriteFile *file_ = nullptr;
 
-        std::map<std::string, SSTablePersistStatus> sstable_data_block_offset_;
-        std::map<std::string, SSTablePersistStatus> sstable_meta_block_offset_;
+        std::unordered_map<std::string, SSTablePersistStatus> sstable_data_block_offset_;
+        std::unordered_map<std::string, SSTablePersistStatus> sstable_meta_block_offset_;
 
         std::list<AllocatedBuf> allocated_bufs_;
         bool is_full_ = false;
@@ -87,9 +92,7 @@ namespace leveldb {
         uint32_t rtable_id_ = 0;
         uint32_t persisting_cnt = 0;
         bool deleted_ = false;
-
-        std::map<uint64_t, leveldb::BlockHandle> diskoff_memoff_;
-
+//        std::map<uint64_t, leveldb::BlockHandle> diskoff_memoff_;
         std::mutex mutex_;
 
         std::vector<BatchWrite> written_mem_blocks_;
@@ -101,25 +104,27 @@ namespace leveldb {
     public:
         NovaRTableManager(Env *env,
                           MemManager *mem_manager,
-                          const std::string &rtable_path, uint32_t rtable_size,
+                          const std::string &rtable_path,
+                          uint32_t rtable_size,
+                          uint32_t server_id,
                           uint32_t nservers, uint32_t nranges);
 
-        NovaRTable *rtable(int rtable_id);
+        NovaRTable *FindRTable(uint32_t rtable_id);
 
-        NovaRTable *active_rtable(uint32_t thread_id);
+//        NovaRTable *active_rtable(uint32_t thread_id);
 
-        NovaRTable *CreateNewRTable(uint32_t thread_id);
+//        NovaRTable *CreateNewRTable(uint32_t thread_id);
 
         void ReadDataBlock(const RTableHandle &rtable_handle, uint64_t offset,
                            uint32_t size, char *scratch, Slice *result);
 
-        NovaRTable *OpenRTable(uint32_t thread_id, std::string& filename);
+        NovaRTable *OpenRTable(uint32_t thread_id, std::string &filename);
 
-        void OpenRTables(std::map<std::string, uint32_t>& fn_rtables);
+        void OpenRTables(std::unordered_map<std::string, uint32_t> &fn_rtables);
 
         void DeleteSSTable(const std::string &sstable_id);
 
-        std::map<std::string, leveldb::NovaRTable*> fn_rtable_map_;
+        std::unordered_map<std::string, leveldb::NovaRTable *> fn_rtable_map_;
     private:
         Env *env_ = nullptr;
         MemManager *mem_manager_ = nullptr;
@@ -128,7 +133,7 @@ namespace leveldb {
         // 0 is reserved so that read knows to fetch the block from a local file.
         // 1 is reserved for manifest file.
         uint32_t current_rtable_id_ = 2;
-        NovaRTable *active_rtables_[64];
+//        NovaRTable *active_rtables_[64];
         NovaRTable *rtables_[MAX_NUM_RTABLES];
         leveldb::Cache *block_cache_ = nullptr;
         std::mutex mutex_;

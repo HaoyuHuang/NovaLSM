@@ -9,6 +9,7 @@
 
 #include <vector>
 #include "nova_rdma_cc.h"
+#include "nova_storage_worker.h"
 
 namespace nova {
     class NovaStatThread {
@@ -18,7 +19,7 @@ namespace nova {
         std::vector<leveldb::DB*> dbs_;
         std::vector<NovaRDMAComputeComponent *> async_workers_;
         std::vector<NovaRDMAComputeComponent *> async_compaction_workers_;
-        std::vector<NovaCCServerAsyncWorker *> cc_server_workers_;
+        std::vector<NovaStorageWorker *> cc_server_workers_;
         std::vector<leveldb::EnvBGThread *> bgs_;
     };
 }

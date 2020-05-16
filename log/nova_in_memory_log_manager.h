@@ -7,6 +7,8 @@
 #ifndef LEVELDB_NOVA_IN_MEMORY_LOG_MANAGER_H
 #define LEVELDB_NOVA_IN_MEMORY_LOG_MANAGER_H
 
+#include <unordered_map>
+
 #include "mc/nova_mem_manager.h"
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -62,16 +64,16 @@ namespace nova {
         void DeleteLogBuf(const std::string &log_file);
 
         void QueryLogFiles(uint32_t sid, uint32_t range_id,
-                           std::map<std::string, uint64_t> *logfile_offset);
+                           std::unordered_map<std::string, uint64_t> *logfile_offset);
 
     private:
         struct LogRecords {
-            std::map<uint64_t, std::vector<char *>> backing_mems;
+            std::unordered_map<uint64_t, std::vector<char *>> backing_mems;
             std::mutex mu;
         };
 
         struct DBLogFiles {
-            std::map<std::string, LogRecords *> logfiles_;
+            std::unordered_map<std::string, LogRecords *> logfiles_;
             leveldb::port::Mutex mutex_;
         };
 

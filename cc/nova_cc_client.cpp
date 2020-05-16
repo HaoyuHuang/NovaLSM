@@ -12,18 +12,79 @@
 #include "db/filename.h"
 
 namespace leveldb {
-
     using namespace rdmaio;
 
-    NovaBlockCCClient::NovaBlockCCClient(uint32_t client_id) {
+    NovaBlockCCClient::NovaBlockCCClient(uint32_t client_id,
+                                         NovaRTableManager *rtable_manager)
+            : rtable_manager_(rtable_manager) {
         sem_init(&sem_, 0, 0);
         current_cc_id_ = client_id;
+    }
+
+    uint32_t NovaBlockCCClient::InitiateCompaction(uint32_t remote_server_id,
+                                                   leveldb::CompactionRequest *compaction_request) {
+        RDMA_ASSERT(remote_server_id != nova::NovaConfig::config->my_server_id);
+        RDMAAsyncClientRequestTask task = {};
+        task.type = RDMA_ASYNC_COMPACTION;
+        task.server_id = remote_server_id;
+        task.compaction_request = compaction_request;
+        task.sem = &sem_;
+
+        uint32_t reqid = req_id_;
+        CCResponse *response = new CCResponse;
+        req_response[reqid] = response;
+        task.response = response;
+        AddAsyncTask(task);
+
+        req_id_++;
+        return reqid;
     }
 
     uint32_t NovaBlockCCClient::InitiateRTableWriteDataBlocks(
             uint32_t server_id, uint32_t thread_id, uint32_t *rtable_id,
             char *buf, const std::string &dbname, uint64_t file_number,
             uint32_t size, bool is_meta_blocks) {
+        if (server_id == nova::NovaConfig::config->my_server_id) {
+            std::string filename;
+            RDMA_ASSERT(file_number != 0);
+            filename = leveldb::TableFileName(dbname,
+                                              file_number,
+                                              is_meta_blocks);
+            leveldb::NovaRTable *rtable = rtable_manager_->OpenRTable(
+                    thread_id, filename);
+            RDMA_ASSERT(rtable);
+            uint64_t rtable_off = rtable->AllocateBuf(filename, size,
+                                                      is_meta_blocks);
+            RDMA_ASSERT(rtable_off != UINT64_MAX)
+                << fmt::format("{} {}", filename, size);
+            char *rtable_buf = (char *) rtable_off;
+            memcpy(rtable_buf, buf, size);
+            RDMA_ASSERT(rtable->MarkOffsetAsWritten(rtable->rtable_id(),
+                                                    rtable_off)) << server_id;
+            uint64_t persisted_bytes = rtable->Persist(rtable->rtable_id());
+            RDMA_ASSERT(persisted_bytes == size)
+                << fmt::format("persisted bytes:{} written bytes:{}",
+                               persisted_bytes, size);
+            leveldb::BlockHandle h = rtable->Handle(
+                    filename, is_meta_blocks);
+            leveldb::RTableHandle rh = {};
+            rh.server_id = nova::NovaConfig::config->my_server_id;
+            rh.rtable_id = rtable->rtable_id();
+            rh.offset = h.offset();
+            rh.size = h.size();
+            rtable->ForceSeal();
+            RDMA_ASSERT(h.offset() == 0 && h.size() == size);
+            uint32_t reqid = req_id_;
+            CCResponse *response = new CCResponse;
+            req_response[reqid] = response;
+            req_id_++;
+            response->rtable_handles.push_back(rh);
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("Wake up local write");
+            sem_post(&sem_);
+            return reqid;
+        }
+
         RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_WRITE_DATA_BLOCKS;
@@ -41,13 +102,25 @@ namespace leveldb {
         req_response[reqid] = response;
         task.response = response;
         AddAsyncTask(task);
-
         req_id_++;
         return reqid;
     }
 
     uint32_t NovaBlockCCClient::InitiateReadDCStats(uint32_t server_id) {
-        RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
+        if (server_id == nova::NovaConfig::config->my_server_id) {
+            uint32_t reqid = req_id_;
+            CCResponse *response = new CCResponse;
+            req_response[reqid] = response;
+            response->dc_queue_depth = nova::dc_stats.dc_queue_depth;
+            response->dc_pending_write_bytes = nova::dc_stats.dc_pending_disk_writes;
+            response->dc_pending_read_bytes = nova::dc_stats.dc_pending_disk_reads;
+            req_id_++;
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("Wake up local read stats");
+            sem_post(&sem_);
+            return reqid;
+        }
+
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_READ_DC_STATS;
         task.server_id = server_id;
@@ -99,10 +172,6 @@ namespace leveldb {
 
         request_context_[req_id] = context;
         IncrementReqId();
-
-        // Flush immediately.
-        rdma_store_->FlushPendingSends(remote_server_id);
-
         RDMA_LOG(DEBUG)
             << fmt::format(
                     "dcclient[{}]: Read log file: dc:{} off:{} size:{} req:{}",
@@ -114,7 +183,7 @@ namespace leveldb {
     uint32_t NovaBlockCCClient::InitiateQueryLogFile(uint32_t storage_server_id,
                                                      uint32_t server_id,
                                                      uint32_t dbid,
-                                                     std::map<std::string, uint64_t> *logfile_offset) {
+                                                     std::unordered_map<std::string, uint64_t> *logfile_offset) {
         RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_QUERY_LOG_FILES;
@@ -145,6 +214,24 @@ namespace leveldb {
 
     uint32_t NovaBlockCCClient::InitiateDeleteTables(uint32_t server_id,
                                                      const std::vector<leveldb::SSTableRTablePair> &rtable_ids) {
+        if (server_id == nova::NovaConfig::config->my_server_id) {
+            for (int i = 0; i < rtable_ids.size(); i++) {
+                leveldb::NovaRTable *rtable = rtable_manager_->FindRTable(
+                        rtable_ids[i].rtable_id);
+                rtable->DeleteSSTable(rtable_ids[i].rtable_id,
+                                      rtable_ids[i].sstable_id);
+                leveldb::FileType type;
+                RDMA_ASSERT(leveldb::ParseFileName(rtable_ids[i].sstable_id,
+                                                   &type));
+                if (type == leveldb::FileType::kTableFile) {
+                    rtable_manager_->DeleteSSTable(
+                            rtable_ids[i].sstable_id + "-meta");
+                }
+
+            }
+            return 0;
+        }
+
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_DELETE_TABLES;
         task.server_id = server_id;
@@ -154,7 +241,7 @@ namespace leveldb {
     }
 
     uint32_t NovaBlockCCClient::InitiateFileNameRTableMapping(uint32_t stoc_id,
-                                                              const std::map<std::string, uint32_t> &fn_rtableid) {
+                                                              const std::unordered_map<std::string, uint32_t> &fn_rtableid) {
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_FILENAME_RTABLE_MAPPING;
         task.server_id = stoc_id;
@@ -169,7 +256,7 @@ namespace leveldb {
     }
 
     uint32_t NovaCCClient::InitiateFileNameRTableMapping(uint32_t stoc_id,
-                                                         const std::map<std::string, uint32_t> &fn_rtableid) {
+                                                         const std::unordered_map<std::string, uint32_t> &fn_rtableid) {
         uint32_t req_id = current_req_id_;
         CCRequestContext context = {};
         context.done = false;
@@ -187,8 +274,6 @@ namespace leveldb {
         rdma_store_->PostSend(send_buf, msg_size, stoc_id, req_id);
         request_context_[req_id] = context;
         IncrementReqId();
-
-        rdma_store_->FlushPendingSends(stoc_id);
         RDMA_LOG(DEBUG)
             << fmt::format(
                     "dcclient[{}]: Inform Filename RTable ID stoc:{} size:{} req:{}",
@@ -214,14 +299,42 @@ namespace leveldb {
 
     uint32_t NovaBlockCCClient::InitiateRTableReadDataBlock(
             const leveldb::RTableHandle &rtable_handle, uint64_t offset,
-            uint32_t size, char *result,
+            uint32_t size, char *result, uint32_t result_size,
             std::string filename) {
+        RDMA_ASSERT(size <= result_size);
+        if (rtable_handle.server_id == nova::NovaConfig::config->my_server_id) {
+            RTableHandle converted_handle = {};
+            uint32_t rtable_id = rtable_handle.rtable_id;
+            if (!filename.empty()) {
+                rtable_id = rtable_manager_->OpenRTable(0,
+                                                        filename)->rtable_id();
+            }
+            Slice output;
+            converted_handle.server_id = rtable_handle.server_id;
+            converted_handle.rtable_id = rtable_id;
+            converted_handle.offset = offset;
+            converted_handle.size = size;
+            rtable_manager_->ReadDataBlock(converted_handle,
+                                           converted_handle.offset,
+                                           converted_handle.size,
+                                           result, &output);
+            RDMA_ASSERT(output.size() == converted_handle.size);
+            RDMA_LOG(rdmaio::DEBUG)
+                << fmt::format("Wake up local read");
+            sem_post(&sem_);
+            uint32_t reqid = req_id_;
+            req_id_++;
+            return reqid;
+        }
+
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_READ;
+        task.server_id = rtable_handle.server_id;
         task.rtable_handle = rtable_handle;
         task.offset = offset;
         task.size = size;
         task.result = result;
+        task.write_size = result_size;
         task.filename = filename;
         task.sem = &sem_;
         AddAsyncTask(task);
@@ -247,10 +360,6 @@ namespace leveldb {
         task.write_buf = rdma_backing_mem;
         task.replicate_log_record_states = replicate_log_record_states;
         task.sem = &sem_;
-
-//        int val = 0;
-//        RDMA_ASSERT(sem_getvalue(&sem_, &val) == 0);
-//        RDMA_ASSERT(val == 0) << fmt::format("{}", val);
         AddAsyncTask(task);
         return 0;
     }
@@ -261,10 +370,8 @@ namespace leveldb {
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_CLOSE_LOG;
         task.log_file_name = log_file_name;
         task.dbid = dbid;
-//        task.sem = &sem_;
         AddAsyncTask(task);
         RDMA_LOG(DEBUG) << fmt::format("Close {}", log_file_name);
-//        RDMA_ASSERT(sem_wait(&sem_) == 0);
         return 0;
     }
 
@@ -284,15 +391,6 @@ namespace leveldb {
                                                 const std::vector<SSTableRTablePair> &rtable_ids) {
         RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
         uint32_t req_id = current_req_id_;
-        if (server_id == nova::NovaConfig::config->my_server_id) {
-            for (int i = 0; i < rtable_ids.size(); i++) {
-                leveldb::NovaRTable *rtable = rtable_manager_->rtable(
-                        rtable_ids[i].rtable_id);
-                rtable->DeleteSSTable(rtable_ids[i].sstable_id);
-            }
-            return 0;
-        }
-
         RDMA_LOG(DEBUG)
             << fmt::format("dcclient[{}]: Delete SSTables server:{} n:{}",
                            cc_client_id_, server_id, rtable_ids.size());
@@ -316,7 +414,7 @@ namespace leveldb {
     uint32_t NovaCCClient::InitiateQueryLogFile(uint32_t storage_server_id,
                                                 uint32_t server_id,
                                                 uint32_t dbid,
-                                                std::map<std::string, uint64_t> *logfile_offset) {
+                                                std::unordered_map<std::string, uint64_t> *logfile_offset) {
         RDMA_ASSERT(server_id !=
                     nova::NovaConfig::config->my_server_id);
 
@@ -339,9 +437,6 @@ namespace leveldb {
         request_context_[req_id] = context;
         IncrementReqId();
 
-        // Flush immediately.
-        rdma_store_->FlushPendingSends(storage_server_id);
-
         RDMA_LOG(DEBUG)
             << fmt::format(
                     "dcclient[{}]: Query RTable server:{} db:{} req:{}",
@@ -350,19 +445,39 @@ namespace leveldb {
         return req_id;
     }
 
+    uint32_t NovaCCClient::InitiateCompaction(uint32_t remote_server_id,
+                                              leveldb::CompactionRequest *compaction_request) {
+        RDMA_ASSERT(remote_server_id !=
+                    nova::NovaConfig::config->my_server_id);
+        uint32_t req_id = current_req_id_;
+        CCRequestContext context = {};
+        context.req_type = CCRequestType::CC_COMPACTION;
+        context.compaction = compaction_request;
+        context.done = false;
+
+        char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
+        uint32_t msg_size = 1;
+        send_buf[0] = CCRequestType::CC_COMPACTION;
+        msg_size += compaction_request->EncodeRequest(send_buf + 1);
+
+        rdma_store_->PostSend(send_buf, msg_size, remote_server_id, req_id);
+        request_context_[req_id] = context;
+        IncrementReqId();
+
+        RDMA_LOG(DEBUG)
+            << fmt::format(
+                    "dcclient[{}]: Initiate compaction server:{}  req:{}",
+                    cc_client_id_, remote_server_id, req_id);
+        return req_id;
+    }
+
     uint32_t NovaCCClient::InitiateRTableReadDataBlock(
             const leveldb::RTableHandle &rtable_handle, uint64_t offset,
-            uint32_t size, char *result,
+            uint32_t size, char *result, uint32_t result_size,
             std::string filename) {
         RDMA_ASSERT(rtable_handle.server_id !=
                     nova::NovaConfig::config->my_server_id);
-        if (rtable_handle.server_id == nova::NovaConfig::config->my_server_id) {
-            Slice backing_result;
-            rtable_manager_->ReadDataBlock(rtable_handle, offset, size, result,
-                                           &backing_result);
-            return 0;
-        }
-
+        RDMA_ASSERT(size <= result_size);
         uint32_t req_id = current_req_id_;
         CCRequestContext context = {};
         context.req_type = CCRequestType::CC_RTABLE_READ_BLOCKS;
@@ -370,8 +485,6 @@ namespace leveldb {
         context.size = size;
         context.done = false;
         context.log_file_name = filename;
-
-        nova::MarkCharAsWaitingForRDMAWRITE(result, context.size);
 
         char *send_buf = rdma_store_->GetSendBuf(rtable_handle.server_id);
         uint32_t msg_size = 1;
@@ -386,15 +499,10 @@ namespace leveldb {
         msg_size += 8;
         msg_size += EncodeStr(send_buf + msg_size, filename);
 
-
         rdma_store_->PostSend(send_buf, msg_size, rtable_handle.server_id,
                               req_id);
         request_context_[req_id] = context;
         IncrementReqId();
-
-        // Flush immediately.
-        rdma_store_->FlushPendingSends(rtable_handle.server_id);
-
         RDMA_LOG(DEBUG)
             << fmt::format(
                     "dcclient[{}]: Read RTable server:{} rtable:{} offset:{} size:{} off:{} size:{} fn:{} backing_mem:{} req:{}",
@@ -419,8 +527,6 @@ namespace leveldb {
         rdma_store_->PostSend(send_buf, msg_size, server_id, req_id);
         request_context_[req_id] = context;
         IncrementReqId();
-
-        rdma_store_->FlushPendingSends(server_id);
         return req_id;
     }
 
@@ -434,22 +540,6 @@ namespace leveldb {
                                                          uint32_t size,
                                                          bool is_meta_blocks) {
         RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
-//        if (server_id == nova::NovaConfig::config->my_server_id) {
-//            std::string sstable_id = TableFileName(dbname, file_number);
-//            NovaRTable *active_rtable = rtable_manager_->active_rtable(
-//                    thread_id);
-//            uint64_t offset = active_rtable->AllocateBuf(
-//                    sstable_id, size);
-//            if (offset == UINT64_MAX) {
-//                active_rtable = rtable_manager_->CreateNewRTable(thread_id);
-//                offset = active_rtable->AllocateBuf(sstable_id, size);
-//            }
-//            memcpy((char *) (offset), buf, size);
-//            active_rtable->MarkOffsetAsWritten(offset);
-//            *rtable_id = active_rtable->rtable_id();
-//            return 0;
-//        }
-
         uint32_t req_id = current_req_id_;
         CCRequestContext context = {};
         context.done = false;
@@ -473,8 +563,6 @@ namespace leveldb {
         context.size = size;
         request_context_[req_id] = context;
         IncrementReqId();
-
-        rdma_store_->FlushPendingSends(server_id);
         RDMA_LOG(DEBUG)
             << fmt::format(
                     "dcclient[{}]: Write RTable server:{} t:{} db:{} fn:{} size:{} req:{}",
@@ -534,11 +622,6 @@ namespace leveldb {
 
     bool NovaCCClient::IsDone(uint32_t req_id, CCResponse *response,
                               uint64_t *timeout) {
-        // Poll both queues.
-        rdma_store_->PollRQ();
-        rdma_store_->PollSQ();
-        cc_server_->PullAsyncCQ();
-
         if (req_id == 0) {
             // local bypass.
             return true;
@@ -578,9 +661,10 @@ namespace leveldb {
     NovaCCClient::OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                          int remote_server_id,
                          char *buf,
-                         uint32_t imm_data) {
+                         uint32_t imm_data, bool *generate_a_new_request) {
+        RDMA_ASSERT(generate_a_new_request);
+        *generate_a_new_request = false;
         bool processed = false;
-
         uint32_t req_id = imm_data;
         switch (type) {
             case IBV_WC_RDMA_READ: {
@@ -646,6 +730,7 @@ namespace leveldb {
                                 context.backing_mem,
                                 context.size, remote_server_id,
                                 rtable_offset, false, req_id);
+                        *generate_a_new_request = true;
                         context.done = false;
                         context.rtable_id = rtable_id;
                         RDMA_LOG(DEBUG) << fmt::format(
@@ -664,7 +749,6 @@ namespace leveldb {
                         // Waiting for WRITEs.
                         if (nova::IsRDMAWRITEComplete(context.backing_mem,
                                                       context.size)) {
-                            context.file_number;
                             RDMA_LOG(DEBUG) << fmt::format(
                                         "dcclient[{}]: Read RTable blocks complete size:{} req:{}",
                                         cc_client_id_, context.size, req_id);
@@ -741,9 +825,20 @@ namespace leveldb {
                                CCRequestType::CC_FILENAME_RTABLEID_RESPONSE) {
                         context.done = true;
                         processed = true;
+                    } else if (buf[0] ==
+                               CCRequestType::CC_COMPACTION_RESPONSE) {
+                        uint32_t num_outputs = leveldb::DecodeFixed32(buf + 1);
+                        Slice outputs(buf + 5,
+                                      nova::NovaConfig::config->max_msg_size);
+                        for (int i = 0; i < num_outputs; i++) {
+                            FileMetaData *meta = new FileMetaData;
+                            RDMA_ASSERT(meta->Decode(&outputs, false));
+                            context.compaction->outputs.push_back(meta);
+                        }
+                        context.done = true;
+                        processed = true;
                     }
                 }
-
                 break;
         }
         return processed;

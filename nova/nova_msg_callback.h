@@ -10,12 +10,11 @@
 #include <infiniband/verbs.h>
 
 namespace nova {
-
     class NovaMsgCallback {
     public:
         virtual bool
         ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
-                      char *buf, uint32_t imm_data) = 0;
+                      char *buf, uint32_t imm_data, bool* generate_a_new_request) = 0;
 
     };
 }

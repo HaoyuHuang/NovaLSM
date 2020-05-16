@@ -43,7 +43,7 @@ namespace nova {
 
         bool
         ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id, int remote_server_id,
-                      char *buf, uint32_t imm_data);
+                      char *buf, uint32_t imm_data, bool *new_request);
 
         void AddAsyncTask(
                 const nova::ServerWorkerAsyncTask &task);

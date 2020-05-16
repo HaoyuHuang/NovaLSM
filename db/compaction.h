@@ -7,13 +7,29 @@
 #ifndef LEVELDB_COMPACTION_H
 #define LEVELDB_COMPACTION_H
 
-#include <leveldb/status.h>
-#include <leveldb/env_bg_thread.h>
-#include <leveldb/iterator.h>
-#include "version_set.h"
-#include "subrange.h"
+#include "leveldb/status.h"
+#include "leveldb/env_bg_thread.h"
+#include "leveldb/iterator.h"
+
+#include "db/dbformat.h"
+#include "db/version_edit.h"
+#include "port/port.h"
+#include "port/thread_annotations.h"
+#include "memtable.h"
+#include "cc/nova_cc.h"
+#include "table_cache.h"
+
+#include "leveldb/subrange.h"
+#include "cc/nova_cc_client.h"
+
+#define FETCH_METADATA_BATCH_SIZE 128
 
 namespace leveldb {
+
+    class VersionFileMap;
+
+    class NovaBlockCCClient;
+
     enum CompactType {
         kCompactMemTables,
         kCompactSSTables
@@ -23,6 +39,96 @@ namespace leveldb {
         uint64_t num_files = 0;
         uint64_t file_size = 0;
         uint32_t level = 0;
+    };
+
+    // A Compaction encapsulates information about a compaction.
+    class Compaction {
+    public:
+        Compaction(VersionFileMap *input_version,
+                   const InternalKeyComparator *icmp,
+                   const Options *options,
+                   int level, int target_level);
+
+        std::string DebugString(const Comparator *user_comparator);
+
+        // Create an iterator that reads over the compaction inputs for "*c".
+        // The caller should delete the iterator when no longer needed.
+        Iterator *
+        MakeInputIterator(TableCache *table_cache, EnvBGThread *bg_thread);
+
+        // Return the level that is being compacted.  Inputs from "level"
+        // and "level+1" will be merged to produce a set of "level+1" files.
+        int level() const { return level_; }
+
+        int target_level() const { return target_level_; }
+
+        // Return the object that holds the edits to the descriptor done
+        // by this compaction.
+        VersionEdit *edit() { return &edit_; }
+
+        // "which" must be either 0 or 1
+        int num_input_files(int which) const { return inputs_[which].size(); }
+
+        uint64_t num_input_file_sizes(int which) const {
+            uint64_t size = 0;
+            for (auto meta : inputs_[which]) {
+                size += meta->file_size;
+            }
+            return size;
+        }
+
+        // Return the ith input file at "level()+which" ("which" must be 0 or 1).
+        FileMetaData *
+        input(int which, int i) const { return inputs_[which][i]; }
+
+        // Maximum size of files to build during this compaction.
+        uint64_t MaxOutputFileSize() const { return max_output_file_size_; }
+
+        // Is this a trivial compaction that can be implemented by just
+        // moving a single input file to the next level (no merging or splitting)
+        bool IsTrivialMove() const;
+
+        // Add all inputs to this compaction as delete operations to *edit.
+        void AddInputDeletions(VersionEdit *edit);
+
+        // Returns true iff we should stop building the current output
+        // before processing "internal_key".
+        bool ShouldStopBefore(const Slice &internal_key);
+
+        VersionFileMap *input_version_;
+
+        sem_t complete_signal_;
+
+        // Each compaction reads inputs from "level_" and "level_+1"
+        std::vector<FileMetaData *> inputs_[2];  // The two sets of inputs
+        // State used to check for number of overlapping grandparent files
+        // (parent == level_ + 1, grandparent == level_ + 2)
+        std::vector<FileMetaData *> grandparents_;
+
+    private:
+        friend class Version;
+
+        friend class VersionSet;
+
+        int level_;
+        int target_level_;
+        uint64_t max_output_file_size_;
+        VersionEdit edit_;
+        const Options *options_;
+        const InternalKeyComparator *icmp_;
+
+        size_t grandparent_index_ = 0;  // Index in grandparent_starts_
+        bool seen_key_ = false;             // Some output key has been seen
+        int64_t overlapped_bytes_ = 0;  // Bytes of overlap between current output
+        // and grandparent files
+
+        // State for implementing IsBaseLevelForKey
+
+        // level_ptrs_ holds indices into input_version_->levels_: our state
+        // is that we are positioned at one of the file ranges for each
+        // higher level than the ones involved in this compaction (i.e. for
+        // all L >= level_ + 2).
+        size_t level_ptrs_[config::kNumLevels];
     };
 
     // Per level compaction stats.  stats_[level] stores the stats for
@@ -42,16 +148,7 @@ namespace leveldb {
 
     struct CompactionState {
         // Files produced by compaction
-        struct Output {
-            uint64_t number;
-            uint64_t file_size;
-            uint64_t converted_file_size;
-            InternalKey smallest, largest;
-            RTableHandle meta_block_handle;
-            std::vector<RTableHandle> data_block_group_handles;
-        };
-
-        Output *current_output() { return &outputs[outputs.size() - 1]; }
+        FileMetaData *current_output() { return &outputs[outputs.size() - 1]; }
 
         explicit CompactionState(Compaction *c, SubRanges *s)
                 : compaction(c),
@@ -61,9 +158,11 @@ namespace leveldb {
                   builder(nullptr),
                   total_bytes(0) {}
 
-        Compaction *const compaction;
+        Compaction *const compaction = nullptr;
 
-        SubRanges *subranges;
+        SubRanges *subranges = nullptr;
+
+        CompactionStats BuildStats();
 
         bool ShouldStopBefore(const Slice &internal_key,
                               const Comparator *user_comparator) {
@@ -74,7 +173,7 @@ namespace leveldb {
                 if (subrange_index == -1) {
                     // Returns the first subrange that has its userkey < upper.
                     while (subrange_index < subranges->subranges.size()) {
-                        SubRange &sr = subranges->subranges[subrange_index];
+                        const SubRange &sr = subranges->subranges[subrange_index];
                         if (sr.IsGreaterThanUpper(userkey, user_comparator)) {
                             subrange_index++;
                         } else {
@@ -83,7 +182,7 @@ namespace leveldb {
                     }
                 }
                 while (subrange_index < subranges->subranges.size()) {
-                    SubRange &sr = subranges->subranges[subrange_index];
+                    const SubRange &sr = subranges->subranges[subrange_index];
                     if (sr.IsGreaterThanUpper(userkey, user_comparator)) {
                         subrange_index++;
                         subrange_stop = true;
@@ -104,16 +203,15 @@ namespace leveldb {
         // will never have to service a snapshot below smallest_snapshot.
         // Therefore if we have seen a sequence number S <= smallest_snapshot,
         // we can drop all entries for the same key with sequence numbers < S.
-        SequenceNumber smallest_snapshot;
+        SequenceNumber smallest_snapshot = 0;
 
-        std::vector<Output> outputs;
+        std::vector<FileMetaData> outputs;
 
         // State kept for output being generated
-        MemWritableFile *outfile;
-        TableBuilder *builder;
+        MemWritableFile *outfile = nullptr;
+        TableBuilder *builder = nullptr;
         std::vector<MemWritableFile *> output_files;
-
-        uint64_t total_bytes;
+        uint64_t total_bytes = 0;
     };
 
     class CompactionJob {
@@ -122,30 +220,42 @@ namespace leveldb {
                       Env *env,
                       const std::string &dbname,
                       const Comparator *user_comparator,
-                      const Options &options);
+                      const Options &options,
+                      EnvBGThread *bg_thread);
 
         Status
-        CompactTables(CompactionState *state, EnvBGThread *bg_thread,
+        CompactTables(CompactionState *state,
                       Iterator *input,
                       CompactionStats *stats, bool drop_duplicates,
                       CompactType type);
 
     private:
-        Status OpenCompactionOutputFile(CompactionState *compact,
-                                        EnvBGThread *bg_thread);
+        Status OpenCompactionOutputFile(CompactionState *compact);
 
         Status
-        FinishCompactionOutputFile(const ParsedInternalKey& ik, CompactionState *compact, Iterator *input);
+        FinishCompactionOutputFile(const ParsedInternalKey &ik,
+                                   CompactionState *compact, Iterator *input);
 
         std::function<uint64_t(void)> fn_generator_;
-        Env *env_;
-
+        Env *env_ = nullptr;
+        EnvBGThread *bg_thread_ = nullptr;
         const std::string dbname_;
-        const Comparator *user_comparator_;
-        const Options &options_;
-
+        const Comparator *user_comparator_ = nullptr;
+        const Options options_;
     };
 
+    void
+    FetchMetadataFilesInParallel(const std::vector<FileMetaData *> &files,
+                                 const std::string &dbname,
+                                 const Options &options,
+                                 NovaBlockCCClient *client,
+                                 Env *env);
+
+    void
+    FetchMetadataFiles(const std::vector<FileMetaData *> &files,
+                       const std::string &dbname,
+                       const Options &options, NovaBlockCCClient *client,
+                       Env *env);
 }
 
 

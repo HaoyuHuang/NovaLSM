@@ -34,16 +34,6 @@ namespace leveldb {
         virtual ~Snapshot();
     };
 
-// A range of keys
-    struct LEVELDB_EXPORT Range {
-        Range() = default;
-
-        Range(const Slice &s, const Slice &l) : start(s), limit(l) {}
-
-        Slice start;  // Included in the range
-        Slice limit;  // Not included in the range
-    };
-
     struct OverlappingStats {
         uint32_t num_overlapping_tables = 0;
         uint64_t total_size = 0;
@@ -152,6 +142,8 @@ namespace leveldb {
         // Caller should delete the iterator when it is no longer needed.
         // The returned iterator should be deleted before this db is deleted.
         virtual Iterator *NewIterator(const ReadOptions &options) = 0;
+
+        virtual uint32_t FlushMemTables() = 0;
 
         // Return a handle to the current DB state.  Iterators created with
         // this handle will all observe a stable snapshot of the current DB

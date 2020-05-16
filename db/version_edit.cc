@@ -9,26 +9,6 @@
 
 namespace leveldb {
 
-    std::string VersionSubRange::DebugString() const {
-        std::string result;
-        result.append(std::to_string(subrange_id));
-        result.append(" ");
-        if (lower_inclusive) {
-            result.append("[");
-        } else {
-            result.append("(");
-        }
-        result.append(lower.ToString());
-        result.append(",");
-        result.append(upper.ToString());
-        if (upper_inclusive) {
-            result.append("]");
-        } else {
-            result.append(")");
-        }
-        return result;
-    }
-
 // Tag numbers for serialized VersionEdit.  These numbers are written to
 // disk and should not be changed.
     enum Tag : char {
@@ -82,37 +62,15 @@ namespace leveldb {
                                       deleted_file_kvp.first);// level
             msg_size += EncodeFixed64(dst + msg_size,
                                       deleted_file_kvp.second.fnumber); // file number
-            msg_size += EncodeFixed32(dst + msg_size,
-                                      deleted_file_kvp.second.memtable_id); // file number
-
         }
 
         for (size_t i = 0; i < new_files_.size(); i++) {
             auto &f = new_files_[i].second;
             dst[msg_size] = kNewFile;
             msg_size += 1;
-
             msg_size += EncodeFixed32(dst + msg_size,
                                       new_files_[i].first); // level
-            msg_size += EncodeFixed64(dst + msg_size, f.number);
-            msg_size += EncodeFixed64(dst + msg_size, f.file_size);
-            msg_size += EncodeFixed64(dst + msg_size, f.converted_file_size);
-            msg_size += EncodeStr(dst + msg_size,
-                                  f.smallest.Encode().ToString());
-            msg_size += EncodeStr(dst + msg_size,
-                                  f.largest.Encode().ToString());
-            msg_size += EncodeFixed64(dst + msg_size, f.flush_timestamp);
-            msg_size += EncodeFixed32(dst + msg_size, f.level);
-            msg_size += EncodeFixed32(dst + msg_size, f.memtable_id);
-            f.meta_block_handle.EncodeHandle(dst + msg_size);
-            msg_size += f.meta_block_handle.HandleSize();
-
-            msg_size += EncodeFixed32(dst + msg_size,
-                                      f.data_block_group_handles.size());
-            for (auto &handle : f.data_block_group_handles) {
-                handle.EncodeHandle(dst + msg_size);
-                msg_size += handle.HandleSize();
-            }
+            msg_size += f.Encode(dst + msg_size);
         }
 
         for (size_t i = 0; i < new_subranges_.size(); i++) {
@@ -120,25 +78,12 @@ namespace leveldb {
             dst[msg_size] = kUpdateSubRange;
             msg_size += 1;
 
-            msg_size += EncodeFixed32(dst + msg_size, subrange.subrange_id);
-            msg_size += EncodeSlice(dst + msg_size, subrange.lower);
-            msg_size += EncodeSlice(dst + msg_size, subrange.upper);
-            msg_size += EncodeBool(dst + msg_size, subrange.lower_inclusive);
-            msg_size += EncodeBool(dst + msg_size, subrange.upper_inclusive);
-            msg_size += EncodeFixed32(dst + msg_size, subrange.num_duplicates);
+            msg_size += subrange.Encode(dst + msg_size, i);
+
         }
         dst[msg_size] = kEndEdit;
         msg_size += 1;
         return msg_size;
-    }
-
-    static bool GetInternalKey(Slice *input, InternalKey *dst) {
-        Slice str;
-        if (DecodeStr(input, &str)) {
-            return dst->DecodeFrom(str);
-        } else {
-            return false;
-        }
     }
 
     static bool GetLevel(Slice *input, int *level) {
@@ -164,7 +109,7 @@ namespace leveldb {
         FileMetaData f;
         Slice str;
         InternalKey key;
-        VersionSubRange sr;
+        SubRange sr;
 
         while (msg == nullptr && input.size() > 0) {
             tag = input[0];
@@ -179,12 +124,6 @@ namespace leveldb {
 
             switch (tag) {
                 case kComparator:
-                    if (DecodeStr(&input, &str)) {
-                        comparator_ = str.ToString();
-                        has_comparator_ = true;
-                    } else {
-                        msg = "comparator name";
-                    }
                     break;
                 case kNextFileNumber:
                     if (DecodeFixed64(&input, &next_file_number_)) {
@@ -201,23 +140,11 @@ namespace leveldb {
                         msg = "last sequence number";
                     }
                     break;
-
-                case kCompactPointer:
-                    if (GetLevel(&input, &level) &&
-                        GetInternalKey(&input, &key)) {
-                        compact_pointers_.push_back(std::make_pair(level, key));
-                    } else {
-                        msg = "compaction pointer";
-                    }
-                    break;
-
                 case kDeletedFile:
                     if (GetLevel(&input, &level) &&
-                        DecodeFixed64(&input, &number) &&
-                        DecodeFixed32(&input, &number_2)) {
+                        DecodeFixed64(&input, &number)) {
                         DeletedFileIdentifier df = {};
                         df.fnumber = number;
-                        df.memtable_id = number_2;
                         deleted_files_.emplace_back(std::make_pair(level, df));
                     } else {
                         msg = "deleted file";
@@ -225,19 +152,7 @@ namespace leveldb {
                     break;
 
                 case kNewFile:
-                    if (GetLevel(&input, &level) &&
-                        DecodeFixed64(&input, &f.number) &&
-                        DecodeFixed64(&input, &f.file_size) &&
-                        DecodeFixed64(&input, &f.converted_file_size) &&
-                        GetInternalKey(&input, &f.smallest) &&
-                        GetInternalKey(&input, &f.largest) &&
-                        DecodeFixed64(&input, &f.flush_timestamp) &&
-                        DecodeFixed32(&input, &f.level) &&
-                        DecodeFixed32(&input, &f.memtable_id) &&
-                        RTableHandle::DecodeHandle(&input,
-                                                   &f.meta_block_handle) &&
-                        RTableHandle::DecodeHandles(&input,
-                                                    &f.data_block_group_handles)) {
+                    if (GetLevel(&input, &level) && f.Decode(&input, false)) {
                         new_files_.emplace_back(std::make_pair(level, f));
                         f.data_block_group_handles.clear();
                     } else {
@@ -245,12 +160,7 @@ namespace leveldb {
                     }
                     break;
                 case kUpdateSubRange:
-                    if (DecodeFixed32(&input, &sr.subrange_id) &&
-                        DecodeStr(&input, &sr.lower) &&
-                        DecodeStr(&input, &sr.upper) &&
-                        DecodeBool(&input, &sr.lower_inclusive) &&
-                        DecodeBool(&input, &sr.upper_inclusive) &&
-                        DecodeFixed32(&input, &sr.num_duplicates)) {
+                    if (sr.Decode(&input)) {
                         new_subranges_.push_back(sr);
                     } else {
                         msg = "update-subrange entry";
@@ -302,8 +212,6 @@ namespace leveldb {
             r.append("\n  DeleteFile: ");
             AppendNumberTo(&r, deleted_files_kvp.first);
             r.append(" ");
-            AppendNumberTo(&r, deleted_files_kvp.second.memtable_id);
-            r.append(" ");
             AppendNumberTo(&r, deleted_files_kvp.second.fnumber);
         }
         for (size_t i = 0; i < new_files_.size(); i++) {
@@ -314,7 +222,7 @@ namespace leveldb {
             r.append(f.DebugString());
         }
         for (size_t i = 0; i < new_subranges_.size(); i++) {
-            const VersionSubRange &sr = new_subranges_[i];
+            const SubRange &sr = new_subranges_[i];
             r.append("\n  UpdateSubrange: ");
             r.append(sr.DebugString());
         }

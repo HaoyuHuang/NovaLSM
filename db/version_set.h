@@ -26,6 +26,7 @@
 #include "port/thread_annotations.h"
 #include "memtable.h"
 #include "cc/nova_cc.h"
+#include "table_cache.h"
 
 #define MAX_LIVE_MEMTABLES 100000
 
@@ -80,7 +81,23 @@ namespace leveldb {
         kL1AndAbove = 2
     };
 
-    class Version {
+    class VersionFileMap {
+    public:
+        VersionFileMap(TableCache *table_cache) : table_cache_(table_cache) {}
+
+        TableCache *table_cache() {
+            return table_cache_;
+        }
+
+        FileMetaData *file_meta(uint64_t fn) {
+            return fn_files_[fn];
+        }
+
+        TableCache *table_cache_;
+        std::unordered_map<uint64_t, FileMetaData *> fn_files_;
+    };
+
+    class Version : public VersionFileMap {
     public:
         // Lookup the value for key.  If found, store it in *val and
         // return OK.  Else return a non-OK status.  Fills *stats.
@@ -95,11 +112,13 @@ namespace leveldb {
         // REQUIRES: This version has been saved (see VersionSet::SaveTo)
         void AddIterators(const ReadOptions &, std::vector<Iterator *> *iters);
 
-        Status Get(const ReadOptions &, const LookupKey &key, std::string *val,
-                   GetStats *stats, GetSearchScope search_scope);
+        Status
+        Get(const ReadOptions &, const LookupKey &key, SequenceNumber *seq,
+            std::string *val, GetStats *stats, GetSearchScope search_scope);
 
         Status Get(const ReadOptions &, std::vector<uint64_t> &fns,
                    const LookupKey &key,
+                   SequenceNumber *seq,
                    std::string *val);
 
         // Reference count management (so Versions do not disappear out from
@@ -120,13 +139,19 @@ namespace leveldb {
         // Return a human readable string that describes this version's contents.
         std::string DebugString() const;
 
-        void QueryStats(DBStats *stats);
+        void QueryStats(DBStats *stats, bool detailed_stats);
 
         void ComputeOverlappingFilesStats(
-                std::map<uint64_t, FileMetaData *> *files,
+                std::unordered_map<uint64_t, FileMetaData *> *files,
                 std::vector<OverlappingStats> *num_overlapping);
 
-        bool ComputeOverlappingFilesInRange(
+        enum OverlappingFileResult {
+            OVERLAP_FOUND_NEW_TABLES,
+            OVERLAP_EXCEED_MAX,
+            OVERLAP_NO_NEW_TABLES
+        };
+
+        OverlappingFileResult ComputeOverlappingFilesInRange(
                 std::vector<FileMetaData *> *files,
                 int which,
                 Compaction *compaction,
@@ -136,12 +161,12 @@ namespace leveldb {
                 Slice *new_upper);
 
         void ComputeOverlappingFilesForRange(
-                std::vector<FileMetaData *> *l0files,
-                std::vector<FileMetaData *> *l1files,
+                std::vector<FileMetaData *> *l0inputs,
+                std::vector<FileMetaData *> *l1inputs,
                 Compaction *compaction);
 
         void ComputeOverlappingFilesPerTable(
-                std::map<uint64_t, FileMetaData *> *files,
+                std::unordered_map<uint64_t, FileMetaData *> *files,
                 std::vector<OverlappingStats> *num_overlapping);
 
         void ComputeNonOverlappingSet(std::vector<Compaction *> *compactions);
@@ -150,11 +175,7 @@ namespace leveldb {
         AssertNonOverlappingSet(const std::vector<Compaction *> &compactions,
                                 std::string *reason);
 
-        static std::map<uint64_t, FileMetaData *> last_fnfile;
-
-        TableCache *table_cache();
-
-        FileMetaData *file_meta(uint64_t fn);
+        static std::unordered_map<uint64_t, FileMetaData *> last_fnfile;
 
         uint32_t version_id() {
             return version_id_;
@@ -165,8 +186,8 @@ namespace leveldb {
         explicit Version(const InternalKeyComparator *icmp,
                          TableCache *table_cache,
                          const Options *const options, uint32_t version_id)
-                : icmp_(icmp),
-                  table_cache_(table_cache),
+                : VersionFileMap(table_cache),
+                  icmp_(icmp),
                   options_(options),
                   next_(this),
                   prev_(this),
@@ -179,7 +200,6 @@ namespace leveldb {
 
         // List of files per level
         std::vector<FileMetaData *> files_[config::kNumLevels];
-        std::map<uint64_t, FileMetaData *> fn_files_;
         uint32_t version_id_;
     private:
         friend class Compaction;
@@ -205,6 +225,11 @@ namespace leveldb {
                       Slice *smallest,
                       Slice *largest);
 
+        void
+        ExpandRangeWithBoundaries(const std::vector<FileMetaData *> &inputs,
+                                  Slice *smallest,
+                                  Slice *largest);
+
         void RemoveOverlapTablesWithRange(std::vector<FileMetaData *> *inputs,
                                           const Slice &smallest,
                                           const Slice &largest);
@@ -226,7 +251,6 @@ namespace leveldb {
                                 GetSearchScope search_scope);
 
         const InternalKeyComparator *icmp_;
-        TableCache *table_cache_;
         const Options *const options_;
 
         Version *next_;     // Next version in linked list
@@ -277,7 +301,8 @@ namespace leveldb {
         // current version.  Will release *mu while actually writing to the file.
         // REQUIRES: *mu is held on entry.
         // REQUIRES: no other thread concurrently calls LogAndApply()
-        Status LogAndApply(VersionEdit *edit, Version *new_version);
+        Status LogAndApply(VersionEdit *edit, Version *new_version,
+                           bool install_new_version);
 
         void AppendChangesToManifest(VersionEdit *edit,
                                      NovaCCMemFile *manifest_file,
@@ -285,7 +310,7 @@ namespace leveldb {
 
         // Recover the last saved descriptor from persistent storage.
         Status Recover(Slice manifest_file,
-                       std::vector<VersionSubRange> *subrange_edits);
+                       std::vector<SubRange> *subrange_edits);
 
         // Return the current version.
         Version *current() const { return current_; }
@@ -324,12 +349,8 @@ namespace leveldb {
         // describes the compaction.  Caller should delete the result.
         Compaction *PickCompaction(uint32_t thread_id);
 
-        // Create an iterator that reads over the compaction inputs for "*c".
-        // The caller should delete the iterator when no longer needed.
-        Iterator *MakeInputIterator(Compaction *c, EnvBGThread *bg_thread);
-
         void AddCompactedInputs(Compaction *c,
-                                std::map<uint64_t, FileMetaData> *map);
+                                std::unordered_map<uint64_t, FileMetaData> *map);
 
         // Returns true iff some level needs a compaction.
         bool NeedsCompaction() const {
@@ -341,6 +362,8 @@ namespace leveldb {
         // May also mutate some internal state.
         void AddLiveFiles(std::set<uint64_t> *live);
 
+        void AppendVersion(Version *v);
+
         void DeleteObsoleteVersions();
 
         // Return the approximate offset in the database of the data for
@@ -348,13 +371,13 @@ namespace leveldb {
         uint64_t ApproximateOffsetOf(Version *v, const InternalKey &key);
 
         uint32_t current_version_id() {
-            return current_version_id_.load();
+            return current_version_id_;
         }
 
         std::atomic_uint_fast64_t last_sequence_;
 
-        AtomicMemTable mid_table_mapping_[MAX_LIVE_MEMTABLES];
-        AtomicVersion versions_[MAX_LIVE_MEMTABLES];
+        AtomicMemTable *mid_table_mapping_[MAX_LIVE_MEMTABLES];
+        AtomicVersion* versions_[MAX_LIVE_MEMTABLES];
         std::atomic_int_fast32_t version_id_seq_;
 
         std::mutex manifest_lock_;
@@ -377,8 +400,6 @@ namespace leveldb {
 
         void SetupOtherInputs(Compaction *c);
 
-        void AppendVersion(Version *v);
-
         Env *const env_;
         const std::string dbname_;
         const Options *const options_;
@@ -397,91 +418,6 @@ namespace leveldb {
         // Either an empty string, or a valid InternalKey.
         std::string compact_pointer_[config::kNumLevels];
     };
-
-    // A Compaction encapsulates information about a compaction.
-    class Compaction {
-    public:
-        std::string DebugString(const Comparator *user_comparator);
-
-        // Return the level that is being compacted.  Inputs from "level"
-        // and "level+1" will be merged to produce a set of "level+1" files.
-        int level() const { return level_; }
-
-        int target_level() const { return target_level_; }
-
-        // Return the object that holds the edits to the descriptor done
-        // by this compaction.
-        VersionEdit *edit() { return &edit_; }
-
-        // "which" must be either 0 or 1
-        int num_input_files(int which) const { return inputs_[which].size(); }
-
-        uint64_t num_input_file_sizes(int which) const {
-            uint64_t size = 0;
-            for (auto meta : inputs_[which]) {
-                size += meta->file_size;
-            }
-            return size;
-        }
-
-        // Return the ith input file at "level()+which" ("which" must be 0 or 1).
-        FileMetaData *
-        input(int which, int i) const { return inputs_[which][i]; }
-
-        // Maximum size of files to build during this compaction.
-        uint64_t MaxOutputFileSize() const { return max_output_file_size_; }
-
-        // Is this a trivial compaction that can be implemented by just
-        // moving a single input file to the next level (no merging or splitting)
-        bool IsTrivialMove() const;
-
-        // Add all inputs to this compaction as delete operations to *edit.
-        void AddInputDeletions(VersionEdit *edit);
-
-        // Returns true iff we should stop building the current output
-        // before processing "internal_key".
-        bool ShouldStopBefore(const Slice &internal_key);
-
-        Version *input_version_;
-
-        sem_t complete_signal_;
-    private:
-        friend class Version;
-
-        friend class VersionSet;
-
-        Compaction(Version *input_version, const InternalKeyComparator *icmp,
-                   const Options *options,
-                   int level, int target_level);
-
-        int level_;
-        int target_level_;
-        uint64_t max_output_file_size_;
-        VersionEdit edit_;
-        const Options *options_;
-        const InternalKeyComparator *icmp_;
-
-        // Each compaction reads inputs from "level_" and "level_+1"
-        std::vector<FileMetaData *> inputs_[2];  // The two sets of inputs
-
-        // State used to check for number of overlapping grandparent files
-        // (parent == level_ + 1, grandparent == level_ + 2)
-        std::vector<FileMetaData *> grandparents_;
-        size_t grandparent_index_ = 0;  // Index in grandparent_starts_
-        bool seen_key_ = false;             // Some output key has been seen
-        int64_t overlapped_bytes_ = 0;  // Bytes of overlap between current output
-        // and grandparent files
-
-        // State for implementing IsBaseLevelForKey
-
-        // level_ptrs_ holds indices into input_version_->levels_: our state
-        // is that we are positioned at one of the file ranges for each
-        // higher level than the ones involved in this compaction (i.e. for
-        // all L >= level_ + 2).
-        size_t level_ptrs_[config::kNumLevels];
-
-    };
-
 }  // namespace leveldb
 
 #endif  // STORAGE_LEVELDB_DB_VERSION_SET_H

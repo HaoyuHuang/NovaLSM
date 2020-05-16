@@ -120,9 +120,8 @@ namespace leveldb {
 
         Status Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n, Slice *result,
                     char *scratch) override;
-
-    private:
         MemFile *file_;
+    private:
     };
 
     class MemRandomRWFile : public RandomAccessFile {

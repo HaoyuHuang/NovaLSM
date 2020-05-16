@@ -13,6 +13,7 @@
 #include <vector>
 #include <map>
 #include <mutex>
+#include <set>
 #include "port/port.h"
 
 #include "slice.h"
@@ -104,9 +105,6 @@ namespace leveldb {
     };
 
     struct DeletedFileIdentifier {
-        DeletedFileIdentifier() {}
-
-        uint32_t memtable_id = 0;
         uint64_t fnumber = 0;
     };
 
@@ -115,13 +113,18 @@ namespace leveldb {
                          converted_file_size(0),
                          compaction_status(FileCompactionStatus::NONE) {}
 
+        uint32_t Encode(char *buf) const;
+
+        bool Decode(Slice *ptr, bool copy);
+
         std::string DebugString() const;
 
         std::string ShortDebugString() const;
 
         int refs;
         int allowed_seeks;  // Seeks allowed until compaction
-        uint32_t memtable_id = 0;
+        //
+        std::set<uint32_t> memtable_ids;
         uint64_t number;
         uint64_t file_size;    // File size in bytes in original SSTable format.
         uint64_t converted_file_size; // File size in bytes after converted to RTable.
@@ -133,11 +136,6 @@ namespace leveldb {
         RTableHandle meta_block_handle;
         std::vector<RTableHandle> data_block_group_handles;
     };
-
-    uint32_t
-    EncodeFileMetaData(const FileMetaData &meta, char *buf, uint32_t buf_size);
-
-    void DecodeFileMetaData(const Slice &s, FileMetaData *meta);
 
     class LEVELDB_EXPORT MemManager {
     public:
@@ -154,7 +152,7 @@ namespace leveldb {
 
     class CCServer {
     public:
-        virtual int PullAsyncCQ() = 0;
+        virtual int ProcessCompletionQueue() = 0;
     };
 
     class WBTable {

@@ -9,12 +9,12 @@
 
 namespace leveldb {
     SubRangeManager::SubRangeManager(leveldb::NovaCCMemFile *manifest_file,
-                                 const std::string &dbname,
-                                 leveldb::VersionSet *versions,
-                                 const leveldb::Options &options,
-                                 const leveldb::Comparator *user_comparator,
-                                 std::vector<leveldb::MemTablePartition *> *partitioned_active_memtables,
-                                 std::vector<uint32_t> *partitioned_imms)
+                                     const std::string &dbname,
+                                     leveldb::VersionSet *versions,
+                                     const leveldb::Options &options,
+                                     const leveldb::Comparator *user_comparator,
+                                     std::vector<leveldb::MemTablePartition *> *partitioned_active_memtables,
+                                     std::vector<uint32_t> *partitioned_imms)
             : manifest_file_(manifest_file), dbname_(dbname),
               versions_(versions), options_(options),
               user_comparator_(user_comparator),
@@ -25,9 +25,9 @@ namespace leveldb {
 
 
     int SubRangeManager::SearchSubranges(const leveldb::WriteOptions &options,
-                                       const leveldb::Slice &key,
-                                       const leveldb::Slice &val,
-                                       leveldb::SubRange **subrange) {
+                                         const leveldb::Slice &key,
+                                         const leveldb::Slice &val,
+                                         leveldb::SubRange **subrange) {
         SubRanges *ref = latest_subranges_;
         ref->AssertSubrangeBoundary(user_comparator_);
         int subrange_id = -1;
@@ -64,32 +64,33 @@ namespace leveldb {
                 new_subranges->subranges.size() <
                 options_.num_memtable_partitions) {
                 SubRange &sr = new_subranges->subranges[subrange_id];
-                if (sr.lower_inclusive &&
-                    user_comparator_->Compare(sr.lower, key) == 0) {
+                if (sr.lower_inclusive() &&
+                    user_comparator_->Compare(sr.lower(), key) == 0) {
                     // Cannot split this subrange since it will create a new subrange with no keys.
                     break;
                 }
 
                 // find the key but not enough subranges. Split this subrange.
-                SubRange new_sr = {}; // [k, sr.upper]
-                new_sr.lower = SubRange::Copy(key);
-                new_sr.upper = SubRange::Copy(sr.upper);
-                new_sr.lower_inclusive = true;
-                new_sr.upper_inclusive = sr.upper_inclusive;
-                // [lower, k)
-                delete sr.upper.data();
-                sr.upper = SubRange::Copy(new_sr.lower);
-                sr.upper_inclusive = false;
+                SubRange new_sr = {}; // [k, sr.upper)
+                Range new_range = {};
+                new_range.lower.assign(key.ToString());
+                new_range.upper.assign(sr.upper());
+                // Update the last tiny range of sr to [tr.lower, k)
+                Range &last = sr.tiny_ranges[sr.tiny_ranges.size() - 1];
+                last.upper.assign(key.ToString());
 
                 // update stats.
-                sr.ninserts /= 2;
-                new_sr.ninserts = sr.ninserts;
+                last.ninserts /= 2;
+                new_range.ninserts = last.ninserts;
+                new_sr.UpdateStats();
+                sr.UpdateStats();
 
                 // insert new subrange.
+                new_sr.tiny_ranges.push_back(std::move(new_range));
                 subrange_id += 1;
                 new_subranges->subranges.insert(
                         new_subranges->subranges.begin() + subrange_id,
-                        new_sr);
+                        std::move(new_sr));
                 break;
             }
 
@@ -102,8 +103,8 @@ namespace leveldb {
                         key,
                         user_comparator_)) {
                     SubRange &sr = new_subranges->subranges[subrange_id];
-                    sr.lower = SubRange::Copy(key);
-                    sr.lower_inclusive = true;
+                    Range &first = sr.tiny_ranges[0];
+                    first.lower.assign(key.ToString());
                     if (sr.num_duplicates > 0) {
                         int i = subrange_id - 1;
                         while (i >= 0) {
@@ -118,8 +119,8 @@ namespace leveldb {
                         int start = i + 1;
                         for (int i = 0; i < sr.num_duplicates; i++) {
                             SubRange &dup = new_subranges->subranges[start + i];
-                            dup.lower = SubRange::Copy(key);
-                            dup.lower_inclusive = true;
+                            Range &dup_first = dup.tiny_ranges[0];
+                            dup_first.lower.assign(key.ToString());
                         }
                     }
                 } else {
@@ -128,8 +129,9 @@ namespace leveldb {
                                     key,
                                     user_comparator_));
                     SubRange &sr = new_subranges->subranges[subrange_id];
-                    sr.upper = SubRange::Copy(key);
-                    sr.upper_inclusive = true;
+                    Range &last = sr.tiny_ranges[sr.tiny_ranges.size() - 1];
+                    last.upper.assign(key.ToString());
+                    last.upper_inclusive = true;
                     if (sr.num_duplicates > 0) {
                         int i = subrange_id - 1;
                         while (i >= 0) {
@@ -144,8 +146,10 @@ namespace leveldb {
                         int start = i + 1;
                         for (int i = 0; i < sr.num_duplicates; i++) {
                             SubRange &dup = new_subranges->subranges[start + i];
-                            dup.upper = SubRange::Copy(key);
-                            dup.upper_inclusive = true;
+                            Range &dup_last = dup.tiny_ranges[
+                                    sr.tiny_ranges.size() - 1];
+                            dup_last.upper = key.ToString();
+                            dup_last.upper_inclusive = true;
                         }
                     }
                 }
@@ -156,12 +160,12 @@ namespace leveldb {
             // no subranges. construct a point.
             if (new_subranges->subranges.empty()) {
                 SubRange sr = {};
-                sr.lower = SubRange::Copy(key);
-                sr.upper = SubRange::Copy(key);
-
-                sr.lower_inclusive = true;
-                sr.upper_inclusive = true;
-                new_subranges->subranges.push_back(sr);
+                Range new_range = {};
+                new_range.lower.assign(key.ToString());
+                new_range.upper.assign(
+                        std::to_string(new_range.lower_int() + 1));
+                sr.tiny_ranges.push_back(std::move(new_range));
+                new_subranges->subranges.push_back(std::move(sr));
                 subrange_id = 0;
                 break;
             }
@@ -170,11 +174,15 @@ namespace leveldb {
                 new_subranges->subranges[0].IsAPoint(user_comparator_)) {
                 if (new_subranges->subranges[0].IsSmallerThanLower(key,
                                                                    user_comparator_)) {
-                    new_subranges->subranges[0].lower_inclusive = true;
-                    new_subranges->subranges[0].lower = SubRange::Copy(key);
+                    Range &first = new_subranges->subranges[0].tiny_ranges[0];
+                    first.lower.assign(key.ToString());
                 } else {
-                    new_subranges->subranges[0].upper_inclusive = true;
-                    new_subranges->subranges[0].upper = SubRange::Copy(key);
+                    Range &last = new_subranges->subranges[0].tiny_ranges[
+                            new_subranges->subranges[0].tiny_ranges.size() -
+                            1];
+                    uint64_t u = 0;
+                    nova::str_to_int(key.data(), &u, key.size());
+                    last.upper.assign(std::to_string(u + 1));
                 }
                 subrange_id = 0;
                 break;
@@ -184,14 +192,13 @@ namespace leveldb {
             if (new_subranges->subranges[subrange_id].IsSmallerThanLower(key,
                                                                          user_comparator_)) {
                 SubRange sr = {};
-                sr.lower = SubRange::Copy(key);
-                sr.upper = SubRange::Copy(
-                        new_subranges->subranges[subrange_id].lower);
-                sr.lower_inclusive = true;
-                sr.upper_inclusive = false;
-
+                Range new_range = {};
+                new_range.lower.assign(key.ToString());
+                new_range.upper.assign(
+                        new_subranges->subranges[subrange_id].lower());
+                sr.tiny_ranges.push_back(std::move(new_range));
                 new_subranges->subranges.insert(
-                        new_subranges->subranges.begin(), sr);
+                        new_subranges->subranges.begin(), std::move(sr));
                 break;
             }
 
@@ -199,12 +206,14 @@ namespace leveldb {
             if (new_subranges->subranges[subrange_id].IsGreaterThanUpper(key,
                                                                          user_comparator_)) {
                 SubRange sr = {};
-                sr.lower = SubRange::Copy(
-                        new_subranges->subranges[subrange_id].upper);
-                sr.upper = SubRange::Copy(key);
-                sr.lower_inclusive = false;
-                sr.upper_inclusive = true;
-                new_subranges->subranges.push_back(sr);
+                Range new_range = {};
+                new_range.lower.assign(
+                        new_subranges->subranges[subrange_id].upper());
+                uint64_t u = 0;
+                nova::str_to_int(key.data(), &u, key.size());
+                new_range.upper.assign(std::to_string(u + 1));
+                sr.tiny_ranges.push_back(std::move(new_range));
+                new_subranges->subranges.push_back(std::move(sr));
                 subrange_id = new_subranges->subranges.size() - 1;
                 break;
             }
@@ -229,7 +238,7 @@ namespace leveldb {
     }
 
     void SubRangeManager::PerformSubrangeMajorReorg(SubRanges *latest,
-                                                  double processed_writes) {
+                                                    double processed_writes) {
         std::vector<double> insertion_rates;
         std::vector<SubRange> &subranges = latest->subranges;
         // Perform major reorg.
@@ -248,9 +257,9 @@ namespace leveldb {
             MemTable *m = (*partitioned_active_memtables_)[i]->memtable;
             if (m) {
                 RDMA_ASSERT(
-                        versions_->mid_table_mapping_[m->memtableid()].Ref());
+                        versions_->mid_table_mapping_[m->memtableid()]->RefMemTable());
                 memtables.push_back(
-                        &versions_->mid_table_mapping_[m->memtableid()]);
+                        versions_->mid_table_mapping_[m->memtableid()]);
             }
             uint32_t slots = nslots;
             if (remainder > 0) {
@@ -262,9 +271,9 @@ namespace leveldb {
                 if (imm_id == 0) {
                     continue;
                 }
-                auto *imm = versions_->mid_table_mapping_[imm_id].Ref();
+                auto *imm = versions_->mid_table_mapping_[imm_id]->RefMemTable();
                 if (imm) {
-                    memtables.push_back(&versions_->mid_table_mapping_[imm_id]);
+                    memtables.push_back(versions_->mid_table_mapping_[imm_id]);
                 }
             }
             slot_id += slots;
@@ -350,7 +359,6 @@ namespace leveldb {
 
         if (userkey_rate.size() <= options_.num_memtable_partitions * 2) {
             num_skipped_major_reorgs++;
-
             // Unref all immutable memtables.
             for (int i = 0; i < subrange_imms.size(); i++) {
                 for (int j = 0; j < subrange_imms[i].size(); j++) {
@@ -364,129 +372,42 @@ namespace leveldb {
         last_major_reorg_seq_ = versions_->last_sequence_;
         last_minor_reorg_seq_ = versions_->last_sequence_;
         num_major_reorgs++;
-        double share_per_subrange =
-                total_rate / options_.num_memtable_partitions;
-        double fair_share = 1.0 /
-                            (double) options_.num_memtable_partitions;
-        double fair_rate = fair_share * total_rate;
-        double remaining_rate = total_rate;
-
-        int index = 0;
-        double sum = 0;
-
-        std::string lower = subranges[0].lower.ToString();
-        bool li = subranges[0].lower_inclusive;
-        std::string upper = subranges[subranges.size() - 1].upper.ToString();
-        bool ui = subranges[subranges.size() - 1].upper_inclusive;
-
-        for (int i = 0; i < subranges.size(); i++) {
-            delete subranges[i].lower.data();
-            delete subranges[i].upper.data();
-            subranges[i].lower = {};
-            subranges[i].upper = {};
-            subranges[i].num_duplicates = 0;
-        }
         subranges.clear();
-        subranges.resize(options_.num_memtable_partitions);
-        subranges[0].lower_inclusive = li;
-        subranges[0].lower = SubRange::Copy(lower);
-        subranges[subranges.size() - 1].upper_inclusive = ui;
-        subranges[subranges.size() - 1].upper = SubRange::Copy(upper);
 
-        for (auto entry = userkey_rate.begin();
-             entry != userkey_rate.end(); entry++) {
-            double keyrate = entry->second;
-            if (keyrate >= 1.5 * fair_rate) {
-                // a hot key.
-                RDMA_LOG(rdmaio::INFO)
-                    << fmt::format("hot key {} rate:{} fair:{}", entry->first,
-                                   keyrate, fair_rate);
-                std::string userkey = std::to_string(entry->first);
-                if (subranges[index].IsGreaterThanLower(userkey,
-                                                        user_comparator_)) {
-                    // close the current subrange.
-                    subranges[index].upper = SubRange::Copy(userkey);
-                    subranges[index].upper_inclusive = false;
-                    index++;
-                }
-
-                int num_duplicates = std::ceil(keyrate / fair_rate);
-                for (int i = 0; i < num_duplicates; i++) {
-                    subranges[index].num_duplicates = num_duplicates;
-                    subranges[index].lower = SubRange::Copy(userkey);
-                    subranges[index].lower_inclusive = true;
-                    subranges[index].upper = SubRange::Copy(userkey);
-                    subranges[index].upper_inclusive = true;
-                    index++;
-                }
-                entry++;
-                auto next = entry;
-                subranges[index].lower = SubRange::Copy(
-                        std::to_string(next->first));
-                subranges[index].lower_inclusive = true;
-                remaining_rate -= keyrate;
-                sum = 0;
-                share_per_subrange =
-                        remaining_rate / (subranges.size() - index);
-                entry--;
-                continue;
-            }
-
-            if (sum + entry->second > share_per_subrange) {
-                // Close the current subrange.
-                Slice userkey = std::to_string(entry->first);
-                if (user_comparator_->Compare(userkey,
-                                              subranges[index].lower) == 0 &&
-                    subranges[index].lower_inclusive) {
-                    // A single point.
-                    subranges[index].upper = SubRange::Copy(userkey);
-                    subranges[index].upper_inclusive = true;
-
-                    remaining_rate -= entry->second;
-
-                    entry++;
-                    index++;
-                    subranges[index].lower = SubRange::Copy(
-                            std::to_string(entry->first));
-                    subranges[index].lower_inclusive = true;
-
-                    sum = entry->second;
-                    share_per_subrange =
-                            remaining_rate / (subranges.size() - index);
-                    remaining_rate -= entry->second;
-                    continue;
-                } else {
-                    subranges[index].upper = SubRange::Copy(userkey);
-                    subranges[index].upper_inclusive = false;
-
-                    index++;
-                    subranges[index].lower = SubRange::Copy(userkey);
-                    subranges[index].lower_inclusive = true;
-                    if (index == subranges.size() - 1) {
-                        break;
+        // First, construct subranges with each subrange containing one tiny
+        // range.
+        std::vector<Range> tmp_subranges;
+        ConstructRanges(userkey_rate, total_rate, 0, 10000000,
+                        options_.num_memtable_partitions, true, &tmp_subranges);
+        // Second, break each subrange that contains more than one value into
+        // alpha tiny ranges.
+        for (int i = 0; i < tmp_subranges.size(); i++) {
+            std::map<uint64_t, double> sub_userkey_rate;
+            uint64_t lower = tmp_subranges[i].lower_int();
+            uint64_t upper = tmp_subranges[i].upper_int();
+            SubRange sr = {};
+            if (upper - lower > 1) {
+                double subTotalShare = 0;
+                for (auto it : userkey_rate) {
+                    if (it.first < lower) {
+                        continue;
                     }
-                    share_per_subrange =
-                            remaining_rate / (subranges.size() - index);
+                    if (it.first >= upper) {
+                        continue;
+                    }
+                    subTotalShare += it.second;
+                    sub_userkey_rate[it.first] = it.second;
                 }
-                sum = 0;
+                ConstructRanges(sub_userkey_rate, subTotalShare,
+                                lower, upper,
+                                0, //alpha,
+                                false, &sr.tiny_ranges);
+            } else {
+                sr.tiny_ranges.push_back(std::move(tmp_subranges[i]));
             }
-            sum += entry->second;
-            remaining_rate -= entry->second;
+            subranges.push_back(std::move(sr));
         }
-
-        RDMA_ASSERT(index == subranges.size() - 1);
         latest->AssertSubrangeBoundary(user_comparator_);
-
-        bool bad_reorg = false;
-        for (int i = 0; i < subranges.size(); i++) {
-            SubRange &sr = subranges[i];
-            if (user_comparator_->Compare(sr.upper, sr.lower) < 0) {
-                // This is a bad reorg due to too few samples. give up.
-                bad_reorg = true;
-                break;
-            }
-            sr.ninserts = 0; //total_inserts / subranges.size();
-        }
 
         // Unref all immutable memtables.
         for (int i = 0; i < subrange_imms.size(); i++) {
@@ -494,22 +415,13 @@ namespace leveldb {
                 subrange_imms[i][j]->Unref(dbname_);
             }
         }
-
-        if (bad_reorg) {
-            RDMA_LOG(rdmaio::INFO)
-                << fmt::format("bad reorg: {}", latest->DebugString());
-            delete latest;
-            return;
-        }
         RDMA_LOG(rdmaio::INFO)
             << fmt::format("major at {} puts with {} keys: {}",
                            processed_writes,
                            userkey_rate.size(), latest->DebugString());
         VersionEdit edit;
         for (int i = 0; i < subranges.size(); i++) {
-            edit.UpdateSubRange(i, subranges[i].lower, subranges[i].upper,
-                                subranges[i].lower_inclusive,
-                                subranges[i].upper_inclusive,
+            edit.UpdateSubRange(i, subranges[i].tiny_ranges,
                                 subranges[i].num_duplicates);
         }
         latest_subranges_.store(latest);
@@ -519,12 +431,45 @@ namespace leveldb {
 
     void
     SubRangeManager::MoveShareDuplicateSubranges(SubRanges *latest, int index) {
+//        SubRange &sr = latest->subranges[index];
+//        int nDuplicates = 0;
+//        int start = -1;
+//        int end = -1;
+//        for (int i = 0; i < latest->subranges.size(); i++) {
+//            if (!latest->subranges[i].Equals(sr, user_comparator_)) {
+//                continue;
+//            }
+//            end = i;
+//            if (start == -1) {
+//                start = i;
+//            }
+//        }
+//        RDMA_ASSERT(end - start + 1 == sr.num_duplicates);
+//        nDuplicates = sr.num_duplicates - 1;
+//        double share = sr.ninserts / nDuplicates;
+//        for (int i = start; i <= end; i++) {
+//            SubRange &dup = latest->subranges[i];
+//            dup.ninserts += share;
+//            dup.num_duplicates -= 1;
+//            if (nDuplicates == 1) {
+//                dup.num_duplicates = 0;
+//            }
+//        }
+    }
+
+    void SubRangeManager::moveShare(SubRanges *latest, int index) {
         SubRange &sr = latest->subranges[index];
+        int lower = sr.tiny_ranges[0].lower_int();
         int nDuplicates = 0;
         int start = -1;
         int end = -1;
         for (int i = 0; i < latest->subranges.size(); i++) {
-            if (!latest->subranges[i].Equals(sr, user_comparator_)) {
+            SubRange &r = latest->subranges[i];
+            if (r.num_duplicates == 0) {
+                continue;
+            }
+            RDMA_ASSERT(r.tiny_ranges.size() == 1);
+            if (r.tiny_ranges[0].lower_int() != lower) {
                 continue;
             }
             end = i;
@@ -532,485 +477,378 @@ namespace leveldb {
                 start = i;
             }
         }
-        RDMA_ASSERT(end - start + 1 == sr.num_duplicates);
-        nDuplicates = sr.num_duplicates - 1;
+
+        nDuplicates = end - start;
         double share = sr.ninserts / nDuplicates;
         for (int i = start; i <= end; i++) {
-            SubRange &dup = latest->subranges[i];
-            dup.ninserts += share;
-            dup.num_duplicates -= 1;
+            SubRange &r = latest->subranges[i];
             if (nDuplicates == 1) {
-                dup.num_duplicates = 0;
+                r.tiny_ranges[0].is_duplicated = false;
             }
+            r.tiny_ranges[0].ninserts += share;
+        }
+    }
+
+    void SubRangeManager::ConstructRanges(
+            const std::map<uint64_t, double> &userkey_rate, double total_rate,
+            uint64_t lower, uint64_t upper, uint32_t num_ranges_to_construct,
+            bool is_constructing_subranges,
+            std::vector<leveldb::Range> *ranges) {
+        RDMA_ASSERT(upper - lower > 1);
+        RDMA_ASSERT(num_ranges_to_construct > 1);
+        double share_per_range = total_rate / (double) num_ranges_to_construct;
+        double fair_rate = total_rate / (double) num_ranges_to_construct;
+        double total = total_rate;
+        double sum = 0;
+
+        uint32_t current_lower = lower;
+        uint32_t current_upper = 0;
+        for (auto it : userkey_rate) {
+            RDMA_ASSERT(it.first >= lower);
+            RDMA_ASSERT(it.first < upper);
+            double rate = it.second;
+            if (rate >= fair_rate && is_constructing_subranges) {
+                RDMA_LOG(rdmaio::INFO)
+                    << fmt::format("hot key {}:{}:{}", it.first, rate / total,
+                                   fair_rate / total);
+                // close the current subrange.
+                if (current_lower < it.first) {
+                    current_upper = it.first;
+                    Range r = {};
+                    r.lower = std::to_string(current_lower);
+                    r.upper = std::to_string((current_upper));
+                    (*ranges).push_back(std::move(r));
+                }
+
+                int nDuplicates = (int) std::ceil(rate / fair_rate);
+                for (int i = 0; i < nDuplicates; i++) {
+                    Range r = {};
+                    r.lower = std::to_string(it.first);
+                    r.upper = std::to_string(it.first + 1);
+                    r.is_duplicated = true;
+                    (*ranges).push_back(std::move(r));
+                }
+                current_lower = it.first + 1;
+                total_rate -= it.second;
+                sum = 0;
+                share_per_range =
+                        total_rate / (num_ranges_to_construct - ranges->size());
+                continue;
+            }
+
+            if (sum + rate > share_per_range) {
+                if (current_lower == it.first) {
+                    current_upper = it.first + 1;
+                    Range r = {};
+                    r.lower = std::to_string(current_lower);
+                    r.upper = std::to_string(current_upper);
+                    (*ranges).push_back(std::move(r));
+
+                    current_lower = it.first + 1;
+                    if (ranges->size() + 1 == num_ranges_to_construct) {
+                        break;
+                    }
+                    sum = 0;
+                    total_rate -= rate;
+                    share_per_range = total_rate / (num_ranges_to_construct -
+                                                    ranges->size());
+                    continue;
+                } else {
+                    current_upper = it.first;
+                    Range r = {};
+                    r.lower = std::to_string(current_lower);
+                    r.upper = std::to_string(current_upper);
+                    (*ranges).push_back(std::move(r));
+
+                    current_lower = it.first;
+                    if (ranges->size() + 1 == num_ranges_to_construct) {
+                        break;
+                    }
+                    sum = 0;
+                    share_per_range = total_rate / (num_ranges_to_construct -
+                                                    ranges->size());
+                }
+            }
+            sum += rate;
+            total_rate -= rate;
+        }
+
+        if (is_constructing_subranges) {
+            Range r = {};
+            r.lower = std::to_string(current_lower);
+            ranges->push_back(std::move(r));
+            RDMA_ASSERT(ranges->size() == num_ranges_to_construct);
+        } else {
+            if (current_lower < upper) {
+                Range r = {};
+                r.lower = std::to_string(current_lower);
+                ranges->push_back(std::move(r));
+            }
+            RDMA_ASSERT(ranges->size() <= num_ranges_to_construct);
+        }
+
+        (*ranges)[0].lower = std::to_string(lower);
+        (*ranges->rbegin()).upper = std::to_string(upper);
+
+        int prior_upper = -1;
+        for (int i = 0; i < ranges->size(); i++) {
+            Range &sr = (*ranges)[i];
+            uint64_t lower = sr.lower_int();
+            uint64_t upper = sr.upper_int();
+            if (prior_upper != -1 && prior_upper - lower > 1) {
+                RDMA_ASSERT(lower > prior_upper);
+            }
+            prior_upper = lower;
         }
     }
 
     bool
     SubRangeManager::MinorReorgDestroyDuplicates(SubRanges *latest,
-                                               int subrange_id) {
+                                                 int subrange_id, bool force) {
         SubRange &sr = latest->subranges[subrange_id];
+        double fair_ratio = 1.0 / (double) (options_.num_memtable_partitions);
         if (sr.num_duplicates == 0) {
             return false;
         }
 
-        double fair_ratio = 1.0 / options_.num_memtable_partitions;
+        if (force) {
+            moveShare(latest, subrange_id);
+            latest->subranges.erase(latest->subranges.begin() + subrange_id);
+            return true;
+        }
+
         double percent = sr.insertion_ratio / fair_ratio;
         if (percent >= 0.5) {
             return false;
         }
-
-        // destroy this duplicate.
-        MoveShareDuplicateSubranges(latest, subrange_id);
+        num_minor_reorgs_for_dup++;
         RDMA_LOG(rdmaio::INFO)
-            << fmt::format("Destroy subrange {} {}", subrange_id,
-                           sr.DebugString());
+            << fmt::format("Destroy subrange {}", subrange_id);
+        // destroy this duplicate.
+        moveShare(latest, subrange_id);
         latest->subranges.erase(latest->subranges.begin() + subrange_id);
-        VersionEdit edit;
-        std::vector<SubRange> &subranges = latest->subranges;
-        for (int i = 0; i < subranges.size(); i++) {
-            edit.UpdateSubRange(i, subranges[i].lower, subranges[i].upper,
-                                subranges[i].lower_inclusive,
-                                subranges[i].upper_inclusive,
-                                subranges[i].num_duplicates);
-        }
-        latest_subranges_.store(latest);
-        versions_->AppendChangesToManifest(&edit, manifest_file_,
-                                           options_.manifest_stoc_id);
-        num_minor_reorgs_for_dup += 1;
-        last_minor_reorg_seq_ = versions_->last_sequence_;
         return true;
     }
 
-    bool SubRangeManager::PerformSubrangeMinorReorgDuplicate(int subrange_id,
-                                                           leveldb::SubRanges *latest,
-                                                           double total_inserts) {
-        double fair_ratio = 1.0 / (double) options_.num_memtable_partitions;
-        std::vector<SubRange> &subranges = latest->subranges;
-        SubRange &sr = subranges[subrange_id];
-        RDMA_ASSERT(sr.insertion_ratio > fair_ratio);
+    bool SubRangeManager::PerformSubrangeMinorReorgDuplicate(
+            leveldb::SubRanges *latest, int subrange_id,
+            double total_inserts) {
+        double fair_ratio = 1.0 / (double) (options_.num_memtable_partitions);
+        SubRange &sr = latest->subranges[subrange_id];
+        if (sr.tiny_ranges.size() != 1) {
+            return false;
+        }
+        int lower = sr.tiny_ranges[0].lower_int();
+        int upper = sr.tiny_ranges[0].upper_int();
 
-        if (!sr.IsAPoint(user_comparator_)) {
+        if (upper - lower != 1) {
+            return false;
+        }
+        if (sr.insertion_ratio <= 1.5 * fair_ratio) {
+            return false;
+        }
+        int nDuplicates = (int) std::floor(sr.insertion_ratio / fair_ratio);
+        if (nDuplicates == 0) {
             return false;
         }
 
-        int num_duplicates = (int) std::floor(sr.insertion_ratio / fair_ratio);
-        if (num_duplicates == 0) {
-            return false;
-        }
-
+        last_minor_reorg_seq_ = total_inserts;
         num_minor_reorgs_for_dup++;
-        last_minor_reorg_seq_ = versions_->last_sequence_;
 
-        uint64_t total_sr_inserts = sr.ninserts;
-        uint64_t remaining_sum = sr.ninserts;
-        int new_num_duplicates = sr.num_duplicates + num_duplicates + 1;
-        Slice lower = sr.lower;
-        for (int i = 0; i < num_duplicates; i++) {
-            SubRange new_sr = {};
-            new_sr.lower = SubRange::Copy(lower);
-            new_sr.upper = SubRange::Copy(lower);
-            new_sr.lower_inclusive = true;
-            new_sr.upper_inclusive = true;
-            new_sr.num_duplicates = new_num_duplicates;
-            new_sr.ninserts = total_sr_inserts / (num_duplicates + 1);
+        // Create new duplicate subranges.
+        sr.tiny_ranges[0].is_duplicated = true;
+        double remainingSum = sr.ninserts;
+        for (int i = 0; i < nDuplicates; i++) {
+            SubRange newSR = {};
+            Range tinyRange = {};
 
-            remaining_sum -= new_sr.ninserts;
-            subranges.insert(subranges.begin() + subrange_id + 1, new_sr);
+            tinyRange.lower = std::to_string(lower);
+            tinyRange.upper = std::to_string(upper);
+            tinyRange.ninserts = sr.ninserts / (nDuplicates + 1);
+            remainingSum -= tinyRange.ninserts;
+            tinyRange.insertion_ratio = tinyRange.ninserts / total_inserts;
+            tinyRange.is_duplicated = true;
+            newSR.tiny_ranges.push_back(std::move(tinyRange));
+            latest->subranges.insert(latest->subranges.begin() + subrange_id,
+                                     newSR);
         }
+        sr.tiny_ranges[0].ninserts = remainingSum;
 
-        subranges[subrange_id].ninserts = remaining_sum;
-        subranges[subrange_id].num_duplicates = new_num_duplicates;
+        // Remove subranges if the number of subranges exceeds max.
+        // For each removed subrange, move its tiny ranges to its neighboring
+        // subranges.
+        while (latest->subranges.size() > options_.num_memtable_partitions) {
+            // remove the subrange that has the lowest insertion rate.
+            double minShare = UINT64_MAX;
+            int minRangeId = 0;
+            for (int i = 0; i < latest->subranges.size(); i++) {
+                SubRange &minSR = latest->subranges[i];
+                // Skip the new subranges.
+                if (minSR.tiny_ranges.size() == 1) {
+                    if (minSR.tiny_ranges[0].lower_int() == lower) {
+                        continue;
+                    }
+                }
+                if (minSR.insertion_ratio < minShare) {
+                    minShare = minSR.insertion_ratio;
+                    minRangeId = i;
+                }
+            }
 
-        int start = -1;
-        int end = -1;
-        for (int i = 0; i < subranges.size(); i++) {
-            if (!subranges[i].Equals(subranges[subrange_id],
-                                     user_comparator_)) {
+            if (latest->subranges[minRangeId].num_duplicates > 0) {
+                MinorReorgDestroyDuplicates(latest, minRangeId, true);
                 continue;
             }
-            end = i;
-            subranges[i].num_duplicates = new_num_duplicates;
-            if (start == -1) {
-                start = i;
-            }
-        }
-        RDMA_ASSERT(end - start + 1 == subranges[subrange_id].num_duplicates);
 
-        while (subranges.size() > options_.num_memtable_partitions) {
-            // remove min.
-            double min_ratio = 9999999;
-            int min_range_id = -1;
-            for (int i = 0; i < subranges.size(); i++) {
-                // Skip the new subranges.
-                if (i >= start && i <= end) {
-                    continue;
-                }
-
-                SubRange &min_sr = subranges[i];
-                if (user_comparator_->Compare(min_sr.lower, lower) == 0) {
-                    continue;
-                }
-                if (min_sr.insertion_ratio < min_ratio) {
-                    min_ratio = min_sr.insertion_ratio;
-                    min_range_id = i;
-                }
-            }
-
-            // merge min with neighboring subrange.
-            int left = min_range_id - 1;
-            int right = min_range_id + 1;
-            bool merge_left = true;
-            if (left >= 0 && right < subranges.size()) {
-                if (subranges[left].insertion_ratio <
-                    subranges[right].insertion_ratio) {
-                    merge_left = true;
+            int left = minRangeId - 1;
+            int right = minRangeId + 1;
+            bool mergeLeft = true;
+            if (left >= 0 && right < latest->subranges.size()) {
+                if (latest->subranges[left].insertion_ratio <
+                    latest->subranges[right].insertion_ratio) {
+                    mergeLeft = true;
                 } else {
-                    merge_left = false;
+                    mergeLeft = false;
                 }
             } else if (left >= 0) {
-                merge_left = true;
+                mergeLeft = true;
             } else {
-                merge_left = false;
+                mergeLeft = false;
             }
-            SubRange &min_sr = subranges[min_range_id];
-            if (merge_left) {
-                SubRange &l = subranges[left];
-                if (l.num_duplicates > 0) {
-                    // move its shares to other duplicates.
-                    MoveShareDuplicateSubranges(latest, left);
-                    // destroy this subrange.
-                    subranges.erase(subranges.begin() + left);
-                } else {
-                    l.ninserts += min_sr.ninserts;
-                    l.upper = min_sr.upper;
-                    l.upper_inclusive = min_sr.upper_inclusive;
-                    subranges.erase(subranges.begin() + min_range_id);
-                }
+
+            if (mergeLeft && latest->subranges[left].num_duplicates > 0) {
+                MinorReorgDestroyDuplicates(latest, left, true);
+            } else if (!mergeLeft &&
+                       latest->subranges[right].num_duplicates > 0) {
+                MinorReorgDestroyDuplicates(latest, right, true);
             } else {
-                SubRange &r = subranges[right];
-                if (r.num_duplicates > 0) {
-                    // move its shares to other duplicates.
-                    MoveShareDuplicateSubranges(latest, right);
-                    // destroy this subrange.
-                    subranges.erase(subranges.begin() + right);
-                } else {
-                    r.ninserts += min_sr.ninserts;
-                    r.lower = min_sr.lower;
-                    r.lower_inclusive = min_sr.lower_inclusive;
-                    subranges.erase(subranges.begin() + min_range_id);
-                }
+                int nranges = latest->subranges[minRangeId].tiny_ranges.size();
+                int pushedRanges = PushTinyRanges(latest, minRangeId, false);
+                RDMA_ASSERT(pushedRanges == nranges);
             }
-        }
-        VersionEdit edit;
-        for (int i = 0; i < subranges.size(); i++) {
-            edit.UpdateSubRange(i, subranges[i].lower, subranges[i].upper,
-                                subranges[i].lower_inclusive,
-                                subranges[i].upper_inclusive,
-                                subranges[i].num_duplicates);
         }
         RDMA_LOG(rdmaio::INFO)
-            << fmt::format("Duplicate {} subrange-{} {}", num_duplicates,
-                           subrange_id, latest->DebugString());
-
-        latest_subranges_.store(latest);
-        versions_->AppendChangesToManifest(&edit, manifest_file_,
-                                           options_.manifest_stoc_id);
+            << fmt::format("minor duplicate subrange {}", subrange_id);
         return true;
     }
 
-    void SubRangeManager::PerformSubrangeMinorReorg(int subrange_id,
-                                                  leveldb::SubRanges *latest,
-                                                  double total_inserts) {
-        last_minor_reorg_seq_ = versions_->last_sequence_;
-        std::vector<SubRange> &subranges = latest->subranges;
-        double fair_ratio = 1.0 / (double) options_.num_memtable_partitions;
+    int
+    SubRangeManager::PushTinyRanges(leveldb::SubRanges *latest, int subrangeId,
+                                    bool stopWhenBelowFair) {
+        // Push its tiny ranges to its neighbors.
+        int left = subrangeId - 1;
+        int right = subrangeId + 1;
+        double fair_ratio = 1.0 / (double) (options_.num_memtable_partitions);
 
-        SubRange &sr = subranges[subrange_id];
-        RDMA_ASSERT(sr.insertion_ratio > fair_ratio);
-
-        if (PerformSubrangeMinorReorgDuplicate(subrange_id, latest,
-                                               total_inserts)) {
-            return;
+        SubRange *leftSR = nullptr;
+        SubRange *rightSR = nullptr;
+        if (left >= 0) {
+            leftSR = &latest->subranges[left];
         }
-
-        // higher share.
-        // Perform major reorg.
-        std::vector<AtomicMemTable *> subrange_imms;
-        uint32_t nslots = (options_.num_memtables -
-                           options_.num_memtable_partitions) /
-                          options_.num_memtable_partitions;
-        uint32_t remainder = (options_.num_memtables -
-                              options_.num_memtable_partitions) %
-                             options_.num_memtable_partitions;
-        uint32_t slot_id = 0;
-        uint32_t slots = 0;
-        for (int i = 0; i < subrange_id; i++) {
-            slots = nslots;
-            if (remainder > 0) {
-                slots += 1;
-                remainder--;
-            }
-            slot_id += slots;
+        if (right < latest->subranges.size()) {
+            rightSR = &latest->subranges[right];
         }
-
-        slots = nslots;
-        if (remainder > 0) {
-            slots += 1;
+        int moved = 0;
+        SubRange *minSR = &latest->subranges[subrangeId];
+        // move to left
+        // move the remaining
+        double leftShare = UINT64_MAX;
+        double rightShare = UINT64_MAX;
+        if (leftSR != nullptr && leftSR->num_duplicates == 0) {
+            leftShare = leftSR->insertion_ratio;
         }
-
-        (*partitioned_active_memtables_)[subrange_id]->mutex.Lock();
-        MemTable *m = (*partitioned_active_memtables_)[subrange_id]->memtable;
-        if (m) {
-            RDMA_ASSERT(versions_->mid_table_mapping_[m->memtableid()].Ref());
-            subrange_imms.push_back(
-                    &versions_->mid_table_mapping_[m->memtableid()]);
+        if (rightSR != nullptr && rightSR->num_duplicates == 0) {
+            rightShare = rightSR->insertion_ratio;
         }
+        if (leftShare != UINT64_MAX || rightShare != UINT64_MAX) {
+            while (!minSR->tiny_ranges.empty()) {
+                Range &first = minSR->tiny_ranges[0];
+                Range &last = minSR->tiny_ranges[minSR->tiny_ranges.size() - 1];
+                bool pushLeft = false;
 
-        for (int j = 0; j < slots; j++) {
-            RDMA_ASSERT(slot_id + j < (*partitioned_imms_).size());
-            uint32_t imm_id = (*partitioned_imms_)[slot_id + j];
-            if (imm_id == 0) {
-                continue;
-            }
-            auto *imm = versions_->mid_table_mapping_[imm_id].Ref();
-            if (imm) {
-                subrange_imms.push_back(&versions_->mid_table_mapping_[imm_id]);
-            }
-        }
-        (*partitioned_active_memtables_)[subrange_id]->mutex.Unlock();
-
-        // We have all memtables now.
-        std::map<uint64_t, uint32_t> userkey_freq;
-        uint32_t total_accesses = 0;
-        for (int i = 0; i < subrange_imms.size(); i++) {
-            AtomicMemTable *mem = subrange_imms[i];
-            uint32_t samples = 0;
-            leveldb::Iterator *it = mem->memtable_->NewIterator(
-                    TraceType::MEMTABLE, AccessCaller::kUncategorized,
-                    0);
-            it->SeekToFirst();
-            ParsedInternalKey ik;
-            while (it->Valid()) {
-                RDMA_ASSERT(ParseInternalKey(it->key(), &ik));
-                if (sr.IsSmallerThanLower(ik.user_key, user_comparator_)) {
-                    it->Next();
-                    continue;
-                }
-                if (sr.IsGreaterThanUpper(ik.user_key, user_comparator_)) {
-                    it->Next();
-                    continue;
+                if (leftShare + first.insertion_ratio < rightShare
+                                                        +
+                                                        last.insertion_ratio) {
+                    pushLeft = true;
                 }
 
-                uint64_t k = 0;
-                nova::str_to_int(ik.user_key.data(), &k,
-                                 ik.user_key.size());
-                userkey_freq[k] += 1;
-                samples += 1;
-                total_accesses += 1;
-                it->Next();
-            }
-//            RDMA_LOG(rdmaio::INFO)
-//                << fmt::format("minor sample {} from mid-{} subrange-{}",
-//                               samples, mem->memtable_->memtableid(),
-//                               subrange_id);
-            delete it;
-        }
-
-        if (userkey_freq.size() <= 1 || total_accesses <= 100) {
-            num_skipped_minor_reorgs++;
-            // Unref all immutable memtables.
-            for (int j = 0; j < subrange_imms.size(); j++) {
-                subrange_imms[j]->Unref(dbname_);
-            }
-            delete latest;
-            return;
-        }
-
-        RDMA_LOG(rdmaio::INFO)
-            << fmt::format(
-                    "minor at {} puts with {} keys for subrange-{}: before {}",
-                    total_inserts,
-                    userkey_freq.size(), subrange_id,
-                    sr.DebugString());
-
-        double inserts = (sr.insertion_ratio - fair_ratio) * total_inserts;
-        RDMA_ASSERT(inserts < sr.ninserts)
-            << fmt::format("{} inserts:{} fair:{}", sr.DebugString(), inserts,
-                           fair_ratio);
-        double remove_share = (double) (
-                ((sr.insertion_ratio - fair_ratio) / sr.insertion_ratio)
-                * total_accesses);
-        double left_share = remove_share;
-        double right_share = remove_share;
-        double left_inserts = inserts;
-        double right_inserts = inserts;
-
-        double total_rate_to_distribute = sr.insertion_ratio - fair_ratio;
-        double remaining_rate = total_rate_to_distribute;
-        double left_rate = 0;
-        double right_rate = 0;
-
-        if (subrange_id != 0 && subrange_id != subranges.size() - 1) {
-            SubRange &left = subranges[subrange_id - 1];
-            SubRange &right = subranges[subrange_id + 1];
-            // they are not duplicates.
-            if (left.num_duplicates == 0 && right.num_duplicates == 0) {
-                if (left.insertion_ratio > fair_ratio
-                    && right.insertion_ratio < fair_ratio) {
-                    double need_rate = fair_ratio - right.insertion_ratio;
-                    if (total_rate_to_distribute < need_rate) {
-                        right_rate = total_rate_to_distribute;
-                        remaining_rate = 0;
+                if (stopWhenBelowFair) {
+                    if (pushLeft) {
+                        if (minSR->insertion_ratio
+                            - first.insertion_ratio < fair_ratio && moved > 0) {
+                            return moved;
+                        }
                     } else {
-                        right_rate = need_rate;
-                        remaining_rate = total_rate_to_distribute - need_rate;
-                    }
-                } else if (left.insertion_ratio < fair_ratio
-                           && right.insertion_ratio > fair_ratio) {
-                    double need_rate = fair_ratio - left.insertion_ratio;
-                    if (total_rate_to_distribute < need_rate) {
-                        left_rate = total_rate_to_distribute;
-                        remaining_rate = 0;
-                    } else {
-                        left_rate = need_rate;
-                        remaining_rate = total_rate_to_distribute - need_rate;
+                        if (minSR->insertion_ratio - last.insertion_ratio <
+                            fair_ratio
+                            && moved > 0) {
+                            return moved;
+                        }
                     }
                 }
 
-                if (remaining_rate > 0) {
-                    double new_right_rate = right.insertion_ratio + right_rate;
-                    double new_left_rate = left.insertion_ratio + left_rate;
-
-                    double total = new_left_rate + new_right_rate;
-                    double leftp = new_right_rate / total;
-                    double rightp = new_left_rate / total;
-
-                    left_rate += leftp * remaining_rate;
-                    right_rate += rightp * remaining_rate;
-                }
-
-                RDMA_ASSERT(std::abs(
-                        total_rate_to_distribute - left_rate - right_rate) <=
-                            0.001);
-                double leftp = left_rate / total_rate_to_distribute;
-                double rightp = right_rate / total_rate_to_distribute;
-                left_share = remove_share * leftp;
-                left_inserts = inserts * leftp;
-                right_share = remove_share * rightp;
-                right_inserts = inserts * rightp;
-
-                if (left_share < userkey_freq.begin()->second
-                    && right_share < userkey_freq.rbegin()->second) {
-                    // cannot move either to left or right.
+                if (pushLeft) {
+                    // move to left.
+                    leftShare += first.insertion_ratio;
+                    leftSR->tiny_ranges.push_back(std::move(first));
+                    minSR->tiny_ranges.erase(minSR->tiny_ranges.begin());
+                } else {
                     // move to right.
-                    right_share = userkey_freq.rbegin()->second;
-                    right_inserts += left_inserts;
-                    left_share = 0;
-                    left_inserts = 0;
+                    rightShare += last.insertion_ratio;
+                    rightSR->tiny_ranges.insert(rightSR->tiny_ranges.begin(),
+                                                std::move(last));
+                    minSR->tiny_ranges.erase(minSR->tiny_ranges.end() - 1);
                 }
+                moved++;
             }
         }
-
-        bool success = false;
-        if (subrange_id > 0 && left_share > 0 &&
-            subranges[subrange_id].num_duplicates == 0) {
-            uint64_t sr_lower;
-            uint64_t new_lower;
-            nova::str_to_int(sr.lower.data(), &new_lower, sr.lower.size());
-            sr_lower = new_lower;
-            double removes = left_share;
-            auto it = userkey_freq.begin();
-            while (it != userkey_freq.end()) {
-                if (removes - it->second < 0) {
-                    break;
-                }
-                removes -= it->second;
-                new_lower = it->first;
-                it = userkey_freq.erase(it);
-            }
-            if (new_lower > sr_lower) {
-                sr.lower = SubRange::Copy(std::to_string(new_lower));
-                sr.lower_inclusive = true;
-                sr.ninserts -= left_inserts;
-
-                SubRange &other = subranges[subrange_id - 1];
-                other.ninserts += left_inserts;
-                other.upper = SubRange::Copy(sr.lower);
-                other.upper_inclusive = false;
-                success = true;
-            }
+        if (minSR->tiny_ranges.empty()) {
+            latest->subranges.erase(latest->subranges.begin() + subrangeId);
         }
-        if (subrange_id < subranges.size() - 1 && right_share > 0 &&
-            subranges[subrange_id + 1].num_duplicates == 0) {
-            uint64_t sr_upper;
-            uint64_t new_upper;
-            uint64_t sr_lower;
-            nova::str_to_int(sr.upper.data(), &new_upper, sr.upper.size());
-            nova::str_to_int(sr.lower.data(), &sr_lower, sr.lower.size());
-            sr_upper = new_upper;
-            if (!sr.lower_inclusive) {
-                sr_lower += 1;
-            }
-            double removes = right_share;
-            for (auto it = userkey_freq.rbegin();
-                 it != userkey_freq.rend(); it++) {
-                if (removes - it->second < 0) {
-                    break;
-                }
-                removes -= it->second;
-                new_upper = it->first;
-            }
-            if (new_upper < sr_upper && new_upper - sr_lower >= 1) {
-                sr.upper = SubRange::Copy(std::to_string(new_upper));
-                sr.upper_inclusive = false;
-                sr.ninserts -= right_inserts;
-
-                SubRange &other = subranges[subrange_id + 1];
-                other.ninserts += right_inserts;
-                other.lower = SubRange::Copy(sr.upper);
-                other.lower_inclusive = true;
-                success = true;
-            }
-        }
-
-        // Unref all immutable memtables.
-        for (int j = 0; j < subrange_imms.size(); j++) {
-            subrange_imms[j]->Unref(dbname_);
-        }
-
-        if (success) {
-            RDMA_LOG(rdmaio::INFO)
-                << fmt::format(
-                        "minor at {} puts with {} keys for subrange-{}: after {}",
-                        total_inserts,
-                        userkey_freq.size(), subrange_id,
-                        sr.DebugString());
-            num_minor_reorgs += 1;
-            VersionEdit edit;
-            for (int i = 0; i < subranges.size(); i++) {
-                edit.UpdateSubRange(i, subranges[i].lower, subranges[i].upper,
-                                    subranges[i].lower_inclusive,
-                                    subranges[i].upper_inclusive,
-                                    subranges[i].num_duplicates);
-            }
-            latest_subranges_.store(latest);
-            versions_->AppendChangesToManifest(&edit, manifest_file_,
-                                               options_.manifest_stoc_id);
-            return;
-        }
-
-        delete latest;
-        num_skipped_minor_reorgs++;
+        return moved;
     }
 
-    void SubRangeManager::PerformSubRangeReorganization(double processed_writes) {
+    bool
+    SubRangeManager::MinorRebalancePush(leveldb::SubRanges *latest, int index,
+                                        double total_inserts) {
+        SubRange &sr = latest->subranges[index];
+        double fair_ratio = 1.0 / (double) (options_.num_memtable_partitions);
+        double totalRemoveInserts = (sr.insertion_ratio - fair_ratio)
+                                    * total_inserts;
+
+        if (totalRemoveInserts >= sr.ninserts) {
+            return false;
+        }
+
+        if (sr.tiny_ranges.size() == 1) {
+            return false;
+        }
+
+        RDMA_ASSERT(sr.insertion_ratio > fair_ratio);
+        // Distribute the load across adjacent subranges.
+        last_minor_reorg_seq_ = total_inserts;
+
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("{} push minor before {}", index, sr.DebugString());
+        // push tiny ranges.
+        if (PushTinyRanges(latest, index, true) == 0) {
+            return false;
+        }
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("{} push minor after {}", index, sr.DebugString());
+
+        return true;
+    }
+
+    void
+    SubRangeManager::PerformSubRangeReorganization(double processed_writes) {
         RDMA_ASSERT(versions_->last_sequence_ > SUBRANGE_WARMUP_NPUTS);
         SubRanges *ref = latest_subranges_;
         double fair_ratio = 1.0 / (double) options_.num_memtable_partitions;
 
         // Make a copy.
         range_lock_.Lock();
-        SubRanges *latest = new SubRanges(*ref);
+        auto latest = new SubRanges(*ref);
         range_lock_.Unlock();
         std::vector<SubRange> &subranges = latest->subranges;
         double total_inserts = 0;
@@ -1025,6 +863,36 @@ namespace leveldb {
                 std::memory_order_relaxed);
         RDMA_ASSERT(total_inserts <= now)
             << fmt::format("{},{}", total_inserts, now);
+
+        if (now - last_minor_reorg_seq_ > SUBRANGE_MINOR_REORG_INTERVAL) {
+            int pivot = 0;
+            bool success = false;
+            while (pivot < subranges.size()) {
+                SubRange &sr = subranges[pivot];
+                if (MinorReorgDestroyDuplicates(latest, pivot, false)) {
+                    // no need to update pivot since it already points to the
+                    // next range.
+                    success = true;
+                } else if (PerformSubrangeMinorReorgDuplicate(latest,
+                                                              pivot,
+                                                              total_inserts)) {
+                    // go to the next subrange.
+                    for (int i = 0; i < subranges.size(); i++) {
+                        SubRange &other = subranges[i];
+                        if (other.Equals(sr, user_comparator_)) {
+                            pivot = i;
+                        }
+                    }
+                    pivot++;
+                    success = true;
+                } else {
+                    pivot++;
+                }
+            }
+            if (success) {
+                last_minor_reorg_seq_ = now;
+            }
+        }
 
         double most_unfair = 0;
         uint32_t most_unfair_subrange = 0;
@@ -1042,9 +910,6 @@ namespace leveldb {
                                      now - last_minor_reorg_seq_ >
                                      SUBRANGE_MINOR_REORG_INTERVAL;
             if (eligble_for_minor) {
-                if (MinorReorgDestroyDuplicates(latest, i)) {
-                    return;
-                }
                 if (diff > SUBRANGE_REORG_DIFF_FROM_FAIR_THRESHOLD &&
                     diff > most_unfair) {
                     most_unfair = diff;
@@ -1060,8 +925,7 @@ namespace leveldb {
             return;
         } else if (most_unfair != 0) {
             // Perform minor.
-            PerformSubrangeMinorReorg(most_unfair_subrange, latest,
-                                      total_inserts);
+            MinorRebalancePush(latest, most_unfair_subrange, total_inserts);
             return;
         }
         delete latest;

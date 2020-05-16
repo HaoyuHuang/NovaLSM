@@ -52,7 +52,7 @@ namespace leveldb {
         // Add key,value to the table being constructed.
         // REQUIRES: key is after any previously added key according to comparator.
         // REQUIRES: Finish(), Abandon() have not been called
-        void Add(const Slice &key, const Slice &value);
+        bool Add(const Slice &key, const Slice &value);
 
         // Advanced operation: flush any buffered key/value pairs to file.
         // Can be used to ensure that two adjacent entries never live in

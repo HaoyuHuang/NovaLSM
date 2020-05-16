@@ -15,17 +15,6 @@ namespace leveldb {
 
     class VersionSet;
 
-    struct VersionSubRange {
-        uint32_t subrange_id;
-        Slice lower;
-        Slice upper;
-        bool lower_inclusive;
-        bool upper_inclusive;
-        uint32_t num_duplicates;
-
-        std::string DebugString() const;
-    };
-
     class VersionEdit {
     public:
         VersionEdit() { Clear(); }
@@ -53,15 +42,12 @@ namespace leveldb {
             compact_pointers_.emplace_back(std::make_pair(level, key));
         }
 
-        void UpdateSubRange(uint32_t subrange_id, Slice lower, Slice upper,
-                            bool lower_inclusive,
-                            bool upper_inclusive, uint32_t num_duplicates) {
-            VersionSubRange sr = {};
-            sr.subrange_id = subrange_id;
-            sr.lower = lower;
-            sr.upper = upper;
-            sr.lower_inclusive = lower_inclusive;
-            sr.upper_inclusive = upper_inclusive;
+        void
+        UpdateSubRange(uint32_t subrange_id, std::vector<Range> &tiny_ranges,
+                       uint32_t num_duplicates) {
+            SubRange sr = {};
+            sr.decoded_subrange_id = subrange_id;
+            sr.tiny_ranges = tiny_ranges;
             sr.num_duplicates = num_duplicates;
             new_subranges_.push_back(sr);
         }
@@ -69,17 +55,20 @@ namespace leveldb {
         // Add the specified file at the specified number.
         // REQUIRES: This version has not been saved (see VersionSet::SaveTo)
         // REQUIRES: "smallest" and "largest" are smallest and largest keys in file
-        void AddFile(int level, uint32_t memtable_id, uint64_t file,
-                     uint64_t file_size,
-                     uint64_t converted_file_size,
-                     uint64_t flush_timestamp,
-                     const InternalKey &smallest,
-                     const InternalKey &largest,
-                     RTableHandle meta_block_handle,
-                     const std::vector<RTableHandle> &data_block_group_handles) {
+        void
+        AddFile(int level,
+                const std::set<uint32_t> &memtable_ids,
+                uint64_t file,
+                uint64_t file_size,
+                uint64_t converted_file_size,
+                uint64_t flush_timestamp,
+                const InternalKey &smallest,
+                const InternalKey &largest,
+                RTableHandle meta_block_handle,
+                const std::vector<RTableHandle> &data_block_group_handles) {
             FileMetaData f;
             f.level = level;
-            f.memtable_id = memtable_id;
+            f.memtable_ids = memtable_ids;
             f.number = file;
             f.file_size = file_size;
             f.converted_file_size = converted_file_size;
@@ -92,9 +81,8 @@ namespace leveldb {
         }
 
         // Delete the specified "file" from the specified "level".
-        void DeleteFile(int level, uint32_t memtable_id, uint64_t file) {
+        void DeleteFile(int level, uint64_t file) {
             DeletedFileIdentifier f = {};
-            f.memtable_id = memtable_id;
             f.fnumber = file;
             deleted_files_.emplace_back(std::make_pair(level, f));
         }
@@ -120,7 +108,7 @@ namespace leveldb {
         std::vector<std::pair<int, DeletedFileIdentifier>> deleted_files_;
         std::vector<std::pair<int, FileMetaData>> new_files_;
 
-        std::vector<VersionSubRange> new_subranges_;
+        std::vector<SubRange> new_subranges_;
 
     };
 

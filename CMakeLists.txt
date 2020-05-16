@@ -123,17 +123,21 @@ endif (BUILD_SHARED_LIBS)
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
 
-add_library(leveldb "")
+add_library(leveldb "" cc/rdma_admission_ctrl.cpp cc/rdma_admission_ctrl.h)
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
         include/leveldb/cc_client.h
         include/leveldb/db_types.h
 
+        cc/nova_storage_worker.cpp
+        cc/nova_storage_worker.h
+        cc/storage_selector.cpp
+        cc/storage_selector.h
         cc/nova_cc_stat_thread.cpp
         cc/nova_cc_stat_thread.h
         db/subrange.cpp
-        db/subrange.h
+        include/leveldb/subrange.h
         db/compaction.cpp
         db/compaction.h
         db/subrange_manager.cpp
@@ -578,6 +582,10 @@ target_link_libraries(leveldbutil leveldb)
 add_executable(nova_shared_main "nova/nova_shared_main.cpp")
 target_link_libraries(nova_shared_main -lgflags leveldb)
 
+#add_executable(nova_storage_test "nova/nova_storage_test.cpp")
+#target_link_libraries(nova_storage_test -lgflags leveldb)
+
+
 add_executable(nova_subrange_sim "nova/nova_subrange_sim.cc")
 target_link_libraries(nova_subrange_sim -lgflags leveldb)
 
@@ -592,4 +600,13 @@ target_link_libraries(memtable_bench -lgflags leveldb)
 
 add_executable(version_set_test "db/version_set_test.cc")
 target_link_libraries(version_set_test -lgflags leveldb)
+
+add_executable(bloom_test "util/bloom_test.cc")
+target_link_libraries(bloom_test -lgflags leveldb)
+
+add_executable(filter_block_test "table/filter_block_test.cc")
+target_link_libraries(filter_block_test -lgflags leveldb)
+
+#add_executable(table_test "table/table_test.cc")
+#target_link_libraries(table_test -lgflags leveldb)
 

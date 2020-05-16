@@ -51,10 +51,14 @@ namespace leveldb {
         // for the duration of the returned table's lifetime.
         //
         // *file must remain live while this Table is in use.
-        static Status Open(const Options &options, const ReadOptions& read_options, RandomAccessFile *file,
-                           uint64_t file_size, int level,
-                           uint64_t file_number, Table **table,
-                           DBProfiler *db_profiler);
+        static Status
+        Open(const Options &options,
+             const ReadOptions &read_options,
+             const FileMetaData *meta,
+             RandomAccessFile *file,
+             uint64_t file_size, int level,
+             uint64_t file_number, Table **table,
+             DBProfiler *db_profiler);
 
         Table(const Table &) = delete;
 
@@ -102,6 +106,8 @@ namespace leveldb {
         Status InternalGet(const ReadOptions &, const Slice &key, void *arg,
                            void (*handle_result)(void *arg, const Slice &k,
                                                  const Slice &v));
+
+        uint64_t TranslateToDataBlockOffset(const RTableHandle& handle);
 
         void ReadMeta(const Footer &footer);
 

@@ -20,7 +20,7 @@ namespace leveldb {
     public:
         // Initialize the block with the specified contents.
         explicit Block(const BlockContents &contents, uint64_t file_number,
-                       uint64_t block_id);
+                       uint64_t block_id, bool adhoc = false);
 
         Block(const Block &) = delete;
 
@@ -48,6 +48,7 @@ namespace leveldb {
         size_t size_;
         uint32_t restart_offset_;  // Offset in data_ of restart array
         bool owned_;               // Block owns data_[]
+        bool adhoc_;
     };
 
 }  // namespace leveldb
