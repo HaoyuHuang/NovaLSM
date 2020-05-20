@@ -1149,34 +1149,26 @@ namespace leveldb {
 
     void
     SubRangeManager::ComputeCompactionThreadsAssignment(SubRanges *subranges) {
-        // Assign a unique thread id to subranges that have few keys.
-        for (SubRange &subrange : subranges->subranges) {
-            subrange.start_tid = 0;
-            subrange.end_tid = options_.num_compaction_threads - 1;
+        if (options_.subrange_no_flush_num_keys == 0 ||
+            !options_.enable_flush_multiple_memtables) {
+            // MemTables of a subrange maybe assigned to any compaction thread.
+            for (SubRange &subrange : subranges->subranges) {
+                subrange.start_tid = 0;
+                subrange.end_tid = options_.num_compaction_threads - 1;
+            }
+            return;;
         }
 
-//        if (options_.num_compaction_threads == 1) {
-//            return;
-//        }
-//        RDMA_ASSERT(
-//                options_.num_compaction_threads >= subranges->subranges.size());
-//        int thread_id = 0;
-//        // Assign a unique thread id to subranges that have few keys.
-//        for (SubRange &subrange : subranges->subranges) {
-//            if (subrange.keys() <= options_.subrange_no_flush_num_keys) {
-//                subrange.start_tid = thread_id;
-//                subrange.end_tid = thread_id;
-//                thread_id++;
-//                continue;
-//            }
-//        }
-//        for (SubRange &subrange : subranges->subranges) {
-//            if (subrange.keys() > options_.subrange_no_flush_num_keys) {
-//                subrange.start_tid = thread_id;
-//                subrange.end_tid = options_.num_compaction_threads - 1;
-//                continue;
-//            }
-//        }
+        int thread_id = 0;
+        // MemTables of a subrange is assigned to only one thread.
+        for (SubRange &subrange : subranges->subranges) {
+            if (subrange.keys() <= options_.subrange_no_flush_num_keys) {
+                subrange.merge_memtables_without_flushing = true;
+            }
+            subrange.start_tid = thread_id;
+            subrange.end_tid = thread_id;
+            thread_id = (thread_id + 1) % options_.num_compaction_threads;
+        }
     }
 
     void SubRangeManager::ComputeLoadImbalance(const std::vector<double> &loads,

@@ -1423,11 +1423,13 @@ namespace leveldb {
                         debug);
                 return false;
             }
-            ranges.push_back(r);
+            if (c->level() != c->target_level()) {
+                ranges.push_back(r);
+            }
         }
 
         // check sets are non overlapping.
-        RDMA_ASSERT(ranges.size() == compactions.size());
+        RDMA_ASSERT(ranges.size() <= compactions.size());
         for (int pivot = 0; pivot < ranges.size(); pivot++) {
             Range &p = ranges[pivot];
             for (int i = 0; i < ranges.size(); i++) {

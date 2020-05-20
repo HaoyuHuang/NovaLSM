@@ -117,6 +117,7 @@ namespace nova {
             } else {
                 options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
             }
+            options.subrange_no_flush_num_keys = NovaConfig::config->subrange_num_keys_no_flush;
             uint32_t stocid = db_index % NovaConfig::config->dc_servers.size();
             options.manifest_stoc_id = NovaConfig::config->dc_servers[stocid].server_id;
             options.num_tiny_ranges_per_subrange = NovaConfig::config->num_tinyranges_per_subrange;

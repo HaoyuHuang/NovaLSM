@@ -150,8 +150,8 @@ namespace nova {
                     compaction->input_version_ = &version_files;
 
                     leveldb::CompactionState *state = new leveldb::CompactionState(
-                            compaction, &srs);
-                    state->smallest_snapshot = task.compaction_request->smallest_snapshot;
+                            compaction, &srs,
+                            task.compaction_request->smallest_snapshot);
                     std::function<uint64_t(void)> fn_generator = []() {
                         uint32_t fn = storage_file_number_seq.fetch_add(1);
                         uint64_t stocid = nova::NovaConfig::config->my_server_id;

@@ -84,6 +84,8 @@ DEFINE_string(cc_log_record_mode, "none", "none/rdma");
 DEFINE_uint32(cc_num_log_replicas, 0, "");
 DEFINE_string(cc_memtable_type, "", "pool/static_partition");
 
+DEFINE_bool(cc_recover_dbs, false, "recovery");
+DEFINE_uint32(cc_num_recovery_threads, 32, "recovery");
 
 DEFINE_bool(cc_enable_subrange, false, "");
 DEFINE_double(cc_sampling_ratio, 1, "");
@@ -91,15 +93,12 @@ DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
 DEFINE_string(cc_client_access_pattern, "uniform", "");
 DEFINE_uint32(cc_num_tinyranges_per_subrange, 10, "");
 
-DEFINE_bool(cc_recover_dbs, false, "recovery");
-DEFINE_uint32(cc_num_recovery_threads, 32, "recovery");
-
 DEFINE_bool(cc_enable_detailed_db_stats, false, "");
 DEFINE_bool(cc_enable_flush_multiple_memtables, false, "");
+DEFINE_uint32(cc_subrange_no_flush_num_keys, 100, "");
 DEFINE_string(cc_major_compaction_type, "no", "no/st/lc/sc");
 DEFINE_uint32(cc_major_compaction_max_parallism, 1, "");
 DEFINE_uint32(cc_major_compaction_max_tables_in_a_set, 15, "");
-
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
@@ -282,6 +281,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->ReadZipfianDist();
     NovaConfig::config->client_access_pattern = FLAGS_cc_client_access_pattern;
     NovaConfig::config->enable_detailed_db_stats = FLAGS_cc_enable_detailed_db_stats;
+    NovaConfig::config->subrange_num_keys_no_flush = FLAGS_cc_subrange_no_flush_num_keys;
 
     leveldb::EnvBGThread::bg_thread_id_seq = 0;
     nova::NovaCCServer::storage_worker_seq_id_ = 0;

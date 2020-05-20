@@ -204,7 +204,10 @@ namespace leveldb {
         output += tiny_ranges[0].lower;
         output += ",";
         output += tiny_ranges[tiny_ranges.size() - 1].upper;
-        output += ") keys:";
+        output += ") ";
+        output += fmt::format("c:{} {} {} ", start_tid, end_tid,
+                              merge_memtables_without_flushing);
+        output += "keys:";
         output += std::to_string(
                 tiny_ranges[tiny_ranges.size() - 1].upper_int() -
                 tiny_ranges[0].lower_int());
@@ -228,8 +231,8 @@ namespace leveldb {
     }
 
     int SubRange::GetCompactionThreadId(std::atomic_int_fast32_t *rr_id,
-                                        bool *merge_memtables_without_flushing) const {
-        *merge_memtables_without_flushing = false;
+                                        bool *_merge_memtables_without_flushing) const {
+        *_merge_memtables_without_flushing = merge_memtables_without_flushing;
         if (start_tid == end_tid) {
             return start_tid;
         }

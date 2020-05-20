@@ -305,7 +305,6 @@ namespace leveldb {
                                  const std::function<void(
                                          const ParsedInternalKey &ikey,
                                          const Slice &value)> &add_to_memtable) {
-        RDMA_ASSERT(output_type == kCompactOutputSSTables);
         const uint64_t start_micros = env_->NowMicros();
         std::string output;
         if (input_type == CompactInputType::kCompactInputMemTables) {
@@ -336,6 +335,7 @@ namespace leveldb {
         bool has_current_user_key = false;
         SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
         std::vector<std::string> keys;
+        uint64_t memtable_size = 0;
         while (input->Valid()) {
             Slice key = input->key();
             RDMA_ASSERT(ParseInternalKey(key, &ikey));
@@ -397,9 +397,9 @@ namespace leveldb {
                 }
 //                RDMA_LOG(rdmaio::DEBUG)
 //                    << fmt::format("add key-{}", ikey.FullDebugString());
-                compact->current_output()->largest.DecodeFrom(key);
 //                keys.push_back(ikey.DebugString());
                 if (output_type == kCompactOutputSSTables) {
+                    compact->current_output()->largest.DecodeFrom(key);
                     if (!compact->builder->Add(key, input->value())) {
                         std::string added_keys;
                         for (auto &k : keys) {
@@ -414,6 +414,8 @@ namespace leveldb {
                 } else {
                     RDMA_ASSERT(output_type == kCompactOutputMemTables);
                     add_to_memtable(ikey, input->value());
+                    memtable_size +=
+                            input->key().size() + input->value().size();
                 }
 
                 // Close output file if it is big enough
@@ -439,18 +441,25 @@ namespace leveldb {
         input = nullptr;
 
         stats->micros = env_->NowMicros() - start_micros;
-        for (size_t i = 0; i < compact->outputs.size(); i++) {
-            stats->output.file_size += compact->outputs[i].file_size;
-            stats->output.num_files += 1;
+        if (output_type == CompactOutputType::kCompactOutputSSTables) {
+            for (size_t i = 0; i < compact->outputs.size(); i++) {
+                stats->output.file_size += compact->outputs[i].file_size;
+                stats->output.num_files += 1;
+            }
+        } else {
+            stats->output.num_files = 1;
+            stats->output.file_size = memtable_size;
         }
 
         if (input_type == CompactInputType::kCompactInputMemTables) {
             output = fmt::format(
-                    "bg[{}] Flushing {} memtables => {} files {} bytes",
+                    "bg[{}] Flushing {} memtables => {} files {} bytes {}",
                     bg_thread_->thread_id(),
                     stats->input_source.num_files,
                     stats->output.num_files,
-                    stats->output.file_size);
+                    stats->output.file_size,
+                    output_type == kCompactOutputMemTables ? "memtable"
+                                                           : "sstable");
         } else {
             const int src_level = compact->compaction->level();
             const int dest_level = compact->compaction->target_level();

@@ -60,8 +60,10 @@ namespace leveldb {
         double ninserts = 0;
         double insertion_ratio = 0;
 
+        // Are not required for subrange reorg.
         int start_tid = 0;
         int end_tid = 0;
+        bool merge_memtables_without_flushing = false;
 
         int GetCompactionThreadId(std::atomic_int_fast32_t *rr_id,
                                   bool *merge_memtables_without_flushing) const;

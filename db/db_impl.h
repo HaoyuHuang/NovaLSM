@@ -120,8 +120,6 @@ namespace leveldb {
                                 std::vector<Compaction *> *compactions,
                                 VersionEdit *edit);
 
-        std::unordered_map<uint64_t, std::vector<uint32_t>> l0fn_memtableids;
-
         class NovaCCRecoveryThread {
         public:
             NovaCCRecoveryThread(
@@ -150,11 +148,15 @@ namespace leveldb {
         bool CompactMemTableStaticPartition(EnvBGThread *bg_thread,
                                             const std::vector<EnvBGTask> &tasks);
 
-        bool CompactMultipleMemTablesStaticPartition(
+        bool CompactMultipleMemTablesStaticPartitionToMemTable(
                 int partition_id,
                 EnvBGThread *bg_thread,
-                                                     const std::vector<EnvBGTask> &tasks,
-                                                     CompactOutputType output_type);
+                const std::vector<EnvBGTask> &tasks);
+
+        bool CompactMultipleMemTablesStaticPartitionToSSTables(
+                int partition_id,
+                EnvBGThread *bg_thread,
+                const std::vector<EnvBGTask> &tasks);
 
         friend class DB;
 

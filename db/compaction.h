@@ -155,13 +155,12 @@ namespace leveldb {
         // Files produced by compaction
         FileMetaData *current_output() { return &outputs[outputs.size() - 1]; }
 
-        explicit CompactionState(Compaction *c, SubRanges *s)
+        explicit CompactionState(Compaction *c, SubRanges *s, SequenceNumber n)
                 : compaction(c),
                   subranges(s),
-                  smallest_snapshot(0),
                   outfile(nullptr),
                   builder(nullptr),
-                  total_bytes(0) {}
+                  total_bytes(0), smallest_snapshot(n) {}
 
         Compaction *const compaction = nullptr;
 
@@ -234,7 +233,7 @@ namespace leveldb {
                       CompactInputType input_type,
                       CompactOutputType output_type,
                       const std::function<void(const ParsedInternalKey &ikey,
-                                         const Slice &value)>& add_to_memtable = {});
+                                               const Slice &value)> &add_to_memtable = {});
 
     private:
         Status OpenCompactionOutputFile(CompactionState *compact);
