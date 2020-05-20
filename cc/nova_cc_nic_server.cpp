@@ -74,12 +74,12 @@ namespace nova {
             options.mem_manager = mem_manager;
             options.dc_client = cc_client;
             options.num_memtable_partitions = NovaConfig::config->num_memtable_partitions;
-            options.l0_consolidate_group_size = 8;
             options.num_memtables = NovaConfig::config->num_memtables;
             options.l0_stop_writes_trigger = NovaConfig::config->cc_l0_stop_write;
             options.max_open_files = 50000;
             options.enable_table_locator = NovaConfig::config->enable_table_locator;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
+            options.num_compaction_threads = bg_threads.size();
 
             if (NovaConfig::config->cc_l0_stop_write == 0) {
                 options.l0_stop_writes_trigger = UINT32_MAX;
@@ -119,6 +119,7 @@ namespace nova {
             }
             uint32_t stocid = db_index % NovaConfig::config->dc_servers.size();
             options.manifest_stoc_id = NovaConfig::config->dc_servers[stocid].server_id;
+            options.num_tiny_ranges_per_subrange = NovaConfig::config->num_tinyranges_per_subrange;
             return options;
         }
 
@@ -139,7 +140,6 @@ namespace nova {
             options.mem_manager = mem_manager;
             options.dc_client = nullptr;
             options.num_memtable_partitions = NovaConfig::config->num_memtable_partitions;
-            options.l0_consolidate_group_size = 8;
             options.num_memtables = NovaConfig::config->num_memtables;
             options.l0_stop_writes_trigger = NovaConfig::config->cc_l0_stop_write;
             options.max_open_files = 50000;
@@ -320,9 +320,11 @@ namespace nova {
             uint32_t nmemtables = 0;
             for (auto db : dbs_) {
                 leveldb::DBStats stats;
+                stats.sstable_size_dist = new uint32_t[20];
                 db->QueryDBStats(&stats);
                 l0tables += stats.nsstables;
                 nmemtables += db->FlushMemTables();
+                delete stats.sstable_size_dist;
             }
             RDMA_LOG(rdmaio::INFO) << fmt::format(
                         "Waiting for {} L0 tables and {} memtables to go to L1",

@@ -83,11 +83,13 @@ DEFINE_string(cc_scatter_policy, "random", "random/stats");
 DEFINE_string(cc_log_record_mode, "none", "none/rdma");
 DEFINE_uint32(cc_num_log_replicas, 0, "");
 DEFINE_string(cc_memtable_type, "", "pool/static_partition");
-DEFINE_bool(cc_enable_subrange, false, "");
 
+
+DEFINE_bool(cc_enable_subrange, false, "");
 DEFINE_double(cc_sampling_ratio, 1, "");
 DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
 DEFINE_string(cc_client_access_pattern, "uniform", "");
+DEFINE_uint32(cc_num_tinyranges_per_subrange, 10, "");
 
 DEFINE_bool(cc_recover_dbs, false, "recovery");
 DEFINE_uint32(cc_num_recovery_threads, 32, "recovery");
@@ -111,7 +113,7 @@ void start(NovaCCNICServer *server) {
     server->Start();
 }
 
-void InitializeCC() {
+void TestSubRanges() {
     RdmaCtrl *rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
                                        NovaConfig::config->rdma_port);
     int port = NovaConfig::config->servers[NovaConfig::config->my_server_id].port;
@@ -256,6 +258,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->rtable_size = FLAGS_cc_rtable_size_mb * 1024;
     NovaConfig::config->sstable_size = FLAGS_cc_sstable_size_mb * 1024 * 1024;
     NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
+    NovaConfig::config->num_tinyranges_per_subrange = FLAGS_cc_num_tinyranges_per_subrange;
 
     if (FLAGS_cc_scatter_policy == "random") {
         NovaConfig::config->scatter_policy = ScatterPolicy::RANDOM;
@@ -287,6 +290,6 @@ int main(int argc, char *argv[]) {
     nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;
 
     NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
-    InitializeCC();
+    TestSubRanges();
     return 0;
 }

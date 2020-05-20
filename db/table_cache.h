@@ -48,7 +48,8 @@ namespace leveldb {
                    void (*handle_result)(void *, const Slice &, const Slice &));
 
         // Evict any entry for the specified file number
-        void Evict(uint64_t file_number);
+        void
+        Evict(uint64_t file_number, bool compaction_file_only);
 
         Status
         FindTable(AccessCaller caller, const ReadOptions &options,

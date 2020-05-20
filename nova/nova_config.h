@@ -170,6 +170,7 @@ namespace nova {
         ZipfianDist zipfian_dist;
         std::string client_access_pattern;
         bool enable_detailed_db_stats;
+        int num_tinyranges_per_subrange;
 
         vector<Host> cc_servers;
         vector<Host> dc_servers;

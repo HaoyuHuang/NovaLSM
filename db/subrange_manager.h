@@ -30,12 +30,16 @@ namespace leveldb {
                         std::vector<MemTablePartition *> *partitioned_active_memtables,
                         std::vector<uint32_t> *partitioned_imms);
 
-        void PerformSubRangeReorganization(double processed_writes);
+        void ReorganizeSubranges();
 
         int SearchSubranges(const leveldb::WriteOptions &options,
                             const leveldb::Slice &key,
                             const leveldb::Slice &val,
                             SubRange **subrange);
+
+        void QueryDBStats(leveldb::DBStats *db_stats);
+
+        void ComputeCompactionThreadsAssignment(SubRanges *subranges);
 
         uint64_t last_major_reorg_seq_ = 0;
         uint64_t last_minor_reorg_seq_ = 0;
@@ -43,46 +47,51 @@ namespace leveldb {
         uint32_t num_major_reorgs = 0;
         uint32_t num_skipped_major_reorgs = 0;
         uint32_t num_minor_reorgs = 0;
+        uint32_t num_minor_reorgs_samples = 0;
         uint32_t num_minor_reorgs_for_dup = 0;
         uint32_t num_skipped_minor_reorgs = 0;
 
         std::atomic<SubRanges *> latest_subranges_;
 
+        SubRanges *latest_ = nullptr;
+        double total_num_inserts_since_last_major_ = 0;
+        double fair_ratio_ = 0;
+        VersionEdit edit_;
+
     private:
+        void ComputeLoadImbalance(const std::vector<double> &loads,
+                                  leveldb::DBStats *db_stats);
+
+
         void ConstructRanges(const std::map<uint64_t, double> &userkey_rate,
                              double total_rate, uint64_t lower, uint64_t upper,
                              uint32_t num_ranges_to_construct,
                              bool is_constructing_subranges,
                              std::vector<Range> *ranges);
 
-        void PerformSubrangeMajorReorg(SubRanges *latest,
-                                       double processed_writes);
+        std::vector<AtomicMemTable *> MinorSampling(int subrange_id);
 
-        void MoveShareDuplicateSubranges(SubRanges *latest, int index);
+        bool MajorReorg();
 
-        bool MinorReorgDestroyDuplicates(SubRanges *latest, int subrange_id,
-                                         bool force);
+        bool DestroyDuplicates(int subrange_id, bool force);
 
-        bool MinorRebalancePush(leveldb::SubRanges *latest, int index,
-                                            double total_inserts);
+        bool MinorRebalancePush(int index, bool *updated_prior);
 
-        void moveShare(SubRanges *latest, int index);
+        void MoveShareForDuplicateSubRange(int index);
 
-        int PushTinyRanges(leveldb::SubRanges *latest, int subrangeId,
-                           bool stopWhenBelowFair);
+        int PushTinyRanges(int subrangeId, bool stopWhenBelowFair,
+                           bool *updated_prior);
 
-        bool PerformSubrangeMinorReorgDuplicate(
-                leveldb::SubRanges *latest, int subrange_id,
-                double total_inserts);
+        bool CreateDuplicates(int subrange_id);
 
         port::Mutex range_lock_;
         NovaCCMemFile *manifest_file_ = nullptr;
         std::string dbname_;
-        VersionSet *versions_;
+        VersionSet *versions_ = nullptr;
         const Options options_;
-        const Comparator *user_comparator_;
-        std::vector<MemTablePartition *> *partitioned_active_memtables_;
-        std::vector<uint32_t> *partitioned_imms_;
+        const Comparator *user_comparator_ = nullptr;
+        std::vector<MemTablePartition *> *partitioned_active_memtables_ = nullptr;
+        std::vector<uint32_t> *partitioned_imms_ = nullptr;
     };
 }
 

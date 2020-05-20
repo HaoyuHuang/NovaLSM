@@ -14,8 +14,8 @@
 namespace leveldb {
 
     struct TableAndFile {
-        RandomAccessFile *file;
-        Table *table;
+        RandomAccessFile *file = nullptr;
+        Table *table = nullptr;
     };
 
     static void DeleteEntry(const Slice &key, void *value) {
@@ -55,9 +55,9 @@ namespace leveldb {
         char buf[1 + sizeof(file_number)];
 
         if (caller == AccessCaller::kCompaction) {
-            buf[0] = 'a';
+            buf[0] = 'c';
         } else {
-            buf[0] = 'b';
+            buf[0] = 'u';
         }
         EncodeFixed64(buf + 1, file_number);
         Slice key(buf, 1 + sizeof(file_number));
@@ -132,7 +132,6 @@ namespace leveldb {
         Table *table = reinterpret_cast<TableAndFile *>(cache_->Value(
                 handle))->table;
 
-
         Iterator *result = table->NewIterator(caller, options);
         result->RegisterCleanup(&UnrefEntry, cache_, handle);
         if (tableptr != nullptr) {
@@ -172,13 +171,17 @@ namespace leveldb {
         return s;
     }
 
-    void TableCache::Evict(uint64_t file_number) {
+    void TableCache::Evict(uint64_t file_number, bool compaction_file_only) {
         char buf[1 + sizeof(file_number)];
-        buf[0] = 'a';
+        buf[0] = 'c';
         EncodeFixed64(buf + 1, file_number);
         cache_->Erase(Slice(buf, 1 + sizeof(file_number)));
 
-        buf[0] = 'b';
+        if (compaction_file_only) {
+            return;
+        }
+
+        buf[0] = 'u';
         EncodeFixed64(buf + 1, file_number);
         cache_->Erase(Slice(buf, 1 + sizeof(file_number)));
     }

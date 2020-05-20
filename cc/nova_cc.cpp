@@ -36,6 +36,7 @@ namespace leveldb {
 
         // Only used for flushing SSTables.
         // Policy.
+        RDMA_LOG(rdmaio::DEBUG) << fmt::format("create file w {}", filename);
         uint32_t scid = mem_manager->slabclassid(thread_id, file_size);
         backing_mem_ = mem_manager->ItemAlloc(thread_id, scid);
         RDMA_ASSERT(backing_mem_) << "Running out of memory " << file_size;
@@ -47,6 +48,7 @@ namespace leveldb {
 
     NovaCCMemFile::~NovaCCMemFile() {
         if (backing_mem_) {
+            RDMA_LOG(rdmaio::DEBUG) << fmt::format("close file w {}", fname_);
             uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                       allocated_size_);
             mem_manager_->FreeItem(thread_id_, backing_mem_, scid);
@@ -549,6 +551,10 @@ namespace leveldb {
                                                         prefetch_all_(
                                                                 prefetch_all),
                                                         filename(filename) {
+        if (prefetch_all) {
+            RDMA_LOG(rdmaio::DEBUG) << fmt::format("create file {}", filename);
+        }
+
 //        prefetch_all_ = false;
         RDMA_ASSERT(mem_manager_);
 
@@ -621,6 +627,9 @@ namespace leveldb {
     }
 
     NovaCCRandomAccessFile::~NovaCCRandomAccessFile() {
+        if (prefetch_all_) {
+            RDMA_LOG(rdmaio::DEBUG) << fmt::format("close file {}", filename);
+        }
         if (local_ra_file_) {
             delete local_ra_file_;
         }
@@ -631,14 +640,6 @@ namespace leveldb {
             mem_manager_->FreeItem(thread_id_, backing_mem_table_, scid);
             backing_mem_table_ = nullptr;
         }
-
-//        while (!backing_mem_blocks_.empty()) {
-//            auto it = backing_mem_blocks_.front();
-//            uint32_t scid = mem_manager_->slabclassid(it.thread_id,
-//                                                      MAX_BLOCK_SIZE);
-//            mem_manager_->FreeItem(it.thread_id, it.buf, scid);
-//            backing_mem_blocks_.pop();
-//        }
     }
 
     Status NovaCCRandomAccessFile::Read(const RTableHandle &rtable_handle,

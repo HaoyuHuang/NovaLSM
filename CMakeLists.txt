@@ -123,13 +123,17 @@ endif (BUILD_SHARED_LIBS)
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
 
-add_library(leveldb "" cc/rdma_admission_ctrl.cpp cc/rdma_admission_ctrl.h)
+add_library(leveldb "" )
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
         include/leveldb/cc_client.h
         include/leveldb/db_types.h
 
+        cc/rdma_admission_ctrl.cpp
+        cc/rdma_admission_ctrl.h
+        db/table_locator.cpp
+        db/table_locator.h
         cc/nova_storage_worker.cpp
         cc/nova_storage_worker.h
         cc/storage_selector.cpp

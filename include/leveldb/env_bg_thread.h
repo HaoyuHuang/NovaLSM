@@ -24,6 +24,7 @@ namespace leveldb {
 
         // flushing memtable related attributes.
         void *memtable = nullptr;
+        bool merge_memtables_without_flushing;
         uint32_t range_id = 0;
         uint32_t memtable_size_mb = 0;
         uint32_t memtable_partition_id = 0;

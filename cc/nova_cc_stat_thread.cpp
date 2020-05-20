@@ -264,7 +264,9 @@ namespace nova {
                         stats.num_overlapping_sstables_per_table_since_last_query);
                 output += ostats.DebugString();
                 output += ",";
-                output += std::to_string(stats.maximum_load_imbalance);
+                output += std::to_string(stats.load_imbalance.maximum_load_imbalance);
+                output += ",";
+                output += std::to_string(stats.load_imbalance.stdev);
                 output += ",";
                 // ideal load imbalance is 0.
                 output += std::to_string(0);
@@ -275,9 +277,12 @@ namespace nova {
                 output += ",";
                 output += std::to_string(stats.num_minor_reorgs);
                 output += ",";
-                output += std::to_string(stats.num_skipped_minor_reorgs);
+                output += std::to_string(stats.num_minor_reorgs_samples);
                 output += ",";
                 output += std::to_string(stats.num_minor_reorgs_for_dup);
+                output += ",";
+                output += std::to_string(stats.num_skipped_minor_reorgs);
+
                 output += "\n";
 
                 output += "db-size-stats-" + std::to_string(i) + ",";

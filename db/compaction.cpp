@@ -199,11 +199,12 @@ namespace leveldb {
                                  leveldb::Env *env, const std::string &dbname,
                                  const leveldb::Comparator *user_comparator,
                                  const leveldb::Options &options,
-                                 EnvBGThread *bg_thread)
+                                 EnvBGThread *bg_thread,
+                                 TableCache *table_cache)
             : fn_generator_(fn_generator), env_(env), dbname_(dbname),
               user_comparator_(
                       user_comparator), options_(options),
-              bg_thread_(bg_thread) {
+              bg_thread_(bg_thread), table_cache_(table_cache) {
     }
 
     Status CompactionJob::OpenCompactionOutputFile(CompactionState *compact) {
@@ -233,7 +234,6 @@ namespace leveldb {
                                                    filename);
         compact->outfile = new MemWritableFile(cc_file);
         compact->builder = new TableBuilder(options_, compact->outfile);
-        compact->output_files.push_back(compact->outfile);
         return Status::OK();
     }
 
@@ -244,7 +244,6 @@ namespace leveldb {
         assert(compact != nullptr);
         assert(compact->outfile != nullptr);
         assert(compact->builder != nullptr);
-        assert(!compact->output_files.empty());
 
         const uint64_t output_number = compact->current_output()->number;
         assert(output_number != 0);
@@ -283,6 +282,17 @@ namespace leveldb {
         s = compact->outfile->Close();
 
         mem_file->WaitForPersistingDataBlocks();
+        {
+            FileMetaData *output = compact->current_output();
+            output->converted_file_size = mem_file->Finalize();
+            output->meta_block_handle = mem_file->meta_block_handle();
+            output->data_block_group_handles = mem_file->rhs();
+
+            delete mem_file;
+            mem_file = nullptr;
+            delete compact->outfile;
+            compact->outfile = nullptr;
+        }
         return s;
     }
 
@@ -290,10 +300,15 @@ namespace leveldb {
     CompactionJob::CompactTables(CompactionState *compact,
                                  Iterator *input,
                                  CompactionStats *stats, bool drop_duplicates,
-                                 CompactType type) {
+                                 CompactInputType input_type,
+                                 CompactOutputType output_type,
+                                 const std::function<void(
+                                         const ParsedInternalKey &ikey,
+                                         const Slice &value)> &add_to_memtable) {
+        RDMA_ASSERT(output_type == kCompactOutputSSTables);
         const uint64_t start_micros = env_->NowMicros();
         std::string output;
-        if (type == CompactType::kCompactMemTables) {
+        if (input_type == CompactInputType::kCompactInputMemTables) {
             output = fmt::format(
                     "bg[{}] Flushing {} memtables",
                     bg_thread_->thread_id(),
@@ -325,7 +340,8 @@ namespace leveldb {
             Slice key = input->key();
             RDMA_ASSERT(ParseInternalKey(key, &ikey));
 
-            if (compact->ShouldStopBefore(key, user_comparator_) &&
+            if (output_type == kCompactOutputSSTables &&
+                compact->ShouldStopBefore(key, user_comparator_) &&
                 compact->builder != nullptr &&
                 compact->builder->NumEntries() > 0) {
                 status = FinishCompactionOutputFile(ikey, compact, input);
@@ -368,34 +384,41 @@ namespace leveldb {
                 continue;
             } else {
                 // Open output file if necessary
-                if (compact->builder == nullptr) {
+                if (output_type == kCompactOutputSSTables &&
+                    compact->builder == nullptr) {
                     status = OpenCompactionOutputFile(compact);
                     if (!status.ok()) {
                         break;
                     }
                 }
-                if (compact->builder->NumEntries() == 0) {
+                if (output_type == kCompactOutputSSTables &&
+                    compact->builder->NumEntries() == 0) {
                     compact->current_output()->smallest.DecodeFrom(key);
                 }
 //                RDMA_LOG(rdmaio::DEBUG)
 //                    << fmt::format("add key-{}", ikey.FullDebugString());
                 compact->current_output()->largest.DecodeFrom(key);
 //                keys.push_back(ikey.DebugString());
-                if (!compact->builder->Add(key, input->value())) {
-                    std::string added_keys;
-                    for (auto &k : keys) {
-                        added_keys += k;
-                        added_keys += "\n";
+                if (output_type == kCompactOutputSSTables) {
+                    if (!compact->builder->Add(key, input->value())) {
+                        std::string added_keys;
+                        for (auto &k : keys) {
+                            added_keys += k;
+                            added_keys += "\n";
+                        }
+                        RDMA_ASSERT(false) << fmt::format("{}\n {}",
+                                                          compact->compaction->DebugString(
+                                                                  user_comparator_),
+                                                          added_keys);
                     }
-                    RDMA_ASSERT(false) << fmt::format("{}\n {}",
-                                                      compact->compaction->DebugString(
-                                                              user_comparator_),
-                                                      added_keys);
+                } else {
+                    RDMA_ASSERT(output_type == kCompactOutputMemTables);
+                    add_to_memtable(ikey, input->value());
                 }
 
-
                 // Close output file if it is big enough
-                if (compact->builder->FileSize() >= options_.max_file_size) {
+                if (output_type == kCompactOutputSSTables &&
+                    compact->builder->FileSize() >= options_.max_file_size) {
                     status = FinishCompactionOutputFile(ikey, compact, input);
                     if (!status.ok()) {
                         break;
@@ -405,7 +428,8 @@ namespace leveldb {
             input->Next();
         }
 
-        if (status.ok() && compact->builder != nullptr) {
+        if (output_type == kCompactOutputSSTables && status.ok() &&
+            compact->builder != nullptr) {
             status = FinishCompactionOutputFile(ikey, compact, input);
         }
         if (status.ok()) {
@@ -420,7 +444,7 @@ namespace leveldb {
             stats->output.num_files += 1;
         }
 
-        if (type == CompactType::kCompactMemTables) {
+        if (input_type == CompactInputType::kCompactInputMemTables) {
             output = fmt::format(
                     "bg[{}] Flushing {} memtables => {} files {} bytes",
                     bg_thread_->thread_id(),
@@ -442,7 +466,7 @@ namespace leveldb {
         Log(options_.info_log, "%s", output.c_str());
         RDMA_LOG(rdmaio::INFO) << output;
 
-        if (type == CompactType::kCompactMemTables) {
+        if (input_type == CompactInputType::kCompactInputMemTables) {
             output = fmt::format(
                     "Flushing memtables stats,{},{},{},{},{}",
                     stats->input_source.num_files +
@@ -464,20 +488,17 @@ namespace leveldb {
         Log(options_.info_log, "%s", output.c_str());
         RDMA_LOG(rdmaio::INFO) << output;
 
-        // Now finalize all tables.
-        for (int i = 0; i < compact->output_files.size(); i++) {
-            FileMetaData &output = compact->outputs[i];
-            MemWritableFile *out = compact->output_files[i];
-            auto *mem_file = dynamic_cast<NovaCCMemFile *>(out->mem_file());
-            output.converted_file_size = mem_file->Finalize();
-            output.meta_block_handle = mem_file->meta_block_handle();
-            output.data_block_group_handles = mem_file->rhs();
-
-            delete mem_file;
-            delete out;
-            compact->output_files[i] = nullptr;
-            mem_file = nullptr;
-            out = nullptr;
+        // Remove input files from table cache.
+        if (table_cache_) {
+            if (compact->compaction) {
+                for (int which = 0; which < 2; which++) {
+                    for (int i = 0;
+                         i < compact->compaction->inputs_[which].size(); i++) {
+                        auto f = compact->compaction->inputs_[which][i];
+                        table_cache_->Evict(f->number, true);
+                    }
+                }
+            }
         }
 
         if (compact->compaction) {

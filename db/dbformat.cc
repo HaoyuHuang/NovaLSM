@@ -85,7 +85,6 @@ namespace leveldb {
             guides.push_back(meta);
         }
         RDMA_ASSERT(DecodeFixed32(&input, &num_subranges));
-        RDMA_ASSERT(num_subranges == 0);
         for (int i = 0; i < num_subranges; i++) {
             SubRange sr = {};
             RDMA_ASSERT(sr.DecodeForCompaction(&input));

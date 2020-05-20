@@ -33,8 +33,10 @@ namespace leveldb {
         has_prev_log_number_ = false;
         has_next_file_number_ = false;
         has_last_sequence_ = false;
+        compact_pointers_.clear();
         deleted_files_.clear();
         new_files_.clear();
+        new_subranges_.clear();
     }
 
     uint32_t VersionEdit::EncodeTo(char *dst) const {
@@ -65,7 +67,7 @@ namespace leveldb {
         }
 
         for (size_t i = 0; i < new_files_.size(); i++) {
-            auto &f = new_files_[i].second;
+            const auto &f = new_files_[i].second;
             dst[msg_size] = kNewFile;
             msg_size += 1;
             msg_size += EncodeFixed32(dst + msg_size,
@@ -74,12 +76,10 @@ namespace leveldb {
         }
 
         for (size_t i = 0; i < new_subranges_.size(); i++) {
-            auto &subrange = new_subranges_[i];
+            const auto &subrange = new_subranges_[i];
             dst[msg_size] = kUpdateSubRange;
             msg_size += 1;
-
             msg_size += subrange.Encode(dst + msg_size, i);
-
         }
         dst[msg_size] = kEndEdit;
         msg_size += 1;
@@ -160,8 +160,9 @@ namespace leveldb {
                     }
                     break;
                 case kUpdateSubRange:
+                    sr = {};
                     if (sr.Decode(&input)) {
-                        new_subranges_.push_back(sr);
+                        new_subranges_.push_back(std::move(sr));
                     } else {
                         msg = "update-subrange entry";
                     }

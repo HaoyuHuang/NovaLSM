@@ -8,6 +8,7 @@
 #define LEVELDB_SUBRANGE_H
 
 #include <vector>
+#include <atomic>
 #include "nova/logging.hpp"
 
 #include "leveldb/slice.h"
@@ -20,9 +21,10 @@ namespace leveldb {
         std::string upper = {};
         bool lower_inclusive = true;
         bool upper_inclusive = false;
-        bool is_duplicated = false;
-        uint64_t ninserts = 0;
+        uint32_t num_duplicates = 0;
+        double ninserts = 0;
         double insertion_ratio = 0;
+        int prior_subrange_id = -1;
 
         uint32_t Encode(char *buf) const;
 
@@ -47,6 +49,7 @@ namespace leveldb {
         bool IsAPoint(const Comparator *comparator) const;
 
         uint64_t lower_int() const;
+
         uint64_t upper_int() const;
     };
 
@@ -54,36 +57,32 @@ namespace leveldb {
     struct SubRange {
         std::vector<Range> tiny_ranges;
         uint32_t num_duplicates = 0;
-        uint64_t ninserts = 0;
+        double ninserts = 0;
         double insertion_ratio = 0;
+
+        int start_tid = 0;
+        int end_tid = 0;
+
+        int GetCompactionThreadId(std::atomic_int_fast32_t *rr_id,
+                                  bool *merge_memtables_without_flushing) const;
 
         uint32_t decoded_subrange_id = 0;
 
-        void UpdateStats();
+        void UpdateStats(double num_inserts_since_last_major);
 
         bool BinarySearch(const leveldb::Slice &key,
                           int *tinyrange_id,
-                          const Comparator *user_comparator);
+                          const Comparator *user_comparator) const;
 
-        const std::string &lower() const {
-            RDMA_ASSERT(!tiny_ranges.empty());
-            return tiny_ranges[0].lower;
+        Range &first() {
+            return tiny_ranges[0];
         }
 
-        bool lower_inclusive() const {
-            RDMA_ASSERT(!tiny_ranges.empty());
-            return tiny_ranges[0].lower_inclusive;
+        Range &last() {
+            return tiny_ranges[tiny_ranges.size() - 1];
         }
 
-        const std::string &upper() const {
-            RDMA_ASSERT(!tiny_ranges.empty());
-            return tiny_ranges[tiny_ranges.size() - 1].upper;
-        }
-
-        bool upper_inclusive() const {
-            RDMA_ASSERT(!tiny_ranges.empty());
-            return tiny_ranges[tiny_ranges.size() - 1].upper_inclusive;
-        }
+        int keys() const;
 
         uint32_t Encode(char *buf, uint32_t subrange_id) const;
 
@@ -122,18 +121,26 @@ namespace leveldb {
 
         explicit SubRanges(const std::vector<SubRange> &other);
 
+        SubRange &first() {
+            return subranges[0];
+        }
+
+        SubRange &last() {
+            return subranges[subranges.size() - 1];
+        }
+
         std::vector<SubRange> subranges;
 
         bool BinarySearch(const leveldb::Slice &key,
                           int *subrange_id,
-                          const Comparator *user_comparator);
+                          const Comparator *user_comparator) const;
 
         bool
         BinarySearchWithDuplicate(const leveldb::Slice &key,
                                   unsigned int *rand_seed, int *subrange_id,
-                                  const Comparator *user_comparator);
+                                  const Comparator *user_comparator) const;
 
-        std::string DebugString();
+        std::string DebugString() const;
 
         void AssertSubrangeBoundary(const Comparator *comparator);
     };

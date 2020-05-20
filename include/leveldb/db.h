@@ -50,16 +50,22 @@ namespace leveldb {
         }
     };
 
+    struct LoadImbalanceMetric {
+        double maximum_load_imbalance = 0.0;
+        double stdev = 0.0;
+    };
+
     struct DBStats {
         uint32_t nsstables = 0;
         uint64_t dbsize = 0;
-        double maximum_load_imbalance = 0.0;
-
+        LoadImbalanceMetric load_imbalance = {};
         uint32_t num_major_reorgs = 0.0;
         uint32_t num_minor_reorgs = 0.0;
         uint32_t num_skipped_major_reorgs = 0.0;
         uint32_t num_skipped_minor_reorgs = 0.0;
         uint32_t num_minor_reorgs_for_dup = 0.0;
+        uint32_t num_minor_reorgs_samples = 0.0;
+
         uint32_t new_l0_sstables_since_last_query = 0.0;
 
         std::vector<OverlappingStats> num_overlapping_sstables_per_table;
@@ -117,8 +123,8 @@ namespace leveldb {
         // Returns OK on success, non-OK on failure.
         // Note: consider setting options.sync = true.
         virtual Status
-        Write(const WriteOptions &options, const Slice &key,
-              const Slice &value) = 0;
+        WriteMemTablePool(const WriteOptions &options, const Slice &key,
+                          const Slice &value) = 0;
 
         // If the database contains an entry for "key" store the
         // corresponding value in *value and return OK.

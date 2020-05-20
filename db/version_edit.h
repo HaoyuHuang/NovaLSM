@@ -43,13 +43,14 @@ namespace leveldb {
         }
 
         void
-        UpdateSubRange(uint32_t subrange_id, std::vector<Range> &tiny_ranges,
+        UpdateSubRange(uint32_t subrange_id,
+                       const std::vector<Range> &tiny_ranges,
                        uint32_t num_duplicates) {
             SubRange sr = {};
             sr.decoded_subrange_id = subrange_id;
             sr.tiny_ranges = tiny_ranges;
             sr.num_duplicates = num_duplicates;
-            new_subranges_.push_back(sr);
+            new_subranges_.push_back(std::move(sr));
         }
 
         // Add the specified file at the specified number.
@@ -107,9 +108,7 @@ namespace leveldb {
         std::vector<std::pair<int, InternalKey>> compact_pointers_;
         std::vector<std::pair<int, DeletedFileIdentifier>> deleted_files_;
         std::vector<std::pair<int, FileMetaData>> new_files_;
-
         std::vector<SubRange> new_subranges_;
-
     };
 
 }  // namespace leveldb

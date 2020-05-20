@@ -146,6 +146,7 @@ namespace nova {
                     // This will delete the subranges.
                     leveldb::SubRanges srs;
                     srs.subranges = task.compaction_request->subranges;
+                    srs.AssertSubrangeBoundary(user_comparator_);
                     compaction->input_version_ = &version_files;
 
                     leveldb::CompactionState *state = new leveldb::CompactionState(
@@ -173,7 +174,7 @@ namespace nova {
                     leveldb::CompactionJob job(fn_generator, env_,
                                                task.compaction_request->dbname,
                                                user_comparator_,
-                                               options_, this);
+                                               options_, this, &table_cache);
                     RDMA_LOG(rdmaio::DEBUG)
                         << fmt::format("storage[{}]: {}", thread_id_,
                                        compaction->DebugString(
@@ -181,7 +182,8 @@ namespace nova {
                     auto it = compaction->MakeInputIterator(&table_cache, this);
                     leveldb::CompactionStats stats = state->BuildStats();
                     job.CompactTables(state, it, &stats, true,
-                                      leveldb::CompactType::kCompactSSTables);
+                                      leveldb::CompactInputType::kCompactInputSSTables,
+                                      leveldb::CompactOutputType::kCompactOutputSSTables);
                     ct.compaction_state = state;
                     ct.compaction_request = task.compaction_request;
 //                    {

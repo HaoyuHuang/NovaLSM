@@ -30,9 +30,14 @@ namespace leveldb {
 
     class NovaBlockCCClient;
 
-    enum CompactType {
-        kCompactMemTables,
-        kCompactSSTables
+    enum CompactInputType {
+        kCompactInputMemTables = 0,
+        kCompactInputSSTables = 1
+    };
+
+    enum CompactOutputType {
+        kCompactOutputMemTables = 0,
+        kCompactOutputSSTables = 1
     };
 
     struct CompactionTableStats {
@@ -210,7 +215,6 @@ namespace leveldb {
         // State kept for output being generated
         MemWritableFile *outfile = nullptr;
         TableBuilder *builder = nullptr;
-        std::vector<MemWritableFile *> output_files;
         uint64_t total_bytes = 0;
     };
 
@@ -221,13 +225,16 @@ namespace leveldb {
                       const std::string &dbname,
                       const Comparator *user_comparator,
                       const Options &options,
-                      EnvBGThread *bg_thread);
+                      EnvBGThread *bg_thread, TableCache *table_cache);
 
         Status
         CompactTables(CompactionState *state,
                       Iterator *input,
                       CompactionStats *stats, bool drop_duplicates,
-                      CompactType type);
+                      CompactInputType input_type,
+                      CompactOutputType output_type,
+                      const std::function<void(const ParsedInternalKey &ikey,
+                                         const Slice &value)>& add_to_memtable = {});
 
     private:
         Status OpenCompactionOutputFile(CompactionState *compact);
@@ -242,6 +249,7 @@ namespace leveldb {
         const std::string dbname_;
         const Comparator *user_comparator_ = nullptr;
         const Options options_;
+        TableCache *table_cache_ = nullptr;
     };
 
     void

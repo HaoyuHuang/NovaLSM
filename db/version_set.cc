@@ -1107,38 +1107,39 @@ namespace leveldb {
         Builder builder(this, current_);
         Slice input = record;
         Slice next;
-        {
-            while (true) {
-                VersionEdit edit;
+        while (true) {
+            VersionEdit edit;
 
-                Status s = edit.DecodeFrom(input, &next);
-                input = next;
-                if (!s.ok()) {
-                    break;
-                }
+            Status s = edit.DecodeFrom(input, &next);
+            input = next;
+            if (!s.ok()) {
                 RDMA_LOG(rdmaio::INFO)
-                    << fmt::format("stats:{} edit:{}", s.ToString(),
-                                   edit.DebugString());
+                    << fmt::format("Read manifest file {} bytes",
+                                   (uint64_t) (next.data()) -
+                                   (uint64_t) (record.data()));
+                break;
+            }
+            RDMA_LOG(rdmaio::INFO)
+                << fmt::format("stats:{} edit:{}", s.ToString(),
+                               edit.DebugString());
 
-                builder.Apply(&edit);
-                if (edit.has_next_file_number_) {
-                    next_file = std::max(next_file, edit.next_file_number_);
-                }
+            builder.Apply(&edit);
+            if (edit.has_next_file_number_) {
+                next_file = std::max(next_file, edit.next_file_number_);
+            }
 
-                if (edit.has_last_sequence_) {
-                    last_sequence = std::max(last_sequence,
-                                             edit.last_sequence_);
-                }
-
-                if (edit.new_subranges_.empty()) {
-                    continue;
-                }
-                subrange_edits->clear();
-                subrange_edits->resize(edit.new_subranges_.size());
-                for (int i = 0; i < edit.new_subranges_.size(); i++) {
-                    SubRange &sr = edit.new_subranges_[i];
-                    (*subrange_edits)[sr.decoded_subrange_id] = sr;
-                }
+            if (edit.has_last_sequence_) {
+                last_sequence = std::max(last_sequence,
+                                         edit.last_sequence_);
+            }
+            if (edit.new_subranges_.empty()) {
+                continue;
+            }
+            subrange_edits->clear();
+            subrange_edits->resize(edit.new_subranges_.size());
+            for (int i = 0; i < edit.new_subranges_.size(); i++) {
+                SubRange &sr = edit.new_subranges_[i];
+                (*subrange_edits)[sr.decoded_subrange_id] = sr;
             }
         }
 

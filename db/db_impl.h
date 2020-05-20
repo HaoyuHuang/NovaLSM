@@ -29,8 +29,7 @@
 #include "leveldb/subrange.h"
 #include "subrange_manager.h"
 #include "compaction.h"
-
-#define MAX_BUCKETS 10000000
+#include "table_locator.h"
 
 namespace leveldb {
 
@@ -43,20 +42,6 @@ namespace leveldb {
     class VersionEdit;
 
     class VersionSet;
-
-    struct TableLocation {
-        std::atomic_int_fast64_t memtable_id;
-    };
-
-    class TableLocator {
-    public:
-        uint64_t Lookup(const Slice &key, uint64_t hash);
-
-        void Insert(const Slice &key, uint64_t hash, uint32_t memtableid);
-
-    private:
-        TableLocation table_locator_[MAX_BUCKETS];
-    };
 
     class DBImpl : public DB {
     public:
@@ -82,8 +67,8 @@ namespace leveldb {
 
         Status Delete(const WriteOptions &, const Slice &key) override;
 
-        Status Write(const WriteOptions &options, const Slice &key,
-                     const Slice &value) override;
+        Status WriteMemTablePool(const WriteOptions &options, const Slice &key,
+                                 const Slice &val) override;
 
         Status WriteStaticPartition(const WriteOptions &options,
                                     const Slice &key,
@@ -122,9 +107,10 @@ namespace leveldb {
         Status Recover() override;
 
         Status
-        RecoverLogFile(const std::unordered_map<std::string, uint64_t> &logfile_buf,
-                       uint32_t *recovered_log_records,
-                       timeval *rdma_read_complete);
+        RecoverLogFile(
+                const std::unordered_map<std::string, uint64_t> &logfile_buf,
+                uint32_t *recovered_log_records,
+                timeval *rdma_read_complete);
 
         void
         CoordinateMajorCompaction() override;
@@ -164,8 +150,11 @@ namespace leveldb {
         bool CompactMemTableStaticPartition(EnvBGThread *bg_thread,
                                             const std::vector<EnvBGTask> &tasks);
 
-        bool CompactMultipleMemTablesStaticPartition(EnvBGThread *bg_thread,
-                                                     const std::vector<EnvBGTask> &tasks);
+        bool CompactMultipleMemTablesStaticPartition(
+                int partition_id,
+                EnvBGThread *bg_thread,
+                                                     const std::vector<EnvBGTask> &tasks,
+                                                     CompactOutputType output_type);
 
         friend class DB;
 
@@ -220,10 +209,8 @@ namespace leveldb {
 
         void ScheduleBGTask(
                 int thread_id, MemTable *imm, void *compaction,
-                uint32_t partition_id,
-                uint32_t imm_slot,
-                unsigned int *rand_seed) EXCLUSIVE_LOCKS_REQUIRED(
-                mutex_);
+                uint32_t partition_id, uint32_t imm_slot,
+                unsigned int *rand_seed, bool merge_memtables_without_flushing);
 
         bool
         PerformMajorCompaction(EnvBGThread *bg_thread,
@@ -292,7 +279,8 @@ namespace leveldb {
 
         // Set of table files to protect from deletion because they are
         // part of ongoing compactions.
-        std::unordered_map<uint64_t, FileMetaData> compacted_tables_ GUARDED_BY(mutex_);
+        std::unordered_map<uint64_t, FileMetaData> compacted_tables_ GUARDED_BY(
+                mutex_);
         bool is_major_compaciton_running_ = false;
         ManualCompaction *manual_compaction_ GUARDED_BY(mutex_);
 

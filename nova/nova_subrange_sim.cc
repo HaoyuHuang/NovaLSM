@@ -36,8 +36,8 @@ using namespace std;
 using namespace rdmaio;
 using namespace nova;
 
-DEFINE_uint32(cc_num_memtables, 128, "");
-DEFINE_uint32(cc_num_memtable_partitions, 64, "");
+DEFINE_uint32(cc_num_memtables, 16, "");
+DEFINE_uint32(cc_num_memtable_partitions, 8, "");
 DEFINE_uint64(cc_iterations, 10000000, "");
 DEFINE_double(cc_sampling_ratio, 1, "");
 DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
@@ -101,9 +101,8 @@ namespace {
         if (NovaConfig::config->sstable_size > 0) {
             options.max_file_size = NovaConfig::config->sstable_size;
         }
-
+        options.num_compaction_threads = bg_threads.size();
         options.num_memtable_partitions = NovaConfig::config->num_memtable_partitions;
-        options.l0_consolidate_group_size = 8;
         options.num_memtables = NovaConfig::config->num_memtables;
         options.l0_stop_writes_trigger = NovaConfig::config->cc_l0_stop_write;
         options.max_open_files = 50000;
@@ -121,14 +120,16 @@ namespace {
         options.bg_threads = bg_threads;
         options.enable_tracing = false;
         options.comparator = new YCSBKeyComparator();
-        if (NovaConfig::config->memtable_type == "pool") {
-            options.memtable_type = leveldb::MemTableType::kMemTablePool;
-        } else {
-            options.memtable_type = leveldb::MemTableType::kStaticPartition;
-        }
+        options.memtable_type = leveldb::MemTableType::kStaticPartition;
         options.enable_subranges = NovaConfig::config->enable_subrange;
         options.subrange_reorg_sampling_ratio = 1.0;
         options.reorg_thread = reorg_thread;
+        options.num_tiny_ranges_per_subrange = 10;
+        options.enable_subranges = true;
+        options.max_num_sstables_in_nonoverlapping_set = 0;
+        options.max_num_coordinated_compaction_nonoverlapping_sets = 0;
+        options.enable_flush_multiple_memtables = false;
+        options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
 
         leveldb::Logger *log = nullptr;
         std::string db_path = DBName(NovaConfig::config->db_path,
@@ -165,7 +166,7 @@ void start(NovaCCNICServer *server) {
     server->Start();
 }
 
-void InitializeCC() {
+void TestSubRanges() {
     uint64_t nrdmatotal = nrdma_buf_cc();
     uint64_t ntotal = nrdmatotal;
     ntotal += NovaConfig::config->mem_pool_size_gb * 1024 * 1024 * 1024;
@@ -183,9 +184,11 @@ void InitializeCC() {
     mkdirs(NovaConfig::config->rtable_path.data());
     mkdirs(NovaConfig::config->db_path.data());
 
-    leveldb::NovaNoopCompactionThread *bg = new leveldb::NovaNoopCompactionThread;
     std::vector<leveldb::EnvBGThread *> bgs;
-    bgs.push_back(bg);
+    for (int i = 0; i < FLAGS_cc_num_memtable_partitions; i++) {
+        leveldb::NovaNoopCompactionThread *bg = new leveldb::NovaNoopCompactionThread;
+        bgs.push_back(bg);
+    }
 
     leveldb::NovaCCCompactionThread *reorg = new leveldb::NovaCCCompactionThread(
             nullptr);
@@ -194,7 +197,10 @@ void InitializeCC() {
 
     leveldb::DB *db = CreateDatabase(0, nullptr, mem_manager, nullptr, bgs,
                                      reorg);
-    bg->db = db;
+    for (int i = 0; i < FLAGS_cc_num_memtable_partitions; i++) {
+        auto bg = reinterpret_cast<leveldb::NovaNoopCompactionThread *> (bgs[i]);
+        bg->db = db;
+    }
 
     auto stat_thread = new NovaStatThread;
     stat_thread->cc_server_workers_ = {};
@@ -224,7 +230,7 @@ void InitializeCC() {
         gen = new ycsbc::ZipfianGenerator(0, records);
     }
 
-    for (uint64_t j = 0; j < FLAGS_cc_iterations; FLAGS_cc_iterations++) {
+    for (uint64_t j = 0; j < FLAGS_cc_iterations; j++) {
         uint32_t rid = gen->Next();
         auto v = static_cast<char>((rid % 10) + 'a');
 
@@ -243,7 +249,7 @@ void InitializeCC() {
         option.thread_id = 0;
         option.local_write = true;
         option.replicate_log_record_states = state;
-
+        option.is_loading_db = false;
         leveldb::Status s = db->Put(option, key, val);
         RDMA_ASSERT(s.ok());
     }
@@ -332,13 +338,11 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_NONE;
 
     NovaConfig::config->enable_table_locator = true;
-
     leveldb::EnvBGThread::bg_thread_id_seq = 0;
     nova::NovaCCServer::storage_worker_seq_id_ = 0;
     leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
     NovaConfig::config->use_multiple_disks = false;
     nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;
-
     NovaConfig::config->subrange_sampling_ratio = FLAGS_cc_sampling_ratio;
     NovaConfig::config->zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
     NovaConfig::config->ReadZipfianDist();
@@ -352,18 +356,17 @@ int main(int argc, char *argv[]) {
         r.lower = "0";
         r.upper = "1111";
         r.lower_inclusive = true;
-        r.upper_inclusive = true;
+        r.upper_inclusive = false;
         tiny_ranges.push_back(r);
         edit.UpdateSubRange(0, tiny_ranges, 0);
     }
-
     {
         std::vector<leveldb::Range> tiny_ranges;
         leveldb::Range r;
         r.lower = "2222";
         r.upper = "33333";
-        r.lower_inclusive = false;
-        r.upper_inclusive = true;
+        r.lower_inclusive = true;
+        r.upper_inclusive = false;
         tiny_ranges.push_back(r);
         edit.UpdateSubRange(1, tiny_ranges, 1);
     }
@@ -398,7 +401,6 @@ int main(int argc, char *argv[]) {
     leveldb::VersionEdit new_edit;
     RDMA_ASSERT(new_edit.DecodeFrom(leveldb::Slice(edit_memory, size)).ok());
     RDMA_LOG(rdmaio::INFO) << new_edit.DebugString();
-
-    InitializeCC();
+    TestSubRanges();
     return 0;
 }
