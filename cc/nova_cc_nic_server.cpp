@@ -75,15 +75,12 @@ namespace nova {
             options.dc_client = cc_client;
             options.num_memtable_partitions = NovaConfig::config->num_memtable_partitions;
             options.num_memtables = NovaConfig::config->num_memtables;
-            options.l0_stop_writes_trigger = NovaConfig::config->cc_l0_stop_write;
+            options.l0bytes_stop_writes_trigger =
+                    NovaConfig::config->l0_stop_write_gb * 1024 * 1024 * 1024;
             options.max_open_files = 50000;
             options.enable_table_locator = NovaConfig::config->enable_table_locator;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
             options.num_compaction_threads = bg_threads.size();
-
-            if (NovaConfig::config->cc_l0_stop_write == 0) {
-                options.l0_stop_writes_trigger = UINT32_MAX;
-            }
             options.max_dc_file_size =
                     std::max(options.write_buffer_size, options.max_file_size) +
                     LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
@@ -142,14 +139,9 @@ namespace nova {
             options.dc_client = nullptr;
             options.num_memtable_partitions = NovaConfig::config->num_memtable_partitions;
             options.num_memtables = NovaConfig::config->num_memtables;
-            options.l0_stop_writes_trigger = NovaConfig::config->cc_l0_stop_write;
             options.max_open_files = 50000;
             options.enable_table_locator = NovaConfig::config->enable_table_locator;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
-
-            if (NovaConfig::config->cc_l0_stop_write == 0) {
-                options.l0_stop_writes_trigger = UINT32_MAX;
-            }
             options.max_dc_file_size =
                     std::max(options.write_buffer_size, options.max_file_size) +
                     LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
@@ -323,7 +315,7 @@ namespace nova {
                 leveldb::DBStats stats;
                 stats.sstable_size_dist = new uint32_t[20];
                 db->QueryDBStats(&stats);
-                l0tables += stats.nsstables;
+                l0tables += stats.num_l0_sstables;
                 nmemtables += db->FlushMemTables();
                 delete stats.sstable_size_dist;
             }

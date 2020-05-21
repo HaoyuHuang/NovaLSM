@@ -181,7 +181,6 @@ namespace nova {
         worker->stats.nget_hits++;
 
         leveldb::Slice key(buf, nkey);
-
         CCFragment *frag = NovaConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
         std::string value;
@@ -214,14 +213,11 @@ namespace nova {
     bool
     process_reintialize_qps(int fd, Connection *conn) {
         RDMA_LOG(rdmaio::INFO) << "Reinitialize QPs";
-
         NovaCCConnWorker *worker = (NovaCCConnWorker *) conn->worker;
-
         for (int i = 0; i < worker->rdma_threads.size(); i++) {
             auto *thread = reinterpret_cast<NovaRDMAComputeComponent *>(worker->rdma_threads[i]);
             thread->should_pause = true;
         }
-
         // Wait until all rdma threads are paused.
         bool wait = true;
         while (wait) {
@@ -234,22 +230,38 @@ namespace nova {
                 }
             }
         }
-
         for (int i = 0; i < worker->rdma_threads.size(); i++) {
             auto *thread = reinterpret_cast<NovaRDMAComputeComponent *>(worker->rdma_threads[i]);
             auto *broker = reinterpret_cast<NovaRDMARCStore *> (thread->rdma_store_);
             broker->ReinitializeQPs(worker->ctrl_);
         }
-
         for (int i = 0; i < worker->rdma_threads.size(); i++) {
             auto *thread = reinterpret_cast<NovaRDMAComputeComponent *>(worker->rdma_threads[i]);
             thread->should_pause = false;
             sem_post(&thread->sem_);
         }
-
         char *response_buf = conn->buf;
         int nlen = 1;
         int len = int_to_str(response_buf, nlen);
+        conn->response_buf = conn->buf;
+        conn->response_size = len + nlen;
+        return true;
+    }
+
+    bool
+    process_socket_stats_request(int fd, Connection *conn) {
+        RDMA_LOG(rdmaio::INFO) << "Obtain stats";
+        NovaCCConnWorker *worker = (NovaCCConnWorker *) conn->worker;
+        int num_l0_sstables = 0;
+        for (auto db : worker->dbs_) {
+            leveldb::DBStats stats;
+            db->QueryDBStats(&stats);
+            num_l0_sstables += stats.num_l0_sstables;
+        }
+
+        char *response_buf = conn->buf;
+        int nlen = 1;
+        int len = int_to_str(response_buf, num_l0_sstables);
         conn->response_buf = conn->buf;
         conn->response_size = len + nlen;
         return true;
@@ -459,6 +471,9 @@ namespace nova {
         }
         if (buf[0] == RequestType::CLOSE_RTABLE) {
             return process_close_rtables(fd, conn);
+        }
+        if (buf[0] == RequestType::STATS) {
+            return process_socket_stats_request(fd, conn);
         }
 //        if (buf[0] == RequestType::DELETE_LOG_FILE) {
 //            return process_socket_delete_log_file(fd, conn);

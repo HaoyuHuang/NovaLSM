@@ -322,7 +322,7 @@ namespace leveldb {
                     stats->input_target.level);
         }
         Log(options_.info_log, "%s", output.c_str());
-        RDMA_LOG(rdmaio::DEBUG) << output;
+//        RDMA_LOG(rdmaio::DEBUG) << output;
 
         assert(compact->builder == nullptr);
         assert(compact->outfile == nullptr);
@@ -471,9 +471,9 @@ namespace leveldb {
                     compact->compaction->num_input_files(1),
                     dest_level,
                     compact->total_bytes);
+            RDMA_LOG(rdmaio::INFO) << output;
         }
         Log(options_.info_log, "%s", output.c_str());
-        RDMA_LOG(rdmaio::INFO) << output;
 
         if (input_type == CompactInputType::kCompactInputMemTables) {
             output = fmt::format(
@@ -493,9 +493,9 @@ namespace leveldb {
                                  stats->output.num_files,
                                  stats->output.file_size,
                                  stats->micros);
+            RDMA_LOG(rdmaio::INFO) << output;
         }
         Log(options_.info_log, "%s", output.c_str());
-        RDMA_LOG(rdmaio::INFO) << output;
 
         // Remove input files from table cache.
         if (table_cache_) {

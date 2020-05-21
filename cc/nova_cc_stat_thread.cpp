@@ -229,12 +229,12 @@ namespace nova {
                 dbs_[i]->QueryDBStats(&stats);
 
                 aggregated_stats.dbsize += stats.dbsize;
-                aggregated_stats.nsstables += stats.nsstables;
-                output += std::to_string(stats.nsstables);
+                aggregated_stats.num_l0_sstables += stats.num_l0_sstables;
+                output += std::to_string(stats.num_l0_sstables);
                 output += ",";
-                uint32_t ideal_nsstables = stats.nsstables;
+                uint32_t ideal_nsstables = stats.num_l0_sstables;
                 if (nova::NovaConfig::config->enable_subrange) {
-                    ideal_nsstables = stats.nsstables /
+                    ideal_nsstables = stats.num_l0_sstables /
                                       nova::NovaConfig::config->num_memtable_partitions;
                     ideal_nsstables = std::max(ideal_nsstables, (uint32_t) 1);
                 }
@@ -288,7 +288,7 @@ namespace nova {
                 output += "db-size-stats-" + std::to_string(i) + ",";
                 output += std::to_string(stats.dbsize / 1024 / 1024);
                 output += ",";
-                output += std::to_string(stats.nsstables);
+                output += std::to_string(stats.num_l0_sstables);
                 output += ",";
                 for (int j = 0; j < BUCKET_SIZE; j++) {
                     size_dist[j] += stats.sstable_size_dist[j];
@@ -314,7 +314,7 @@ namespace nova {
             output += "db," + std::to_string(
                     aggregated_stats.dbsize / 1024 / 1024);
             output += ",";
-            output += std::to_string(aggregated_stats.nsstables);
+            output += std::to_string(aggregated_stats.num_l0_sstables);
             output += ",";
             for (int j = 0; j < BUCKET_SIZE; j++) {
                 output += std::to_string(aggregated_stats.sstable_size_dist[j]);

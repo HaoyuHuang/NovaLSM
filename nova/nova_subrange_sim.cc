@@ -104,12 +104,9 @@ namespace {
         options.num_compaction_threads = bg_threads.size();
         options.num_memtable_partitions = NovaConfig::config->num_memtable_partitions;
         options.num_memtables = NovaConfig::config->num_memtables;
-        options.l0_stop_writes_trigger = NovaConfig::config->cc_l0_stop_write;
+        options.l0bytes_stop_writes_trigger = 0;
         options.max_open_files = 50000;
         options.enable_table_locator = NovaConfig::config->enable_table_locator;
-        if (NovaConfig::config->cc_l0_stop_write == 0) {
-            options.l0_stop_writes_trigger = UINT32_MAX;
-        }
         options.max_dc_file_size =
                 std::max(options.write_buffer_size, options.max_file_size) +
                 LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
@@ -325,7 +322,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->num_rdma_compaction_workers = 1;
     NovaConfig::config->num_memtables = FLAGS_cc_num_memtables;
     NovaConfig::config->num_memtable_partitions = FLAGS_cc_num_memtable_partitions;
-    NovaConfig::config->cc_l0_stop_write = 0;
+    NovaConfig::config->l0_stop_write_gb = 0;
     NovaConfig::config->enable_subrange = true;
     NovaConfig::config->memtable_type = "static_partition";
 

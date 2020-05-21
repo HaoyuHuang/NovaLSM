@@ -72,7 +72,7 @@ DEFINE_uint32(cc_num_memtables, 0, "");
 DEFINE_uint32(cc_num_memtable_partitions, 0, "");
 DEFINE_bool(cc_enable_table_locator, false, "");
 
-DEFINE_uint32(cc_l0_stop_write, 0, "");
+DEFINE_uint32(cc_l0_stop_write_gb, 0, "");
 
 DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint64(cc_sstable_size_mb, 0, "sstable size in mb");
@@ -112,7 +112,7 @@ void start(NovaCCNICServer *server) {
     server->Start();
 }
 
-void TestSubRanges() {
+void StartServer() {
     RdmaCtrl *rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
                                        NovaConfig::config->rdma_port);
     int port = NovaConfig::config->servers[NovaConfig::config->my_server_id].port;
@@ -248,7 +248,6 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->num_rdma_compaction_workers = FLAGS_cc_num_rdma_compaction_workers;
     NovaConfig::config->num_memtables = FLAGS_cc_num_memtables;
     NovaConfig::config->num_memtable_partitions = FLAGS_cc_num_memtable_partitions;
-    NovaConfig::config->cc_l0_stop_write = FLAGS_cc_l0_stop_write;
     NovaConfig::config->enable_subrange = FLAGS_cc_enable_subrange;
     NovaConfig::config->memtable_type = FLAGS_cc_memtable_type;
 
@@ -282,14 +281,14 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->client_access_pattern = FLAGS_cc_client_access_pattern;
     NovaConfig::config->enable_detailed_db_stats = FLAGS_cc_enable_detailed_db_stats;
     NovaConfig::config->subrange_num_keys_no_flush = FLAGS_cc_subrange_no_flush_num_keys;
+    NovaConfig::config->l0_stop_write_gb = FLAGS_cc_l0_stop_write_gb;
 
     leveldb::EnvBGThread::bg_thread_id_seq = 0;
     nova::NovaCCServer::storage_worker_seq_id_ = 0;
     leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
     nova::NovaStorageWorker::storage_file_number_seq = 0;
     nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;
-
     NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
-    TestSubRanges();
+    StartServer();
     return 0;
 }

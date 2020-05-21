@@ -128,6 +128,7 @@ namespace leveldb {
               compaction_coordinator_thread_(
                       raw_options.compaction_coordinator_thread),
               memtable_available_signal_(&range_lock_),
+              l0_stop_write_signal_(&l0_stop_write_mutex_),
               user_comparator_(raw_options.comparator) {
         memtable_id_seq_ = 100;
         if (options_.enable_table_locator) {
@@ -860,9 +861,11 @@ namespace leveldb {
         RDMA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
         versions_->mid_table_mapping_[memtable_id]->SetMemTable(
                 output_memtable);
+        WriteOptions wo = {};
+        // TODO: Fill wo.
+        std::vector<LevelDBLogRecord> log_records;
         auto fn_add_to_memtable = [&](const ParsedInternalKey &ikey,
                                       const Slice &value) {
-            // TODO: Generate log records.
             output_memtable->Add(ikey.sequence, ValueType::kTypeValue,
                                  ikey.user_key, value);
             // Update table locator.
@@ -875,7 +878,14 @@ namespace leveldb {
                 table_locator_->CAS(ikey.user_key, key, current_mid,
                                     memtable_id);
             }
+            LevelDBLogRecord log_record = {};
+            log_record.sequence_number = ikey.sequence;
+            log_record.key = ikey.user_key;
+            log_record.value = value;
+            log_records.push_back(std::move(log_record));
         };
+        GenerateLogRecord(wo, log_records, output_memtable->memtableid());
+
         job.CompactTables(state, it, &stats, true, kCompactInputMemTables,
                           kCompactOutputMemTables, fn_add_to_memtable);
         iterators.clear();
@@ -1326,7 +1336,8 @@ namespace leveldb {
                options_.major_compaction_type == kMajorCoordinatedStoC) {
             mutex_.Lock();
             Version *current = versions_->current();
-            if (current->files_[0].size() <= 0) {
+            if (current->l0_bytes_ <=
+                options_.l0bytes_start_compaction_trigger) {
                 mutex_.Unlock();
                 sleep(1);
                 continue;
@@ -1570,6 +1581,7 @@ namespace leveldb {
             ObtainObsoleteFiles(compaction_coordinator_thread_,
                                 &files_to_delete, &server_pairs);
             mutex_.Unlock();
+            l0_stop_write_signal_.SignalAll();
             for (auto c : compactions) {
                 delete c;
             }
@@ -2031,6 +2043,31 @@ namespace leveldb {
                     options_.write_buffer_size) {
                     break;
                 }
+
+                while (options_.l0bytes_stop_writes_trigger > 0) {
+                    // Get the current version.
+                    Version *current = nullptr;
+                    while (current == nullptr) {
+                        uint32_t vid = versions_->current_version_id();
+                        RDMA_ASSERT(vid < MAX_LIVE_MEMTABLES) << vid;
+                        current = versions_->versions_[vid]->Ref();
+                    }
+
+                    if (current->l0_bytes_ >=
+                        options_.l0bytes_stop_writes_trigger) {
+                        versions_->versions_[current->version_id_]->Unref(
+                                dbname_);
+                        // Wait if the L0 bytes exceed max.
+                        // The mutex is only needed to protect the conditional varilable.
+                        l0_stop_write_mutex_.Lock();
+                        l0_stop_write_signal_.Wait();
+                        l0_stop_write_mutex_.Unlock();
+                        continue;
+                    }
+                    versions_->versions_[current->version_id_]->Unref(dbname_);
+                    break;
+                }
+
                 // The table is full.
                 RDMA_ASSERT(!partition->available_slots.empty());
                 // Mark the active memtable as immutable and schedule compaction.
@@ -2097,6 +2134,8 @@ namespace leveldb {
                 partition_id, options.thread_id);
         }
         uint32_t memtable_id = table->memtableid();
+        GenerateLogRecord(options, last_sequence, key, value,
+                          table->memtableid());
         table->Add(last_sequence, ValueType::kTypeValue, key, value);
         versions_->mid_table_mapping_[memtable_id]->nentries_ += 1;
         if (table_locator_ != nullptr) {
@@ -2467,24 +2506,8 @@ namespace leveldb {
             // Increment the pending writes counter.
             atomic_memtable->number_of_pending_writes_ += 1;
             atomic_memtable->mutex_.unlock();
-
-            auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
-            RDMA_ASSERT(dc);
-            dc->set_dbid(dbid_);
-            LevelDBLogRecord log_record = {};
-            log_record.sequence_number = last_sequence;
-            log_record.key = key;
-            log_record.value = val;
-            RDMA_ASSERT(8 + key.size() + val.size() + 4 + 4 <=
-                        options.rdma_backing_mem_size);
-            options.dc_client->InitiateReplicateLogRecords(
-                    fmt::format("{}-{}-{}", server_id_, dbid_,
-                                atomic_memtable->memtable_->memtableid()),
-                    options.thread_id, dbid_,
-                    atomic_memtable->memtable_->memtableid(),
-                    options.rdma_backing_mem, log_record,
-                    options.replicate_log_record_states);
-            dc->Wait();
+            GenerateLogRecord(options, last_sequence, key, val,
+                              atomic_memtable->memtable_->memtableid());
             atomic_memtable->mutex_.lock();
             atomic_memtable->number_of_pending_writes_ -= 1;
         }
@@ -2530,6 +2553,37 @@ namespace leveldb {
             ScheduleBGTask(-1, imm, nullptr, 0, 0, options.rand_seed, false);
         }
         return Status::OK();
+    }
+
+    void DBImpl::GenerateLogRecord(const leveldb::WriteOptions &options,
+                                   const std::vector<leveldb::LevelDBLogRecord> &log_records,
+                                   uint32_t memtable_id) {
+        // TODO:
+    }
+
+    void DBImpl::GenerateLogRecord(const WriteOptions &options,
+                                   SequenceNumber last_sequence,
+                                   const Slice &key, const Slice &val,
+                                   uint32_t memtable_id) {
+        if (nova::NovaConfig::config->log_record_mode ==
+            nova::NovaLogRecordMode::LOG_RDMA && !options.local_write) {
+            auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
+            RDMA_ASSERT(dc);
+            dc->set_dbid(dbid_);
+            LevelDBLogRecord log_record = {};
+            log_record.sequence_number = last_sequence;
+            log_record.key = key;
+            log_record.value = val;
+            RDMA_ASSERT(8 + key.size() + val.size() + 4 + 4 <=
+                        options.rdma_backing_mem_size);
+            options.dc_client->InitiateReplicateLogRecords(
+                    fmt::format("{}-{}-{}", server_id_, dbid_,
+                                memtable_id),
+                    options.thread_id, dbid_, memtable_id,
+                    options.rdma_backing_mem, log_record,
+                    options.replicate_log_record_states);
+            dc->Wait();
+        }
     }
 
     void DBImpl::QueryDBStats(leveldb::DBStats *db_stats) {

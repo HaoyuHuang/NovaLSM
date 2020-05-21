@@ -739,7 +739,7 @@ namespace leveldb {
             for (int level = 0; level < config::kNumLevels; level++) {
                 const std::vector<FileMetaData *> &files = files_[level];
                 if (level == 0) {
-                    stats->nsstables += files.size();
+                    stats->num_l0_sstables += files.size();
                 }
                 for (size_t i = 0; i < files.size(); i++) {
                     stats->dbsize += files[i]->file_size;
@@ -756,7 +756,7 @@ namespace leveldb {
         for (int level = 0; level < config::kNumLevels; level++) {
             const std::vector<FileMetaData *> &files = files_[level];
             if (level == 0) {
-                stats->nsstables += files.size();
+                stats->num_l0_sstables += files.size();
             }
             for (size_t i = 0; i < files.size(); i++) {
                 stats->dbsize += files[i]->file_size;
@@ -796,6 +796,8 @@ namespace leveldb {
 
         r.append("compaction-score: ");
         r.append(std::to_string(compaction_score_));
+        r.append("l0-bytes: ");
+        r.append(std::to_string(l0_bytes_));
         r.append("\n");
 
         for (int level = 0; level < config::kNumLevels; level++) {
@@ -1003,6 +1005,9 @@ namespace leveldb {
                 }
                 f->refs++;
                 files->push_back(f);
+                if (f->level == 0) {
+                    v->l0_bytes_ += f->file_size;
+                }
                 RDMA_ASSERT(v->fn_files_.find(f->number) == v->fn_files_.end())
                     << fmt::format("{}@{}", f->number, level);
                 v->fn_files_[f->number] = f;

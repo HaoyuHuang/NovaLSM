@@ -97,7 +97,7 @@ namespace leveldb {
         Init(log_file_name, thread_id, log_record, rdma_backing_buf);
         uint32_t log_record_size = nova::LogRecordsSize(log_record);
 
-        // If one of the log buf is intiializing, return false.
+        // If one of the log buf is intializing, return false.
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
             uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
             auto &it = logfile_last_buf_[log_file_name];

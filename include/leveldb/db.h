@@ -56,7 +56,7 @@ namespace leveldb {
     };
 
     struct DBStats {
-        uint32_t nsstables = 0;
+        uint32_t num_l0_sstables = 0;
         uint64_t dbsize = 0;
         LoadImbalanceMetric load_imbalance = {};
         uint32_t num_major_reorgs = 0.0;

@@ -115,6 +115,15 @@ namespace leveldb {
         void
         CoordinateMajorCompaction() override;
 
+        void GenerateLogRecord(const WriteOptions &options,
+                               SequenceNumber last_sequence,
+                               const Slice &key, const Slice &val,
+                               uint32_t memtable_id);
+
+        void GenerateLogRecord(const WriteOptions &options,
+                               const std::vector<LevelDBLogRecord>& log_records,
+                               uint32_t memtable_id);
+
     private:
         void ComputeCompactions(Version *current,
                                 std::vector<Compaction *> *compactions,
@@ -252,9 +261,11 @@ namespace leveldb {
         int number_of_available_pinned_memtables_ = 2;
         const int min_memtables_ = 2;
 
-        // State below is protected by mutex_
         port::Mutex mutex_;
         std::atomic<bool> shutting_down_;
+        port::Mutex l0_stop_write_mutex_;
+        port::CondVar l0_stop_write_signal_;
+
 
         std::vector<EnvBGThread *> compaction_threads_;
         EnvBGThread *reorg_thread_;

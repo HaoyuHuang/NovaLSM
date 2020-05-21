@@ -201,6 +201,7 @@ namespace leveldb {
         // List of files per level
         std::vector<FileMetaData *> files_[config::kNumLevels];
         uint32_t version_id_;
+        uint64_t l0_bytes_ = 0;
     private:
         friend class Compaction;
 

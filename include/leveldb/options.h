@@ -129,7 +129,9 @@ namespace leveldb {
         bool enable_subranges = false;
         bool enable_detailed_stats = true;
 
-        uint32_t l0_stop_writes_trigger = 12;
+        // 4 GB.
+        uint64_t l0bytes_start_compaction_trigger = 4l * 1024 * 1024 * 1024;
+        uint64_t l0bytes_stop_writes_trigger = 0;
 
         uint32_t num_memtable_partitions = 1;
 
