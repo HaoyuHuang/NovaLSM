@@ -861,8 +861,7 @@ namespace leveldb {
         RDMA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
         versions_->mid_table_mapping_[memtable_id]->SetMemTable(
                 output_memtable);
-        WriteOptions wo = {};
-        // TODO: Fill wo.
+
         std::vector<LevelDBLogRecord> log_records;
         auto fn_add_to_memtable = [&](const ParsedInternalKey &ikey,
                                       const Slice &value) {
@@ -884,10 +883,34 @@ namespace leveldb {
             log_record.value = value;
             log_records.push_back(std::move(log_record));
         };
-        GenerateLogRecord(wo, log_records, output_memtable->memtableid());
-
         job.CompactTables(state, it, &stats, true, kCompactInputMemTables,
                           kCompactOutputMemTables, fn_add_to_memtable);
+        {
+            leveldb::WriteOptions wo;
+            wo.dc_client = bg_thread->dc_client();
+            wo.sync = true;
+            wo.local_write = false;
+            wo.thread_id = bg_thread->thread_id();
+            wo.rand_seed = bg_thread->rand_seed();
+            wo.hash = 0;
+            wo.replicate_log_record_states = new leveldb::WriteState[nova::NovaConfig::config->servers.size()];
+            for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
+                wo.replicate_log_record_states[i].result = leveldb::WriteResult::REPLICATE_LOG_RECORD_NONE;
+                wo.replicate_log_record_states[i].rdma_wr_id = -1;
+            }
+            uint32_t rdma_backing_mem_size = nova::LogRecordsSize(log_records);
+            uint32_t scid = bg_thread->mem_manager()->slabclassid(0,
+                                                                  rdma_backing_mem_size);
+            char *backing_mem = bg_thread->mem_manager()->ItemAlloc(0, scid);
+            wo.rdma_backing_mem = backing_mem;
+            wo.rdma_backing_mem_size = rdma_backing_mem_size;
+            wo.is_loading_db = false;
+            GenerateLogRecord(wo, log_records, output_memtable->memtableid());
+
+            bg_thread->mem_manager()->FreeItem(0, backing_mem, scid);
+        }
+
+
         iterators.clear();
         std::vector<uint32_t> closed_memtable_log_files;
         // The table locator is updated before this so that new gets will reference the new memtable.
@@ -2558,7 +2581,19 @@ namespace leveldb {
     void DBImpl::GenerateLogRecord(const leveldb::WriteOptions &options,
                                    const std::vector<leveldb::LevelDBLogRecord> &log_records,
                                    uint32_t memtable_id) {
-        // TODO:
+        if (nova::NovaConfig::config->log_record_mode ==
+            nova::NovaLogRecordMode::LOG_RDMA && !options.local_write) {
+            auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(options.dc_client);
+            RDMA_ASSERT(dc);
+            dc->set_dbid(dbid_);
+            options.dc_client->InitiateReplicateLogRecords(
+                    fmt::format("{}-{}-{}", server_id_, dbid_,
+                                memtable_id),
+                    options.thread_id, dbid_, memtable_id,
+                    options.rdma_backing_mem, log_records,
+                    options.replicate_log_record_states);
+            dc->Wait();
+        }
     }
 
     void DBImpl::GenerateLogRecord(const WriteOptions &options,
@@ -2574,13 +2609,13 @@ namespace leveldb {
             log_record.sequence_number = last_sequence;
             log_record.key = key;
             log_record.value = val;
-            RDMA_ASSERT(8 + key.size() + val.size() + 4 + 4 <=
+            RDMA_ASSERT(8 + key.size() + val.size() + 4 + 4 + 1 <=
                         options.rdma_backing_mem_size);
             options.dc_client->InitiateReplicateLogRecords(
                     fmt::format("{}-{}-{}", server_id_, dbid_,
                                 memtable_id),
                     options.thread_id, dbid_, memtable_id,
-                    options.rdma_backing_mem, log_record,
+                    options.rdma_backing_mem, {log_record},
                     options.replicate_log_record_states);
             dc->Wait();
         }

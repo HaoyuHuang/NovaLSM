@@ -75,7 +75,7 @@ namespace leveldb {
                                     uint32_t db_id,
                                     uint32_t memtable_id,
                                     char *rdma_backing_mem,
-                                    const LevelDBLogRecord &log_record,
+                                    const std::vector<LevelDBLogRecord> &log_records,
                                     WriteState *replicate_log_record_states) override;
 
 
@@ -178,7 +178,7 @@ namespace leveldb {
                                     uint32_t db_id,
                                     uint32_t memtable_id,
                                     char *rdma_backing_mem,
-                                    const LevelDBLogRecord &log_record,
+                                    const std::vector<LevelDBLogRecord> &log_records,
                                     WriteState *replicate_log_record_states) override;
 
         uint32_t InitiateReadDCStats(uint32_t server_id) override;

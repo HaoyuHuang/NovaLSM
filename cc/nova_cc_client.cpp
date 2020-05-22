@@ -348,7 +348,7 @@ namespace leveldb {
             const std::string &log_file_name, uint64_t thread_id,
             uint32_t db_id, uint32_t memtable_id,
             char *rdma_backing_mem,
-            const LevelDBLogRecord &log_record,
+            const std::vector<LevelDBLogRecord> &log_records,
             WriteState *replicate_log_record_states) {
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD;
@@ -356,7 +356,7 @@ namespace leveldb {
         task.thread_id = thread_id;
         task.dbid = db_id;
         task.memtable_id = memtable_id;
-        task.log_record = log_record;
+        task.log_records = log_records;
         task.write_buf = rdma_backing_mem;
         task.replicate_log_record_states = replicate_log_record_states;
         task.sem = &sem_;
@@ -498,7 +498,6 @@ namespace leveldb {
         EncodeFixed64(send_buf + msg_size, (uint64_t) result);
         msg_size += 8;
         msg_size += EncodeStr(send_buf + msg_size, filename);
-
         rdma_store_->PostSend(send_buf, msg_size, rtable_handle.server_id,
                               req_id);
         request_context_[req_id] = context;
@@ -575,27 +574,26 @@ namespace leveldb {
             const std::string &log_file_name, uint64_t thread_id,
             uint32_t db_id, uint32_t memtable_id,
             char *rdma_backing_mem,
-            const LevelDBLogRecord &log_record,
+            const std::vector<LevelDBLogRecord> &log_records,
             WriteState *replicate_log_record_states) {
         uint32_t req_id = current_req_id_;
         CCRequestContext context = {};
         context.done = false;
         context.req_type = CCRequestType::CC_REPLICATE_LOG_RECORDS;
-
         context.log_file_name = log_file_name;
         context.thread_id = thread_id;
         context.db_id = db_id;
         context.memtable_id = memtable_id;
         context.replicate_log_record_states = replicate_log_record_states;
         context.log_record_mem = rdma_backing_mem;
-        context.log_record_size = nova::LogRecordsSize(log_record);
+        context.log_record_size = nova::LogRecordsSize(log_records);
         request_context_[req_id] = context;
 
         bool success = rdma_log_writer_->AddRecord(log_file_name,
                                                    thread_id, db_id,
                                                    memtable_id,
                                                    rdma_backing_mem,
-                                                   log_record,
+                                                   log_records,
                                                    req_id,
                                                    replicate_log_record_states);
         IncrementReqId();
@@ -695,15 +693,8 @@ namespace leveldb {
                         RDMA_LOG(DEBUG) << fmt::format(
                                     "dcclient[{}]: Log record replicated req:{} wr_id:{} first:{}",
                                     cc_client_id_, req_id, wr_id, buf[0]);
-
                         bool complete = rdma_log_writer_->CheckCompletion(
-                                context.log_file_name,
-                                context.thread_id,
-                                context.db_id,
-                                context.memtable_id,
-                                req_id,
-                                context.log_record_mem,
-                                context.log_record_size,
+                                context.log_file_name, context.db_id,
                                 context.replicate_log_record_states);
                         if (complete) {
                             context.done = true;

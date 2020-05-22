@@ -29,7 +29,7 @@ namespace leveldb {
                   uint32_t dbid,
                   uint32_t memtableid,
                   char *rdma_backing_buf,
-                  const LevelDBLogRecord &log_record,
+                  const std::vector<LevelDBLogRecord> &log_records,
                   uint32_t client_req_id,
                   WriteState *replicate_log_record_states);
 
@@ -47,13 +47,7 @@ namespace leveldb {
         CloseLogFile(const std::string &log_file_name, uint32_t dbid,
                      uint32_t client_req_id);
 
-        bool CheckCompletion(const std::string &log_file_name,
-                             uint64_t thread_id,
-                             uint32_t dbid,
-                             uint32_t memtableid,
-                             uint32_t client_req_id,
-                             char *backing_mem,
-                             uint32_t log_record_size,
+        bool CheckCompletion(const std::string &log_file_name, uint32_t dbid,
                              WriteState *replicate_log_record_states);
 
     private:
@@ -85,7 +79,7 @@ namespace leveldb {
 
         void Init(const std::string &log_file_name,
                   uint64_t thread_id,
-                  const LevelDBLogRecord &log_record,
+                  const std::vector<LevelDBLogRecord> &log_records,
                   char *backing_buf);
 
         nova::NovaRDMAStore *store_;

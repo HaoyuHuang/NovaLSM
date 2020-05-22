@@ -142,7 +142,7 @@ namespace nova {
                             task.dbid,
                             task.memtable_id,
                             task.write_buf,
-                            task.log_record,
+                            task.log_records,
                             task.replicate_log_record_states);
                     if (ctx.req_id == 0) {
                         // Failed and must retry.

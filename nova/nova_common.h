@@ -663,15 +663,75 @@ namespace nova {
         }
     };
 
-    uint32_t
-    LogRecordsSize(const leveldb::LevelDBLogRecord &log_record);
+//    inline uint32_t
+//    LogRecordsSize(const leveldb::LevelDBLogRecord &log_record);
+//
+//    inline uint32_t
+//    LogRecordsSize(const std::vector<leveldb::LevelDBLogRecord> &log_records);
+//
+//    inline uint32_t
+//    EncodeLogRecord(char *buf,
+//                    const leveldb::LevelDBLogRecord &log_record);
+//
+//    inline uint32_t DecodeLogRecord(char *buf,
+//                             leveldb::LevelDBLogRecord *log_record);
 
+    inline uint32_t
+    LogRecordsSize(const leveldb::LevelDBLogRecord &record) {
+        uint32_t size = 0;
+        size += 4;
+        size += 4;
+        size += record.key.size();
+        size += 4;
+        size += record.value.size();
+        size += 8;
+        size += 1;
+        return size;
+    }
 
-    uint32_t
+    inline uint32_t
+    LogRecordsSize(const std::vector<leveldb::LevelDBLogRecord> &log_records) {
+        uint32_t size = 0;
+        for (const auto &record : log_records) {
+            size += LogRecordsSize(record);
+        }
+        return size;
+    }
+
+    inline uint32_t
     EncodeLogRecord(char *buf,
-                    const leveldb::LevelDBLogRecord &log_record);
+                    const leveldb::LevelDBLogRecord &record) {
+        uint32_t size = 0;
+        uint32_t record_size =
+                4 + record.key.size() + 4 + record.value.size() + 8;
+        size += leveldb::EncodeFixed32(buf + size, record_size);
+        size += leveldb::EncodeSlice(buf + size, record.key);
+        size += leveldb::EncodeSlice(buf + size, record.value);
+        size += leveldb::EncodeFixed64(buf + size, record.sequence_number);
+        // The last byte is 1.
+        buf[size] = 1;
+        size++;
+        return size;
+    }
 
-    uint32_t DecodeLogRecord(char *buf,
-                             leveldb::LevelDBLogRecord *log_record);
+    inline uint32_t DecodeLogRecord(char *buf,
+                                    leveldb::LevelDBLogRecord *log_record) {
+        uint32_t read_size = 0;
+        uint32_t record_size = leveldb::DecodeFixed32(buf + read_size);
+        read_size += 4;
+        if (record_size == 0) {
+            return 0;
+        }
+        log_record->key = leveldb::DecodeSlice(buf + read_size);
+        read_size += (4 + log_record->key.size());
+        log_record->value = leveldb::DecodeSlice(buf + read_size);
+        read_size += (4 + log_record->value.size());
+        log_record->sequence_number = leveldb::DecodeFixed64(buf + read_size);
+        read_size += 8;
+        if (buf[read_size] == 1) {
+            return read_size + 1;
+        }
+        return 0;
+    }
 }
 #endif //RLIB_NOVA_COMMON_H

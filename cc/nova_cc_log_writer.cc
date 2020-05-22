@@ -23,7 +23,7 @@ namespace leveldb {
 
     void RDMALogWriter::Init(const std::string &log_file_name,
                              uint64_t thread_id,
-                             const LevelDBLogRecord &log_record,
+                             const std::vector<LevelDBLogRecord> &log_records,
                              char *backing_buf) {
         auto it = logfile_last_buf_.find(log_file_name);
         if (it == logfile_last_buf_.end()) {
@@ -39,7 +39,10 @@ namespace leveldb {
             }
             logfile_last_buf_[log_file_name] = meta;
         }
-        nova::EncodeLogRecord(backing_buf, log_record);
+        uint32_t size = 0;
+        for (const auto &record : log_records) {
+            size += nova::EncodeLogRecord(backing_buf + size, record);
+        }
     }
 
     void RDMALogWriter::AckAllocLogBuf(const std::string &log_file_name,
@@ -87,15 +90,15 @@ namespace leveldb {
                              uint32_t dbid,
                              uint32_t memtableid,
                              char *rdma_backing_buf,
-                             const LevelDBLogRecord &log_record,
+                             const std::vector<LevelDBLogRecord> &log_records,
                              uint32_t client_req_id,
                              WriteState *replicate_log_record_states) {
         nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid];
         if (frag->log_replica_stoc_ids.empty()) {
             return true;
         }
-        Init(log_file_name, thread_id, log_record, rdma_backing_buf);
-        uint32_t log_record_size = nova::LogRecordsSize(log_record);
+        Init(log_file_name, thread_id, log_records, rdma_backing_buf);
+        uint32_t log_record_size = nova::LogRecordsSize(log_records);
 
         // If one of the log buf is intializing, return false.
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
@@ -145,11 +148,7 @@ namespace leveldb {
     }
 
     bool RDMALogWriter::CheckCompletion(const std::string &log_file_name,
-                                        uint64_t thread_id, uint32_t dbid,
-                                        uint32_t memtableid,
-                                        uint32_t client_req_id,
-                                        char *backing_mem,
-                                        uint32_t log_record_size,
+                                        uint32_t dbid,
                                         WriteState *replicate_log_record_states) {
         nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid];
         // Pull all pending writes.

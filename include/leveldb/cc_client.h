@@ -163,7 +163,7 @@ namespace leveldb {
         uint64_t thread_id = 0;
         uint32_t dbid = 0;
         uint32_t memtable_id = 0;
-        LevelDBLogRecord log_record = {};
+        std::vector<LevelDBLogRecord> log_records;
 
         int server_id = -1;
         std::vector<SSTableRTablePair> rtable_ids;
@@ -226,7 +226,7 @@ namespace leveldb {
                                     uint32_t db_id,
                                     uint32_t memtable_id,
                                     char *rdma_backing_mem,
-                                    const LevelDBLogRecord &log_record,
+                                    const std::vector<LevelDBLogRecord> &log_records,
                                     WriteState *replicate_log_record_states) = 0;
 
 
