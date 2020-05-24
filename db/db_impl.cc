@@ -1359,6 +1359,8 @@ namespace leveldb {
                options_.major_compaction_type == kMajorCoordinatedStoC) {
             mutex_.Lock();
             Version *current = versions_->current();
+
+
             if (current->l0_bytes_ <=
                 options_.l0bytes_start_compaction_trigger) {
                 mutex_.Unlock();
@@ -1824,15 +1826,15 @@ namespace leveldb {
         if (!l0fns.empty()) {
             s = current->Get(options, l0fns, lkey, &latest_seq, value);
         }
-        std::string l0fns_str;
-        for (auto &l0 : l0fns) {
-            l0fns_str.append(std::to_string(l0));
-            l0fns_str += ",";
-        }
-        RDMA_ASSERT(!s.IsIOError())
-            << fmt::format("v:{} status:{} mid:{} l0:{} version:{}", vid,
-                           s.ToString(),
-                           memtableid, l0fns_str, current->DebugString());
+//        std::string l0fns_str;
+//        for (auto &l0 : l0fns) {
+//            l0fns_str.append(std::to_string(l0));
+//            l0fns_str += ",";
+//        }
+        RDMA_ASSERT(!s.IsIOError());
+//            << fmt::format("v:{} status:{} mid:{} l0:{} version:{}", vid,
+//                           s.ToString(),
+//                           memtableid, l0fns_str, current->DebugString());
         if (s.IsNotFound()) {
             // Search L1 files.
             Version::GetStats stats = {};
@@ -1844,10 +1846,10 @@ namespace leveldb {
                 value->assign(l1val);
             }
         }
-        RDMA_ASSERT(s.ok())
-            << fmt::format("key:{} seq:{} status:{} l0:{} version:{}",
-                           key.ToString(), latest_seq, s.ToString(),
-                           l0fns_str, current->DebugString());
+        RDMA_ASSERT(s.ok());
+//            << fmt::format("key:{} seq:{} status:{} l0:{} version:{}",
+//                           key.ToString(), latest_seq, s.ToString(),
+//                           l0fns_str, current->DebugString());
         versions_->versions_[vid]->Unref(dbname_);
         return s;
     }
@@ -2203,7 +2205,9 @@ namespace leveldb {
     }
 
     void DBImpl::PerformSubRangeReorganization() {
-//        subrange_manager_->ReorganizeSubranges();
+        if (options_.enable_subrange_reorg) {
+            subrange_manager_->ReorganizeSubranges();
+        }
     }
 
     Status DBImpl::WriteSubrange(const leveldb::WriteOptions &options,

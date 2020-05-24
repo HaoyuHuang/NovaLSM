@@ -104,6 +104,8 @@ namespace leveldb {
 
         bool enable_flush_multiple_memtables = false;
 
+        bool enable_subrange_reorg = false;
+
         // If true, the implementation will do aggressive checking of the
         // data it is processing and will stop early if it detects any
         // errors.  This may have unforeseen ramifications: for example, a

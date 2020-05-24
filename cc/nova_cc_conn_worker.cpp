@@ -255,15 +255,17 @@ namespace nova {
         int num_l0_sstables = 0;
         for (auto db : worker->dbs_) {
             leveldb::DBStats stats;
+            stats.sstable_size_dist = new uint32_t[20];
             db->QueryDBStats(&stats);
             num_l0_sstables += stats.num_l0_sstables;
+            delete stats.sstable_size_dist;
         }
 
         char *response_buf = conn->buf;
-        int nlen = 1;
+        int nlen = 0;
         int len = int_to_str(response_buf, num_l0_sstables);
         conn->response_buf = conn->buf;
-        conn->response_size = len + nlen;
+        conn->response_size = len;
         return true;
     }
 

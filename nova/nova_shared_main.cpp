@@ -72,6 +72,7 @@ DEFINE_uint32(cc_num_memtables, 0, "");
 DEFINE_uint32(cc_num_memtable_partitions, 0, "");
 DEFINE_bool(cc_enable_table_locator, false, "");
 
+DEFINE_uint32(cc_l0_start_compaction_mb, 0, "");
 DEFINE_uint32(cc_l0_stop_write_gb, 0, "");
 
 DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
@@ -88,6 +89,7 @@ DEFINE_bool(cc_recover_dbs, false, "recovery");
 DEFINE_uint32(cc_num_recovery_threads, 32, "recovery");
 
 DEFINE_bool(cc_enable_subrange, false, "");
+DEFINE_bool(cc_enable_subrange_reorg, false, "");
 DEFINE_double(cc_sampling_ratio, 1, "");
 DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
 DEFINE_string(cc_client_access_pattern, "uniform", "");
@@ -282,6 +284,8 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->enable_detailed_db_stats = FLAGS_cc_enable_detailed_db_stats;
     NovaConfig::config->subrange_num_keys_no_flush = FLAGS_cc_subrange_no_flush_num_keys;
     NovaConfig::config->l0_stop_write_gb = FLAGS_cc_l0_stop_write_gb;
+    NovaConfig::config->l0_start_compaction_mb = FLAGS_cc_l0_start_compaction_mb;
+    NovaConfig::config->enable_subrange_reorg = FLAGS_cc_enable_subrange_reorg;
 
     leveldb::EnvBGThread::bg_thread_id_seq = 0;
     nova::NovaCCServer::storage_worker_seq_id_ = 0;

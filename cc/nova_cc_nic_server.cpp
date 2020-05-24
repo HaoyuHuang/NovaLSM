@@ -75,6 +75,8 @@ namespace nova {
             options.dc_client = cc_client;
             options.num_memtable_partitions = NovaConfig::config->num_memtable_partitions;
             options.num_memtables = NovaConfig::config->num_memtables;
+            options.l0bytes_start_compaction_trigger =
+                    NovaConfig::config->l0_start_compaction_mb * 1024 * 1024;
             options.l0bytes_stop_writes_trigger =
                     NovaConfig::config->l0_stop_write_gb * 1024 * 1024 * 1024;
             options.max_open_files = 50000;
@@ -103,6 +105,7 @@ namespace nova {
             options.enable_flush_multiple_memtables = NovaConfig::config->enable_flush_multiple_memtables;
             options.max_num_sstables_in_nonoverlapping_set = NovaConfig::config->major_compaction_max_tables_in_a_set;
             options.max_num_coordinated_compaction_nonoverlapping_sets = NovaConfig::config->major_compaction_max_parallism;
+            options.enable_subrange_reorg = NovaConfig::config->enable_subrange_reorg;
             if (NovaConfig::config->major_compaction_type == "no") {
                 options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
             } else if (NovaConfig::config->major_compaction_type == "st") {

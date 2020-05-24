@@ -149,6 +149,7 @@ namespace nova {
 
         bool use_multiple_disks;
         bool enable_subrange;
+        bool enable_subrange_reorg;
         bool enable_flush_multiple_memtables;
         std::string memtable_type;
         std::string major_compaction_type;
@@ -188,6 +189,7 @@ namespace nova {
         uint32_t num_memtable_partitions;
         uint64_t write_buffer_size_mb;
         uint64_t l0_stop_write_gb;
+        uint64_t l0_start_compaction_mb;
         std::vector<CCFragment *> fragments;
         std::vector<CCFragment *> db_fragment;
         int num_rtable_num_servers_scatter_data_blocks;
