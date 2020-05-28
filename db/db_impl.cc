@@ -909,8 +909,6 @@ namespace leveldb {
 
             bg_thread->mem_manager()->FreeItem(0, backing_mem, scid);
         }
-
-
         iterators.clear();
         std::vector<uint32_t> closed_memtable_log_files;
         // The table locator is updated before this so that new gets will reference the new memtable.
@@ -1471,112 +1469,30 @@ namespace leveldb {
                     // Prefetch metadata files.
                     FetchMetadataFilesInParallel(metafiles, dbname_, options_,
                                                  client, env_);
-//                    {
-//                        ReadOptions options;
-//                        options.mem_manager = options_.mem_manager;
-//                        options.dc_client = client;
-//                        options.thread_id = compaction_coordinator_thread_->thread_id();
-//                        uint32_t scid = options.mem_manager->slabclassid(0, 8192);
-//                        options.rdma_backing_mem = options.mem_manager->ItemAlloc(0,
-//                                                                                  scid);
-//                        options.rdma_backing_mem_size = 8192;
-//                        auto file = metafiles[0];
-//                        table_cache_->OpenTable(AccessCaller::kUserGet, options,
-//                                                file, file->number,
-//                                                file->converted_file_size, 0);
-//
-//
-//                        auto s = file->smallest.user_key();
-//                        auto l = file->largest.user_key();
-//                        uint64_t start = 0;
-//                        uint64_t end = 0;
-//                        nova::str_to_int(s.data(), &start, s.size());
-//                        nova::str_to_int(l.data(), &end, l.size());
-//                        {
-//                            Table *tableptr;
-//                            auto iter = table_cache_->NewIterator(
-//                                    AccessCaller::kUserIterator, options, file,
-//                                    file->number, file->level,
-//                                    file->converted_file_size, &tableptr);
-//                            FileMetaData meta;
-//                            meta.number = versions_->NewFileNumber();
-//                            meta.flush_timestamp = versions_->last_sequence_;
-//                            meta.level = 0;
-//                            RDMA_ASSERT(
-//                                    BuildTable(dbname_, env_, options_,
-//                                               table_cache_,
-//                                               iter,
-//                                               &meta,
-//                                               compaction_coordinator_thread_).ok());
-//                            RDMA_LOG(rdmaio::INFO)
-//                                << fmt::format("!!!!!!!!!!!!!!!!!{} {}",
-//                                               file->DebugString(), meta.DebugString());
-//                            delete iter;
-//                        }
-//                        {
-//                            Table *tableptr;
-//                            auto iter = table_cache_->NewIterator(
-//                                    AccessCaller::kUserIterator, options, file,
-//                                    file->number, file->level,
-//                                    file->converted_file_size, &tableptr);
-//                            FileMetaData meta;
-//                            meta.number = versions_->NewFileNumber();
-//                            meta.flush_timestamp = versions_->last_sequence_;
-//                            meta.level = 0;
-//                            RDMA_ASSERT(
-//                                    BuildTable(dbname_, env_, options_,
-//                                               table_cache_,
-//                                               iter,
-//                                               &meta,
-//                                               compaction_coordinator_thread_).ok());
-//                            RDMA_LOG(rdmaio::INFO)
-//                                << fmt::format("!!!!!!!!!!!!!!!!!{} {}",
-//                                               file->DebugString(), meta.DebugString());
-//                            delete iter;
-//
-//                            iter = table_cache_->NewIterator(
-//                                    AccessCaller::kUserIterator, options, file,
-//                                    file->number, file->level,
-//                                    file->converted_file_size, &tableptr);
-//                            auto built = table_cache_->NewIterator(
-//                                    AccessCaller::kUserIterator, options, &meta,
-//                                    meta.number, meta.level,
-//                                    meta.converted_file_size, &tableptr);
-//                            iter->SeekToFirst();
-//                            built->SeekToFirst();
-//                            while (iter->Valid() && built->Valid()) {
-//                                RDMA_ASSERT(
-//                                        BytewiseComparator()->Compare(iter->key(),
-//                                                                      built->key()) ==
-//                                        0);
-//                                RDMA_ASSERT(
-//                                        BytewiseComparator()->Compare(iter->value(),
-//                                                                      built->value()) ==
-//                                        0);
-//                                iter->Next();
-//                                built->Next();
-//                            }
-//                            RDMA_ASSERT(!iter->Valid() && !built->Valid());
-//                            RDMA_LOG(rdmaio::INFO) << "Is the new valid?";
-//                            for (int i = start; i <= end; i++) {
-//                                LookupKey k(std::to_string(i), kMaxSequenceNumber);
-//                                table_cache_->Get(options, &meta, meta.number,
-//                                                  meta.file_size, 0,
-//                                                  k.internal_key(),
-//                                                  nullptr, nullptr);
-//                            }
-//                            RDMA_LOG(rdmaio::INFO) << "Is the old valid?";
-//                            for (int i = start; i <= end; i++) {
-//                                LookupKey k(std::to_string(i), kMaxSequenceNumber);
-//                                table_cache_->Get(options, file, file->number,
-//                                                  file->file_size, 0,
-//                                                  k.internal_key(),
-//                                                  nullptr, nullptr);
-//                            }
-//                        }
-//                        RDMA_ASSERT(false);
-//                    }
-
+                    uint64_t input_size = 0;
+                    uint64_t output_size = 0;
+                    uint32_t ninputs = 0;
+                    for (int i = 0; i < states.size(); i++) {
+                        auto state = states[i];
+                        for (int which = 0; which < 2; which++) {
+                            ninputs += state->compaction->inputs_[which].size();
+                            for (int j = 0; j <
+                                            state->compaction->inputs_[which].size(); j++) {
+                                input_size += state->compaction->inputs_[which][j]->file_size;
+                            }
+                        }
+                        for (const auto &out : state->outputs) {
+                            output_size += out.file_size;
+                        }
+                    }
+                    input_size = input_size / 1024 / 1024;
+                    output_size = output_size / 1024 / 1024;
+                    RDMA_LOG(rdmaio::INFO)
+                        << fmt::format("parallel,{},{},{},{},{}",
+                                       compactions.size(),
+                                       ninputs / compactions.size(),
+                                       input_size, output_size,
+                                       input_size - output_size);
                 }
             }
 
@@ -1824,7 +1740,8 @@ namespace leveldb {
         }
 
         if (!l0fns.empty()) {
-            s = current->Get(options, l0fns, lkey, &latest_seq, value);
+            s = current->Get(options, l0fns, lkey, &latest_seq, value,
+                             &number_of_files_to_search_);
         }
 //        std::string l0fns_str;
 //        for (auto &l0 : l0fns) {
@@ -1841,7 +1758,8 @@ namespace leveldb {
             std::string l1val;
             SequenceNumber l1seq;
             s = current->Get(options, lkey, &l1seq, &l1val,
-                             &stats, GetSearchScope::kL1AndAbove);
+                             &stats, GetSearchScope::kL1AndAbove,
+                             &number_of_files_to_search_);
             if (l1seq > latest_seq) {
                 value->assign(l1val);
             }
@@ -2061,6 +1979,7 @@ namespace leveldb {
 
         MemTable *table = nullptr;
         bool wait = false;
+        int next_imm_slot = - 1;
         while (true) {
             table = partition->memtable;
             if (table) {
@@ -2068,7 +1987,6 @@ namespace leveldb {
                     options_.write_buffer_size) {
                     break;
                 }
-
                 while (options_.l0bytes_stop_writes_trigger > 0) {
                     // Get the current version.
                     Version *current = nullptr;
@@ -2077,7 +1995,6 @@ namespace leveldb {
                         RDMA_ASSERT(vid < MAX_LIVE_MEMTABLES) << vid;
                         current = versions_->versions_[vid]->Ref();
                     }
-
                     if (current->l0_bytes_ >=
                         options_.l0bytes_stop_writes_trigger) {
                         versions_->versions_[current->version_id_]->Unref(
@@ -2092,7 +2009,6 @@ namespace leveldb {
                     versions_->versions_[current->version_id_]->Unref(dbname_);
                     break;
                 }
-
                 // The table is full.
                 RDMA_ASSERT(!partition->available_slots.empty());
                 // Mark the active memtable as immutable and schedule compaction.
@@ -2117,7 +2033,6 @@ namespace leveldb {
                                merge_memtables_without_flushing);
                 partition->memtable = nullptr;
             }
-
             if (partition->available_slots.empty()) {
                 // We have filled up all memtables, but the previous
                 // one is still being compacted, so we wait.
@@ -2149,7 +2064,6 @@ namespace leveldb {
                 break;
             }
         }
-
         if (!wait) {
             number_of_puts_no_wait_ += 1;
         }
@@ -2167,6 +2081,9 @@ namespace leveldb {
             table_locator_->Insert(key, options.hash, table->memtableid());
         }
         partition->mutex.Unlock();
+
+        // Schedule.
+
         return true;
     }
 

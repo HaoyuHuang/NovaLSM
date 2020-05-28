@@ -386,7 +386,8 @@ namespace leveldb {
         for (int i = 0; i < subranges.size(); i++) {
             for (int j = 0; j < subranges[i].tiny_ranges.size(); j++) {
                 RDMA_ASSERT(subranges[i].num_duplicates ==
-                            subranges[i].tiny_ranges[j].num_duplicates);
+                            subranges[i].tiny_ranges[j].num_duplicates)
+                    << DebugString();
                 Range &range = subranges[i].tiny_ranges[j];
                 RDMA_ASSERT(range.lower_inclusive) << DebugString();
                 RDMA_ASSERT(!range.upper_inclusive) << DebugString();

@@ -332,7 +332,7 @@ namespace leveldb {
                         std::vector<uint64_t> &fns,
                         const leveldb::LookupKey &key,
                         SequenceNumber *seq,
-                        std::string *val) {
+                        std::string *val, uint64_t *num_searched_files) {
         bool found = false;
         for (int i = fns.size() - 1; i >= 0; i--) {
             auto fn = fns[i];
@@ -352,7 +352,7 @@ namespace leveldb {
                     file->largest.user_key(), key.user_key()) < 0) {
                 continue;
             }
-
+            *num_searched_files += 1;
             std::string tmp_val;
             SequenceNumber tmp_seq;
             Saver saver;
@@ -387,7 +387,8 @@ namespace leveldb {
     Status Version::Get(const ReadOptions &options, const LookupKey &k,
                         SequenceNumber *seq,
                         std::string *value, GetStats *stats,
-                        GetSearchScope search_scope) {
+                        GetSearchScope search_scope,
+                        uint64_t *num_searched_files) {
         stats->seek_file = nullptr;
         stats->seek_file_level = -1;
 
@@ -402,6 +403,7 @@ namespace leveldb {
             TableCache *table_cache;
             Status s;
             bool found;
+            uint64_t *num_searched_files;
 
             static bool Match(void *arg, int level, FileMetaData *f) {
                 State *state = reinterpret_cast<State *>(arg);
@@ -422,6 +424,7 @@ namespace leveldb {
                                                    state->ikey,
                                                    &state->saver,
                                                    SaveValue);
+                (*state->num_searched_files) += 1;
 
                 if (!state->s.ok()) {
                     state->found = true;
@@ -454,17 +457,15 @@ namespace leveldb {
         state.stats = stats;
         state.last_file_read = nullptr;
         state.last_file_read_level = -1;
-
         state.options = &options;
         state.ikey = k.internal_key();
         state.table_cache = table_cache_;
-
         state.saver.state = kNotFound;
         state.saver.ucmp = icmp_->user_comparator();
         state.saver.user_key = k.user_key();
         state.saver.seq = seq;
         state.saver.value = value;
-
+        state.num_searched_files = num_searched_files;
         ForEachOverlapping(state.saver.user_key, state.ikey, &state,
                            &State::Match, search_scope);
         return state.found ? state.s : Status::NotFound("Not found in L1.");
@@ -1078,13 +1079,11 @@ namespace leveldb {
         edit->SetLastSequence(last_sequence_);
         char *edit_str = manifest_file->Buf();
         uint32_t msg_size = edit->EncodeTo(edit_str);
-
         if (RDMA_LOG_LEVEL == rdmaio::DEBUG) {
             VersionEdit decode;
             RDMA_ASSERT(decode.DecodeFrom(Slice(edit_str, msg_size)).ok());
             RDMA_LOG(rdmaio::DEBUG) << decode.DebugString();
         }
-
         RDMA_ASSERT(manifest_file->SyncAppend(Slice(edit_str, msg_size),
                                               stoc_id).ok());
         manifest_lock_.unlock();
@@ -1124,7 +1123,7 @@ namespace leveldb {
                                    (uint64_t) (record.data()));
                 break;
             }
-            RDMA_LOG(rdmaio::INFO)
+            RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("stats:{} edit:{}", s.ToString(),
                                edit.DebugString());
 

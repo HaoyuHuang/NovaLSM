@@ -589,7 +589,6 @@ namespace nova {
             dbs_[db_index]->dbs_ = dbs_;
         }
 
-
         std::vector<std::string> dbnames;
         for (auto sid : dbids) {
             for (auto dbid : sid.second) {
@@ -597,13 +596,10 @@ namespace nova {
                                          sid.first, dbid));
             }
         }
-
         for (auto &dbname : dbnames) {
             mkdirs(dbname.c_str());
         }
-
         int worker_id = 0;
-
         uint32_t max_req_id = UINT32_MAX - 1;
         uint32_t range_per_server =
                 max_req_id / NovaConfig::config->servers.size();

@@ -638,7 +638,7 @@ namespace nova {
     }
 
     void NovaCCConnWorker::Start() {
-        RDMA_LOG(INFO) << "memstore[" << thread_id_ << "]: "
+        RDMA_LOG(DEBUG) << "memstore[" << thread_id_ << "]: "
                        << "starting mem worker";
 
         nova::NovaConfig::config->add_tid_mapping();

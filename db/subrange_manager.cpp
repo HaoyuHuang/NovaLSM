@@ -730,10 +730,11 @@ namespace leveldb {
         SubRange *right_sr = nullptr;
         SubRange *min_sr = &latest_->subranges[subrangeId];
 
-        if (left >= 0) {
+        if (left >= 0 && latest_->subranges[left].num_duplicates == 0) {
             left_sr = &latest_->subranges[left];
         }
-        if (right < latest_->subranges.size()) {
+        if (right < latest_->subranges.size() &&
+            latest_->subranges[right].num_duplicates == 0) {
             right_sr = &latest_->subranges[right];
         }
 
@@ -742,10 +743,10 @@ namespace leveldb {
         // move the remaining
         double left_ratio = 1.0;
         double right_ratio = 1.0;
-        if (left_sr && left_sr->num_duplicates == 0) {
+        if (left_sr) {
             left_ratio = latest_->subranges[left].insertion_ratio;
         }
-        if (right_sr && right_sr->num_duplicates == 0) {
+        if (right_sr) {
             right_ratio = right_sr->insertion_ratio;
         }
         if (left_ratio != 1.0 || right_ratio != 1.0) {
@@ -951,7 +952,7 @@ namespace leveldb {
                 ConstructRanges(userkey_freq, total_accesses,
                                 sr.first().lower_int(),
                                 sr.last().upper_int(),
-                                options_.num_tiny_ranges_per_subrange, true,
+                                options_.num_tiny_ranges_per_subrange, false,
                                 &ranges);
                 for (auto &range : ranges) {
                     range.ninserts = range.insertion_ratio * sr.ninserts;
@@ -1159,15 +1160,24 @@ namespace leveldb {
             return;;
         }
 
+        RDMA_ASSERT(
+                options_.num_compaction_threads >= subranges->subranges.size());
         int thread_id = 0;
         // MemTables of a subrange is assigned to only one thread.
         for (SubRange &subrange : subranges->subranges) {
             if (subrange.keys() <= options_.subrange_no_flush_num_keys) {
                 subrange.merge_memtables_without_flushing = true;
+                subrange.start_tid = thread_id;
+                subrange.end_tid = thread_id;
+                thread_id = thread_id + 1;
             }
-            subrange.start_tid = thread_id;
-            subrange.end_tid = thread_id;
-            thread_id = (thread_id + 1) % options_.num_compaction_threads;
+        }
+        for (SubRange &subrange : subranges->subranges) {
+            if (subrange.keys() > options_.subrange_no_flush_num_keys) {
+                subrange.merge_memtables_without_flushing = false;
+                subrange.start_tid = thread_id;
+                subrange.end_tid = options_.num_compaction_threads - 1;
+            }
         }
     }
 

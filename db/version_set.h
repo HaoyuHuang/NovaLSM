@@ -114,12 +114,13 @@ namespace leveldb {
 
         Status
         Get(const ReadOptions &, const LookupKey &key, SequenceNumber *seq,
-            std::string *val, GetStats *stats, GetSearchScope search_scope);
+            std::string *val, GetStats *stats, GetSearchScope search_scope,
+            uint64_t *num_searched_files);
 
         Status Get(const ReadOptions &, std::vector<uint64_t> &fns,
                    const LookupKey &key,
                    SequenceNumber *seq,
-                   std::string *val);
+                   std::string *val, uint64_t *num_searched_files);
 
         // Reference count management (so Versions do not disappear out from
         // under live iterators)
@@ -378,7 +379,7 @@ namespace leveldb {
         std::atomic_uint_fast64_t last_sequence_;
 
         AtomicMemTable *mid_table_mapping_[MAX_LIVE_MEMTABLES];
-        AtomicVersion* versions_[MAX_LIVE_MEMTABLES];
+        AtomicVersion *versions_[MAX_LIVE_MEMTABLES];
         std::atomic_int_fast32_t version_id_seq_;
 
         std::mutex manifest_lock_;

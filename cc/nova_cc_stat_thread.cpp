@@ -178,6 +178,23 @@ namespace nova {
             }
             output += "\n";
 
+            output += "searched_file,";
+            for (int i = 0; i < dbs_.size(); i++) {
+                output += std::to_string(dbs_[i]->number_of_files_to_search_);
+                output += ",";
+            }
+            output += "\n";
+
+            output += "searched_file_per_miss,";
+            for (int i = 0; i < dbs_.size(); i++) {
+                double miss = dbs_[i]->number_of_gets_ -
+                              dbs_[i]->number_of_memtable_hits_;
+                double files = dbs_[i]->number_of_files_to_search_;
+                output += std::to_string(files / miss);
+                output += ",";
+            }
+            output += "\n";
+
             for (int j = 0; j < BUCKET_SIZE; j++) {
                 flushed_memtable_size[j] = 0;
             }
@@ -264,7 +281,8 @@ namespace nova {
                         stats.num_overlapping_sstables_per_table_since_last_query);
                 output += ostats.DebugString();
                 output += ",";
-                output += std::to_string(stats.load_imbalance.maximum_load_imbalance);
+                output += std::to_string(
+                        stats.load_imbalance.maximum_load_imbalance);
                 output += ",";
                 output += std::to_string(stats.load_imbalance.stdev);
                 output += ",";
