@@ -46,10 +46,13 @@ namespace leveldb {
             uint32_t size, bool is_meta_blocks) {
         if (server_id == nova::NovaConfig::config->my_server_id) {
             std::string filename;
-            RDMA_ASSERT(file_number != 0);
-            filename = leveldb::TableFileName(dbname,
-                                              file_number,
-                                              is_meta_blocks);
+            if (file_number == 0) {
+                filename = leveldb::DescriptorFileName(dbname, 0);
+            } else {
+                filename = leveldb::TableFileName(dbname,
+                                                  file_number,
+                                                  is_meta_blocks);
+            }
             leveldb::NovaRTable *rtable = rtable_manager_->OpenRTable(
                     thread_id, filename);
             RDMA_ASSERT(rtable);
@@ -72,8 +75,10 @@ namespace leveldb {
             rh.rtable_id = rtable->rtable_id();
             rh.offset = h.offset();
             rh.size = h.size();
-            rtable->ForceSeal();
-            RDMA_ASSERT(h.offset() == 0 && h.size() == size);
+            if (file_number != 0) {
+                RDMA_ASSERT(h.offset() == 0 && h.size() == size);
+                rtable->ForceSeal();
+            }
             uint32_t reqid = req_id_;
             CCResponse *response = new CCResponse;
             req_response[reqid] = response;

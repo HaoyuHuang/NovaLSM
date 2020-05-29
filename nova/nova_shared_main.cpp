@@ -79,7 +79,7 @@ DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint64(cc_sstable_size_mb, 0, "sstable size in mb");
 DEFINE_uint32(cc_log_buf_size, 0, "log buffer size");
 DEFINE_uint32(cc_rtable_size_mb, 0, "RTable size");
-DEFINE_bool(cc_multiple_disks, false, "");
+DEFINE_bool(cc_local_disk, false, "");
 DEFINE_string(cc_scatter_policy, "random", "random/stats");
 DEFINE_string(cc_log_record_mode, "none", "none/rdma");
 DEFINE_uint32(cc_num_log_replicas, 0, "");
@@ -103,7 +103,8 @@ DEFINE_uint32(cc_major_compaction_max_parallism, 1, "");
 DEFINE_uint32(cc_major_compaction_max_tables_in_a_set, 15, "");
 
 NovaConfig *NovaConfig::config;
-std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
+std::atomic_int_fast32_t leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq;
+std::atomic_int_fast32_t leveldb::EnvBGThread::bg_compaction_thread_id_seq;
 std::atomic_int_fast32_t nova::NovaCCServer::fg_storage_worker_seq_id_;
 std::atomic_int_fast32_t nova::NovaCCServer::bg_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
@@ -161,13 +162,6 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->rtable_path = FLAGS_rtable_path;
 
     NovaConfig::config->mem_pool_size_gb = FLAGS_mem_pool_size_gb;
-    if (!FLAGS_cc_multiple_disks) {
-//        if (FLAGS_server_id < FLAGS_number_of_ccs) {
-//            // I'm a CC.
-//            NovaConfig::config->mem_pool_size_gb = 10;
-//        }
-    }
-
     NovaConfig::config->load_default_value_size = FLAGS_use_fixed_value_size;
     // RDMA
     NovaConfig::config->rdma_port = FLAGS_rdma_port;
@@ -191,14 +185,12 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->recover_dbs = FLAGS_cc_recover_dbs;
 
     NovaConfig::config->servers = convert_hosts(FLAGS_cc_servers);
-    if (FLAGS_cc_multiple_disks) {
+    if (FLAGS_cc_local_disk) {
         for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
             NovaConfig::config->cc_servers.push_back(
                     NovaConfig::config->servers[i]);
-            if (i != FLAGS_server_id) {
-                NovaConfig::config->dc_servers.push_back(
-                        NovaConfig::config->servers[i]);
-            }
+            NovaConfig::config->dc_servers.push_back(
+                    NovaConfig::config->servers[i]);
         }
     } else {
         for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
@@ -254,7 +246,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->log_buf_size = FLAGS_cc_rtable_size_mb * 1024;
     NovaConfig::config->rtable_size = FLAGS_cc_rtable_size_mb * 1024;
     NovaConfig::config->sstable_size = FLAGS_cc_sstable_size_mb * 1024 * 1024;
-    NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
+    NovaConfig::config->use_local_disk = FLAGS_cc_local_disk;
     NovaConfig::config->num_tinyranges_per_subrange = FLAGS_cc_num_tinyranges_per_subrange;
 
     if (FLAGS_cc_scatter_policy == "random") {
@@ -284,12 +276,12 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->l0_start_compaction_mb = FLAGS_cc_l0_start_compaction_mb;
     NovaConfig::config->enable_subrange_reorg = FLAGS_cc_enable_subrange_reorg;
 
-    leveldb::EnvBGThread::bg_thread_id_seq = 0;
+    leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq = 0;
+    leveldb::EnvBGThread::bg_compaction_thread_id_seq = 0;
     nova::NovaCCServer::bg_storage_worker_seq_id_ = 0;
     leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
     nova::NovaStorageWorker::storage_file_number_seq = 0;
     nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;
-    NovaConfig::config->use_multiple_disks = FLAGS_cc_multiple_disks;
     StartServer();
     return 0;
 }

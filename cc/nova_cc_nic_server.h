@@ -72,7 +72,8 @@ namespace nova {
         std::vector<NovaStorageWorker *> fg_storage_workers;
         std::vector<NovaStorageWorker *> bg_storage_workers;
         std::vector<NovaStorageWorker *> compaction_storage_workers;
-        std::vector<leveldb::EnvBGThread *> bgs;
+        std::vector<leveldb::EnvBGThread *> bg_compaction_threads;
+        std::vector<leveldb::EnvBGThread *> bg_flush_memtable_threads;
         std::vector<leveldb::EnvBGThread *> reorg_bgs;
         std::vector<leveldb::EnvBGThread *> compaction_coord_bgs;
 

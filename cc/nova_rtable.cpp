@@ -101,7 +101,7 @@ namespace leveldb {
             << fmt::format("{} {}", given_rtable_id_for_assertion, rtable_id_);
         bool found = false;
         mutex_.lock();
-        uint64_t relative_off = offset - (uint64_t) (backing_mem_);
+        uint64_t relative_off = offset - (uint64_t)(backing_mem_);
         for (auto it = allocated_bufs_.rbegin();
              it != allocated_bufs_.rend(); it++) {
             if (it->offset == relative_off) {
@@ -120,17 +120,14 @@ namespace leveldb {
 
     uint64_t NovaRTable::AllocateBuf(const std::string &sstable,
                                      uint32_t size, bool is_meta_blocks) {
-        RDMA_ASSERT(size <= allocated_mem_size_)
+        RDMA_ASSERT(current_mem_offset_ + size <= allocated_mem_size_)
             << "exceed maximum rtable size "
             << size << ","
             << allocated_mem_size_;
-
         leveldb::FileType type = leveldb::FileType::kCurrentFile;
         RDMA_ASSERT(ParseFileName(sstable, &type));
-
         mutex_.lock();
         if (is_full_ || current_mem_offset_ + size > allocated_mem_size_) {
-            is_full_ = true;
             Seal();
             mutex_.unlock();
             return UINT64_MAX;
@@ -159,8 +156,7 @@ namespace leveldb {
         allocated_bufs_.push_back(allocated_buf);
         file_size_ += size;
         mutex_.unlock();
-
-        return (uint64_t) (backing_mem_) + off;
+        return (uint64_t)(backing_mem_) + off;
     }
 
     uint64_t NovaRTable::Persist(uint32_t given_rtable_id_for_assertion) {

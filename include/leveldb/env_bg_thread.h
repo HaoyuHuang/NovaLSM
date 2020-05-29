@@ -53,8 +53,8 @@ namespace leveldb {
 
         virtual unsigned int* rand_seed() = 0;
 
-        static std::atomic_int_fast32_t bg_thread_id_seq;
-
+        static std::atomic_int_fast32_t bg_flush_memtable_thread_id_seq;
+        static std::atomic_int_fast32_t bg_compaction_thread_id_seq;
         std::atomic_int_fast32_t memtable_size[BUCKET_SIZE];
     };
 }

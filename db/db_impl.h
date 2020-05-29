@@ -216,10 +216,12 @@ namespace leveldb {
 
         void RecordBackgroundError(const Status &s);
 
-        void ScheduleBGTask(
-                int thread_id, MemTable *imm, void *compaction,
+        void ScheduleFlushMemTableTask(
+                int thread_id, MemTable *imm,
                 uint32_t partition_id, uint32_t imm_slot,
                 unsigned int *rand_seed, bool merge_memtables_without_flushing);
+
+        void ScheduleCompactionTask(int thread_id, void *compaction);
 
         bool
         PerformMajorCompaction(EnvBGThread *bg_thread,
@@ -264,8 +266,8 @@ namespace leveldb {
         port::Mutex l0_stop_write_mutex_;
         port::CondVar l0_stop_write_signal_;
 
-
-        std::vector<EnvBGThread *> compaction_threads_;
+        std::vector<EnvBGThread *> bg_compaction_threads_;
+        std::vector<EnvBGThread *> bg_flush_memtable_threads_;
         EnvBGThread *reorg_thread_;
         EnvBGThread *compaction_coordinator_thread_;
 

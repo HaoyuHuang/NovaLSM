@@ -54,7 +54,8 @@ namespace nova {
                                         leveldb::MemTablePool *memtable_pool,
                                         leveldb::MemManager *mem_manager,
                                         leveldb::CCClient *cc_client,
-                                        std::vector<leveldb::EnvBGThread *> &bg_threads,
+                                        std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
+                                        std::vector<leveldb::EnvBGThread *> &bg_flush_memtable_threads,
                                         leveldb::EnvBGThread *reorg_thread,
                                         leveldb::EnvBGThread *compaction_coord_thread,
                                         leveldb::Env *env) {
@@ -64,7 +65,7 @@ namespace nova {
             options.memtable_pool = memtable_pool;
             if (NovaConfig::config->write_buffer_size_mb > 0) {
                 options.write_buffer_size =
-                        (uint64_t) (
+                        (uint64_t)(
                                 NovaConfig::config->write_buffer_size_mb) *
                         1024 * 1024;
             }
@@ -82,7 +83,7 @@ namespace nova {
             options.max_open_files = 50000;
             options.enable_table_locator = NovaConfig::config->enable_table_locator;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
-            options.num_compaction_threads = bg_threads.size();
+            options.num_compaction_threads = bg_flush_memtable_threads.size();
             options.max_dc_file_size =
                     std::max(options.write_buffer_size, options.max_file_size) +
                     LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
@@ -90,7 +91,8 @@ namespace nova {
             options.create_if_missing = true;
             options.compression = leveldb::kNoCompression;
             options.filter_policy = leveldb::NewBloomFilterPolicy(10);
-            options.bg_threads = bg_threads;
+            options.bg_compaction_threads = bg_compaction_threads;
+            options.bg_flush_memtable_threads = bg_flush_memtable_threads;
             options.enable_tracing = false;
             options.comparator = new YCSBKeyComparator();
             if (NovaConfig::config->memtable_type == "pool") {
@@ -131,7 +133,7 @@ namespace nova {
             options.memtable_pool = nullptr;
             if (NovaConfig::config->write_buffer_size_mb > 0) {
                 options.write_buffer_size =
-                        (uint64_t) (
+                        (uint64_t)(
                                 NovaConfig::config->write_buffer_size_mb) *
                         1024 * 1024;
             }
@@ -172,7 +174,8 @@ namespace nova {
                                     leveldb::MemTablePool *memtable_pool,
                                     leveldb::MemManager *mem_manager,
                                     leveldb::CCClient *cc_client,
-                                    std::vector<leveldb::EnvBGThread *> &bg_threads,
+                                    std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
+                                    std::vector<leveldb::EnvBGThread *> &bg_flush_memtable_threads,
                                     leveldb::EnvBGThread *reorg_thread,
                                     leveldb::EnvBGThread *compaction_coord_thread) {
             leveldb::EnvOptions env_option;
@@ -183,7 +186,9 @@ namespace nova {
             leveldb::Options options = BuildDBOptions(db_index, cache,
                                                       memtable_pool,
                                                       mem_manager,
-                                                      cc_client, bg_threads,
+                                                      cc_client,
+                                                      bg_compaction_threads,
+                                                      bg_flush_memtable_threads,
                                                       reorg_thread,
                                                       compaction_coord_thread,
                                                       env);
@@ -403,7 +408,7 @@ namespace nova {
     }
 
     void NovaCCNICServer::LoadData() {
-        if (!NovaConfig::config->use_multiple_disks) {
+        if (!NovaConfig::config->use_local_disk) {
             for (int i = 0;
                  i < NovaConfig::config->dc_servers.size(); i++) {
                 if (NovaConfig::config->my_server_id ==
@@ -513,30 +518,31 @@ namespace nova {
 
         uint32_t num_mem_partitions = 1;
         NovaConfig::config->num_mem_partitions = num_mem_partitions;
-        uint64_t slab_size_mb = std::max(
-                NovaConfig::config->sstable_size / 1024 / 1024,
-                NovaConfig::config->write_buffer_size_mb) +
-                                LEVELDB_TABLE_PADDING_SIZE_MB;
-
+        uint64_t slab_size_mb = NovaConfig::config->rtable_size / 1024 / 1024;
         mem_manager = new NovaMemManager(cache_buf,
                                          num_mem_partitions,
                                          NovaConfig::config->mem_pool_size_gb,
                                          slab_size_mb);
         log_manager = new InMemoryLogFileManager(mem_manager);
-
         NovaConfig::config->add_tid_mapping();
         int bg_thread_id = 0;
         for (int i = 0;
              i < NovaConfig::config->num_compaction_workers; i++) {
-            auto bg = new leveldb::NovaCCCompactionThread(mem_manager);
-            bgs.push_back(bg);
+            {
+                auto bg = new leveldb::NovaCCCompactionThread(mem_manager);
+                bg_flush_memtable_threads.push_back(bg);
+            }
+            {
+                auto bg = new leveldb::NovaCCCompactionThread(mem_manager);
+                bg_compaction_threads.push_back(bg);
+            }
         }
 
         leveldb::Cache *block_cache = nullptr;
         leveldb::Cache *row_cache = nullptr;
         if (NovaConfig::config->block_cache_mb > 0) {
             uint64_t cache_size =
-                    (uint64_t) (NovaConfig::config->block_cache_mb) *
+                    (uint64_t)(NovaConfig::config->block_cache_mb) *
                     1024 * 1024;
             block_cache = leveldb::NewLRUCache(cache_size);
 
@@ -547,7 +553,7 @@ namespace nova {
         }
         if (NovaConfig::config->row_cache_mb > 0) {
             uint64_t row_cache_size =
-                    (uint64_t) (NovaConfig::config->row_cache_mb) * 1024 *
+                    (uint64_t)(NovaConfig::config->row_cache_mb) * 1024 *
                     1024;
             row_cache = leveldb::NewLRUCache(row_cache_size);
         }
@@ -563,6 +569,8 @@ namespace nova {
 
         uint32_t nranges = NovaConfig::config->fragments.size() /
                            NovaConfig::config->cc_servers.size();
+
+//        uint64_t NovaConfig::config->sstable_size + LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
         leveldb::NovaRTableManager *rtable_manager = new leveldb::NovaRTableManager(
                 env, mem_manager, NovaConfig::config->rtable_path,
                 NovaConfig::config->rtable_size,
@@ -582,7 +590,8 @@ namespace nova {
                                                          rtable_manager);
             dbs_.push_back(
                     CreateDatabase(db_index, block_cache, pool, mem_manager,
-                                   client, bgs, reorg, coord));
+                                   client, bg_compaction_threads,
+                                   bg_flush_memtable_threads, reorg, coord));
             db_clients.push_back(client);
         }
         for (int db_index = 0; db_index < ndbs; db_index++) {
@@ -771,12 +780,19 @@ namespace nova {
         for (int i = 0;
              i <
              NovaConfig::config->num_compaction_workers; i++) {
-            auto bg = static_cast<leveldb::NovaCCCompactionThread *>(bgs[i]);
+            auto bg = static_cast<leveldb::NovaCCCompactionThread *>(bg_flush_memtable_threads[i]);
             bg->cc_client_ = new leveldb::NovaBlockCCClient(i, rtable_manager);
             bg->cc_client_->ccs_ = async_compaction_workers;
             bg->thread_id_ = i;
         }
-
+        for (int i = 0;
+             i <
+             NovaConfig::config->num_compaction_workers; i++) {
+            auto bg = static_cast<leveldb::NovaCCCompactionThread *>(bg_compaction_threads[i]);
+            bg->cc_client_ = new leveldb::NovaBlockCCClient(i, rtable_manager);
+            bg->cc_client_->ccs_ = async_compaction_workers;
+            bg->thread_id_ = i;
+        }
         RDMA_ASSERT(buf == cache_buf);
 
         leveldb::EnvOptions mem_env_option;
@@ -871,10 +887,15 @@ namespace nova {
             cc_workers.emplace_back(&NovaRDMAComputeComponent::Start,
                                     async_compaction_workers[i]);
         }
-
         for (int i = 0;
              i < NovaConfig::config->num_compaction_workers; i++) {
-            auto bg = reinterpret_cast<leveldb::NovaCCCompactionThread *>(bgs[i]);
+            auto bg = reinterpret_cast<leveldb::NovaCCCompactionThread *>(bg_flush_memtable_threads[i]);
+            compaction_workers.emplace_back(
+                    &leveldb::NovaCCCompactionThread::Start, bg);
+        }
+        for (int i = 0;
+             i < NovaConfig::config->num_compaction_workers; i++) {
+            auto bg = reinterpret_cast<leveldb::NovaCCCompactionThread *>(bg_compaction_threads[i]);
             compaction_workers.emplace_back(
                     &leveldb::NovaCCCompactionThread::Start, bg);
         }
@@ -913,7 +934,13 @@ namespace nova {
             if (!all_initialized) {
                 continue;
             }
-            for (const auto &worker : bgs) {
+            for (const auto &worker : bg_flush_memtable_threads) {
+                if (!worker->IsInitialized()) {
+                    all_initialized = false;
+                    break;
+                }
+            }
+            for (const auto &worker : bg_compaction_threads) {
                 if (!worker->IsInitialized()) {
                     all_initialized = false;
                     break;
@@ -952,7 +979,8 @@ namespace nova {
         stat_thread_->bg_storage_workers_ = bg_storage_workers;
         stat_thread_->fg_storage_workers_ = fg_storage_workers;
         stat_thread_->compaction_storage_workers_ = compaction_storage_workers;
-        stat_thread_->bgs_ = bgs;
+        stat_thread_->bgs_ = bg_flush_memtable_threads;
+
         stat_thread_->async_workers_ = async_workers;
         stat_thread_->async_compaction_workers_ = async_compaction_workers;
         stat_thread_->dbs_ = dbs_;

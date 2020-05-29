@@ -115,7 +115,7 @@ namespace {
         options.create_if_missing = true;
         options.compression = leveldb::kNoCompression;
         options.filter_policy = leveldb::NewBloomFilterPolicy(10);
-        options.bg_threads = bg_threads;
+        options.bg_flush_memtable_threads = bg_threads;
         options.enable_tracing = false;
         options.comparator = new YCSBKeyComparator();
         options.memtable_type = leveldb::MemTableType::kStaticPartition;
@@ -153,7 +153,8 @@ namespace {
 }
 
 NovaConfig *NovaConfig::config;
-std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
+std::atomic_int_fast32_t leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq;
+std::atomic_int_fast32_t leveldb::EnvBGThread::bg_compaction_thread_id_seq;
 std::atomic_int_fast32_t nova::NovaCCServer::fg_storage_worker_seq_id_;
 std::atomic_int_fast32_t nova::NovaCCServer::bg_storage_worker_seq_id_;
 std::atomic_int_fast32_t nova::NovaCCServer::compaction_storage_worker_seq_id_;
@@ -348,21 +349,21 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->log_buf_size = 18 * 1024 * 1024;
     NovaConfig::config->rtable_size = 18 * 1024 * 1024;
     NovaConfig::config->sstable_size = 18 * 1024 * 1024;
-    NovaConfig::config->use_multiple_disks = false;
+    NovaConfig::config->use_local_disk = false;
     NovaConfig::config->scatter_policy = ScatterPolicy::RANDOM;
     NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_NONE;
 
     NovaConfig::config->enable_table_locator = true;
-    leveldb::EnvBGThread::bg_thread_id_seq = 0;
+    leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq = 0;
+    leveldb::EnvBGThread::bg_compaction_thread_id_seq = 0;
     nova::NovaCCServer::bg_storage_worker_seq_id_ = 0;
     leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
-    NovaConfig::config->use_multiple_disks = false;
+    NovaConfig::config->use_local_disk = false;
     nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;
     NovaConfig::config->subrange_sampling_ratio = FLAGS_cc_sampling_ratio;
     NovaConfig::config->zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
     NovaConfig::config->ReadZipfianDist();
     NovaConfig::config->client_access_pattern = FLAGS_cc_client_access_pattern;
-
     char *edit_memory = (char *) malloc(10240);
     leveldb::VersionEdit edit;
     {

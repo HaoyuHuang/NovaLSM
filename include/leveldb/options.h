@@ -120,7 +120,8 @@ namespace leveldb {
         // Default: Env::Default()
         Env *env = nullptr;
 
-        std::vector<EnvBGThread *> bg_threads = {};
+        std::vector<EnvBGThread *> bg_compaction_threads = {};
+        std::vector<EnvBGThread *> bg_flush_memtable_threads = {};
         EnvBGThread *reorg_thread = nullptr;
         EnvBGThread *compaction_coordinator_thread = nullptr;
 

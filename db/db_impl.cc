@@ -123,7 +123,8 @@ namespace leveldb {
               manual_compaction_(nullptr),
               versions_(new VersionSet(dbname_, &options_, table_cache_,
                                        &internal_comparator_)),
-              compaction_threads_(raw_options.bg_threads),
+              bg_compaction_threads_(raw_options.bg_compaction_threads),
+              bg_flush_memtable_threads_(raw_options.bg_flush_memtable_threads),
               reorg_thread_(raw_options.reorg_thread),
               compaction_coordinator_thread_(
                       raw_options.compaction_coordinator_thread),
@@ -1011,21 +1012,22 @@ namespace leveldb {
         }
     }
 
-    void DBImpl::ScheduleBGTask(int thread_id,
-                                MemTable *imm,
-                                void *compaction,
-                                uint32_t partition_id,
-                                uint32_t imm_slot,
-                                unsigned int *rand_seed,
-                                bool merge_memtables_without_flushing) {
-        if (thread_id == -1) {
-            thread_id = EnvBGThread::bg_thread_id_seq.fetch_add(1,
-                                                                std::memory_order_relaxed) %
-                        compaction_threads_.size();
-        }
+    void DBImpl::ScheduleCompactionTask(int thread_id, void *compaction) {
         EnvBGTask task = {};
         task.db = this;
         task.compaction_task = compaction;
+        if (bg_compaction_threads_[thread_id]->Schedule(task)) {
+        }
+    }
+
+    void DBImpl::ScheduleFlushMemTableTask(int thread_id,
+                                           MemTable *imm,
+                                           uint32_t partition_id,
+                                           uint32_t imm_slot,
+                                           unsigned int *rand_seed,
+                                           bool merge_memtables_without_flushing) {
+        EnvBGTask task = {};
+        task.db = this;
         task.memtable = imm;
         task.merge_memtables_without_flushing = merge_memtables_without_flushing;
         if (imm) {
@@ -1033,7 +1035,7 @@ namespace leveldb {
         }
         task.memtable_partition_id = partition_id;
         task.imm_slot = imm_slot;
-        if (compaction_threads_[thread_id]->Schedule(task)) {
+        if (bg_flush_memtable_threads_[thread_id]->Schedule(task)) {
         }
     }
 
@@ -1238,8 +1240,6 @@ namespace leveldb {
                options_.major_compaction_type == kMajorCoordinatedStoC) {
             mutex_.Lock();
             Version *current = versions_->current();
-
-
             if (current->l0_bytes_ <=
                 options_.l0bytes_start_compaction_trigger) {
                 mutex_.Unlock();
@@ -1258,28 +1258,27 @@ namespace leveldb {
             std::vector<CompactionState *> states;
             std::vector<std::string> files_to_delete;
             std::unordered_map<uint32_t, std::vector<SSTableRTablePair>> server_pairs;
-
             ComputeCompactions(current, &compactions, &edit);
             if (!compactions.empty()) {
                 if (subrange_manager_) {
                     subs = subrange_manager_->latest_subranges_;
                 }
                 uint64_t smallest_snapshot = versions_->LastSequence();
-
                 for (int i = 0; i < compactions.size(); i++) {
                     auto state = new CompactionState(compactions[i], subs,
                                                      smallest_snapshot);
                     states.push_back(state);
                 }
-
                 if (options_.major_compaction_type == kMajorCoordinated) {
                     for (int i = 1; i < states.size(); i++) {
-                        int thread_id = i % compaction_threads_.size();
+                        int thread_id =
+                                EnvBGThread::bg_compaction_thread_id_seq.fetch_add(
+                                        1, std::memory_order_relaxed) %
+                                bg_compaction_threads_.size();
                         RDMA_LOG(rdmaio::DEBUG) << fmt::format(
                                     "Coordinator schedules compaction at thread-{}",
                                     thread_id);
-                        ScheduleBGTask(thread_id, nullptr, states[i], 0, 0,
-                                       nullptr, false);
+                        ScheduleCompactionTask(thread_id, states[i]);
                     }
                     auto c = compactions[0];
                     auto input = c->MakeInputIterator(table_cache_,
@@ -1783,11 +1782,17 @@ namespace leveldb {
                         steal_from_range->number_of_active_memtables_ -= 1;
                         steal_from_range->number_of_immutable_memtables_ += 1;
 
-                        steal_from_range->ScheduleBGTask(-1,
-                                                         steal_table->memtable_,
-                                                         nullptr, 0, 0,
-                                                         options.rand_seed,
-                                                         false);
+                        int thread_id =
+                                EnvBGThread::bg_flush_memtable_thread_id_seq.fetch_add(
+                                        1,
+                                        std::memory_order_relaxed) %
+                                bg_flush_memtable_threads_.size();
+
+                        steal_from_range->ScheduleFlushMemTableTask(thread_id,
+                                                                    steal_table->memtable_,
+                                                                    0, 0,
+                                                                    options.rand_seed,
+                                                                    false);
                         steal_success = true;
                     }
                     steal_table->mutex_.unlock();
@@ -1827,11 +1832,14 @@ namespace leveldb {
                             table);
                     partition->memtable = table;
                     number_of_immutable_memtables_.fetch_add(1);
-                    ScheduleBGTask(-1,
-                                   versions_->mid_table_mapping_[partitioned_imms_[next_imm_slot]]->memtable_,
-                                   nullptr,
-                                   partition_id,
-                                   next_imm_slot, &rand_seed_, false);
+                    int thread_id =
+                            EnvBGThread::bg_flush_memtable_thread_id_seq.fetch_add(
+                                    1, std::memory_order_relaxed) %
+                            bg_flush_memtable_threads_.size();
+                    ScheduleFlushMemTableTask(thread_id,
+                                              versions_->mid_table_mapping_[partitioned_imms_[next_imm_slot]]->memtable_,
+                                              partition_id, next_imm_slot,
+                                              &rand_seed_, false);
                 }
             }
             partition->mutex.Unlock();
@@ -1912,15 +1920,19 @@ namespace leveldb {
                     bool merge_memtables_without_flushing = false;
                     if (subrange) {
                         thread_id = subrange->GetCompactionThreadId(
-                                &EnvBGThread::bg_thread_id_seq,
+                                &EnvBGThread::bg_flush_memtable_thread_id_seq,
                                 &merge_memtables_without_flushing);
+                    } else {
+                        thread_id =
+                                EnvBGThread::bg_flush_memtable_thread_id_seq.fetch_add(
+                                        1, std::memory_order_relaxed) %
+                                bg_flush_memtable_threads_.size();
                     }
-                    ScheduleBGTask(thread_id,
-                                   versions_->mid_table_mapping_[partitioned_imms_[next_imm_slot]]->memtable_,
-                                   nullptr,
-                                   partition_id,
-                                   next_imm_slot, options.rand_seed,
-                                   merge_memtables_without_flushing);
+                    ScheduleFlushMemTableTask(thread_id,
+                                              versions_->mid_table_mapping_[partitioned_imms_[next_imm_slot]]->memtable_,
+                                              partition_id, next_imm_slot,
+                                              options.rand_seed,
+                                              merge_memtables_without_flushing);
                 }
                 // We have filled up all memtables, but the previous
                 // one is still being compacted, so we wait.
@@ -1968,15 +1980,19 @@ namespace leveldb {
             bool merge_memtables_without_flushing = false;
             if (subrange) {
                 thread_id = subrange->GetCompactionThreadId(
-                        &EnvBGThread::bg_thread_id_seq,
+                        &EnvBGThread::bg_flush_memtable_thread_id_seq,
                         &merge_memtables_without_flushing);
+            } else {
+                thread_id =
+                        EnvBGThread::bg_flush_memtable_thread_id_seq.fetch_add(
+                                1, std::memory_order_relaxed) %
+                        bg_flush_memtable_threads_.size();
             }
-            ScheduleBGTask(thread_id,
-                           versions_->mid_table_mapping_[partitioned_imms_[next_imm_slot]]->memtable_,
-                           nullptr,
-                           partition_id,
-                           next_imm_slot, options.rand_seed,
-                           merge_memtables_without_flushing);
+            ScheduleFlushMemTableTask(thread_id,
+                                      versions_->mid_table_mapping_[partitioned_imms_[next_imm_slot]]->memtable_,
+                                      partition_id,
+                                      next_imm_slot, options.rand_seed,
+                                      merge_memtables_without_flushing);
         }
         return true;
     }
@@ -2302,8 +2318,12 @@ namespace leveldb {
                 }
 
                 for (auto imm : full_memtables) {
-                    ScheduleBGTask(-1, imm, nullptr, 0, 0, options.rand_seed,
-                                   false);
+                    int thread_id =
+                            EnvBGThread::bg_flush_memtable_thread_id_seq.fetch_add(
+                                    1, std::memory_order_relaxed) %
+                            bg_flush_memtable_threads_.size();
+                    ScheduleFlushMemTableTask(thread_id, imm, 0, 0,
+                                              options.rand_seed, false);
                 }
                 full_memtables.clear();
 
@@ -2388,7 +2408,12 @@ namespace leveldb {
             range_lock_.Unlock();
         }
         for (auto imm : full_memtables) {
-            ScheduleBGTask(-1, imm, nullptr, 0, 0, options.rand_seed, false);
+            int thread_id =
+                    EnvBGThread::bg_flush_memtable_thread_id_seq.fetch_add(
+                            1, std::memory_order_relaxed) %
+                    bg_flush_memtable_threads_.size();
+            ScheduleFlushMemTableTask(thread_id, imm, 0, 0, options.rand_seed,
+                                      false);
         }
         return Status::OK();
     }

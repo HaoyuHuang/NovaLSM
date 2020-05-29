@@ -147,7 +147,7 @@ namespace nova {
         uint64_t sstable_size;
         std::string rtable_path;
 
-        bool use_multiple_disks;
+        bool use_local_disk;
         bool enable_subrange;
         bool enable_subrange_reorg;
         bool enable_flush_multiple_memtables;
