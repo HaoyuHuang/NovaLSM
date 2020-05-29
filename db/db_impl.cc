@@ -3,7 +3,7 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include "db/db_impl.h"
-
+#include <fmt/core.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -553,8 +553,9 @@ namespace leveldb {
             const Slice min_user_key = meta.smallest.user_key();
             const Slice max_user_key = meta.largest.user_key();
             if (base != nullptr) {
-                level = base->PickLevelForMemTableOutput(min_user_key,
-                                                         max_user_key);
+                level = 0;
+//                base->PickLevelForMemTableOutput(min_user_key,
+//                                                         max_user_key);
             }
             edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
                           meta.largest);
@@ -703,6 +704,80 @@ namespace leveldb {
         current_bg_thread_id_ %= bg_threads_.size();
     }
 
+    uint64_t DBImpl::L0CurrentBytes() {
+        MutexLock lock(&mutex_);
+        return versions_->L0Bytes();
+    }
+
+    void DBImpl::SetL0StartCompactionBytes(uint64_t value) {
+        MutexLock lock(&mutex_);
+        l0_start_compaction_bytes = value;
+    }
+
+    void DBImpl::FlushMemTable(leveldb::NovaLogRecordMode log_record_mode) {
+        while (true) {
+            mutex_.Lock();
+            assert(mem_);
+            if (mem_->nputs_ == 0) {
+                mutex_.Unlock();
+                return;
+            }
+            if (imm_ != nullptr) {
+                mutex_.Unlock();
+                Log(options_.info_log, "%s", fmt::format(
+                        "{} waiting for immutable memtable to be flushed",
+                        dbname_).c_str());
+                env_->SleepForMicroseconds(100000);
+                continue;
+            }
+            assert(imm_ == nullptr);
+            // Attempt to switch to a new memtable and trigger compaction of old
+            assert(versions_->PrevLogNumber() == 0);
+            uint64_t new_log_number = versions_->NewFileNumber();
+            WritableFile *lfile = nullptr;
+            auto s = env_->NewWritableFile(LogFileName(dbname_, new_log_number),
+                                           {.level = -1},
+                                           &lfile);
+            if (!s.ok()) {
+                // Avoid chewing through file number space in a tight loop.
+                versions_->ReuseFileNumber(new_log_number);
+                break;
+            }
+            // Close the current log file.
+            if (log_record_mode != leveldb::LOG_NONE) {
+                closed_log_files_.push_back(current_log_file_name_);
+                current_log_file_name_ = LogFileName(dbname_,
+                                                     new_log_number);
+                delete log_;
+                delete logfile_;
+                logfile_ = lfile;
+                logfile_number_ = new_log_number;
+                log_ = new log::Writer(lfile);
+            }
+            imm_ = mem_;
+            has_imm_.store(true, std::memory_order_release);
+            mem_ = new MemTable(internal_comparator_, db_profiler_);
+            mem_->Ref();
+            MaybeScheduleCompaction();
+            mutex_.Unlock();
+            Log(options_.info_log, "%s", fmt::format(
+                    "{} flushing memtable", dbname_).c_str());
+            break;
+        }
+        while (true) {
+            mutex_.Lock();
+            if (imm_) {
+                mutex_.Unlock();
+                Log(options_.info_log, "%s", fmt::format(
+                        "{} waiting for memtable to be flushed", dbname_).c_str());
+                env_->SleepForMicroseconds(100000);
+                continue;
+            }
+            mutex_.Unlock();
+            break;
+        }
+    }
+
     void DBImpl::MaybeScheduleCompaction() {
         mutex_.AssertHeld();
         if (background_compaction_scheduled_) {
@@ -712,12 +787,12 @@ namespace leveldb {
         } else if (!bg_error_.ok()) {
             // Already got an error; no more changes
         } else if (imm_ == nullptr && manual_compaction_ == nullptr &&
-                   !versions_->NeedsCompaction()) {
+                   versions_->L0Bytes() < l0_start_compaction_bytes) {
             // No work to be done
         } else {
             background_compaction_scheduled_ = true;
             Schedule(&DBImpl::BGWork, this);
-            Log(options_.info_log, "BG: Schedule compaction.");
+//            Log(options_.info_log, "BG: Schedule compaction.");
         }
     }
 
@@ -726,9 +801,9 @@ namespace leveldb {
     }
 
     void DBImpl::BackgroundCall() {
-        Log(options_.info_log, "BG: Scheduled compaction.");
+//        Log(options_.info_log, "BG: Scheduled compaction.");
         MutexLock l(&mutex_);
-        Log(options_.info_log, "BG: Scheduled compaction. Acquired Lock.");
+//        Log(options_.info_log, "BG: Scheduled compaction. Acquired Lock.");
         assert(background_compaction_scheduled_);
         if (shutting_down_.load(std::memory_order_acquire)) {
             // No more background work when shutting down.
@@ -1480,43 +1555,52 @@ namespace leveldb {
         bool allow_delay = !force;
         Status s;
         bool wait = false;
+        uint64_t start_wait_time = 0;
         while (true) {
             if (!bg_error_.ok()) {
                 // Yield previous error
                 s = bg_error_;
                 break;
-            } else if (allow_delay && versions_->NumLevelFiles(0) >=
-                                      config::kL0_SlowdownWritesTrigger) {
-                // We are getting close to hitting a hard limit on the number of
-                // L0 files.  Rather than delaying a single write by several
-                // seconds when we hit the hard limit, start delaying each
-                // individual write by 1ms to reduce latency variance.  Also,
-                // this delay hands over some CPU to the compaction thread in
-                // case it is sharing the same core as the writer.
-                mutex_.Unlock();
-                env_->SleepForMicroseconds(1000);
-                allow_delay = false;  // Do not delay a single write more than once
-                mutex_.Lock();
+//            } else if (allow_delay && versions_->NumLevelFiles(0) >=
+//                                      config::kL0_SlowdownWritesTrigger) {
+//                // We are getting close to hitting a hard limit on the number of
+//                // L0 files.  Rather than delaying a single write by several
+//                // seconds when we hit the hard limit, start delaying each
+//                // individual write by 1ms to reduce latency variance.  Also,
+//                // this delay hands over some CPU to the compaction thread in
+//                // case it is sharing the same core as the writer.
+//                mutex_.Unlock();
+//                env_->SleepForMicroseconds(1000);
+//                allow_delay = false;  // Do not delay a single write more than once
+//                mutex_.Lock();
             } else if (!force &&
                        (mem_->ApproximateMemoryUsage() <=
                         options_.write_buffer_size)) {
                 // There is room in current memtable
                 if (wait) {
-                    Log(options_.info_log, "Make room; resuming...\n");
+                    Log(options_.info_log, "%s", fmt::format("{},{}", 0,
+                                                             env_->NowMicros() -
+                                                             start_wait_time).c_str());
                 }
                 break;
             } else if (imm_ != nullptr) {
                 // We have filled up the current memtable, but the previous
                 // one is still being compacted, so we wait.
-                Log(options_.info_log,
-                    "Current memtable full; Make room waiting...\n");
+//                Log(options_.info_log,
+//                    "Current memtable full; Make room waiting...\n");
+//
+                if (start_wait_time == 0) {
+                    start_wait_time = env_->NowMicros();
+                }
+
                 background_work_finished_signal_.Wait();
                 wait = true;
-            } else if (versions_->NumLevelFiles(0) >=
-                       config::kL0_StopWritesTrigger) {
+            } else if (versions_->L0Bytes() >=
+                       options_.l0bytes_stop_writes_trigger) {
                 // There are too many level-0 files.
-                Log(options_.info_log,
-                    "Too many L0 files; Make room waiting...\n");
+                if (start_wait_time == 0) {
+                    start_wait_time = env_->NowMicros();
+                }
                 background_work_finished_signal_.Wait();
                 wait = true;
             } else {
@@ -1535,7 +1619,8 @@ namespace leveldb {
                 // Close the current log file. 
                 if (write_options.log_record_mode != leveldb::LOG_NONE) {
                     closed_log_files_.push_back(current_log_file_name_);
-                    current_log_file_name_ = LogFileName(dbname_, new_log_number);
+                    current_log_file_name_ = LogFileName(dbname_,
+                                                         new_log_number);
                     delete log_;
                     delete logfile_;
                     logfile_ = lfile;

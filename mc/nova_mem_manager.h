@@ -13,7 +13,7 @@
 #include "nova/linked_list.h"
 #include "nova/nova_mem_config.h"
 
-#define NOVA_MEM_PARTITIONS 64
+#define NOVA_MEM_PARTITIONS 1
 
 namespace nova {
     class Slab {

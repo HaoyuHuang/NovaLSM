@@ -4,6 +4,7 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
+#include <fmt/core.h>
 #include <netinet/tcp.h>
 #include <signal.h>
 #include <leveldb/write_batch.h>
@@ -107,16 +108,41 @@ namespace nova {
 
 
     void NovaMemServer::LoadData() {
-        if (NovaConfig::config->partition_mode == NovaRDMAPartitionMode::HASH) {
-//        LoadDataWithHashPartition();
-        } else if (NovaConfig::config->partition_mode ==
-                   NovaRDMAPartitionMode::RANGE) {
-            LoadDataWithRangePartition();
-            if (dbs_.size() > 1) {
-                LoadDataWithRangePartition();
-            }
+        LoadDataWithRangePartition();
+
+        for (auto &db : dbs_) {
+            db->SetL0StartCompactionBytes(0);
+            db->FlushMemTable(NovaConfig::config->log_record_mode);
         }
+        while (true) {
+            bool stop = true;
+            for (auto &db : dbs_) {
+                uint64_t bytes = db->L0CurrentBytes();
+                if (bytes > 0) {
+                    RDMA_LOG(INFO)
+                        << fmt::format("Waiting for {} bytes at L0", bytes);
+                    stop = false;
+                    db->MaybeScheduleCompaction();
+                }
+            }
+            if (stop) {
+                break;
+            }
+            for (int i = 0; i < dbs_.size(); i++) {
+                RDMA_LOG(INFO) << "Database " << i;
+                std::string value;
+                dbs_[i]->GetProperty("leveldb.sstables", &value);
+                RDMA_LOG(INFO) << "\n" << value;
+                value.clear();
+                dbs_[i]->GetProperty("leveldb.approximate-memory-usage", &value);
+                RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
+            }
+            sleep(1);
+        }
+
         for (int i = 0; i < dbs_.size(); i++) {
+            dbs_[i]->SetL0StartCompactionBytes(
+                    NovaConfig::config->l0_start_compaction_bytes);
             RDMA_LOG(INFO) << "Database " << i;
             std::string value;
             dbs_[i]->GetProperty("leveldb.sstables", &value);

@@ -65,7 +65,7 @@ namespace leveldb {
         // in *status and return true.
         // Else, return false.
         bool Get(const LookupKey &key, std::string *value, Status *s);
-
+        uint32_t nputs_ = 0;
     private:
         friend class MemTableIterator;
 

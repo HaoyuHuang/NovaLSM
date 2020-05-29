@@ -156,6 +156,14 @@ namespace leveldb {
         // Therefore the following call will compact the entire database:
         //    db->CompactRange(nullptr, nullptr);
         virtual void CompactRange(const Slice *begin, const Slice *end) = 0;
+
+        virtual void SetL0StartCompactionBytes(uint64_t value) = 0;
+
+        virtual uint64_t L0CurrentBytes() = 0;
+
+        virtual void FlushMemTable(leveldb::NovaLogRecordMode log_record_mode) = 0;
+
+        virtual void MaybeScheduleCompaction() = 0;
     };
 
 // Destroy the contents of the specified database.

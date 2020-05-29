@@ -677,7 +677,7 @@ namespace nova {
     }
 
     void NovaConnWorker::Start() {
-        RDMA_LOG(INFO) << "memstore[" << thread_id_ << "]: "
+        RDMA_LOG(DEBUG) << "memstore[" << thread_id_ << "]: "
                        << "starting mem worker";
 
         if (NovaConfig::config->log_record_mode == leveldb::LOG_NIC) {
@@ -710,15 +710,15 @@ namespace nova {
             fprintf(stderr, "Can't allocate event base\n");
             exit(1);
         }
-        RDMA_LOG(INFO) << "Using Libevent with backend method "
+        RDMA_LOG(DEBUG) << "Using Libevent with backend method "
                        << event_base_get_method(base);
         const int f = event_base_get_features(base);
         if ((f & EV_FEATURE_ET)) {
-            RDMA_LOG(INFO) << "Edge-triggered events are supported.";
+            RDMA_LOG(DEBUG) << "Edge-triggered events are supported.";
         }
 
         if ((f & EV_FEATURE_O1)) {
-            RDMA_LOG(INFO) <<
+            RDMA_LOG(DEBUG) <<
                            "O(1) event notification is supported.";
         }
 
@@ -751,15 +751,15 @@ namespace nova {
         }
         /* Timer event for stats */
         {
-            struct timeval tv;
-            tv.tv_sec = 10;
-            tv.tv_usec = 0;
-            memset(&stats_event, 0, sizeof(struct event));
-            RDMA_ASSERT(
-                    event_assign(&stats_event, base, -1, EV_PERSIST,
-                                 stats_handler,
-                                 (void *) this) == 0);
-            RDMA_ASSERT(event_add(&stats_event, &tv) == 0);
+//            struct timeval tv;
+//            tv.tv_sec = 10;
+//            tv.tv_usec = 0;
+//            memset(&stats_event, 0, sizeof(struct event));
+//            RDMA_ASSERT(
+//                    event_assign(&stats_event, base, -1, EV_PERSIST,
+//                                 stats_handler,
+//                                 (void *) this) == 0);
+//            RDMA_ASSERT(event_add(&stats_event, &tv) == 0);
         }
         /* Timer event for RDMA */
 //        if (NovaConfig::config->enable_rdma) {
@@ -772,7 +772,7 @@ namespace nova {
 //                                 rdma_timer_event_handler, (void *) this) == 0);
 //            RDMA_ASSERT(event_add(&rdma_timer_event, &tv) == 0);
 //        }
-        RDMA_LOG(INFO) << "NIC worker started";
+        RDMA_LOG(DEBUG) << "NIC worker started";
         RDMA_ASSERT(event_base_loop(base, 0) == 0);
 
     }

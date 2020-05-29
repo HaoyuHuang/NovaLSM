@@ -298,7 +298,7 @@ endif (HAVE_TCMALLOC)
 
 # Needed by port_stdcxx.h
 find_package(Threads REQUIRED)
-target_link_libraries(leveldb Threads::Threads -lpthread)
+target_link_libraries(leveldb Threads::Threads -lpthread fmt)
 
 add_executable(leveldbutil
         "db/leveldbutil.cc"
@@ -574,12 +574,12 @@ set(NOVA_SOURCES
 
 add_library(libnova STATIC ${NOVA_SOURCES})
 set_target_properties(libnova PROPERTIES LINKER_LANGUAGE CXX)
-target_link_libraries(libnova -lpthread ibverbs event leveldb)
+target_link_libraries(libnova -lpthread ibverbs event leveldb fmt)
 
 add_executable(nova_cc "nova/nova_cc_main.cpp")
 #add_executable(nova_test "mc/nova_test.cpp")
 #add_executable(nova_dc "nova/nova_dc_main.cpp")
 
-target_link_libraries(nova_cc libnova -lgflags leveldb)
+target_link_libraries(nova_cc libnova -lgflags leveldb fmt)
 #target_link_libraries(nova_test libnova -lgflags leveldb)
 #target_link_libraries(nova_dc libnova -lgflags leveldb)

@@ -122,6 +122,8 @@ namespace leveldb {
         // Return a human readable string that describes this version's contents.
         std::string DebugString() const;
 
+        uint64_t l0_bytes = 0;
+
     private:
         friend class Compaction;
 
@@ -217,6 +219,8 @@ namespace leveldb {
 
         // Return the number of Table files at the specified level.
         int NumLevelFiles(int level) const;
+
+        uint64_t L0Bytes() const;
 
         // Return the combined file size of all files at the specified level.
         int64_t NumLevelBytes(int level) const;

@@ -775,6 +775,9 @@ namespace leveldb {
                 // File is deleted: do nothing
             } else {
                 std::vector<FileMetaData *> *files = &v->files_[level];
+                if (level == 0) {
+                    v->l0_bytes += f->file_size;
+                }
                 if (level > 0 && !files->empty()) {
                     // Must not overlap
                     assert(vset_->icmp_.Compare(
@@ -1160,6 +1163,10 @@ namespace leveldb {
         return log->AddRecord(record);
     }
 
+    uint64_t VersionSet::L0Bytes() const {
+        return current_->l0_bytes;
+    }
+
     int VersionSet::NumLevelFiles(int level) const {
         assert(level >= 0);
         assert(level < config::kNumLevels);
@@ -1168,7 +1175,7 @@ namespace leveldb {
 
     const char *VersionSet::LevelSummary(LevelSummaryStorage *scratch) const {
         // Update code if kNumLevels changes
-        static_assert(config::kNumLevels == 7, "");
+//        static_assert(config::kNumLevels == 7, "");
         snprintf(scratch->buffer, sizeof(scratch->buffer),
                  "files[ %d %d %d %d %d %d %d ]",
                  int(current_->files_[0].size()),
@@ -1333,43 +1340,33 @@ namespace leveldb {
 
     Compaction *VersionSet::PickCompaction() {
         Compaction *c;
-        int level;
-
+        int level = 0;
+        if (current_->files_[level].size() == 0) {
+            return nullptr;
+        }
         // We prefer compactions triggered by too much data in a level over
         // the compactions triggered by seeks.
-        const bool size_compaction = (current_->compaction_score_ >= 1);
-        const bool seek_compaction = (current_->file_to_compact_ != nullptr);
-        if (size_compaction) {
-            level = current_->compaction_level_;
-            assert(level >= 0);
-            assert(level + 1 < config::kNumLevels);
-            c = new Compaction(options_, level);
+        assert(level >= 0);
+        assert(level + 1 < config::kNumLevels);
+        c = new Compaction(options_, level);
 
-            // Pick the first file that comes after compact_pointer_[level]
-            for (size_t i = 0; i < current_->files_[level].size(); i++) {
-                FileMetaData *f = current_->files_[level][i];
-                if (compact_pointer_[level].empty() ||
-                    icmp_.Compare(f->largest.Encode(),
-                                  compact_pointer_[level]) > 0) {
-                    c->inputs_[0].push_back(f);
-                    break;
-                }
+        // Pick the first file that comes after compact_pointer_[level]
+        for (size_t i = 0; i < current_->files_[level].size(); i++) {
+            FileMetaData *f = current_->files_[level][i];
+            if (compact_pointer_[level].empty() ||
+                icmp_.Compare(f->largest.Encode(),
+                              compact_pointer_[level]) > 0) {
+                c->inputs_[0].push_back(f);
+                break;
             }
-            if (c->inputs_[0].empty()) {
-                // Wrap-around to the beginning of the key space
-                c->inputs_[0].push_back(current_->files_[level][0]);
-            }
-        } else if (seek_compaction) {
-            level = current_->file_to_compact_level_;
-            c = new Compaction(options_, level);
-            c->inputs_[0].push_back(current_->file_to_compact_);
-        } else {
-            return nullptr;
+        }
+        if (c->inputs_[0].empty()) {
+            // Wrap-around to the beginning of the key space
+            c->inputs_[0].push_back(current_->files_[level][0]);
         }
 
         c->input_version_ = current_;
         c->input_version_->Ref();
-
         // Files in level 0 may overlap each other, so pick up all overlapping ones
         if (level == 0) {
             InternalKey smallest, largest;

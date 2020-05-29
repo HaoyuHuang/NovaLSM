@@ -11,6 +11,7 @@
 #include <string>
 #include <leveldb/db_profiler.h>
 #include <list>
+#include <util/mutexlock.h>
 
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -94,6 +95,13 @@ namespace leveldb {
         // bytes.
         void RecordReadSample(Slice key);
 
+        void SetL0StartCompactionBytes(uint64_t value) override;
+
+        uint64_t L0CurrentBytes() override;
+
+        void FlushMemTable(leveldb::NovaLogRecordMode log_record_mode) override;
+
+        void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_) override;
     private:
         friend class DB;
 
@@ -101,6 +109,7 @@ namespace leveldb {
         struct Writer;
 
         DBProfiler *db_profiler_ = nullptr;
+        uint64_t l0_start_compaction_bytes = 0;
 
         // Information for a manual compaction
         struct ManualCompaction {
@@ -165,8 +174,6 @@ namespace leveldb {
         EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         void RecordBackgroundError(const Status &s);
-
-        void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         static void BGWork(void *db);
 

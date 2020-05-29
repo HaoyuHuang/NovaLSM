@@ -43,14 +43,12 @@ DEFINE_string(sstable_mode, "disk", "sstable mode");
 DEFINE_uint32(num_async_workers, 0, "Number of async worker threads.");
 DEFINE_uint32(num_compaction_workers, 0,
               "Number of compaction worker threads.");
-
 DEFINE_string(profiler_file_path, "", "profiler file path.");
 DEFINE_string(servers, "localhost:11211", "A list of peer servers");
 DEFINE_int64(server_id, -1, "Server id.");
 DEFINE_uint64(recordcount, 0, "Number of records.");
 DEFINE_string(data_partition_alg, "hash",
               "Data partition algorithm: hash, range, debug.");
-
 DEFINE_uint64(num_conn_workers, 0, "Number of connection threads.");
 DEFINE_uint64(cache_size_gb, 0, " Cache size in GB.");
 DEFINE_uint64(use_fixed_value_size, 0, "Fixed value size.");
@@ -76,6 +74,8 @@ DEFINE_bool(enable_load_data, false, "Enable loading data.");
 DEFINE_uint64(rdma_number_of_get_retries, 3, "Number of RDMA retries for get.");
 DEFINE_string(config_path, "/tmp/uniform-3-32-10000000-frags.txt",
               "The path that stores fragment configuration.");
+DEFINE_uint32(cc_l0_start_compaction_mb, 0, "");
+DEFINE_uint32(cc_l0_stop_write_mb, 0, "");
 
 namespace {
     class YCSBKeyComparator : public leveldb::Comparator {
@@ -96,7 +96,6 @@ namespace {
             }
             return 0;
         }
-
         // Ignore the following methods for now:
         const char *Name() const { return "YCSBKeyComparator"; }
 
@@ -154,6 +153,11 @@ leveldb::DB *CreateDatabase(int sid, int db_index, leveldb::Cache *cache,
     options.filter_policy = leveldb::NewBloomFilterPolicy(10);
     options.bg_threads = bg_threads;
     options.max_file_size = 1024 * 1024 * FLAGS_sstable_size_mb;
+    options.l0bytes_start_compaction_trigger =
+            FLAGS_cc_l0_start_compaction_mb * 1024 * 1024;
+    options.l0bytes_stop_writes_trigger =
+            FLAGS_cc_l0_stop_write_mb * 1024 * 1024;
+
     if (NovaConfig::config->profiler_file_path.empty()) {
         options.enable_tracing = false;
     } else {
@@ -236,6 +240,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->profiler_file_path = FLAGS_profiler_file_path;
     NovaConfig::config->log_buf_size = FLAGS_log_buf_size;
     NovaConfig::config->num_async_workers = FLAGS_num_async_workers;
+    NovaConfig::config->l0_start_compaction_bytes = FLAGS_cc_l0_start_compaction_mb;
 
     if (FLAGS_persist_log_records_mode == "disk") {
         NovaConfig::config->log_record_mode = leveldb::NovaLogRecordMode::LOG_DISK_SYNC;

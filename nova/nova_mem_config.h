@@ -165,6 +165,7 @@ namespace nova {
 
         bool enable_load_data;
         bool enable_rdma;
+        uint64_t l0_start_compaction_bytes;
 
         vector<Host> servers;
         int num_conn_workers;
