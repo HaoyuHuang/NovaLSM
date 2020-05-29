@@ -595,7 +595,7 @@ using namespace nova;
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
-std::atomic_int_fast32_t nova::NovaCCServer::storage_worker_seq_id_;
+std::atomic_int_fast32_t nova::NovaCCServer::bg_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 

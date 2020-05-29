@@ -213,7 +213,7 @@ namespace leveldb {
                 Iterator *iter = mem->NewIterator(TraceType::MEMTABLE,
                                                   AccessCaller::kUncategorized);
                 status = BuildTable(dbname_, env_, options_, table_cache_, iter,
-                                    &meta, nullptr);
+                                    &meta, nullptr, false);
                 delete iter;
                 mem->Unref();
                 mem = nullptr;

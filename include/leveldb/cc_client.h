@@ -158,6 +158,7 @@ namespace leveldb {
         uint32_t size = 0;
         char *result = nullptr;
         std::string filename;
+        bool is_foreground_reads;
 
         std::string log_file_name;
         uint64_t thread_id = 0;
@@ -197,7 +198,8 @@ namespace leveldb {
                                     uint32_t size,
                                     char *result,
                                     uint32_t result_size,
-                                    std::string filename) = 0;
+                                    std::string filename,
+                                    bool is_foreground_reads) = 0;
 
         virtual uint32_t InitiateQueryLogFile(
                 uint32_t storage_server_id, uint32_t server_id,

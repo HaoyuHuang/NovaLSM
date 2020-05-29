@@ -44,16 +44,14 @@ namespace leveldb {
             std::string filename = TableFileName(dbname, meta->number, true);
             uint32_t backing_scid = options.mem_manager->slabclassid(0,
                                                                      meta->meta_block_handle.size);
-            char *backing_buf = options.mem_manager->ItemAlloc(0,
-                                                               backing_scid);
+            char *backing_buf = options.mem_manager->ItemAlloc(0, backing_scid);
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("Fetch metadata blocks {} handle:{}",
                                filename, meta->DebugString());
             backing_buf[meta->meta_block_handle.size - 1] = 0;
             uint32_t req_id = client->InitiateRTableReadDataBlock(
-                    meta->meta_block_handle, 0,
-                    meta->meta_block_handle.size,
-                    backing_buf, meta->meta_block_handle.size, filename);
+                    meta->meta_block_handle, 0, meta->meta_block_handle.size,
+                    backing_buf, meta->meta_block_handle.size, filename, false);
             backing_mems[i] = backing_buf;
         }
 

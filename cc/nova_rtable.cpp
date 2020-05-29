@@ -557,7 +557,6 @@ namespace leveldb {
     void NovaRTableManager::OpenRTables(
             std::unordered_map<std::string, uint32_t> &fn_rtables) {
         mutex_.lock();
-
         for (auto &it : fn_rtables) {
             auto &fn = it.first;
             auto &rtableid = it.second;
@@ -625,13 +624,13 @@ namespace leveldb {
     }
 
     NovaRTable *NovaRTableManager::FindRTable(uint32_t rtable_id) {
-        mutex_.lock();
+//        mutex_.lock();
         RDMA_ASSERT(rtable_id < MAX_NUM_RTABLES);
         NovaRTable *rtable = rtables_[rtable_id];
         RDMA_ASSERT(rtable) << fmt::format("RTable {} is null.", rtable_id);
         RDMA_ASSERT(rtable->rtable_id() == rtable_id)
             << fmt::format("RTable {} {}.", rtable->rtable_id(), rtable_id);
-        mutex_.unlock();
+//        mutex_.unlock();
         return rtable;
     }
 

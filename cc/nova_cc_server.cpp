@@ -59,11 +59,18 @@ namespace nova {
         mutex_.unlock();
     }
 
-    void NovaCCServer::AddStorageTask(const nova::NovaStorageTask &task) {
+    void NovaCCServer::AddFGStorageTask(const nova::NovaStorageTask &task) {
         uint32_t id =
-                storage_worker_seq_id_.fetch_add(1, std::memory_order_relaxed) %
-                storage_workers_.size();
-        storage_workers_[id]->AddTask(task);
+                fg_storage_worker_seq_id_.fetch_add(1, std::memory_order_relaxed) %
+                fg_storage_workers_.size();
+        fg_storage_workers_[id]->AddTask(task);
+    }
+
+    void NovaCCServer::AddBGStorageTask(const nova::NovaStorageTask &task) {
+        uint32_t id =
+                bg_storage_worker_seq_id_.fetch_add(1, std::memory_order_relaxed) %
+                bg_storage_workers_.size();
+        bg_storage_workers_[id]->AddTask(task);
     }
 
     void
@@ -224,7 +231,7 @@ namespace nova {
                             pair.rtable_id = context.rtable_id;
                             pair.sstable_id = context.sstable_id;
                             task.persist_pairs.push_back(pair);
-                            AddStorageTask(task);
+                            AddBGStorageTask(task);
 
                             request_context_map_.erase(req_id);
                         }
@@ -276,7 +283,8 @@ namespace nova {
                     uint64_t offset = 0;
                     uint32_t size = 0;
                     uint64_t cc_mr_offset = 0;
-
+                    bool is_foreground_read = leveldb::DecodeBool(buf + msg_size);
+                    msg_size += 1;
                     rtable_id = leveldb::DecodeFixed32(buf + msg_size);
                     msg_size += 4;
                     offset = leveldb::DecodeFixed64(buf + msg_size);
@@ -317,7 +325,11 @@ namespace nova {
                     task.rtable_handle.offset = offset;
                     task.rtable_handle.size = size;
 
-                    AddStorageTask(task);
+                    if (is_foreground_read) {
+                        AddFGStorageTask(task);
+                    } else {
+                        AddBGStorageTask(task);
+                    }
                     processed = true;
                 } else if (buf[0] ==
                            leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {

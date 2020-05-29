@@ -199,6 +199,15 @@ namespace leveldb {
         return 1;
     }
 
+    inline bool DecodeBool(char *dst) {
+        if (dst[0] == '1') {
+            return true;
+        } else if (dst[0] == '2') {
+            return false;
+        }
+        assert(false);
+    }
+
     inline bool DecodeBool(Slice *ptr, bool* value) {
         if (ptr->size() >= 1) {
             if (ptr->data()[0] == '1') {

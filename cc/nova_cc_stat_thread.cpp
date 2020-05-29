@@ -36,17 +36,58 @@ namespace nova {
         }
     }
 
+    void NovaStatThread::Initialize(
+            std::vector<nova::NovaStatThread::StorageWorkerStats> *storage_stats,
+            const std::vector<nova::NovaStorageWorker *> &storage_workers) {
+        for (int i = 0; i < storage_workers.size(); i++) {
+            StorageWorkerStats s = {};
+            s.tasks = storage_workers[i]->stat_tasks_;
+            s.read_bytes = storage_workers[i]->stat_read_bytes_;
+            s.write_bytes = storage_workers[i]->stat_write_bytes_;
+            storage_stats->push_back(s);
+        }
+    }
+
+    void NovaStatThread::OutputStats(const std::string &prefix,
+                                     std::string *output,
+                                     std::vector<nova::NovaStatThread::StorageWorkerStats> *storage_stats,
+                                     const std::vector<nova::NovaStorageWorker *> &storage_workers) {
+        output->append(prefix + "-storage,");
+        for (int i = 0; i < storage_workers.size(); i++) {
+            uint32_t tasks = storage_workers[i]->stat_tasks_;
+            output->append(std::to_string(tasks - (*storage_stats)[i].tasks));
+            output->append(",");
+            (*storage_stats)[i].tasks = tasks;
+        }
+        output->append("\n");
+        output->append(prefix + "-storage-read,");
+        for (int i = 0; i < storage_workers.size(); i++) {
+            uint32_t tasks = storage_workers[i]->stat_read_bytes_;
+            output->append(
+                    std::to_string(tasks - (*storage_stats)[i].read_bytes));
+            output->append(",");
+            (*storage_stats)[i].read_bytes = tasks;
+        }
+        output->append("\n");
+        output->append(prefix + "-storage-write,");
+        for (int i = 0; i < storage_workers.size(); i++) {
+            uint32_t tasks = storage_workers[i]->stat_write_bytes_;
+            output->append(
+                    std::to_string(tasks - (*storage_stats)[i].write_bytes));
+            output->append(",");
+            (*storage_stats)[i].write_bytes = tasks;
+        }
+        output->append("\n");
+    }
+
     void NovaStatThread::Start() {
         std::vector<uint32_t> foreground_rdma_tasks;
         std::vector<uint32_t> bg_rdma_tasks;
 
-        struct StorageWorkerStats {
-            uint32_t tasks = 0;
-            uint64_t read_bytes = 0;
-            uint64_t write_bytes = 0;
-        };
+        std::vector<StorageWorkerStats> fg_storage_stats;
+        std::vector<StorageWorkerStats> bg_storage_stats;
+        std::vector<StorageWorkerStats> compaction_storage_stats;
 
-        std::vector<StorageWorkerStats> stats;
         std::vector<uint32_t> compaction_stats;
 
         for (int i = 0; i < async_workers_.size(); i++) {
@@ -60,14 +101,9 @@ namespace nova {
         for (int i = 0; i < bgs_.size(); i++) {
             compaction_stats.push_back(bgs_[i]->num_running_tasks());
         }
-
-        for (int i = 0; i < cc_server_workers_.size(); i++) {
-            StorageWorkerStats s = {};
-            s.tasks = cc_server_workers_[i]->stat_tasks_;
-            s.read_bytes = cc_server_workers_[i]->stat_read_bytes_;
-            s.write_bytes = cc_server_workers_[i]->stat_write_bytes_;
-            stats.push_back(s);
-        }
+        Initialize(&fg_storage_stats, fg_storage_workers_);
+        Initialize(&bg_storage_stats, bg_storage_workers_);
+        Initialize(&compaction_storage_stats, compaction_storage_workers_);
 
         std::string output;
         int flushed_memtable_size[BUCKET_SIZE];
@@ -100,32 +136,10 @@ namespace nova {
             }
             output += "\n";
 
-            output += "storage,";
-            for (int i = 0; i < cc_server_workers_.size(); i++) {
-                uint32_t tasks = cc_server_workers_[i]->stat_tasks_;
-                output += std::to_string(tasks - stats[i].tasks);
-                output += ",";
-                stats[i].tasks = tasks;
-            }
-            output += "\n";
-
-            output += "storage-read,";
-            for (int i = 0; i < cc_server_workers_.size(); i++) {
-                uint32_t tasks = cc_server_workers_[i]->stat_read_bytes_;
-                output += std::to_string(tasks - stats[i].read_bytes);
-                output += ",";
-                stats[i].read_bytes = tasks;
-            }
-            output += "\n";
-
-            output += "storage-write,";
-            for (int i = 0; i < cc_server_workers_.size(); i++) {
-                uint32_t tasks = cc_server_workers_[i]->stat_write_bytes_;
-                output += std::to_string(tasks - stats[i].write_bytes);
-                output += ",";
-                stats[i].write_bytes = tasks;
-            }
-            output += "\n";
+            OutputStats("fg", &output, &fg_storage_stats, fg_storage_workers_);
+            OutputStats("bg", &output, &bg_storage_stats, bg_storage_workers_);
+            OutputStats("c", &output, &compaction_storage_stats,
+                        compaction_storage_workers_);
 
             output += "active-memtables,";
             for (int i = 0; i < dbs_.size(); i++) {

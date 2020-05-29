@@ -154,18 +154,16 @@ namespace leveldb {
         // Compact the in-memory write buffer to disk.  Switches to a new
         // log-file/memtable and writes a new descriptor iff successful.
         // Errors are recorded in bg_error_.
-        bool CompactMemTableStaticPartition(EnvBGThread *bg_thread,
-                                            const std::vector<EnvBGTask> &tasks);
+        void CompactMemTableStaticPartition(EnvBGThread *bg_thread,
+                                            const std::vector<EnvBGTask> &tasks,
+                                            VersionEdit* edit,
+                                            bool prune_memtable);
 
         bool CompactMultipleMemTablesStaticPartitionToMemTable(
                 int partition_id,
                 EnvBGThread *bg_thread,
-                const std::vector<EnvBGTask> &tasks);
-
-        bool CompactMultipleMemTablesStaticPartitionToSSTables(
-                int partition_id,
-                EnvBGThread *bg_thread,
-                const std::vector<EnvBGTask> &tasks);
+                const std::vector<EnvBGTask> &tasks,
+                std::vector<uint32_t> *closed_memtable_log_files);
 
         friend class DB;
 

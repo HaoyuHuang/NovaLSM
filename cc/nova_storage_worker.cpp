@@ -128,8 +128,7 @@ namespace nova {
                             nullptr);
                     leveldb::VersionFileMap version_files(&table_cache);
                     leveldb::Compaction *compaction = new leveldb::Compaction(
-                            &version_files, &icmp_,
-                            &options_,
+                            &version_files, &icmp_, &options_,
                             task.compaction_request->source_level,
                             task.compaction_request->target_level);
                     compaction->grandparents_ = task.compaction_request->guides;
@@ -186,36 +185,6 @@ namespace nova {
                                       leveldb::CompactOutputType::kCompactOutputSSTables);
                     ct.compaction_state = state;
                     ct.compaction_request = task.compaction_request;
-//                    {
-//                        leveldb::ReadOptions options;
-//                        options.mem_manager = options_.mem_manager;
-//                        options.dc_client = client_;
-//                        options.thread_id = 0;
-//                        uint32_t scid = options.mem_manager->slabclassid(0,
-//                                                                         8192);
-//                        options.rdma_backing_mem = options.mem_manager->ItemAlloc(
-//                                0, scid);
-//                        options.rdma_backing_mem_size = 8192;
-//                        auto file = state->outputs[0];
-//                        auto s = file.smallest.user_key();
-//                        auto l = file.largest.user_key();
-//                        uint64_t start = 0;
-//                        uint64_t end = 0;
-//                        nova::str_to_int(s.data(), &start, s.size());
-//                        nova::str_to_int(l.data(), &end, l.size());
-//
-//                        RDMA_LOG(rdmaio::INFO)
-//                            << fmt::format("Is the file valid? {} ",
-//                                           file.DebugString());
-//                        for (int i = start; i <= end; i++) {
-//                            leveldb::LookupKey k(std::to_string(i),
-//                                                 leveldb::kMaxSequenceNumber);
-//                            table_cache.Get(options, &file, file.number,
-//                                            file.converted_file_size, 0,
-//                                            k.internal_key(),
-//                                            nullptr, nullptr);
-//                        }
-//                    }
                 } else {
                     RDMA_ASSERT(false);
                 }

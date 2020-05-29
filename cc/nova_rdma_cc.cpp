@@ -106,8 +106,8 @@ namespace nova {
                             task.rtable_handle,
                             task.offset,
                             task.size,
-                            task.result, task.write_size, task.filename);
-
+                            task.result, task.write_size, task.filename,
+                            task.is_foreground_reads);
                     break;
                 case leveldb::RDMA_ASYNC_REQ_QUERY_LOG_FILES:
                     ctx.req_id = cc_client_->InitiateQueryLogFile(
@@ -226,8 +226,8 @@ namespace nova {
                                             char *buf, uint32_t imm_data,
                                             bool *generate_a_new_request) {
         if (opcode == IBV_WC_SEND ||
-                opcode == IBV_WC_RDMA_WRITE ||
-                opcode == IBV_WC_RDMA_READ) {
+            opcode == IBV_WC_RDMA_WRITE ||
+            opcode == IBV_WC_RDMA_READ) {
             // a send request completes.
             admission_control_->RemoveRequests(remote_server_id, 1);
         }

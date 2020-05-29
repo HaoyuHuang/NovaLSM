@@ -800,7 +800,21 @@ namespace nova {
                     client,
                     mem_manager,
                     i, mem_env);
-            storage_workers.push_back(worker);
+            bg_storage_workers.push_back(worker);
+        }
+        for (int i = 0;
+             i < NovaConfig::config->num_storage_workers; i++) {
+            auto client = new leveldb::NovaBlockCCClient(i, rtable_manager);
+            client->ccs_ = async_workers;
+            NovaStorageWorker *worker = new NovaStorageWorker(
+                    rtable_manager,
+                    cc_servers,
+                    user_comparator,
+                    storage_options,
+                    client,
+                    mem_manager,
+                    i, mem_env);
+            fg_storage_workers.push_back(worker);
         }
 
         for (int i = 0;
@@ -820,7 +834,8 @@ namespace nova {
 
         // Assign workers to cc servers.
         for (int i = 0; i < cc_servers.size(); i++) {
-            cc_servers[i]->storage_workers_ = storage_workers;
+            cc_servers[i]->fg_storage_workers_ = fg_storage_workers;
+            cc_servers[i]->bg_storage_workers_ = bg_storage_workers;
             cc_servers[i]->compaction_storage_workers_ = compaction_storage_workers;
         }
 
@@ -866,7 +881,9 @@ namespace nova {
         for (int i = 0;
              i < NovaConfig::config->num_storage_workers; i++) {
             storage_worker_threads.emplace_back(
-                    &NovaStorageWorker::Start, storage_workers[i]);
+                    &NovaStorageWorker::Start, fg_storage_workers[i]);
+            storage_worker_threads.emplace_back(
+                    &NovaStorageWorker::Start, bg_storage_workers[i]);
         }
         for (int i = 0;
              i < NovaConfig::config->num_compaction_workers; i++) {
@@ -932,7 +949,9 @@ namespace nova {
         }
 
         stat_thread_ = new NovaStatThread;
-        stat_thread_->cc_server_workers_ = storage_workers;
+        stat_thread_->bg_storage_workers_ = bg_storage_workers;
+        stat_thread_->fg_storage_workers_ = fg_storage_workers;
+        stat_thread_->compaction_storage_workers_ = compaction_storage_workers;
         stat_thread_->bgs_ = bgs;
         stat_thread_->async_workers_ = async_workers;
         stat_thread_->async_compaction_workers_ = async_compaction_workers;

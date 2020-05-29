@@ -604,7 +604,7 @@ namespace leveldb {
             dc->set_dbid(dbid_);
             uint32_t req_id = dc->InitiateRTableReadDataBlock(
                     rtable_handle, offset, n, backing_mem_block,
-                    read_options.rdma_backing_mem_size, "");
+                    read_options.rdma_backing_mem_size, "", true);
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("t[{}]: CCRead req:{} start db:{} fn:{} s:{}",
                                read_options.thread_id,
@@ -670,7 +670,7 @@ namespace leveldb {
                                                       backing_mem_table_ +
                                                       offset,
                                                       meta_->file_size - offset,
-                                                      "");
+                                                      "", false);
             DataBlockRTableLocalBuf buf = {};
             buf.offset = handle.offset;
             buf.size = handle.size;

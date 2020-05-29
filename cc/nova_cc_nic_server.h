@@ -69,7 +69,8 @@ namespace nova {
         std::vector<NovaRDMAComputeComponent *> async_workers;
         std::vector<NovaRDMAComputeComponent *> async_compaction_workers;
 
-        std::vector<NovaStorageWorker *> storage_workers;
+        std::vector<NovaStorageWorker *> fg_storage_workers;
+        std::vector<NovaStorageWorker *> bg_storage_workers;
         std::vector<NovaStorageWorker *> compaction_storage_workers;
         std::vector<leveldb::EnvBGThread *> bgs;
         std::vector<leveldb::EnvBGThread *> reorg_bgs;

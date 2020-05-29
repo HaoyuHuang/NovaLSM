@@ -42,6 +42,7 @@ DEFINE_uint64(cc_iterations, 10000000, "");
 DEFINE_double(cc_sampling_ratio, 1, "");
 DEFINE_string(cc_zipfian_dist, "/tmp/zipfian", "");
 DEFINE_string(cc_client_access_pattern, "zipfian", "");
+DEFINE_string(test_filename, "035350.ldb", "");
 
 namespace {
     class YCSBKeyComparator : public leveldb::Comparator {
@@ -153,7 +154,8 @@ namespace {
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
-std::atomic_int_fast32_t nova::NovaCCServer::storage_worker_seq_id_;
+std::atomic_int_fast32_t nova::NovaCCServer::fg_storage_worker_seq_id_;
+std::atomic_int_fast32_t nova::NovaCCServer::bg_storage_worker_seq_id_;
 std::atomic_int_fast32_t nova::NovaCCServer::compaction_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
 std::atomic_int_fast32_t nova::NovaStorageWorker::storage_file_number_seq;
@@ -200,7 +202,7 @@ void TestSubRanges() {
     }
 
     auto stat_thread = new NovaStatThread;
-    stat_thread->cc_server_workers_ = {};
+    stat_thread->bg_storage_workers_ = {};
     stat_thread->bgs_ = bgs;
     stat_thread->async_workers_ = {};
     stat_thread->async_compaction_workers_ = {};
@@ -254,6 +256,22 @@ void TestSubRanges() {
     t.join();
     stats_thread.join();
 }
+
+leveldb::ReadWriteFile* f;
+char*backing_mem;
+
+void Read(uint32_t id) {
+    leveldb::RTableHandle h = {};
+    uint64_t size = 4096;
+    if (id == 0) {
+        size = 15l * 1024 * 1024;
+    }
+    leveldb::Slice result;
+    RDMA_LOG(rdmaio::INFO) << fmt::format("{}:read {} start", id, size);
+    f->Read(h, 0, size, &result, backing_mem);
+    RDMA_LOG(rdmaio::INFO) << fmt::format("{}:read {} end", id, size);
+}
+
 
 int main(int argc, char *argv[]) {
 
@@ -336,7 +354,7 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config->enable_table_locator = true;
     leveldb::EnvBGThread::bg_thread_id_seq = 0;
-    nova::NovaCCServer::storage_worker_seq_id_ = 0;
+    nova::NovaCCServer::bg_storage_worker_seq_id_ = 0;
     leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
     NovaConfig::config->use_multiple_disks = false;
     nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;
@@ -398,6 +416,24 @@ int main(int argc, char *argv[]) {
     leveldb::VersionEdit new_edit;
     RDMA_ASSERT(new_edit.DecodeFrom(leveldb::Slice(edit_memory, size)).ok());
     RDMA_LOG(rdmaio::INFO) << new_edit.DebugString();
-    TestSubRanges();
+//    TestSubRanges();
+
+
+    std::string fname = FLAGS_test_filename;
+    leveldb::Env* posix = new leveldb::PosixEnv;
+    leveldb::EnvFileMetadata meta;
+    meta.level = 0;
+    RDMA_LOG(rdmaio::INFO) << fname;
+    auto s = posix->NewReadWriteFile(fname, meta, &f);
+    RDMA_ASSERT(s.ok()) << s.ToString();
+
+    backing_mem = (char*) malloc(15 * 1024 * 1024);
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 64; i++) {
+        threads.push_back(std::thread(Read, i));
+    }
+    for (int i = 0; i < 64; i++) {
+        threads[i].join();
+    }
     return 0;
 }

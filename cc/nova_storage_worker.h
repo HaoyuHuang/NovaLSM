@@ -68,9 +68,9 @@ namespace nova {
 
         static std::atomic_int_fast32_t storage_file_number_seq;
 
-        std::atomic_int_fast32_t stat_tasks_;
-        std::atomic_int_fast64_t stat_read_bytes_;
-        std::atomic_int_fast64_t stat_write_bytes_;
+        uint32_t stat_tasks_ = 0;
+        uint64_t stat_read_bytes_ = 0;
+        uint64_t stat_write_bytes_ = 0;
     private:
         leveldb::NovaRTableManager *rtable_manager_;
         std::vector<NovaCCServer *> cc_servers_;

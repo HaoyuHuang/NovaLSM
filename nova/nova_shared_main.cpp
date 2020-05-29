@@ -104,15 +104,12 @@ DEFINE_uint32(cc_major_compaction_max_tables_in_a_set, 15, "");
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_thread_id_seq;
-std::atomic_int_fast32_t nova::NovaCCServer::storage_worker_seq_id_;
+std::atomic_int_fast32_t nova::NovaCCServer::fg_storage_worker_seq_id_;
+std::atomic_int_fast32_t nova::NovaCCServer::bg_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
 std::atomic_int_fast32_t nova::NovaStorageWorker::storage_file_number_seq;
 std::atomic_int_fast32_t nova::NovaCCServer::compaction_storage_worker_seq_id_;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
-
-void start(NovaCCNICServer *server) {
-    server->Start();
-}
 
 void StartServer() {
     RdmaCtrl *rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
@@ -288,7 +285,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->enable_subrange_reorg = FLAGS_cc_enable_subrange_reorg;
 
     leveldb::EnvBGThread::bg_thread_id_seq = 0;
-    nova::NovaCCServer::storage_worker_seq_id_ = 0;
+    nova::NovaCCServer::bg_storage_worker_seq_id_ = 0;
     leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
     nova::NovaStorageWorker::storage_file_number_seq = 0;
     nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;

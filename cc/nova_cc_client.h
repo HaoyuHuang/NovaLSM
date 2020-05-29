@@ -45,7 +45,8 @@ namespace leveldb {
                                     uint64_t offset, uint32_t size,
                                     char *result,
                                     uint32_t result_size,
-                                    std::string filename) override;
+                                    std::string filename,
+                                    bool is_foreground_reads) override;
 
         uint32_t
         InitiateFileNameRTableMapping(uint32_t stoc_id,
@@ -151,7 +152,8 @@ namespace leveldb {
                                     uint64_t offset, uint32_t size,
                                     char *result,
                                     uint32_t result_size,
-                                    std::string filename) override;
+                                    std::string filename,
+                                    bool is_foreground_reads) override;
 
         uint32_t
         InitiateReadInMemoryLogFile(char *local_buf, uint32_t remote_server_id,

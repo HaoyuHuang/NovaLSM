@@ -81,14 +81,14 @@ namespace leveldb {
     Status
     BuildTable(const std::string &dbname, Env *env, const Options &options,
                TableCache *table_cache, Iterator *iter, FileMetaData *meta,
-               EnvBGThread *bg_thread) {
+               EnvBGThread *bg_thread, bool prune_memtables) {
         Status s;
         meta->file_size = 0;
         iter->SeekToFirst();
         std::string fname = TableFileName(dbname, meta->number);
         if (iter->Valid()) {
+            const Comparator *user_comp = reinterpret_cast<const InternalKeyComparator *>(options.comparator)->user_comparator();
             MemManager *mem_manager = bg_thread->mem_manager();
-            uint64_t key = bg_thread->thread_id();
             std::string filename = TableFileName(dbname,
                                                  meta->number);
             NovaCCMemFile *cc_file = new NovaCCMemFile(env,
@@ -104,35 +104,30 @@ namespace leveldb {
             WritableFile *file = new MemWritableFile(cc_file);
             TableBuilder *builder = new TableBuilder(options, file);
 
-            ParsedInternalKey ik;
             Slice user_key;
             bool insert = true;
             meta->smallest.DecodeFrom(iter->key());
             for (; iter->Valid(); iter->Next()) {
                 insert = true;
                 Slice key = iter->key();
-                if (options.prune_memtable_before_flushing) {
-                    RDMA_ASSERT(ParseInternalKey(key, &ik));
-                    if (user_key.empty()) {
-                        user_key = ik.user_key;
-                    } else {
-                        if (options.comparator->Compare(ik.user_key,
-                                                        user_key) == 0) {
-                            insert = false;
-                        }
+                if (prune_memtables) {
+                    Slice ukey = ExtractUserKey(key);
+                    if (!user_key.empty() &&
+                        user_comp->Compare(ukey, user_key) == 0) {
+                        insert = false;
                     }
+                    user_key = ukey;
                 }
                 if (insert) {
                     meta->largest.DecodeFrom(key);
                     builder->Add(key, iter->value());
                 }
-
             }
-
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format(
                         "!!!!!!!!!!!!!!!!!!!!! CompactMemTable tid:{} alloc_size:{} nentries:{} nblocks:{}",
-                        key, options.max_dc_file_size, builder->NumEntries(),
+                        bg_thread->thread_id(), options.max_dc_file_size,
+                        builder->NumEntries(),
                         builder->NumDataBlocks());
 
             // Finish and check for builder errors

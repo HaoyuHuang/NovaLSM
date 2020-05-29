@@ -79,13 +79,11 @@ namespace leveldb {
                 storage_stats.push_back(status);
             }
 
-            for (int i = 0;
-                 i < storage_stats.size(); i++) {
+            for (int i = 0; i < storage_stats.size(); i++) {
                 client_->Wait();
             }
 
-            for (int i = 0;
-                 i < storage_stats.size(); i++) {
+            for (int i = 0; i < storage_stats.size(); i++) {
                 RDMA_ASSERT(client_->IsDone(storage_stats[i].req_id,
                                             &storage_stats[i].response,
                                             nullptr));

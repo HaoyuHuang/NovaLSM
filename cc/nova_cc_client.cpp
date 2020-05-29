@@ -300,7 +300,8 @@ namespace leveldb {
     uint32_t NovaBlockCCClient::InitiateRTableReadDataBlock(
             const leveldb::RTableHandle &rtable_handle, uint64_t offset,
             uint32_t size, char *result, uint32_t result_size,
-            std::string filename) {
+            std::string filename,
+            bool is_foreground_reads) {
         RDMA_ASSERT(size <= result_size);
         if (rtable_handle.server_id == nova::NovaConfig::config->my_server_id) {
             RTableHandle converted_handle = {};
@@ -337,6 +338,7 @@ namespace leveldb {
         task.write_size = result_size;
         task.filename = filename;
         task.sem = &sem_;
+        task.is_foreground_reads = is_foreground_reads;
         AddAsyncTask(task);
 
         uint32_t reqid = req_id_;
@@ -474,7 +476,7 @@ namespace leveldb {
     uint32_t NovaCCClient::InitiateRTableReadDataBlock(
             const leveldb::RTableHandle &rtable_handle, uint64_t offset,
             uint32_t size, char *result, uint32_t result_size,
-            std::string filename) {
+            std::string filename, bool is_foreground_reads) {
         RDMA_ASSERT(rtable_handle.server_id !=
                     nova::NovaConfig::config->my_server_id);
         RDMA_ASSERT(size <= result_size);
@@ -489,14 +491,11 @@ namespace leveldb {
         char *send_buf = rdma_store_->GetSendBuf(rtable_handle.server_id);
         uint32_t msg_size = 1;
         send_buf[0] = CCRequestType::CC_RTABLE_READ_BLOCKS;
-        EncodeFixed32(send_buf + msg_size, rtable_handle.rtable_id);
-        msg_size += 4;
-        EncodeFixed64(send_buf + msg_size, offset);
-        msg_size += 8;
-        EncodeFixed32(send_buf + msg_size, size);
-        msg_size += 4;
-        EncodeFixed64(send_buf + msg_size, (uint64_t) result);
-        msg_size += 8;
+        msg_size += EncodeBool(send_buf + msg_size, is_foreground_reads);
+        msg_size += EncodeFixed32(send_buf + msg_size, rtable_handle.rtable_id);
+        msg_size += EncodeFixed64(send_buf + msg_size, offset);
+        msg_size += EncodeFixed32(send_buf + msg_size, size);
+        msg_size += EncodeFixed64(send_buf + msg_size, (uint64_t) result);
         msg_size += EncodeStr(send_buf + msg_size, filename);
         rdma_store_->PostSend(send_buf, msg_size, rtable_handle.server_id,
                               req_id);

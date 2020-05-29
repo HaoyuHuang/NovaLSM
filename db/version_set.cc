@@ -353,13 +353,12 @@ namespace leveldb {
                 continue;
             }
             *num_searched_files += 1;
-            std::string tmp_val;
             SequenceNumber tmp_seq;
             Saver saver;
             saver.state = kNotFound;
             saver.ucmp = icmp_->user_comparator();
             saver.user_key = key.user_key();
-            saver.value = &tmp_val;
+            saver.value = val;
             saver.seq = &tmp_seq;
             Status s = table_cache_->Get(options,
                                          file,
@@ -374,7 +373,7 @@ namespace leveldb {
                 if (tmp_seq > *seq) {
                     // A newer value.
                     *seq = tmp_seq;
-                    val->assign(tmp_val);
+//                    val->assign(tmp_val);
                 }
             }
         }

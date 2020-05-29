@@ -100,17 +100,21 @@ namespace nova {
 
         int ProcessCompletionQueue() override;
 
-        std::vector<NovaStorageWorker *> storage_workers_;
+        std::vector<NovaStorageWorker *> fg_storage_workers_;
+        std::vector<NovaStorageWorker *> bg_storage_workers_;
         std::vector<NovaStorageWorker *> compaction_storage_workers_;
 
-        static std::atomic_int_fast32_t storage_worker_seq_id_;
+        static std::atomic_int_fast32_t fg_storage_worker_seq_id_;
+        static std::atomic_int_fast32_t bg_storage_worker_seq_id_;
         static std::atomic_int_fast32_t compaction_storage_worker_seq_id_;
 
     private:
         bool is_running_ = true;
         bool is_compaction_thread_ = false;
 
-        void AddStorageTask(const NovaStorageTask &task);
+        void AddBGStorageTask(const NovaStorageTask &task);
+
+        void AddFGStorageTask(const NovaStorageTask &task);
 
         void AddCompactionStorageTask(const NovaStorageTask &task);
 
@@ -126,7 +130,6 @@ namespace nova {
         std::list<NovaServerCompleteTask> public_cq_;
 
         uint32_t current_worker_id_ = 0;
-
         std::unordered_map<uint64_t, RequestContext> request_context_map_;
     };
 }
