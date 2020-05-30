@@ -259,7 +259,6 @@ namespace leveldb {
                                      std::vector<std::string> *files_to_delete,
                                      std::unordered_map<uint32_t, std::vector<SSTableRTablePair>> *server_pairs) {
         mutex_.AssertHeld();
-
         if (!bg_error_.ok()) {
             // After a background error, we don't know whether a new version may
             // or may not have been committed, so we cannot safely garbage collect.
@@ -279,7 +278,6 @@ namespace leveldb {
                 continue;
             }
             table_cache_->Evict(meta.number, false);
-
             // Delete data files.
             auto handles = meta.data_block_group_handles;
             for (int i = 0; i < handles.size(); i++) {
@@ -1260,6 +1258,7 @@ namespace leveldb {
             std::vector<std::string> files_to_delete;
             std::unordered_map<uint32_t, std::vector<SSTableRTablePair>> server_pairs;
             ComputeCompactions(current, &compactions, &edit);
+            versions_->versions_[current->version_id()]->Unref(dbname_);
             if (!compactions.empty()) {
                 if (subrange_manager_) {
                     subs = subrange_manager_->latest_subranges_;
@@ -1414,7 +1413,6 @@ namespace leveldb {
                 req->FreeMemoryLTC();
                 delete req;
             }
-            versions_->versions_[current->version_id()]->Unref(dbname_);
             DeleteFiles(compaction_coordinator_thread_, files_to_delete,
                         server_pairs);
         }

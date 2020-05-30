@@ -1333,13 +1333,18 @@ namespace leveldb {
         const int space = (level_ == 0 ? inputs_[0].size() + 1 : 2);
         Iterator **list = new Iterator *[space];
         int num = 0;
+        AccessCaller caller = AccessCaller::kCompaction;
+        if (nova::NovaConfig::config->use_local_disk) {
+            caller = AccessCaller::kUserIterator;
+        }
+
         for (int which = 0; which < 2; which++) {
             if (!inputs_[which].empty()) {
                 if (level_ + which == 0) {
                     const std::vector<FileMetaData *> &files = inputs_[which];
                     for (size_t i = 0; i < files.size(); i++) {
                         list[num++] = table_cache->NewIterator(
-                                AccessCaller::kCompaction, options,
+                                caller, options,
                                 files[i],
                                 files[i]->number,
                                 level_ + which,
@@ -1348,7 +1353,7 @@ namespace leveldb {
                 } else {
                     // Create concatenating iterator for the files from this level
                     BlockReadContext context = {
-                            .caller = AccessCaller::kCompaction,
+                            .caller = caller,
                             .file_number = 0,
                             .level = level_ + which,
                     };

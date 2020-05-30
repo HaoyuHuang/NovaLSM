@@ -359,10 +359,6 @@ namespace leveldb {
                 delete_rtable = true;
             }
         }
-
-        RDMA_LOG(rdmaio::DEBUG) << fmt::format(
-                    "Delete SSTable {} from RTable {}. Delete RTable: {}",
-                    sstable_id, rtable_name_, delete_rtable);
         if (delete_rtable) {
             RDMA_ASSERT(current_disk_offset_ == file_size_);
         }
@@ -372,8 +368,11 @@ namespace leveldb {
             return false;
         }
 
-        RDMA_ASSERT(file_);
+        RDMA_LOG(rdmaio::DEBUG) << fmt::format(
+                    "Delete SSTable {} from RTable {}.",
+                    sstable_id, rtable_name_);
 
+        RDMA_ASSERT(file_);
         Status s = file_->Close();
         RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
         delete file_;

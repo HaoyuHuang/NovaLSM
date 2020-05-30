@@ -554,15 +554,11 @@ namespace leveldb {
         if (prefetch_all) {
             RDMA_LOG(rdmaio::DEBUG) << fmt::format("create file {}", filename);
         }
-
-//        prefetch_all_ = false;
         RDMA_ASSERT(mem_manager_);
-
         uint32_t server_id = 0;
         nova::ParseDBIndexFromDBName(dbname, &server_id, &dbid_);
         Status s = env_->NewRandomAccessFile(TableFileName(dbname, file_number),
                                              &local_ra_file_);
-
         auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(dc_client);
         RDMA_ASSERT(dc);
         dc->set_dbid(dbid_);
@@ -599,12 +595,15 @@ namespace leveldb {
         } else {
             RDMA_ASSERT(n < MAX_BLOCK_SIZE);
             char *backing_mem_block = read_options.rdma_backing_mem;
+            if (rtable_handle.server_id ==
+                nova::NovaConfig::config->my_server_id) {
+                backing_mem_block = scratch;
+            }
             RDMA_ASSERT(backing_mem_block);
             auto dc = reinterpret_cast<leveldb::NovaBlockCCClient *>(read_options.dc_client);
             dc->set_dbid(dbid_);
             uint32_t req_id = dc->InitiateRTableReadDataBlock(
-                    rtable_handle, offset, n, backing_mem_block,
-                    read_options.rdma_backing_mem_size, "", true);
+                    rtable_handle, offset, n, backing_mem_block, n, "", true);
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("t[{}]: CCRead req:{} start db:{} fn:{} s:{}",
                                read_options.thread_id,
@@ -620,7 +619,10 @@ namespace leveldb {
                 << fmt::format("t[{}]: {}", read_options.thread_id, req_id);
 
             ptr = backing_mem_block;
-            memcpy(scratch, ptr, n);
+            if (rtable_handle.server_id !=
+                nova::NovaConfig::config->my_server_id) {
+                memcpy(scratch, ptr, n);
+            }
             *result = Slice(scratch, n);
         }
         return Status::OK();
