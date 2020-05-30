@@ -320,7 +320,7 @@ namespace leveldb {
             index_handle.offset =
                     (handle.offset() - relative_offset) +
                     current_rtable_handle.offset;
-            RDMA_ASSERT(index_handle.offset == handle.offset());
+//            RDMA_ASSERT(index_handle.offset == handle.offset());
             // Does not include crc.
             index_handle.size = handle.size();
             index_handle.EncodeHandle(handle_buf);
