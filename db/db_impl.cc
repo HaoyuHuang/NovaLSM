@@ -363,24 +363,25 @@ namespace leveldb {
     Status DBImpl::Recover() {
         timeval start = {};
         gettimeofday(&start, nullptr);
-
         uint32_t stoc_id = options_.manifest_stoc_id;
         std::string manifest = DescriptorFileName(dbname_, 0);
         auto client = reinterpret_cast<NovaBlockCCClient *> (options_.dc_client);
         uint32_t scid = options_.mem_manager->slabclassid(0,
-                                                          options_.max_file_size);
+                                                          nova::NovaConfig::config->rtable_size);
         char *buf = options_.mem_manager->ItemAlloc(0, scid);
         RTableHandle handle = {};
         handle.server_id = stoc_id;
         handle.rtable_id = 0;
         handle.offset = 0;
-        handle.size = options_.max_file_size;
+        handle.size = nova::NovaConfig::config->rtable_size;
 
         RDMA_LOG(rdmaio::INFO) << fmt::format(
                     "Recover the latest verion from manifest file {} at StoC-{}",
                     manifest, stoc_id);
-        client->InitiateRTableReadDataBlock(handle, 0, options_.max_file_size,
-                                            buf, options_.max_file_size,
+        client->InitiateRTableReadDataBlock(handle, 0,
+                                            nova::NovaConfig::config->rtable_size,
+                                            buf,
+                                            nova::NovaConfig::config->rtable_size,
                                             manifest, false);
         client->Wait();
         std::unordered_map<std::string, uint64_t> logfile_buf;
@@ -2555,7 +2556,7 @@ namespace leveldb {
                                                      options.mem_manager,
                                                      options.dc_client,
                                                      impl->dbname_, 0,
-                                                     options.max_file_size,
+                                                     nova::NovaConfig::config->rtable_size,
                                                      &impl->rand_seed_,
                                                      manifest_file_name);
         }

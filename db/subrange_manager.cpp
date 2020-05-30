@@ -20,7 +20,27 @@ namespace leveldb {
               user_comparator_(user_comparator),
               partitioned_active_memtables_(partitioned_active_memtables),
               partitioned_imms_(partitioned_imms) {
-        latest_subranges_.store(new SubRanges);
+        for (int i = 0; i < nova::NovaConfig::config->fragments.size(); i++) {
+            auto &frag = nova::NovaConfig::config->fragments[i];
+            if (frag->cc_server_id == nova::NovaConfig::config->my_server_id) {
+                if (lower_bound_ == 0) {
+                    lower_bound_ = frag->range.key_start;
+                }
+                upper_bound_ = frag->range.key_end;
+            }
+        }
+        auto sr = new SubRanges;
+        {
+            SubRange nsr;
+            Range r;
+            r.lower = std::to_string(lower_bound_);
+            r.upper = std::to_string(upper_bound_);
+            nsr.tiny_ranges.push_back(r);
+            sr->subranges.push_back(nsr);
+        }
+        latest_subranges_.store(sr);
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("keys:{},{}", lower_bound_, upper_bound_);
     }
 
     int SubRangeManager::SearchSubranges(const leveldb::WriteOptions &options,
@@ -349,7 +369,7 @@ namespace leveldb {
         // First, construct subranges with each subrange containing one tiny
         // range.
         std::vector<Range> tmp_subranges;
-        ConstructRanges(userkey_rate, total_rate, 0, 10000000,
+        ConstructRanges(userkey_rate, total_rate, lower_bound_, upper_bound_,
                         options_.num_memtable_partitions, true, &tmp_subranges);
         // Second, break each subrange that contains more than one value into
         // alpha tiny ranges.
@@ -1195,7 +1215,8 @@ namespace leveldb {
             double diff = (load - fair) * 100.0;
             stdev += std::pow(diff, 2);
         }
-        RDMA_ASSERT(std::abs(sum - 1.0) <= 0.01) << sum;
+//        RDMA_ASSERT(std::abs(sum - 1.0) <= 0.01) << fmt::format("{} {}", sum,
+//                                                                latest_subranges_.load()->DebugString());
         db_stats->load_imbalance.maximum_load_imbalance =
                 (highest_load - fair) * 100.0 / fair;
         db_stats->load_imbalance.stdev =
@@ -1211,9 +1232,8 @@ namespace leveldb {
         db_stats->num_skipped_minor_reorgs = num_skipped_minor_reorgs;
         db_stats->num_minor_reorgs_for_dup = num_minor_reorgs_for_dup;
         db_stats->num_minor_reorgs_samples = num_minor_reorgs_samples;
-
         std::vector<double> loads;
-        uint64_t totalkeys = 10000000.0;
+        uint64_t totalkeys = upper_bound_ - lower_bound_;
         if (nova::NovaConfig::config->client_access_pattern == "uniform") {
             for (int i = 0; i < ref->subranges.size(); i++) {
                 SubRange &sr = ref->subranges[i];

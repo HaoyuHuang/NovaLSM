@@ -101,7 +101,7 @@ namespace leveldb {
             << fmt::format("{} {}", given_rtable_id_for_assertion, rtable_id_);
         bool found = false;
         mutex_.lock();
-        uint64_t relative_off = offset - (uint64_t)(backing_mem_);
+        uint64_t relative_off = offset - (uint64_t) (backing_mem_);
         for (auto it = allocated_bufs_.rbegin();
              it != allocated_bufs_.rend(); it++) {
             if (it->offset == relative_off) {
@@ -156,7 +156,7 @@ namespace leveldb {
         allocated_bufs_.push_back(allocated_buf);
         file_size_ += size;
         mutex_.unlock();
-        return (uint64_t)(backing_mem_) + off;
+        return (uint64_t) (backing_mem_) + off;
     }
 
     uint64_t NovaRTable::Persist(uint32_t given_rtable_id_for_assertion) {
@@ -551,7 +551,7 @@ namespace leveldb {
 //    }
 
     void NovaRTableManager::OpenRTables(
-            std::unordered_map<std::string, uint32_t> &fn_rtables) {
+            const std::unordered_map<std::string, uint32_t> &fn_rtables) {
         mutex_.lock();
         for (auto &it : fn_rtables) {
             auto &fn = it.first;

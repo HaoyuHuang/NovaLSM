@@ -247,14 +247,17 @@ namespace leveldb {
 
     uint32_t NovaBlockCCClient::InitiateFileNameRTableMapping(uint32_t stoc_id,
                                                               const std::unordered_map<std::string, uint32_t> &fn_rtableid) {
+        if (stoc_id == nova::NovaConfig::config->my_server_id) {
+            rtable_manager_->OpenRTables(fn_rtableid);
+            sem_post(&sem_);
+            return 0;
+        }
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_FILENAME_RTABLE_MAPPING;
         task.server_id = stoc_id;
         task.fn_rtableid = fn_rtableid;
-
         task.sem = &sem_;
         AddAsyncTask(task);
-
         uint32_t reqid = req_id_;
         req_id_++;
         return reqid;
@@ -286,7 +289,6 @@ namespace leveldb {
         return req_id;
     }
 
-
     void NovaBlockCCClient::AddAsyncTask(
             const leveldb::RDMAAsyncClientRequestTask &task) {
         if (task.type == RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD) {
@@ -307,7 +309,9 @@ namespace leveldb {
             uint32_t size, char *result, uint32_t result_size,
             std::string filename,
             bool is_foreground_reads) {
-        RDMA_ASSERT(size <= result_size);
+        RDMA_ASSERT(size <= result_size)
+            << fmt::format("{} {} {} {}", rtable_handle.DebugString(), filename,
+                           size, result_size);
         if (rtable_handle.server_id == nova::NovaConfig::config->my_server_id) {
             RTableHandle converted_handle = {};
             uint32_t rtable_id = rtable_handle.rtable_id;
@@ -324,7 +328,7 @@ namespace leveldb {
                                            converted_handle.offset,
                                            converted_handle.size,
                                            result, &output);
-            RDMA_ASSERT(output.size() == converted_handle.size);
+//            RDMA_ASSERT(output.size() == converted_handle.size);
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("Wake up local read");
             sem_post(&sem_);

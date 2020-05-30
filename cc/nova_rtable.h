@@ -120,7 +120,7 @@ namespace leveldb {
 
         NovaRTable *OpenRTable(uint32_t thread_id, std::string &filename);
 
-        void OpenRTables(std::unordered_map<std::string, uint32_t> &fn_rtables);
+        void OpenRTables(const std::unordered_map<std::string, uint32_t> &fn_rtables);
 
         void DeleteSSTable(const std::string &sstable_id);
 

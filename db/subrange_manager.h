@@ -59,6 +59,9 @@ namespace leveldb {
         VersionEdit edit_;
 
     private:
+        uint64_t lower_bound_ = 0;
+        uint64_t upper_bound_ = 0;
+
         void ComputeLoadImbalance(const std::vector<double> &loads,
                                   leveldb::DBStats *db_stats);
 
