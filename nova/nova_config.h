@@ -188,7 +188,7 @@ namespace nova {
         uint32_t num_memtables;
         uint32_t num_memtable_partitions;
         uint64_t write_buffer_size_mb;
-        uint64_t l0_stop_write_gb;
+        uint64_t l0_stop_write_mb;
         uint64_t l0_start_compaction_mb;
         std::vector<CCFragment *> fragments;
         std::vector<CCFragment *> db_fragment;

@@ -341,7 +341,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->num_rdma_compaction_workers = 1;
     NovaConfig::config->num_memtables = FLAGS_cc_num_memtables;
     NovaConfig::config->num_memtable_partitions = FLAGS_cc_num_memtable_partitions;
-    NovaConfig::config->l0_stop_write_gb = 0;
+    NovaConfig::config->l0_stop_write_mb = 0;
     NovaConfig::config->enable_subrange = true;
     NovaConfig::config->memtable_type = "static_partition";
 

@@ -79,7 +79,7 @@ namespace nova {
             options.l0bytes_start_compaction_trigger =
                     NovaConfig::config->l0_start_compaction_mb * 1024 * 1024;
             options.l0bytes_stop_writes_trigger =
-                    NovaConfig::config->l0_stop_write_gb * 1024 * 1024 * 1024;
+                    NovaConfig::config->l0_stop_write_mb * 1024 * 1024;
             options.max_open_files = 50000;
             options.enable_table_locator = NovaConfig::config->enable_table_locator;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;

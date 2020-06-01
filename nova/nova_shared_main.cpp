@@ -73,7 +73,7 @@ DEFINE_uint32(cc_num_memtable_partitions, 0, "");
 DEFINE_bool(cc_enable_table_locator, false, "");
 
 DEFINE_uint32(cc_l0_start_compaction_mb, 0, "");
-DEFINE_uint32(cc_l0_stop_write_gb, 0, "");
+DEFINE_uint32(cc_l0_stop_write_mb, 0, "");
 
 DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint64(cc_sstable_size_mb, 0, "sstable size in mb");
@@ -272,7 +272,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->client_access_pattern = FLAGS_cc_client_access_pattern;
     NovaConfig::config->enable_detailed_db_stats = FLAGS_cc_enable_detailed_db_stats;
     NovaConfig::config->subrange_num_keys_no_flush = FLAGS_cc_subrange_no_flush_num_keys;
-    NovaConfig::config->l0_stop_write_gb = FLAGS_cc_l0_stop_write_gb;
+    NovaConfig::config->l0_stop_write_mb = FLAGS_cc_l0_stop_write_mb;
     NovaConfig::config->l0_start_compaction_mb = FLAGS_cc_l0_start_compaction_mb;
     NovaConfig::config->enable_subrange_reorg = FLAGS_cc_enable_subrange_reorg;
 
