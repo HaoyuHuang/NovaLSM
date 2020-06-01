@@ -285,7 +285,6 @@ namespace leveldb {
             output->converted_file_size = mem_file->Finalize();
             output->meta_block_handle = mem_file->meta_block_handle();
             output->data_block_group_handles = mem_file->rhs();
-
             delete mem_file;
             mem_file = nullptr;
             delete compact->outfile;
@@ -320,7 +319,7 @@ namespace leveldb {
                     stats->input_target.level);
         }
         Log(options_.info_log, "%s", output.c_str());
-//        RDMA_LOG(rdmaio::DEBUG) << output;
+        RDMA_LOG(rdmaio::INFO) << output;
 
         assert(compact->builder == nullptr);
         assert(compact->outfile == nullptr);

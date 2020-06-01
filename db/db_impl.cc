@@ -400,8 +400,9 @@ namespace leveldb {
         }
         // Recover log records.
         std::vector<SubRange> subrange_edits;
-        RDMA_ASSERT(versions_->Recover(Slice(buf, options_.max_file_size),
-                                       &subrange_edits).ok());
+        RDMA_ASSERT(versions_->Recover(
+                Slice(buf, nova::NovaConfig::config->rtable_size),
+                &subrange_edits).ok());
         RDMA_LOG(rdmaio::INFO)
             << fmt::format("Recovered Version: {}",
                            versions_->current()->DebugString());
@@ -422,21 +423,21 @@ namespace leveldb {
                                                      false);
                 auto meta_handle = meta->meta_block_handle;
                 stoc_fn_rtableid[meta_handle.server_id][metafilename] = meta_handle.rtable_id;
-
                 for (auto &data_block : meta->data_block_group_handles) {
                     stoc_fn_rtableid[data_block.server_id][filename] = data_block.rtable_id;
                 }
             }
         }
 
-        for (auto &mapping : stoc_fn_rtableid) {
-            uint32_t stoc_id = mapping.first;
-            std::unordered_map<std::string, uint32_t> &fnrtable = mapping.second;
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("Recover Start Install FileRTable mapping size:{}",
+                           stoc_fn_rtableid.size());
+        for (const auto &mapping : stoc_fn_rtableid) {
             RDMA_LOG(rdmaio::INFO)
                 << fmt::format("Recover Install FileRTable mapping {} size:{}",
-                               stoc_id,
-                               fnrtable.size());
-            client->InitiateFileNameRTableMapping(stoc_id, fnrtable);
+                               mapping.first, mapping.second.size());
+            client->InitiateFileNameRTableMapping(mapping.first,
+                                                  mapping.second);
             client->Wait();
         }
 
@@ -447,6 +448,9 @@ namespace leveldb {
                 meta_files.push_back(files[level][i]);
             }
         }
+        RDMA_LOG(rdmaio::INFO)
+            << fmt::format("Recover Start Fetching meta blocks size:{}",
+                           meta_files.size());
         FetchMetadataFilesInParallel(meta_files, dbname_, options_, client,
                                      env_);
         // Rebuild table locator.

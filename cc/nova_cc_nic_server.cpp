@@ -273,7 +273,7 @@ namespace nova {
             RDMA_LOG(INFO) << fmt::format("t[{}] Insert range {} to {}", tid_,
                                           frags[i]->range.key_start,
                                           frags[i]->range.key_end);
-            for (uint64_t j = frags[i]->range.key_end;
+            for (uint64_t j = frags[i]->range.key_end - 1;
                  j >= frags[i]->range.key_start; j--) {
                 auto v = static_cast<char>((j % 10) + 'a');
 
@@ -363,7 +363,7 @@ namespace nova {
                                           frags[i]->range.key_start,
                                           frags[i]->range.key_end);
 
-            for (uint64_t j = frags[i]->range.key_end;
+            for (uint64_t j = frags[i]->range.key_end - 1;
                  j >= frags[i]->range.key_start; j--) {
                 auto v = static_cast<char>((j % 10) + 'a');
                 std::string key = std::to_string(j);

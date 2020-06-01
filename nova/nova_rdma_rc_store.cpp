@@ -269,7 +269,8 @@ namespace nova {
                 (*new_requests)++;
             }
             // Send is complete.
-            buf[0] = '~';
+            buf[0] = 0;
+            buf[1] = 0;
             npending_send_[qp_idx] -= 1;
         }
         return n;
@@ -279,7 +280,8 @@ namespace nova {
         uint32_t qp_idx = to_qp_idx(server_id);
         char *local_buf =
                 rdma_recv_buf_[qp_idx] + max_msg_size_ * recv_buf_index;
-        local_buf[0] = '~';
+        local_buf[0] = 0;
+        local_buf[1] = 0;
         auto ret = qp_[qp_idx]->post_recv(local_buf, max_msg_size_,
                                           recv_buf_index);
         RDMA_ASSERT(ret == SUCC) << ret;

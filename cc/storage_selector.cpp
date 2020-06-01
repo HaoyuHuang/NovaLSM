@@ -66,7 +66,6 @@ namespace leveldb {
                                    nova::NovaConfig::config->dc_servers.size();
             }
         }
-
         if (!candidate_storage_ids.empty()) {
             std::vector<DCStatsStatus> storage_stats;
             for (int i = 0;
@@ -78,11 +77,9 @@ namespace leveldb {
                 status.req_id = req_id;
                 storage_stats.push_back(status);
             }
-
             for (int i = 0; i < storage_stats.size(); i++) {
                 client_->Wait();
             }
-
             for (int i = 0; i < storage_stats.size(); i++) {
                 RDMA_ASSERT(client_->IsDone(storage_stats[i].req_id,
                                             &storage_stats[i].response,

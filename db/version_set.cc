@@ -1334,10 +1334,9 @@ namespace leveldb {
         Iterator **list = new Iterator *[space];
         int num = 0;
         AccessCaller caller = AccessCaller::kCompaction;
-        if (nova::NovaConfig::config->use_local_disk) {
-            caller = AccessCaller::kUserIterator;
-        }
-
+//        if (nova::NovaConfig::config->use_local_disk) {
+//            caller = AccessCaller::kUserIterator;
+//        }
         for (int which = 0; which < 2; which++) {
             if (!inputs_[which].empty()) {
                 if (level_ + which == 0) {

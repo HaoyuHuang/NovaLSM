@@ -115,11 +115,11 @@ namespace nova {
                 home = config->fragments[m];
                 // Check if x is present at mid
                 if (key >= home->range.key_start &&
-                    key <= home->range.key_end) {
+                    key < home->range.key_end) {
                     break;
                 }
                 // If x greater, ignore left half
-                if (home->range.key_end < key)
+                if (key >= home->range.key_end)
                     l = m + 1;
                     // If x is smaller, ignore right half
                 else
