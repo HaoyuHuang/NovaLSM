@@ -33,27 +33,26 @@ namespace leveldb {
                                           std::vector<uint32_t> *selected_storage) {
         selected_storage->clear();
         selected_storage->resize(num_storage_to_select);
+        if (num_storage_to_select ==
+            nova::NovaConfig::config->dc_servers.size()) {
+            for (int i = 0; i < num_storage_to_select; i++) {
+                (*selected_storage)[i] = nova::NovaConfig::config->dc_servers[i].server_id;
+            }
+            return;
+        }
+
         std::vector<uint32_t> candidate_storage_ids;
         if (scatter_policy == nova::ScatterPolicy::POWER_OF_TWO) {
             uint32_t start_storage_id = rand_r(rand_seed_) %
                                         nova::NovaConfig::config->dc_servers.size();
-            for (int i = 0; i < 2; i++) {
+            uint32_t candidates = 2 * num_storage_to_select;
+            if (candidates > nova::NovaConfig::config->dc_servers.size()) {
+                candidates = nova::NovaConfig::config->dc_servers.size();
+            }
+            for (int i = 0; i < candidates; i++) {
                 candidate_storage_ids.push_back(start_storage_id);
                 start_storage_id = (start_storage_id + 1) %
                                    nova::NovaConfig::config->dc_servers.size();
-            }
-        } else if (scatter_policy == nova::ScatterPolicy::POWER_OF_THREE) {
-            uint32_t start_storage_id = rand_r(rand_seed_) %
-                                        nova::NovaConfig::config->dc_servers.size();
-            for (int i = 0; i < 3; i++) {
-                candidate_storage_ids.push_back(start_storage_id);
-                start_storage_id = (start_storage_id + 1) %
-                                   nova::NovaConfig::config->dc_servers.size();
-            }
-        } else if (scatter_policy == nova::ScatterPolicy::SCATTER_DC_STATS) {
-            for (int i = 0;
-                 i < nova::NovaConfig::config->dc_servers.size(); i++) {
-                candidate_storage_ids.push_back(i);
             }
         } else {
             // Random.

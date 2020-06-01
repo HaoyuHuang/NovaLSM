@@ -76,6 +76,7 @@ namespace {
     }
 }
 
+nova::DCStats nova::DCStats::dc_stats;
 
 int main(int argc, char *argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);

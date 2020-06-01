@@ -111,6 +111,7 @@ std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
 std::atomic_int_fast32_t nova::NovaStorageWorker::storage_file_number_seq;
 std::atomic_int_fast32_t nova::NovaCCServer::compaction_storage_worker_seq_id_;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
+DCStats DCStats::dc_stats;
 
 void StartServer() {
     RdmaCtrl *rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
@@ -282,6 +283,7 @@ int main(int argc, char *argv[]) {
     leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
     nova::NovaStorageWorker::storage_file_number_seq = 0;
     nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;
+    nova::DCStats::dc_stats.Initialize();
     StartServer();
     return 0;
 }

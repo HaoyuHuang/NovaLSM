@@ -61,7 +61,7 @@ namespace nova {
 
         void Add(uint64_t thread_id, const std::string &log_file, char *buf);
 
-        void DeleteLogBuf(const std::string &log_file);
+        void DeleteLogBuf(const std::vector<std::string> &log_files);
 
         void QueryLogFiles(uint32_t sid, uint32_t range_id,
                            std::unordered_map<std::string, uint64_t> *logfile_offset);

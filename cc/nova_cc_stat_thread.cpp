@@ -348,6 +348,16 @@ namespace nova {
             output += ",";
             output += std::to_string(aggregated_stats.num_l0_sstables);
             output += ",";
+            output += std::to_string(
+                    nova::DCStats::dc_stats.generated_memtable_sizes);
+            output += ",";
+            output += std::to_string(
+                    nova::DCStats::dc_stats.written_memtable_sizes);
+            output += ",";
+            output += std::to_string(nova::DCStats::dc_stats.total_disk_reads);
+            output += ",";
+            output += std::to_string(nova::DCStats::dc_stats.total_disk_writes);
+            output += ",";
             for (int j = 0; j < BUCKET_SIZE; j++) {
                 output += std::to_string(aggregated_stats.sstable_size_dist[j]);
                 output += ",";

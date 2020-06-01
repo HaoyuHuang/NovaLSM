@@ -161,6 +161,7 @@ std::atomic_int_fast32_t nova::NovaCCServer::compaction_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
 std::atomic_int_fast32_t nova::NovaStorageWorker::storage_file_number_seq;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
+DCStats DCStats::dc_stats;
 
 void start(NovaCCNICServer *server) {
     server->Start();

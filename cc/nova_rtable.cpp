@@ -87,11 +87,12 @@ namespace leveldb {
     Status NovaRTable::Read(uint64_t offset, uint32_t size, char *scratch,
                             Slice *result) {
         RTableHandle h = {};
-        nova::dc_stats.dc_queue_depth += 1;
-        nova::dc_stats.dc_pending_disk_reads += size;
+        nova::DCStats::dc_stats.dc_queue_depth += 1;
+        nova::DCStats::dc_stats.dc_pending_disk_reads += size;
+        nova::DCStats::dc_stats.total_disk_reads += size;
         Status status = file_->Read(h, offset, size, result, scratch);
-        nova::dc_stats.dc_queue_depth -= 1;
-        nova::dc_stats.dc_pending_disk_reads -= size;
+        nova::DCStats::dc_stats.dc_queue_depth -= 1;
+        nova::DCStats::dc_stats.dc_pending_disk_reads -= size;
         return status;
     }
 
@@ -252,8 +253,9 @@ namespace leveldb {
             }
 
             // persist offset -> size.
-            nova::dc_stats.dc_queue_depth += 1;
-            nova::dc_stats.dc_pending_disk_writes += size;
+            nova::DCStats::dc_stats.dc_queue_depth += 1;
+            nova::DCStats::dc_stats.dc_pending_disk_writes += size;
+            nova::DCStats::dc_stats.total_disk_writes += size;
             persisted_bytes += size;
 
             Status s = file_->Append(Slice(backing_mem_ + offset, size));
@@ -261,8 +263,8 @@ namespace leveldb {
             s = file_->Sync();
             RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
 
-            nova::dc_stats.dc_queue_depth -= 1;
-            nova::dc_stats.dc_pending_disk_writes -= size;
+            nova::DCStats::dc_stats.dc_queue_depth -= 1;
+            nova::DCStats::dc_stats.dc_pending_disk_writes -= size;
 
             mutex_.lock();
             for (int j = persisted_i; j < i; j++) {
@@ -288,8 +290,9 @@ namespace leveldb {
             i += 1;
         }
         // Persist the last range.
-        nova::dc_stats.dc_queue_depth += 1;
-        nova::dc_stats.dc_pending_disk_writes += size;
+        nova::DCStats::dc_stats.dc_queue_depth += 1;
+        nova::DCStats::dc_stats.dc_pending_disk_writes += size;
+        nova::DCStats::dc_stats.total_disk_writes += size;
         persisted_bytes += size;
 
         Status s = file_->Append(Slice(backing_mem_ + offset, size));
@@ -297,8 +300,8 @@ namespace leveldb {
         s = file_->Sync();
         RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
 
-        nova::dc_stats.dc_queue_depth -= 1;
-        nova::dc_stats.dc_pending_disk_writes -= size;
+        nova::DCStats::dc_stats.dc_queue_depth -= 1;
+        nova::DCStats::dc_stats.dc_pending_disk_writes -= size;
 
         mutex_.lock();
         for (int j = persisted_i; j < writes.size(); j++) {
@@ -563,7 +566,7 @@ namespace leveldb {
                                                 mem_manager_,
                                                 0, rtable_size_);
             rtable->ForceSeal();
-            RDMA_ASSERT(rtables_[rtableid] == nullptr);
+            RDMA_ASSERT(rtables_[rtableid] == nullptr) << rtableid;
             rtables_[rtableid] = rtable;
             fn_rtable_map_[fn] = rtable;
             current_rtable_id_ = std::max(current_rtable_id_, rtableid);

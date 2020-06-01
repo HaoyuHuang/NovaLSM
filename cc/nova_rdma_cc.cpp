@@ -64,7 +64,6 @@ namespace nova {
                 it++;
                 continue;
             }
-
             if (task.server_id == -1) {
                 // A log record request.
                 RDMA_ASSERT(task.type == leveldb::RDMA_ASYNC_REQ_CLOSE_LOG ||
@@ -132,8 +131,8 @@ namespace nova {
                             task.server_id);
                     break;
                 case leveldb::RDMA_ASYNC_REQ_CLOSE_LOG:
-                    ctx.req_id = cc_client_->InitiateCloseLogFile(
-                            task.log_file_name, task.dbid);
+                    ctx.req_id = cc_client_->InitiateCloseLogFiles(
+                            task.log_files, task.dbid);
                     break;
                 case leveldb::RDMA_ASYNC_REQ_LOG_RECORD:
                     ctx.req_id = cc_client_->InitiateReplicateLogRecords(
@@ -189,7 +188,8 @@ namespace nova {
                 paused = false;
             }
 
-            if (should_sleep) {
+            if (should_sleep &&
+                nova::NovaConfig::config->num_conn_async_workers > 1) {
                 usleep(timeout);
             }
             int n = 0;
@@ -231,8 +231,6 @@ namespace nova {
             // a send request completes.
             admission_control_->RemoveRequests(remote_server_id, 1);
         }
-
-
         if (opcode == IBV_WC_SEND || opcode == IBV_WC_RDMA_READ) {
             return true;
         }

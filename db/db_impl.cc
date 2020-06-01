@@ -383,17 +383,17 @@ namespace leveldb {
                                             manifest, false);
         client->Wait();
         std::unordered_map<std::string, uint64_t> logfile_buf;
-        nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid_];
-        if (!frag->log_replica_stoc_ids.empty()) {
-            uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[0]].server_id;
-            RDMA_LOG(rdmaio::INFO) << fmt::format(
-                        "Recover the latest memtables from log files at StoC-{}",
-                        stoc_server_id);
-            client->InitiateQueryLogFile(stoc_server_id,
-                                         nova::NovaConfig::config->my_server_id,
-                                         dbid_, &logfile_buf);
-            client->Wait();
-        }
+//        nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid_];
+//        if (!frag->log_replica_stoc_ids.empty()) {
+//            uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[0]].server_id;
+//            RDMA_LOG(rdmaio::INFO) << fmt::format(
+//                        "Recover the latest memtables from log files at StoC-{}",
+//                        stoc_server_id);
+//            client->InitiateQueryLogFile(stoc_server_id,
+//                                         nova::NovaConfig::config->my_server_id,
+//                                         dbid_, &logfile_buf);
+//            client->Wait();
+//        }
         for (auto &it : logfile_buf) {
             RDMA_LOG(rdmaio::INFO)
                 << fmt::format("log file {}:{}", it.first, it.second);
@@ -485,7 +485,7 @@ namespace leveldb {
             table_cache_->Evict(meta->number, true);
         }
 
-        if (options_.enable_subranges) {
+        if (options_.enable_subranges && !subrange_edits.empty()) {
             auto new_srs = new SubRanges(subrange_edits);
             new_srs->AssertSubrangeBoundary(user_comparator_);
             subrange_manager_->latest_subranges_.store(new_srs);
@@ -753,6 +753,7 @@ namespace leveldb {
             Status s;
             Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
                                               AccessCaller::kCompaction);
+            nova::DCStats::dc_stats.generated_memtable_sizes += imm->ApproximateMemoryUsage();
             s = BuildTable(dbname_, env_, options_, table_cache_, iter,
                            &meta, bg_thread, prune_memtable);
             RDMA_ASSERT(s.ok()) << s.ToString();
@@ -770,6 +771,7 @@ namespace leveldb {
                           meta.largest,
                           meta.meta_block_handle,
                           meta.data_block_group_handles);
+            nova::DCStats::dc_stats.written_memtable_sizes += meta.file_size;
         }
     }
 
@@ -790,6 +792,7 @@ namespace leveldb {
             stats.input_source.num_files += 1;
             stats.input_source.file_size += imm->ApproximateMemoryUsage();
             immids.insert(imm->memtableid());
+            nova::DCStats::dc_stats.generated_memtable_sizes += imm->ApproximateMemoryUsage();
         }
 
         Iterator *it = NewMergingIterator(&internal_comparator_, &iterators[0],
@@ -984,12 +987,12 @@ namespace leveldb {
         range_lock_.Unlock();
 
         if (nova::NovaConfig::config->log_record_mode ==
-            nova::NovaLogRecordMode::LOG_RDMA) {
+            nova::NovaLogRecordMode::LOG_RDMA && !closed_memtable_log_files.empty()) {
+            std::vector<std::string> logs;
             for (const auto &file : closed_memtable_log_files) {
-                bg_thread->dc_client()->InitiateCloseLogFile(
-                        fmt::format("{}-{}-{}", server_id_, dbid_, file),
-                        dbid_);
+                logs.push_back(fmt::format("{}-{}-{}", server_id_, dbid_, file));
             }
+            bg_thread->dc_client()->InitiateCloseLogFiles(logs, dbid_);
         }
 
         options_.memtable_pool->mutex_.lock();
@@ -1131,12 +1134,12 @@ namespace leveldb {
         }
         // Delete log files.
         if (nova::NovaConfig::config->log_record_mode ==
-            nova::NovaLogRecordMode::LOG_RDMA) {
+            nova::NovaLogRecordMode::LOG_RDMA && !closed_memtable_log_files.empty()) {
+            std::vector<std::string> logs;
             for (const auto &file : closed_memtable_log_files) {
-                bg_thread->dc_client()->InitiateCloseLogFile(
-                        fmt::format("{}-{}-{}", server_id_, dbid_, file),
-                        dbid_);
+                logs.push_back(fmt::format("{}-{}-{}", server_id_, dbid_, file));
             }
+            bg_thread->dc_client()->InitiateCloseLogFiles(logs, dbid_);
         }
         for (const auto &task : sstable_tasks) {
             CompactionState *state = reinterpret_cast<CompactionState *> (task.compaction_task);
@@ -1969,8 +1972,7 @@ namespace leveldb {
             number_of_puts_no_wait_ += 1;
         }
         uint32_t memtable_id = table->memtableid();
-        GenerateLogRecord(options, last_sequence, key, value,
-                          table->memtableid());
+        GenerateLogRecord(options, last_sequence, key, value, memtable_id);
         table->Add(last_sequence, ValueType::kTypeValue, key, value);
         versions_->mid_table_mapping_[memtable_id]->nentries_ += 1;
         if (table_locator_ != nullptr) {

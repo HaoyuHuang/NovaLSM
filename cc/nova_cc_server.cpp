@@ -61,14 +61,16 @@ namespace nova {
 
     void NovaCCServer::AddFGStorageTask(const nova::NovaStorageTask &task) {
         uint32_t id =
-                fg_storage_worker_seq_id_.fetch_add(1, std::memory_order_relaxed) %
+                fg_storage_worker_seq_id_.fetch_add(1,
+                                                    std::memory_order_relaxed) %
                 fg_storage_workers_.size();
         fg_storage_workers_[id]->AddTask(task);
     }
 
     void NovaCCServer::AddBGStorageTask(const nova::NovaStorageTask &task) {
         uint32_t id =
-                bg_storage_worker_seq_id_.fetch_add(1, std::memory_order_relaxed) %
+                bg_storage_worker_seq_id_.fetch_add(1,
+                                                    std::memory_order_relaxed) %
                 bg_storage_workers_.size();
         bg_storage_workers_[id]->AddTask(task);
     }
@@ -243,11 +245,11 @@ namespace nova {
                     sendbuf[0] =
                             leveldb::CCRequestType::CC_DC_READ_STATS_RESPONSE;
                     leveldb::EncodeFixed64(sendbuf + 1,
-                                           dc_stats.dc_queue_depth);
+                                           DCStats::dc_stats.dc_queue_depth);
                     leveldb::EncodeFixed64(sendbuf + 9,
-                                           dc_stats.dc_pending_disk_reads);
+                                           DCStats::dc_stats.dc_pending_disk_reads);
                     leveldb::EncodeFixed64(sendbuf + 17,
-                                           dc_stats.dc_pending_disk_writes);
+                                           DCStats::dc_stats.dc_pending_disk_writes);
                     rdma_store_->PostSend(sendbuf, 13, remote_server_id,
                                           dc_req_id);
                     processed = true;
@@ -283,7 +285,8 @@ namespace nova {
                     uint64_t offset = 0;
                     uint32_t size = 0;
                     uint64_t cc_mr_offset = 0;
-                    bool is_foreground_read = leveldb::DecodeBool(buf + msg_size);
+                    bool is_foreground_read = leveldb::DecodeBool(
+                            buf + msg_size);
                     msg_size += 1;
                     rtable_id = leveldb::DecodeFixed32(buf + msg_size);
                     msg_size += 4;
@@ -444,12 +447,19 @@ namespace nova {
                     *generate_a_new_request = true;
                 } else if (buf[0] ==
                            leveldb::CCRequestType::CC_DELETE_LOG_FILE) {
-                    uint32_t size = leveldb::DecodeFixed32(buf + 1);
-                    std::string log_file(buf + 5, size);
-                    log_manager_->DeleteLogBuf(log_file);
+                    int size = 1;
+                    uint32_t nlogs = leveldb::DecodeFixed32(buf + 1);
+                    size += 4;
+                    std::vector<std::string> logfiles;
+                    for (int i = 0; i < nlogs; i++) {
+                        std::string log;
+                        size += leveldb::DecodeStr(buf + size, &log);
+                        logfiles.push_back(log);
+                    }
+                    log_manager_->DeleteLogBuf(logfiles);
                     RDMA_LOG(DEBUG) << fmt::format(
                                 "dc[{}]: Delete log buffer for file {}.",
-                                thread_id_, log_file);
+                                thread_id_, logfiles.size());
                     processed = true;
                 } else if (buf[0] ==
                            leveldb::CCRequestType::CC_FILENAME_RTABLEID) {

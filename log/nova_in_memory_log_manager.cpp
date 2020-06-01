@@ -99,36 +99,34 @@ namespace nova {
                            log_file, thread_id);
     }
 
-    void InMemoryLogFileManager::DeleteLogBuf(const std::string &log_file) {
+    void InMemoryLogFileManager::DeleteLogBuf(const std::vector<std::string> &log_file) {
         uint32_t sid;
         uint32_t db_index;
-        ParseDBIndexFromFile(log_file, &sid, &db_index);
+        ParseDBIndexFromFile(log_file[0], &sid, &db_index);
 
         DBLogFiles *db = server_db_log_files_[sid][db_index];
 
         db->mutex_.Lock();
-        auto it = db->logfiles_.find(log_file);
-        if (it == db->logfiles_.end()) {
-            db->mutex_.Unlock();
-            return;
-        }
-        LogRecords *records = it->second;
-        db->logfiles_.erase(log_file);
-        db->mutex_.Unlock();
 
-        for (const auto &it : records->backing_mems) {
-            const auto &items = it.second;
-            uint32_t scid = mem_manager_->slabclassid(it.first,
-                                                      NovaConfig::config->log_buf_size);
-            if (!items.empty()) {
-                mem_manager_->FreeItems(it.first, items, scid);
+        for (int i = 0; i < log_file.size(); i++) {
+            auto it = db->logfiles_.find(log_file[i]);
+            if (it == db->logfiles_.end()) {
+                continue;
             }
-
-            RDMA_LOG(DEBUG)
-                << fmt::format("Free {} log buf for file:{} from thread {}",
-                               items.size(), log_file, it.first);
+            LogRecords *records = it->second;
+            for (const auto &it : records->backing_mems) {
+                const auto &items = it.second;
+                uint32_t scid = mem_manager_->slabclassid(it.first,
+                                                          NovaConfig::config->log_buf_size);
+                if (!items.empty()) {
+                    mem_manager_->FreeItems(it.first, items, scid);
+                }
+                RDMA_LOG(DEBUG)
+                    << fmt::format("Free {} log buf for file:{} from thread {}",
+                                   items.size(), log_file[i], it.first);
+            }
+            db->logfiles_.erase(log_file[i]);
         }
-
-
+        db->mutex_.Unlock();
     }
 }

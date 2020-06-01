@@ -8,6 +8,8 @@
 #define LEVELDB_NOVA_CC_STAT_THREAD_H
 
 #include <vector>
+
+#include "nova/nova_common.h"
 #include "nova_rdma_cc.h"
 #include "nova_storage_worker.h"
 

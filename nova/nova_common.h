@@ -34,19 +34,33 @@ namespace nova {
 #define RDMA_POLL_MAX_TIMEOUT_US 100
 #define LEVELDB_TABLE_PADDING_SIZE_MB 2
 #define MAX_BLOCK_SIZE 10240
-
-
     using namespace std;
     using namespace rdmaio;
 
-    struct DCStats {
+    class DCStats {
+    public:
+        void Initialize() {
+            dc_pending_disk_reads = 0;
+            dc_pending_disk_writes = 0;
+            dc_queue_depth = 0;
+            generated_memtable_sizes = 0;
+            written_memtable_sizes = 0;
+            total_disk_writes = 0;
+            total_disk_reads = 0;
+        }
+
         // DC stats
         std::atomic_int_fast64_t dc_pending_disk_writes;
         std::atomic_int_fast64_t dc_pending_disk_reads;
         std::atomic_int_fast64_t dc_queue_depth;
-    };
 
-    extern nova::DCStats dc_stats;
+        std::atomic_int_fast64_t generated_memtable_sizes;
+        std::atomic_int_fast64_t written_memtable_sizes;
+        std::atomic_int_fast64_t total_disk_writes;
+        std::atomic_int_fast64_t total_disk_reads;
+
+        static DCStats dc_stats;
+    };
 
     enum NovaRDMAPartitionMode {
         RANGE = 0,
@@ -677,7 +691,7 @@ namespace nova {
 //                             leveldb::LevelDBLogRecord *log_record);
 
     inline uint32_t
-    LogRecordsSize(const leveldb::LevelDBLogRecord &record) {
+    LogRecordSize(const leveldb::LevelDBLogRecord &record) {
         uint32_t size = 0;
         size += 4;
         size += 4;
@@ -693,7 +707,7 @@ namespace nova {
     LogRecordsSize(const std::vector<leveldb::LevelDBLogRecord> &log_records) {
         uint32_t size = 0;
         for (const auto &record : log_records) {
-            size += LogRecordsSize(record);
+            size += LogRecordSize(record);
         }
         return size;
     }
@@ -702,8 +716,7 @@ namespace nova {
     EncodeLogRecord(char *buf,
                     const leveldb::LevelDBLogRecord &record) {
         uint32_t size = 0;
-        uint32_t record_size =
-                4 + record.key.size() + 4 + record.value.size() + 8;
+        uint32_t record_size = LogRecordSize(record);
         size += leveldb::EncodeFixed32(buf + size, record_size);
         size += leveldb::EncodeSlice(buf + size, record.key);
         size += leveldb::EncodeSlice(buf + size, record.value);
@@ -729,7 +742,9 @@ namespace nova {
         log_record->sequence_number = leveldb::DecodeFixed64(buf + read_size);
         read_size += 8;
         if (buf[read_size] == 1) {
-            return read_size + 1;
+            read_size += 1;
+            RDMA_ASSERT(read_size == record_size);
+            return read_size;
         }
         return 0;
     }

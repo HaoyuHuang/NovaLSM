@@ -223,7 +223,7 @@ namespace nova {
     NovaCCLoadThread::NovaCCLoadThread(std::vector<leveldb::DB *> &dbs,
                                        std::vector<nova::NovaRDMAComputeComponent *> &async_workers,
                                        nova::NovaMemManager *mem_manager,
-                                       std::set<uint32_t> &assigned_dbids,
+                                       std::set <uint32_t> &assigned_dbids,
                                        uint32_t tid) : dbs_(dbs),
                                                        async_workers_(
                                                                async_workers),
@@ -240,7 +240,7 @@ namespace nova {
         timeval start{};
         gettimeofday(&start, nullptr);
         uint64_t loaded_keys = 0;
-        std::vector<CCFragment *> &frags = NovaConfig::config->fragments;
+        std::vector < CCFragment * > &frags = NovaConfig::config->fragments;
         leveldb::WriteState *state = new leveldb::WriteState[NovaConfig::config->servers.size()];
         for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
             state[i].rdma_wr_id = -1;
@@ -351,7 +351,7 @@ namespace nova {
 
         read_options.thread_id = tid_;
         read_options.verify_checksums = false;
-        std::vector<CCFragment *> &frags = NovaConfig::config->fragments;
+        std::vector < CCFragment * > &frags = NovaConfig::config->fragments;
         for (int i = 0; i < frags.size(); i++) {
             if (frags[i]->cc_server_id !=
                 NovaConfig::config->my_server_id) {
@@ -428,10 +428,10 @@ namespace nova {
             << fmt::format("{} dbs. {} dbs per load thread.", dbs_.size(),
                            ndb_per_thread);
 
-        std::vector<std::thread> load_threads;
-        std::vector<NovaCCLoadThread *> ts;
+        std::vector <std::thread> load_threads;
+        std::vector < NovaCCLoadThread * > ts;
         for (int i = 0; i < nloading_threads; i++) {
-            std::set<uint32_t> dbids;
+            std::set <uint32_t> dbids;
             for (int i = 0; i < ndb_per_thread; i++) {
                 dbids.insert(current_db_id);
                 current_db_id += 1;
@@ -499,7 +499,7 @@ namespace nova {
     NovaCCNICServer::NovaCCNICServer(RdmaCtrl *rdma_ctrl,
                                      char *rdmabuf, int nport)
             : nport_(nport) {
-        std::unordered_map<uint32_t, std::set<uint32_t >> dbids = NovaConfig::ReadDatabases(
+        std::unordered_map <uint32_t, std::set<uint32_t >> dbids = NovaConfig::ReadDatabases(
                 NovaConfig::config->fragments);
         for (auto sid : dbids) {
             for (auto dbid : sid.second) {
@@ -578,8 +578,8 @@ namespace nova {
                 NovaConfig::config->my_server_id,
                 nranges);
 
-        std::vector<nova::NovaMsgCallback *> rdma_threads;
-        std::vector<leveldb::NovaBlockCCClient *> db_clients;
+        std::vector < nova::NovaMsgCallback * > rdma_threads;
+        std::vector < leveldb::NovaBlockCCClient * > db_clients;
         for (int db_index = 0; db_index < ndbs; db_index++) {
             auto reorg = new leveldb::NovaCCCompactionThread(mem_manager);
             reorg_bgs.push_back(reorg);
@@ -598,7 +598,7 @@ namespace nova {
             dbs_[db_index]->dbs_ = dbs_;
         }
 
-        std::vector<std::string> dbnames;
+        std::vector <std::string> dbnames;
         for (auto sid : dbids) {
             for (auto dbid : sid.second) {
                 dbnames.push_back(DBName(NovaConfig::config->db_path,
@@ -619,7 +619,7 @@ namespace nova {
         RDMA_LOG(INFO)
             << fmt::format("Request Id range {}:{}", lower_client_req_id,
                            upper_client_req_id);
-        std::vector<NovaCCServer *> cc_servers;
+        std::vector < NovaCCServer * > cc_servers;
         for (worker_id = 0;
              worker_id <
              NovaConfig::config->num_conn_async_workers; worker_id++) {
@@ -631,7 +631,7 @@ namespace nova {
             rdma_threads.push_back(cc);
             async_workers.push_back(cc);
             NovaRDMAStore *store = nullptr;
-            std::vector<QPEndPoint> endpoints;
+            std::vector <QPEndPoint> endpoints;
             for (int i = 0;
                  i < NovaConfig::config->servers.size(); i++) {
                 if (i == NovaConfig::config->my_server_id) {
@@ -668,20 +668,20 @@ namespace nova {
                                                                    worker_id,
                                                                    false,
                                                                    admission_ctrl);
+            auto log_writer = new leveldb::RDMALogWriter(store, mem_manager,
+                                                         log_manager);
             leveldb::CCClient *dc_client = new leveldb::NovaCCClient(worker_id,
                                                                      store,
                                                                      mem_manager,
-                                                                     new leveldb::RDMALogWriter(
-                                                                             store,
-                                                                             mem_manager,
-                                                                             log_manager),
+                                                                     log_writer,
                                                                      lower_client_req_id,
                                                                      upper_client_req_id,
                                                                      cc_server);
 
+
             cc_servers.push_back(cc_server);
             cc_server->rdma_store_ = store;
-
+            log_writer->admission_control_ = admission_ctrl;
             cc->thread_id_ = worker_id;
             cc->rdma_store_ = store;
             cc->cc_client_ = dc_client;
@@ -702,7 +702,7 @@ namespace nova {
             async_compaction_workers.push_back(cc);
 
             NovaRDMAStore *store = nullptr;
-            std::vector<QPEndPoint> endpoints;
+            std::vector <QPEndPoint> endpoints;
             for (int j = 0;
                  j < NovaConfig::config->servers.size(); j++) {
                 if (j == NovaConfig::config->my_server_id) {
@@ -730,7 +730,6 @@ namespace nova {
             } else {
                 store = new NovaRDMANoopStore();
             }
-
             nova::NovaCCServer *cc_server = new nova::NovaCCServer(rdma_ctrl,
                                                                    mem_manager,
                                                                    rtable_manager,
@@ -738,16 +737,16 @@ namespace nova {
                                                                    worker_id,
                                                                    true,
                                                                    admission_ctrl);
+            auto log_writer = new leveldb::RDMALogWriter(store, mem_manager,
+                                                         log_manager);
             leveldb::CCClient *dc_client = new leveldb::NovaCCClient(worker_id,
                                                                      store,
                                                                      mem_manager,
-                                                                     new leveldb::RDMALogWriter(
-                                                                             store,
-                                                                             mem_manager,
-                                                                             log_manager),
+                                                                     log_writer,
                                                                      lower_client_req_id,
                                                                      upper_client_req_id,
                                                                      cc_server);
+            log_writer->admission_control_ = admission_ctrl;
             cc_servers.push_back(cc_server);
             cc_server->rdma_store_ = store;
             cc->rdma_store_ = store;

@@ -29,7 +29,6 @@ namespace leveldb {
         if (it == logfile_last_buf_.end()) {
             LogFileMetadata meta = {};
             meta.stoc_bufs = new LogFileBuf[nova::NovaConfig::config->servers.size()];
-
             for (int i = 0;
                  i <
                  nova::NovaConfig::config->servers.size(); i++) {
@@ -58,7 +57,7 @@ namespace leveldb {
         meta->stoc_bufs[stoc_server_id].size = size;
         meta->stoc_bufs[stoc_server_id].offset = 0;
         meta->stoc_bufs[stoc_server_id].is_initializing = false;
-
+        admission_control_->AddRequests(stoc_server_id, 1);
         char *sendbuf = store_->GetSendBuf(stoc_server_id);
         sendbuf[0] = leveldb::CCRequestType::CC_REPLICATE_LOG_RECORDS;
         leveldb::EncodeFixed32(sendbuf + 1, client_req_id);
@@ -99,7 +98,6 @@ namespace leveldb {
         }
         Init(log_file_name, thread_id, log_records, rdma_backing_buf);
         uint32_t log_record_size = nova::LogRecordsSize(log_records);
-
         // If one of the log buf is intializing, return false.
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
             uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
@@ -180,23 +178,29 @@ namespace leveldb {
         return acks == frag->log_replica_stoc_ids.size();
     }
 
-    Status RDMALogWriter::CloseLogFile(const std::string &log_file_name,
-                                       uint32_t dbid, uint32_t client_req_id) {
+    Status
+    RDMALogWriter::CloseLogFiles(const std::vector<std::string> &log_file_name,
+                                uint32_t dbid, uint32_t client_req_id) {
         nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid];
-        LogFileMetadata *meta = &logfile_last_buf_[log_file_name];
-        delete meta->stoc_bufs;
-        logfile_last_buf_.erase(log_file_name);
+        for (const auto &logfile : log_file_name) {
+            LogFileMetadata *meta = &logfile_last_buf_[logfile];
+            delete meta->stoc_bufs;
+            logfile_last_buf_.erase(logfile);
+        }
         log_manager_->DeleteLogBuf(log_file_name);
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
             uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
 
             char *send_buf = store_->GetSendBuf(stoc_server_id);
-            char *buf = send_buf;
-            buf[0] = CCRequestType::CC_DELETE_LOG_FILE;
-            buf++;
-            leveldb::EncodeStr(buf, log_file_name);
-            store_->PostSend(send_buf, 1 + 4 + log_file_name.size(),
-                             stoc_server_id, client_req_id);
+            int size = 0;
+            send_buf[size] = CCRequestType::CC_DELETE_LOG_FILE;
+            size++;
+            size += leveldb::EncodeFixed32(send_buf + size,
+                                           log_file_name.size());
+            for (auto &name : log_file_name) {
+                size += leveldb::EncodeStr(send_buf + size, name);
+            }
+            store_->PostSend(send_buf, size, stoc_server_id, client_req_id);
         }
         return Status::OK();
     }

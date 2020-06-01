@@ -160,10 +160,12 @@ namespace leveldb {
         std::string filename;
         bool is_foreground_reads;
 
-        std::string log_file_name;
+        std::vector<std::string> log_files;
+
         uint64_t thread_id = 0;
         uint32_t dbid = 0;
         uint32_t memtable_id = 0;
+        std::string log_file_name;
         std::vector<LevelDBLogRecord> log_records;
 
         int server_id = -1;
@@ -233,14 +235,15 @@ namespace leveldb {
 
 
         virtual uint32_t
-        InitiateCloseLogFile(const std::string &log_file_name,
-                             uint32_t dbid) = 0;
+        InitiateCloseLogFiles(const std::vector<std::string> &log_files,
+                              uint32_t dbid) = 0;
 
         virtual uint32_t InitiateReadDCStats(uint32_t server_id) = 0;
 
         virtual bool OnRecv(ibv_wc_opcode type, uint64_t wr_id,
                             int remote_server_id, char *buf,
-                            uint32_t imm_data, bool* generate_a_new_request) = 0;
+                            uint32_t imm_data,
+                            bool *generate_a_new_request) = 0;
 
         virtual bool
         IsDone(uint32_t req_id, CCResponse *response, uint64_t *timeout) = 0;

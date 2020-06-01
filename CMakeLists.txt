@@ -384,10 +384,10 @@ find_package(Threads REQUIRED)
 target_link_libraries(leveldb Threads::Threads -lpthread)
 target_link_libraries(leveldb ibverbs event fmt)
 
-add_executable(leveldbutil
-        "db/leveldbutil.cc"
-        )
-target_link_libraries(leveldbutil leveldb)
+#add_executable(leveldbutil
+#        "db/leveldbutil.cc"
+#        )
+#target_link_libraries(leveldbutil leveldb)
 
 #if (LEVELDB_BUILD_TESTS)
 #    enable_testing()

@@ -116,9 +116,9 @@ namespace leveldb {
             uint32_t reqid = req_id_;
             CCResponse *response = new CCResponse;
             req_response[reqid] = response;
-            response->dc_queue_depth = nova::dc_stats.dc_queue_depth;
-            response->dc_pending_write_bytes = nova::dc_stats.dc_pending_disk_writes;
-            response->dc_pending_read_bytes = nova::dc_stats.dc_pending_disk_reads;
+            response->dc_queue_depth = nova::DCStats::dc_stats.dc_queue_depth;
+            response->dc_pending_write_bytes = nova::DCStats::dc_stats.dc_pending_disk_writes;
+            response->dc_pending_read_bytes = nova::DCStats::dc_stats.dc_pending_disk_reads;
             req_id_++;
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("Wake up local read stats");
@@ -189,7 +189,7 @@ namespace leveldb {
                                                      uint32_t server_id,
                                                      uint32_t dbid,
                                                      std::unordered_map<std::string, uint64_t> *logfile_offset) {
-        RDMA_ASSERT(server_id != nova::NovaConfig::config->my_server_id);
+        RDMA_ASSERT(storage_server_id != nova::NovaConfig::config->my_server_id);
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_QUERY_LOG_FILES;
         task.server_id = storage_server_id;
@@ -292,9 +292,7 @@ namespace leveldb {
     void NovaBlockCCClient::AddAsyncTask(
             const leveldb::RDMAAsyncClientRequestTask &task) {
         if (task.type == RDMAAsyncRequestType::RDMA_ASYNC_REQ_LOG_RECORD) {
-            uint64_t id = task.dbid;
-//                    (static_cast<uint64_t >(task.dbid) << 32) |
-//                          task.memtable_id;
+            uint64_t id = task.memtable_id;
             ccs_[id % ccs_.size()]->AddTask(task);
             return;
         }
@@ -375,14 +373,14 @@ namespace leveldb {
         return 0;
     }
 
-    uint32_t NovaBlockCCClient::InitiateCloseLogFile(
-            const std::string &log_file_name, uint32_t dbid) {
+    uint32_t NovaBlockCCClient::InitiateCloseLogFiles(
+            const std::vector<std::string> &log_file_name, uint32_t dbid) {
         RDMAAsyncClientRequestTask task = {};
         task.type = RDMAAsyncRequestType::RDMA_ASYNC_REQ_CLOSE_LOG;
-        task.log_file_name = log_file_name;
+        task.log_files = log_file_name;
         task.dbid = dbid;
         AddAsyncTask(task);
-        RDMA_LOG(DEBUG) << fmt::format("Close {}", log_file_name);
+        RDMA_LOG(DEBUG) << fmt::format("Close {}", dbid);
         return 0;
     }
 
@@ -596,7 +594,6 @@ namespace leveldb {
         context.log_record_mem = rdma_backing_mem;
         context.log_record_size = nova::LogRecordsSize(log_records);
         request_context_[req_id] = context;
-
         bool success = rdma_log_writer_->AddRecord(log_file_name,
                                                    thread_id, db_id,
                                                    memtable_id,
@@ -609,7 +606,6 @@ namespace leveldb {
             request_context_.erase(req_id);
             return 0;
         }
-
         RDMA_LOG(DEBUG)
             << fmt::format(
                     "dcclient[{}]: Replicate log record req:{}",
@@ -618,10 +614,10 @@ namespace leveldb {
     }
 
     uint32_t
-    NovaCCClient::InitiateCloseLogFile(const std::string &log_file_name,
+    NovaCCClient::InitiateCloseLogFiles(const std::vector<std::string> &log_file_name,
                                        uint32_t dbid) {
         uint32_t req_id = current_req_id_;
-        rdma_log_writer_->CloseLogFile(log_file_name, dbid, req_id);
+        rdma_log_writer_->CloseLogFiles(log_file_name, dbid, req_id);
         IncrementReqId();
         return 0;
     }

@@ -13,6 +13,7 @@
 #include "leveldb/log_writer.h"
 #include "nova/nova_rdma_store.h"
 #include "log/nova_in_memory_log_manager.h"
+#include "rdma_admission_ctrl.h"
 
 namespace leveldb {
 
@@ -44,12 +45,13 @@ namespace leveldb {
                              WriteState *replicate_log_record_states);
 
         Status
-        CloseLogFile(const std::string &log_file_name, uint32_t dbid,
+        CloseLogFiles(const std::vector<std::string> &log_file_name, uint32_t dbid,
                      uint32_t client_req_id);
 
         bool CheckCompletion(const std::string &log_file_name, uint32_t dbid,
                              WriteState *replicate_log_record_states);
 
+        nova::RDMAAdmissionCtrl *admission_control_ = nullptr;
     private:
         std::string write_result_str(WriteResult wr) {
             switch (wr) {

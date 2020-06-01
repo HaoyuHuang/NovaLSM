@@ -38,6 +38,7 @@ namespace leveldb {
             nsr.tiny_ranges.push_back(r);
             sr->subranges.push_back(nsr);
         }
+        ComputeCompactionThreadsAssignment(sr);
         latest_subranges_.store(sr);
         RDMA_LOG(rdmaio::INFO)
             << fmt::format("keys:{},{}", lower_bound_, upper_bound_);
