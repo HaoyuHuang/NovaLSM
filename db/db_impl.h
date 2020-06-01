@@ -102,6 +102,10 @@ namespace leveldb {
         void FlushMemTable(leveldb::NovaLogRecordMode log_record_mode) override;
 
         void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_) override;
+
+        Logger* infoLog() override {
+            return options_.info_log;
+        };
     private:
         friend class DB;
 

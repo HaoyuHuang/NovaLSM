@@ -150,6 +150,7 @@ namespace nova {
             value.clear();
             dbs_[i]->GetProperty("leveldb.approximate-memory-usage", &value);
             RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
+            leveldb::Log(dbs_[i]->infoLog(), "%s", "Load complete");
         }
     }
 

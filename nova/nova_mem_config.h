@@ -47,7 +47,7 @@ namespace nova {
             } else if (config->partition_mode == NovaRDMAPartitionMode::RANGE) {
                 Fragment *home = nullptr;
                 RDMA_ASSERT(
-                        key <=
+                        key <
                         config->fragments[config->nfragments - 1]->key_end);
                 uint32_t l = 0;
                 uint32_t r = config->nfragments - 1;
@@ -56,11 +56,11 @@ namespace nova {
                     uint32_t m = l + (r - l) / 2;
                     home = config->fragments[m];
                     // Check if x is present at mid
-                    if (key >= home->key_start && key <= home->key_end) {
+                    if (key >= home->key_start && key < home->key_end) {
                         break;
                     }
                     // If x greater, ignore left half
-                    if (home->key_end < key)
+                    if (key >= home->key_end)
                         l = m + 1;
                         // If x is smaller, ignore right half
                     else
