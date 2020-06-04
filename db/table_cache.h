@@ -58,6 +58,10 @@ namespace leveldb {
                   uint64_t file_size,
                   int level, Cache::Handle **);
 
+        bool
+        IsTableCached(AccessCaller caller,
+                  const FileMetaData *meta);
+
         Status
         OpenTable(AccessCaller caller, const ReadOptions &options,
                   const FileMetaData *meta,

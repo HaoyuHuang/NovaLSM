@@ -145,7 +145,7 @@ namespace {
         uint32_t index = 0;
         uint32_t sid = 0;
         std::string logname = leveldb::LogFileName(db_path, 1111);
-        ParseDBIndexFromFile(logname, &sid, &index);
+        ParseDBIndexFromLogFileName(logname, &sid, &index);
         RDMA_ASSERT(index == db_index);
         RDMA_ASSERT(NovaConfig::config->my_server_id == sid);
         return db;
@@ -161,7 +161,7 @@ std::atomic_int_fast32_t nova::NovaCCServer::compaction_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
 std::atomic_int_fast32_t nova::NovaStorageWorker::storage_file_number_seq;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
-DCStats DCStats::dc_stats;
+NovaGlobalVariables NovaGlobalVariables::global;
 
 void start(NovaCCNICServer *server) {
     server->Start();
@@ -259,8 +259,8 @@ void TestSubRanges() {
     stats_thread.join();
 }
 
-leveldb::ReadWriteFile* f;
-char*backing_mem;
+leveldb::ReadWriteFile *f;
+char *backing_mem;
 
 void Read(uint32_t id) {
     leveldb::RTableHandle h = {};
@@ -420,22 +420,35 @@ int main(int argc, char *argv[]) {
     RDMA_LOG(rdmaio::INFO) << new_edit.DebugString();
 //    TestSubRanges();
 
-
-    std::string fname = FLAGS_test_filename;
-    leveldb::Env* posix = new leveldb::PosixEnv;
-    leveldb::EnvFileMetadata meta;
-    meta.level = 0;
-    RDMA_LOG(rdmaio::INFO) << fname;
-    auto s = posix->NewReadWriteFile(fname, meta, &f);
-    RDMA_ASSERT(s.ok()) << s.ToString();
-
-    backing_mem = (char*) malloc(15 * 1024 * 1024);
-    std::vector<std::thread> threads;
-    for (int i = 0; i < 64; i++) {
-        threads.push_back(std::thread(Read, i));
+    for (int i = 0; i < 10; i++) {
+        for (int j = 0; j < 64; j++) {
+            for (int k = 0; k < 100000; k++) {
+                uint32_t sid = 0;
+                uint32_t dbid = 0;
+                ParseDBIndexFromLogFileName(LogFileName(i, j, k), &sid, &dbid);
+//                RDMA_LOG(INFO) << fmt::format("{} {}", sid, dbid);
+                RDMA_ASSERT(sid == i);
+                RDMA_ASSERT(dbid == j);
+            }
+        }
     }
-    for (int i = 0; i < 64; i++) {
-        threads[i].join();
-    }
+
+
+//    std::string fname = FLAGS_test_filename;
+//    leveldb::Env* posix = new leveldb::PosixEnv;
+//    leveldb::EnvFileMetadata meta;
+//    meta.level = 0;
+//    RDMA_LOG(rdmaio::INFO) << fname;
+//    auto s = posix->NewReadWriteFile(fname, meta, &f);
+//    RDMA_ASSERT(s.ok()) << s.ToString();
+//
+//    backing_mem = (char*) malloc(15 * 1024 * 1024);
+//    std::vector<std::thread> threads;
+//    for (int i = 0; i < 64; i++) {
+//        threads.push_back(std::thread(Read, i));
+//    }
+//    for (int i = 0; i < 64; i++) {
+//        threads[i].join();
+//    }
     return 0;
 }

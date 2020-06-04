@@ -52,6 +52,9 @@ namespace nova {
         int remote_server_id = -1;
         uint32_t dc_req_id = 0;
 
+        uint32_t rtable_id = 0;
+        uint64_t rtable_offset = 0;
+
         // Read result.
         char *rdma_buf = nullptr;
         uint64_t cc_mr_offset = 0;

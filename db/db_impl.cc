@@ -753,7 +753,7 @@ namespace leveldb {
             Status s;
             Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
                                               AccessCaller::kCompaction);
-            nova::DCStats::dc_stats.generated_memtable_sizes += imm->ApproximateMemoryUsage();
+            nova::NovaGlobalVariables::global.generated_memtable_sizes += imm->ApproximateMemoryUsage();
             s = BuildTable(dbname_, env_, options_, table_cache_, iter,
                            &meta, bg_thread, prune_memtable);
             RDMA_ASSERT(s.ok()) << s.ToString();
@@ -771,7 +771,7 @@ namespace leveldb {
                           meta.largest,
                           meta.meta_block_handle,
                           meta.data_block_group_handles);
-            nova::DCStats::dc_stats.written_memtable_sizes += meta.file_size;
+            nova::NovaGlobalVariables::global.written_memtable_sizes += meta.file_size;
         }
     }
 
@@ -792,9 +792,8 @@ namespace leveldb {
             stats.input_source.num_files += 1;
             stats.input_source.file_size += imm->ApproximateMemoryUsage();
             immids.insert(imm->memtableid());
-            nova::DCStats::dc_stats.generated_memtable_sizes += imm->ApproximateMemoryUsage();
+            nova::NovaGlobalVariables::global.generated_memtable_sizes += imm->ApproximateMemoryUsage();
         }
-
         Iterator *it = NewMergingIterator(&internal_comparator_, &iterators[0],
                                           iterators.size());
         SubRanges *subranges = nullptr;
@@ -987,10 +986,12 @@ namespace leveldb {
         range_lock_.Unlock();
 
         if (nova::NovaConfig::config->log_record_mode ==
-            nova::NovaLogRecordMode::LOG_RDMA && !closed_memtable_log_files.empty()) {
+            nova::NovaLogRecordMode::LOG_RDMA &&
+            !closed_memtable_log_files.empty()) {
             std::vector<std::string> logs;
             for (const auto &file : closed_memtable_log_files) {
-                logs.push_back(fmt::format("{}-{}-{}", server_id_, dbid_, file));
+                logs.push_back(
+                        fmt::format("{}-{}-{}", server_id_, dbid_, file));
             }
             bg_thread->dc_client()->InitiateCloseLogFiles(logs, dbid_);
         }
@@ -1134,10 +1135,12 @@ namespace leveldb {
         }
         // Delete log files.
         if (nova::NovaConfig::config->log_record_mode ==
-            nova::NovaLogRecordMode::LOG_RDMA && !closed_memtable_log_files.empty()) {
+            nova::NovaLogRecordMode::LOG_RDMA &&
+            !closed_memtable_log_files.empty()) {
             std::vector<std::string> logs;
             for (const auto &file : closed_memtable_log_files) {
-                logs.push_back(fmt::format("{}-{}-{}", server_id_, dbid_, file));
+                logs.push_back(
+                        fmt::format("{}-{}-{}", server_id_, dbid_, file));
             }
             bg_thread->dc_client()->InitiateCloseLogFiles(logs, dbid_);
         }
@@ -1145,6 +1148,26 @@ namespace leveldb {
             CompactionState *state = reinterpret_cast<CompactionState *> (task.compaction_task);
             RDMA_ASSERT(state);
             auto c = state->compaction;
+//            if (options_.major_compaction_type ==
+//                MajorCompactionType::kMajorCoordinatedStoC) {
+//                // I need to fetch metadata files.
+//                std::vector<leveldb::FileMetaData *> files;
+//                for (int which = 0; which < 2; which++) {
+//                    for (int i = 0;
+//                         i < c->num_input_files(which); i++) {
+//                        if (!table_cache_->IsTableCached(
+//                                AccessCaller::kCompaction,
+//                                c->inputs_[which][i])) {
+//                            files.push_back(c->inputs_[which][i]);
+//                        }
+//                    }
+//                }
+//                FetchMetadataFilesInParallel(files,
+//                                             dbname_,
+//                                             options_,
+//                                             reinterpret_cast<leveldb::NovaBlockCCClient *>(bg_thread->dc_client()),
+//                                             env_);
+//            }
             auto input = c->MakeInputIterator(table_cache_, bg_thread);
             CompactionStats stats = state->BuildStats();
             std::function<uint64_t(void)> fn_generator = std::bind(
@@ -1308,20 +1331,41 @@ namespace leveldb {
                 } else {
                     auto client = reinterpret_cast<NovaBlockCCClient *> (compaction_coordinator_thread_->dc_client());
                     std::vector<uint32_t> selected_storages;
-//                    StorageSelector selector(client, &rand_seed_);
-//                    selector.SelectStorageServers(nova::ScatterPolicy::RANDOM,
-//                                                  compactions.size(),
-//                                                  &selected_storages);
-                    int startid = rand_r(&rand_seed_) %
-                                  nova::NovaConfig::config->dc_servers.size();
+                    std::vector<nova::Host> dcs;
+                    for (auto host : nova::NovaConfig::config->dc_servers) {
+//                        if (host.server_id !=
+//                            nova::NovaConfig::config->my_server_id) {
+//                            dcs.push_back(host);
+//                        }
+                        dcs.push_back(host);
+                    }
+                    int startid = rand_r(&rand_seed_) % dcs.size();
                     for (int i = 0; i < compactions.size(); i++) {
-                        int id = (startid + i) %
-                                 nova::NovaConfig::config->dc_servers.size();
-                        uint32_t sid = nova::NovaConfig::config->dc_servers[id].server_id;
+                        int id = (startid + i) % dcs.size();
+                        uint32_t sid = dcs[id].server_id;
+//                        RDMA_ASSERT(
+//                                sid != nova::NovaConfig::config->my_server_id);
                         selected_storages.push_back(sid);
                     }
                     RDMA_ASSERT(selected_storages.size() == compactions.size());
                     for (int i = 0; i < compactions.size(); i++) {
+                        RDMA_LOG(rdmaio::INFO) << fmt::format(
+                                    "Coordinator schedules compaction on StoC-{}",
+                                    selected_storages[i]);
+                        if (selected_storages[i] ==
+                            nova::NovaConfig::config->my_server_id) {
+                            // Schedule on my server.
+                            int thread_id =
+                                    EnvBGThread::bg_compaction_thread_id_seq.fetch_add(
+                                            1, std::memory_order_relaxed) %
+                                    bg_compaction_threads_.size();
+                            ScheduleCompactionTask(thread_id, states[i]);
+                            // A placeholder.
+                            reqs.push_back(0);
+                            auto req = new CompactionRequest;
+                            requests.push_back(req);
+                            continue;
+                        }
                         auto compaction = compactions[i];
                         auto req = new CompactionRequest;
                         req->source_level = compaction->level();
@@ -1340,11 +1384,20 @@ namespace leveldb {
                         reqs.push_back(req_id);
                         requests.push_back(req);
                     }
-                    for (auto req : reqs) {
-                        client->Wait();
+                    // Wait for majors to complete.
+                    for (int i = 0; i < compactions.size(); i++) {
+                        if (selected_storages[i] ==
+                            nova::NovaConfig::config->my_server_id) {
+                            sem_wait(&compactions[i]->complete_signal_);
+                        } else {
+                            client->Wait();
+                        }
                     }
                     std::vector<FileMetaData *> metafiles;
                     for (int i = 0; i < reqs.size(); i++) {
+                        if (reqs[i] == 0) {
+                            continue;
+                        }
                         CCResponse response;
                         RDMA_ASSERT(
                                 client->IsDone(reqs[i], &response, nullptr));
@@ -1353,7 +1406,7 @@ namespace leveldb {
                             metafiles.push_back(f);
                         }
                     }
-                    // Prefetch metadata files.
+                    // Prefetch metadata files stored on other servers.
                     FetchMetadataFilesInParallel(metafiles, dbname_, options_,
                                                  client, env_);
                     uint64_t input_size = 0;
@@ -1879,8 +1932,8 @@ namespace leveldb {
             table = partition->memtable;
             next_imm_slot = -1;
             if (table) {
-                if (table->ApproximateMemoryUsage() <=
-                    options_.write_buffer_size) {
+                auto atomic_mem = versions_->mid_table_mapping_[table->memtableid()];
+                if (atomic_mem->memtable_size_ <= options_.write_buffer_size) {
                     break;
                 }
                 while (options_.l0bytes_stop_writes_trigger > 0) {
@@ -1909,6 +1962,13 @@ namespace leveldb {
                     versions_->versions_[current->version_id_]->Unref(dbname_);
                     break;
                 }
+
+                if (atomic_mem->number_of_pending_writes_ > 0) {
+                    // Wait until the number of pending writes is 0.
+                    partition->background_work_finished_signal_.Wait();
+                    continue;
+                }
+
                 // The table is full.
                 RDMA_ASSERT(!partition->available_slots.empty());
                 // Mark the active memtable as immutable and schedule compaction.
@@ -1950,7 +2010,6 @@ namespace leveldb {
                 if (start_wait == 0) {
                     start_wait = env_->NowMicros();
                 }
-                // Try a different table.
                 partition->background_work_finished_signal_.Wait();
                 wait = true;
             } else {
@@ -1972,11 +2031,28 @@ namespace leveldb {
             number_of_puts_no_wait_ += 1;
         }
         uint32_t memtable_id = table->memtableid();
-        GenerateLogRecord(options, last_sequence, key, value, memtable_id);
+        auto atomic_mem = versions_->mid_table_mapping_[memtable_id];
+        atomic_mem->number_of_pending_writes_ += 1;
+        atomic_mem->memtable_size_ += (key.size() + value.size());
+        if (nova::NovaConfig::config->log_record_mode ==
+            nova::NovaLogRecordMode::LOG_RDMA && !options.local_write) {
+            partition->mutex.Unlock();
+            GenerateLogRecord(options, last_sequence, key, value, memtable_id);
+            partition->mutex.Lock();
+        }
         table->Add(last_sequence, ValueType::kTypeValue, key, value);
+        atomic_mem->number_of_pending_writes_ -= 1;
         versions_->mid_table_mapping_[memtable_id]->nentries_ += 1;
-        if (table_locator_ != nullptr) {
+        if (table_locator_) {
             table_locator_->Insert(key, options.hash, table->memtableid());
+        }
+        if (nova::NovaConfig::config->log_record_mode ==
+            nova::NovaLogRecordMode::LOG_RDMA && !options.local_write) {
+            if (atomic_mem->number_of_pending_writes_ == 0 &&
+                atomic_mem->memtable_size_ > options_.write_buffer_size) {
+                // Wake up other threads that are waiting on pending.
+                partition->background_work_finished_signal_.SignalAll();
+            }
         }
         partition->mutex.Unlock();
         // Schedule.
@@ -2432,8 +2508,7 @@ namespace leveldb {
             RDMA_ASSERT(dc);
             dc->set_dbid(dbid_);
             options.dc_client->InitiateReplicateLogRecords(
-                    fmt::format("{}-{}-{}", server_id_, dbid_,
-                                memtable_id),
+                    nova::LogFileName(server_id_, dbid_, memtable_id),
                     options.thread_id, dbid_, memtable_id,
                     options.rdma_backing_mem, log_records,
                     options.replicate_log_record_states);
@@ -2457,8 +2532,7 @@ namespace leveldb {
             RDMA_ASSERT(8 + key.size() + val.size() + 4 + 4 + 1 <=
                         options.rdma_backing_mem_size);
             options.dc_client->InitiateReplicateLogRecords(
-                    fmt::format("{}-{}-{}", server_id_, dbid_,
-                                memtable_id),
+                    nova::LogFileName(server_id_, dbid_, memtable_id),
                     options.thread_id, dbid_, memtable_id,
                     options.rdma_backing_mem, {log_record},
                     options.replicate_log_record_states);

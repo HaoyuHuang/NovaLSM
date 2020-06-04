@@ -50,7 +50,7 @@ namespace leveldb {
             db->CoordinateMajorCompaction();
         }
 
-        RDMA_LOG(rdmaio::INFO)
+        RDMA_LOG(rdmaio::DEBUG)
             << fmt::format("{} Compaction worker started.", thread_id_);
         while (is_running_) {
             sem_wait(&signal);

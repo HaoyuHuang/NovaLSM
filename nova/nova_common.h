@@ -37,7 +37,7 @@ namespace nova {
     using namespace std;
     using namespace rdmaio;
 
-    class DCStats {
+    class NovaGlobalVariables {
     public:
         void Initialize() {
             dc_pending_disk_reads = 0;
@@ -47,6 +47,7 @@ namespace nova {
             written_memtable_sizes = 0;
             total_disk_writes = 0;
             total_disk_reads = 0;
+            is_ready_to_process_requests = false;
         }
 
         // DC stats
@@ -58,8 +59,8 @@ namespace nova {
         std::atomic_int_fast64_t written_memtable_sizes;
         std::atomic_int_fast64_t total_disk_writes;
         std::atomic_int_fast64_t total_disk_reads;
-
-        static DCStats dc_stats;
+        std::atomic_bool is_ready_to_process_requests;
+        static NovaGlobalVariables global;
     };
 
     enum NovaRDMAPartitionMode {
@@ -179,13 +180,8 @@ namespace nova {
     std::string
     DBName(const std::string &dbname, uint32_t server_id, uint32_t index);
 
-    void ParseDBIndexFromFile(const std::string &logname, uint32_t *server_id,
-                              uint32_t *index);
-
     void ParseDBIndexFromDBName(const std::string &dbname, uint32_t *server_id,
                                 uint32_t *index);
-
-    uint64_t LogFileHash(const std::string &logname);
 
     void mkdirs(const char *dir);
 
@@ -370,6 +366,37 @@ namespace nova {
     uint32_t int_to_str(char *str, uint64_t x);
 
     uint32_t str_to_int(const char *str, uint64_t *out, uint32_t nkey = 0);
+
+    inline std::string
+    LogFileName(uint32_t server_id, uint32_t db_id, uint32_t memtableid) {
+        return fmt::format("{}-{}-{}", server_id, db_id, memtableid);
+    }
+
+    inline void
+    ParseDBIndexFromLogFileName(const std::string &logname, uint32_t *server_id,
+                                uint32_t *index) {
+        uint32_t data = 0;
+        int i = 0;
+        while (i < logname.size()) {
+            if (logname[i] == '-') {
+                *server_id = data;
+                i++;
+                break;
+            }
+            data = data * 10 + logname[i] - '0';
+            i++;
+        }
+        data = 0;
+        while (i < logname.size()) {
+            if (logname[i] == '-') {
+                *index = data;
+                i++;
+                break;
+            }
+            data = data * 10 + logname[i] - '0';
+            i++;
+        }
+    }
 
     int
     GenerateRDMARequest(RequestType req_type, char *buf,

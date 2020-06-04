@@ -156,6 +156,6 @@ namespace leveldb {
 
 }  // namespace leveldb
 
-nova::DCStats nova::DCStats::dc_stats;
+nova::NovaGlobalVariables nova::NovaGlobalVariables::global;
 
 int main(int argc, char **argv) { return leveldb::test::RunAllTests(); }

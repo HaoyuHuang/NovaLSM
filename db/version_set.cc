@@ -1072,7 +1072,6 @@ namespace leveldb {
         if (!manifest_file) {
             return;
         }
-
         manifest_lock_.lock();
         edit->SetNextFile(next_file_number_);
         edit->SetLastSequence(last_sequence_);
@@ -1739,13 +1738,6 @@ namespace leveldb {
             } else {
                 it++;
             }
-        }
-    }
-
-    void VersionSet::NewFileNumbers(uint32_t nfiles,
-                                    std::queue<uint64_t> *new_fns) {
-        for (int i = 0; i < nfiles; i++) {
-            new_fns->push(next_file_number_.fetch_add(1));
         }
     }
 

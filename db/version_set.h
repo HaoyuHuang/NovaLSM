@@ -317,8 +317,6 @@ namespace leveldb {
         // Return the current version.
         Version *current() const { return current_; }
 
-        void NewFileNumbers(uint32_t nfiles, std::queue<uint64_t> *new_fns);
-
         // Allocate and return a new file number
         uint64_t NewFileNumber() {
             return next_file_number_.fetch_add(1);

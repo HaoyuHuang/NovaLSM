@@ -131,9 +131,10 @@ namespace leveldb {
         uint32_t rtable_size_ = 0;
         std::string rtable_path_;
         // 0 is reserved so that read knows to fetch the block from a local file.
-        // 1 is reserved for manifest file.
-        uint32_t current_rtable_id_ = 2;
-//        NovaRTable *active_rtables_[64];
+        // 1-1000 is reserved for manifest file.
+        uint32_t current_manifest_file_rtable_id_ = 1;
+        const uint32_t MAX_MANIFEST_FILE_ID = 1000;
+        uint32_t current_rtable_id_ = MAX_MANIFEST_FILE_ID + 1;
         NovaRTable *rtables_[MAX_NUM_RTABLES];
         leveldb::Cache *block_cache_ = nullptr;
         std::mutex mutex_;

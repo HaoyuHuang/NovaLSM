@@ -92,7 +92,7 @@ namespace nova {
                     RDMA_ASSERT(result.size() <= task.rtable_handle.size);
                     stat_read_bytes_ += task.rtable_handle.size;
                 } else if (task.request_type ==
-                           leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
+                           leveldb::CCRequestType::CC_RTABLE_PERSIST) {
                     RDMA_ASSERT(task.persist_pairs.size() == 1);
                     leveldb::FileType type = leveldb::FileType::kCurrentFile;
                     for (auto &pair : task.persist_pairs) {
@@ -153,7 +153,9 @@ namespace nova {
                             task.compaction_request->smallest_snapshot);
                     std::function<uint64_t(void)> fn_generator = []() {
                         uint32_t fn = storage_file_number_seq.fetch_add(1);
-                        uint64_t stocid = nova::NovaConfig::config->my_server_id;
+                        uint64_t stocid =
+                                nova::NovaConfig::config->my_server_id +
+                                nova::NovaConfig::config->cc_servers.size();
                         return (stocid << 32) | fn;
                     };
                     {

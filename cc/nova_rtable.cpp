@@ -87,12 +87,12 @@ namespace leveldb {
     Status NovaRTable::Read(uint64_t offset, uint32_t size, char *scratch,
                             Slice *result) {
         RTableHandle h = {};
-        nova::DCStats::dc_stats.dc_queue_depth += 1;
-        nova::DCStats::dc_stats.dc_pending_disk_reads += size;
-        nova::DCStats::dc_stats.total_disk_reads += size;
+        nova::NovaGlobalVariables::global.dc_queue_depth += 1;
+        nova::NovaGlobalVariables::global.dc_pending_disk_reads += size;
+        nova::NovaGlobalVariables::global.total_disk_reads += size;
         Status status = file_->Read(h, offset, size, result, scratch);
-        nova::DCStats::dc_stats.dc_queue_depth -= 1;
-        nova::DCStats::dc_stats.dc_pending_disk_reads -= size;
+        nova::NovaGlobalVariables::global.dc_queue_depth -= 1;
+        nova::NovaGlobalVariables::global.dc_pending_disk_reads -= size;
         return status;
     }
 
@@ -253,9 +253,9 @@ namespace leveldb {
             }
 
             // persist offset -> size.
-            nova::DCStats::dc_stats.dc_queue_depth += 1;
-            nova::DCStats::dc_stats.dc_pending_disk_writes += size;
-            nova::DCStats::dc_stats.total_disk_writes += size;
+            nova::NovaGlobalVariables::global.dc_queue_depth += 1;
+            nova::NovaGlobalVariables::global.dc_pending_disk_writes += size;
+            nova::NovaGlobalVariables::global.total_disk_writes += size;
             persisted_bytes += size;
 
             Status s = file_->Append(Slice(backing_mem_ + offset, size));
@@ -263,8 +263,8 @@ namespace leveldb {
             s = file_->Sync();
             RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
 
-            nova::DCStats::dc_stats.dc_queue_depth -= 1;
-            nova::DCStats::dc_stats.dc_pending_disk_writes -= size;
+            nova::NovaGlobalVariables::global.dc_queue_depth -= 1;
+            nova::NovaGlobalVariables::global.dc_pending_disk_writes -= size;
 
             mutex_.lock();
             for (int j = persisted_i; j < i; j++) {
@@ -290,9 +290,9 @@ namespace leveldb {
             i += 1;
         }
         // Persist the last range.
-        nova::DCStats::dc_stats.dc_queue_depth += 1;
-        nova::DCStats::dc_stats.dc_pending_disk_writes += size;
-        nova::DCStats::dc_stats.total_disk_writes += size;
+        nova::NovaGlobalVariables::global.dc_queue_depth += 1;
+        nova::NovaGlobalVariables::global.dc_pending_disk_writes += size;
+        nova::NovaGlobalVariables::global.total_disk_writes += size;
         persisted_bytes += size;
 
         Status s = file_->Append(Slice(backing_mem_ + offset, size));
@@ -300,8 +300,8 @@ namespace leveldb {
         s = file_->Sync();
         RDMA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
 
-        nova::DCStats::dc_stats.dc_queue_depth -= 1;
-        nova::DCStats::dc_stats.dc_pending_disk_writes -= size;
+        nova::NovaGlobalVariables::global.dc_queue_depth -= 1;
+        nova::NovaGlobalVariables::global.dc_pending_disk_writes -= size;
 
         mutex_.lock();
         for (int j = persisted_i; j < writes.size(); j++) {
@@ -555,23 +555,23 @@ namespace leveldb {
     void NovaRTableManager::OpenRTables(
             const std::unordered_map<std::string, uint32_t> &fn_rtables) {
         mutex_.lock();
-        for (auto &it : fn_rtables) {
-            auto &fn = it.first;
-            auto &rtableid = it.second;
+        for (const auto &it : fn_rtables) {
+            const auto &fn = it.first;
+            const auto &rtableid = it.second;
             RDMA_LOG(rdmaio::INFO)
                 << fmt::format("Open RTable {} for file {}", rtableid, fn);
-
             NovaRTable *rtable = new NovaRTable(rtableid, env_,
                                                 fn,
                                                 mem_manager_,
                                                 0, rtable_size_);
             rtable->ForceSeal();
-            RDMA_ASSERT(rtables_[rtableid] == nullptr) << rtableid;
+            RDMA_ASSERT(rtables_[rtableid] == nullptr)
+                << fmt::format("{} {} {}", rtableid, it.first,
+                               rtables_[rtableid]->rtable_name_);
             rtables_[rtableid] = rtable;
             fn_rtable_map_[fn] = rtable;
             current_rtable_id_ = std::max(current_rtable_id_, rtableid);
         }
-
         current_rtable_id_ += 1;
         mutex_.unlock();
     }
@@ -586,8 +586,19 @@ namespace leveldb {
             return rtable;
         }
         // not found.
-        uint32_t id = current_rtable_id_;
-        current_rtable_id_ += 1;
+        FileType type;
+        RDMA_ASSERT(leveldb::ParseFileName(filename, &type)) << filename;
+        uint32_t id = 0;
+        if (type == FileType::kDescriptorFile) {
+            id = current_manifest_file_rtable_id_;
+            current_manifest_file_rtable_id_ += 1;
+            RDMA_ASSERT(
+                    current_manifest_file_rtable_id_ <= MAX_MANIFEST_FILE_ID)
+                << filename;
+        } else {
+            id = current_rtable_id_;
+            current_rtable_id_ += 1;
+        }
         mutex_.unlock();
 
         RDMA_LOG(rdmaio::DEBUG)

@@ -45,6 +45,25 @@ namespace leveldb {
 
     TableCache::~TableCache() { delete cache_; }
 
+    bool TableCache::IsTableCached(AccessCaller caller, const FileMetaData *meta) {
+        Status s;
+        char buf[1 + sizeof(meta->number)];
+
+        if (caller == AccessCaller::kCompaction) {
+            buf[0] = 'c';
+        } else {
+            buf[0] = 'u';
+        }
+        EncodeFixed64(buf + 1, meta->number);
+        Slice key(buf, 1 + sizeof(meta->number));
+        auto *handle = cache_->Lookup(key);
+        if (handle) {
+            cache_->Release(handle);
+            return true;
+        }
+        return false;
+    }
+
     Status
     TableCache::FindTable(AccessCaller caller, const ReadOptions &options,
                           const FileMetaData *meta,

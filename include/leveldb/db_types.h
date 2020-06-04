@@ -121,13 +121,13 @@ namespace leveldb {
 
         std::string ShortDebugString() const;
 
-        int refs;
-        int allowed_seeks;  // Seeks allowed until compaction
+        int refs = 0;
+        int allowed_seeks = 0;  // Seeks allowed until compaction
         //
         std::set<uint32_t> memtable_ids;
-        uint64_t number;
-        uint64_t file_size;    // File size in bytes in original SSTable format.
-        uint64_t converted_file_size; // File size in bytes after converted to RTable.
+        uint64_t number = 0;
+        uint64_t file_size = 0;    // File size in bytes in original SSTable format.
+        uint64_t converted_file_size = 0; // File size in bytes after converted to RTable.
         uint64_t flush_timestamp = 0;
         uint32_t level = 0;
         InternalKey smallest;  // Smallest internal key served by table

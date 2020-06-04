@@ -33,6 +33,9 @@ namespace leveldb {
         NovaBlockCCClient(uint32_t client_id,
                           NovaRTableManager *rtable_manager);
 
+        uint32_t
+        InitiateIsReadyForProcessingRequests(uint32_t remote_server_id) override;
+
         uint32_t InitiateCompaction(uint32_t remote_server_id,
                                     CompactionRequest *compaction_request) override;
 
@@ -136,6 +139,9 @@ namespace leveldb {
                   current_req_id_(lower_req_id), cc_server_(cc_server) {
         }
 
+        uint32_t
+        InitiateIsReadyForProcessingRequests(uint32_t remote_server_id) override;
+
         uint32_t InitiateCompaction(uint32_t remote_server_id,
                                     CompactionRequest *compaction_request) override;
 
@@ -200,6 +206,7 @@ namespace leveldb {
 
         void IncrementReqId();
 
+        nova::NovaRDMAComputeComponent *cc_ = nullptr;
     private:
         uint32_t cc_client_id_ = 0;
         nova::NovaRDMAStore *rdma_store_;

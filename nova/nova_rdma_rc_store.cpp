@@ -77,11 +77,11 @@ namespace nova {
                                               peer_store.thread_id,
                                               my_server_id_);
             uint64_t peer_memory_id = static_cast<uint64_t >(peer_store.server_id);
-            RDMA_LOG(INFO) << "rdma-rc[" << thread_id_
+            RDMA_LOG(DEBUG) << "rdma-rc[" << thread_id_
                            << "]: my rc key " << my_rc_key.node_id << ":"
                            << my_rc_key.worker_id << ":" << my_rc_key.index;
 
-            RDMA_LOG(INFO) << "rdma-rc[" << thread_id_
+            RDMA_LOG(DEBUG) << "rdma-rc[" << thread_id_
                            << "]: connecting to peer rc key "
                            << peer_store.host.ip << ":" << peer_rc_key.node_id
                            << ":" << peer_rc_key.worker_id << ":"
@@ -217,7 +217,6 @@ namespace nova {
         uint32_t qp_idx = to_qp_idx(server_id);
         FlushSendsOnQP(qp_idx);
     }
-
 
     void NovaRDMARCStore::FlushPendingSends() {
         for (int peer_id = 0; peer_id < end_points_.size(); peer_id++) {

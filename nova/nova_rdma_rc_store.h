@@ -44,7 +44,7 @@ namespace nova {
                 mr_size_(mr_size),
                 rdma_port_(rdma_port),
                 callback_(callback) {
-            RDMA_LOG(INFO)
+            RDMA_LOG(DEBUG)
                 << fmt::format("rc[{}]: create rdma {} {} {} {} {} {} {}.",
                                thread_id_,
                                max_num_sends_,

@@ -27,7 +27,7 @@ namespace leveldb {
         WAIT_FOR_ALLOC = 1,
         ALLOC_SUCCESS = 2,
         WAIT_FOR_WRITE = 3,
-        WRITE_SUCESS = 4,
+        WRITE_SUCCESS = 4,
     };
 
     struct WriteState {
@@ -76,6 +76,7 @@ namespace leveldb {
         CC_READ_IN_MEMORY_LOG_FILE = 'p',
         CC_RTABLE_WRITE_SSTABLE = 'q',
         CC_RTABLE_WRITE_SSTABLE_RESPONSE = 'r',
+        CC_RTABLE_PERSIST = 'T',
         CC_RTABLE_PERSIST_RESPONSE = 't',
         CC_DC_READ_STATS = 'u',
         CC_DC_READ_STATS_RESPONSE = 's',
@@ -85,7 +86,9 @@ namespace leveldb {
         CC_FILENAME_RTABLEID = 'y',
         CC_FILENAME_RTABLEID_RESPONSE = 'z',
         CC_COMPACTION = 'C',
-        CC_COMPACTION_RESPONSE = 'R'
+        CC_COMPACTION_RESPONSE = 'R',
+        CC_IS_READY_FOR_REQUESTS = 'A',
+        CC_IS_READY_FOR_REQUESTS_RESPONSE = 'B',
     };
 
     struct CCRequestContext {
@@ -116,6 +119,8 @@ namespace leveldb {
         std::unordered_map<std::string, uint64_t> *logfile_offset = nullptr;
         // compaction request.
         CompactionRequest *compaction = nullptr;
+
+        bool is_ready_for_requests = false;
     };
 
     struct CCResponse {
@@ -125,6 +130,7 @@ namespace leveldb {
         uint64_t dc_queue_depth;
         uint64_t dc_pending_read_bytes;
         uint64_t dc_pending_write_bytes;
+        bool is_ready_to_process_requests;
     };
 
     enum RDMAAsyncRequestType : char {
@@ -138,6 +144,9 @@ namespace leveldb {
         RDMA_ASYNC_READ_LOG_FILE = 'h',
         RDMA_ASYNC_FILENAME_RTABLE_MAPPING = 'i',
         RDMA_ASYNC_COMPACTION = 'j',
+        RDMA_ASYNC_RTABLE_WRITE_SSTABLE_RESPONSE = 'k',
+        RDMA_ASYNC_ALLOCATE_LOG_BUFFER_SUCC = 'l',
+        RDMA_ASYNC_IS_READY_FOR_REQUESTS = 'm',
     };
 
     struct LevelDBLogRecord {
@@ -189,6 +198,9 @@ namespace leveldb {
     public:
         virtual uint32_t InitiateCompaction(uint32_t remote_server_id,
                                             CompactionRequest *compaction_request) = 0;
+
+        virtual uint32_t
+        InitiateIsReadyForProcessingRequests(uint32_t remote_server_id) = 0;
 
         virtual uint32_t
         InitiateFileNameRTableMapping(uint32_t stoc_id,

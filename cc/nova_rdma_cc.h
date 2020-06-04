@@ -60,6 +60,7 @@ namespace nova {
 
         NovaRDMAStore *rdma_store_ = nullptr;
         leveldb::CCClient *cc_client_ = nullptr;
+        leveldb::RDMALogWriter *rdma_log_writer_ = nullptr;
         NovaCCServer *cc_server_ = nullptr;
         uint64_t thread_id_ = 0;
         std::atomic_int_fast64_t stat_tasks_;
@@ -74,6 +75,7 @@ namespace nova {
         std::atomic_bool should_pause;
         std::atomic_bool paused;
         sem_t sem_;
+        std::list<leveldb::RDMAAsyncClientRequestTask> private_queue_;
     private:
         int ProcessRequestQueue();
 
@@ -91,7 +93,7 @@ namespace nova {
         std::vector<leveldb::DB *> dbs_;
         RDMAAdmissionCtrl *admission_control_ = nullptr;
         leveldb::port::Mutex mutex_;
-        std::list<leveldb::RDMAAsyncClientRequestTask> private_queue_;
+
         std::list<leveldb::RDMAAsyncClientRequestTask> public_queue_;
     };
 }

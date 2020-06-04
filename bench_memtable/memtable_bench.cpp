@@ -33,7 +33,7 @@ DEFINE_uint64(memtable_size_mb, 0, "");
 DEFINE_uint32(npartitions, 0, "");
 DEFINE_uint64(max_ops, 0, "");
 
-DCStats DCStats::dc_stats;
+NovaGlobalVariables NovaGlobalVariables::global;
 
 int main(int argc, char *argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);

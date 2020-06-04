@@ -57,18 +57,14 @@ namespace nova {
         stat_tasks_ += private_queue_.size();
         uint32_t size = private_queue_.size();
         auto it = private_queue_.begin();
+        std::vector<int> serverids;
         while (it != private_queue_.end()) {
             const auto &task = *it;
-            if (task.server_id != -1 &&
-                !admission_control_->CanIssueRequest(task.server_id)) {
-                it++;
-                continue;
-            }
-            if (task.server_id == -1) {
+            serverids.clear();
+            if (task.type == leveldb::RDMA_ASYNC_REQ_CLOSE_LOG ||
+                task.type == leveldb::RDMA_ASYNC_REQ_LOG_RECORD) {
+                RDMA_ASSERT(task.server_id == -1);
                 // A log record request.
-                RDMA_ASSERT(task.type == leveldb::RDMA_ASYNC_REQ_CLOSE_LOG ||
-                            task.type == leveldb::RDMA_ASYNC_REQ_LOG_RECORD);
-                std::vector<int> serverids;
                 nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[task.dbid];
                 for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
                     uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
@@ -78,13 +74,36 @@ namespace nova {
                     it++;
                     continue;
                 }
+            } else {
+                RDMA_ASSERT(task.server_id >= 0);
+                if (!admission_control_->CanIssueRequest(task.server_id)) {
+                    it++;
+                    continue;
+                }
             }
-
             RequestCtx ctx = {};
             ctx.sem = task.sem;
             ctx.response = task.response;
             bool failed = false;
             switch (task.type) {
+                case leveldb::RDMA_ASYNC_ALLOCATE_LOG_BUFFER_SUCC:
+                    rdma_log_writer_->AckAllocLogBuf(task.log_file_name,
+                                                     task.server_id,
+                                                     task.offset,
+                                                     task.size,
+                                                     task.rdma_log_record_backing_mem,
+                                                     task.write_size,
+                                                     task.thread_id,
+                                                     task.replicate_log_record_states);
+                    ctx.req_id = task.thread_id;
+                    break;
+                case leveldb::RDMA_ASYNC_RTABLE_WRITE_SSTABLE_RESPONSE:
+                    rdma_store_->PostWrite(
+                            task.write_buf,
+                            task.size, task.server_id,
+                            task.offset, false, task.thread_id);
+                    ctx.req_id = task.thread_id;
+                    break;
                 case leveldb::RDMA_ASYNC_COMPACTION:
                     ctx.req_id = cc_client_->InitiateCompaction(
                             task.server_id,
@@ -134,6 +153,10 @@ namespace nova {
                     ctx.req_id = cc_client_->InitiateCloseLogFiles(
                             task.log_files, task.dbid);
                     break;
+                case leveldb::RDMA_ASYNC_IS_READY_FOR_REQUESTS:
+                    ctx.req_id = cc_client_->InitiateIsReadyForProcessingRequests(
+                            task.server_id);
+                    break;
                 case leveldb::RDMA_ASYNC_REQ_LOG_RECORD:
                     ctx.req_id = cc_client_->InitiateReplicateLogRecords(
                             task.log_file_name,
@@ -150,6 +173,10 @@ namespace nova {
                     break;
             }
             if (failed) {
+                RDMA_ASSERT(serverids.size() > 0);
+                for (auto sid : serverids) {
+                    admission_control_->RemoveRequests(sid, 1);
+                }
                 it++;
             } else {
                 pending_reqs_.push_back(ctx);
@@ -167,14 +194,11 @@ namespace nova {
     }
 
     void NovaRDMAComputeComponent::Start() {
-        RDMA_LOG(INFO) << "Async worker started";
-
+        RDMA_LOG(DEBUG) << "Async worker started";
         if (NovaConfig::config->enable_rdma) {
             rdma_store_->Init(rdma_ctrl_);
         }
-
         nova::NovaConfig::config->add_tid_mapping();
-
         mutex_.Lock();
         is_running_ = true;
         mutex_.Unlock();
@@ -234,23 +258,13 @@ namespace nova {
         if (opcode == IBV_WC_SEND || opcode == IBV_WC_RDMA_READ) {
             return true;
         }
-        *generate_a_new_request = false;
         bool processed_by_client = cc_client_->OnRecv(opcode, wr_id,
                                                       remote_server_id, buf,
-                                                      imm_data,
-                                                      generate_a_new_request);
-        if (*generate_a_new_request) {
-            admission_control_->AddRequests(remote_server_id, 1);
-        }
-        *generate_a_new_request = false;
+                                                      imm_data, nullptr);
         bool processed_by_server = cc_server_->ProcessRDMAWC(opcode, wr_id,
                                                              remote_server_id,
                                                              buf,
-                                                             imm_data,
-                                                             generate_a_new_request);
-        if (*generate_a_new_request) {
-            admission_control_->AddRequests(remote_server_id, 1);
-        }
+                                                             imm_data, nullptr);
         if (processed_by_client && processed_by_server) {
             RDMA_ASSERT(false)
                 << fmt::format("Processed by both client and server");

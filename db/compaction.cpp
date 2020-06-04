@@ -212,6 +212,13 @@ namespace leveldb {
         {
             file_number = fn_generator_();
             FileMetaData out;
+            if (file_number == 0) {
+                std::string str;
+                if (compact->compaction) {
+                    str = compact->compaction->DebugString(user_comparator_);
+                }
+                RDMA_ASSERT(false) << str;
+            }
             out.number = file_number;
             out.smallest.Clear();
             out.largest.Clear();

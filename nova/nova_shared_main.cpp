@@ -111,7 +111,7 @@ std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
 std::atomic_int_fast32_t nova::NovaStorageWorker::storage_file_number_seq;
 std::atomic_int_fast32_t nova::NovaCCServer::compaction_storage_worker_seq_id_;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
-DCStats DCStats::dc_stats;
+NovaGlobalVariables NovaGlobalVariables::global;
 
 void StartServer() {
     RdmaCtrl *rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
@@ -222,14 +222,29 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::ReadFragments(FLAGS_cc_config_path,
                               &NovaConfig::config->fragments);
-    uint32_t start_stoc_id = 0;
-    for (int i = 0; i < NovaConfig::config->fragments.size(); i++) {
-        NovaConfig::config->fragments[i]->log_replica_stoc_ids.clear();
-        for (int r = 0; r < FLAGS_cc_num_log_replicas; r++) {
-            NovaConfig::config->fragments[i]->log_replica_stoc_ids.push_back(
-                    start_stoc_id);
-            start_stoc_id = (start_stoc_id + 1) %
-                            NovaConfig::config->dc_servers.size();
+    if (FLAGS_cc_local_disk && FLAGS_server_id < FLAGS_number_of_ccs) {
+        uint32_t start_stoc_id = 0;
+        for (int i = 0; i < NovaConfig::config->fragments.size(); i++) {
+            NovaConfig::config->fragments[i]->log_replica_stoc_ids.clear();
+            std::set<uint32_t> set;
+            for (int r = 0; r < FLAGS_cc_num_log_replicas; r++) {
+                if (NovaConfig::config->dc_servers[start_stoc_id].server_id ==
+                    FLAGS_server_id) {
+                    start_stoc_id = (start_stoc_id + 1) %
+                                    NovaConfig::config->dc_servers.size();
+                }
+                RDMA_ASSERT(
+                        NovaConfig::config->dc_servers[start_stoc_id].server_id !=
+                        FLAGS_server_id);
+                NovaConfig::config->fragments[i]->log_replica_stoc_ids.push_back(
+                        start_stoc_id);
+                set.insert(start_stoc_id);
+                start_stoc_id = (start_stoc_id + 1) %
+                                NovaConfig::config->dc_servers.size();
+            }
+            RDMA_ASSERT(set.size() == FLAGS_cc_num_log_replicas);
+            RDMA_ASSERT(set.size() ==
+                        NovaConfig::config->fragments[i]->log_replica_stoc_ids.size());
         }
     }
 
@@ -283,7 +298,7 @@ int main(int argc, char *argv[]) {
     leveldb::NovaBlockCCClient::rdma_worker_seq_id_ = 0;
     nova::NovaStorageWorker::storage_file_number_seq = 0;
     nova::NovaCCServer::compaction_storage_worker_seq_id_ = 0;
-    nova::DCStats::dc_stats.Initialize();
+    nova::NovaGlobalVariables::global.Initialize();
     StartServer();
     return 0;
 }

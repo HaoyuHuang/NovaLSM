@@ -53,6 +53,9 @@ namespace nova {
         server_db_log_files_ = new DBLogFiles **[NovaConfig::config->servers.size()];
         uint32_t nranges = NovaConfig::config->fragments.size() /
                            NovaConfig::config->cc_servers.size();
+        RDMA_LOG(rdmaio::DEBUG)
+            << fmt::format("{} {}", NovaConfig::config->servers.size(),
+                           nranges);
         for (int i = 0; i < NovaConfig::config->cc_servers.size(); i++) {
             server_db_log_files_[i] = new DBLogFiles *[nranges];
             for (int j = 0; j < nranges; j++) {
@@ -62,7 +65,7 @@ namespace nova {
     }
 
     void InMemoryLogFileManager::QueryLogFiles(uint32_t sid, uint32_t range_id,
-                                       std::unordered_map<std::string, uint64_t> *logfile_offset) {
+                                               std::unordered_map<std::string, uint64_t> *logfile_offset) {
         DBLogFiles *db = server_db_log_files_[sid][range_id];
         db->mutex_.Lock();
         for (const auto &it : db->logfiles_) {
@@ -72,12 +75,14 @@ namespace nova {
         db->mutex_.Unlock();
     }
 
-    void InMemoryLogFileManager::Add(uint64_t thread_id, const std::string &log_file,
-                             char *buf) {
+    void
+    InMemoryLogFileManager::Add(uint64_t thread_id, const std::string &log_file,
+                                char *buf) {
         uint32_t sid;
         uint32_t db_index;
-        ParseDBIndexFromFile(log_file, &sid, &db_index);
-
+        ParseDBIndexFromLogFileName(log_file, &sid, &db_index);
+        RDMA_LOG(rdmaio::DEBUG)
+            << fmt::format("{} {} {}", log_file, sid, db_index);
         DBLogFiles *db = server_db_log_files_[sid][db_index];
         db->mutex_.Lock();
         auto it = db->logfiles_.find(log_file);
@@ -99,10 +104,11 @@ namespace nova {
                            log_file, thread_id);
     }
 
-    void InMemoryLogFileManager::DeleteLogBuf(const std::vector<std::string> &log_file) {
+    void InMemoryLogFileManager::DeleteLogBuf(
+            const std::vector<std::string> &log_file) {
         uint32_t sid;
         uint32_t db_index;
-        ParseDBIndexFromFile(log_file[0], &sid, &db_index);
+        ParseDBIndexFromLogFileName(log_file[0], &sid, &db_index);
 
         DBLogFiles *db = server_db_log_files_[sid][db_index];
 

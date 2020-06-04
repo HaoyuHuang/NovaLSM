@@ -103,8 +103,44 @@ namespace nova {
                 it++;
                 continue;
             }
-            if (task.request_type ==
-                leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS) {
+
+            if (task.request_type == leveldb::CC_FILENAME_RTABLEID) {
+                char *send_buf = rdma_store_->GetSendBuf(task.remote_server_id);
+                send_buf[0] = leveldb::CCRequestType::CC_FILENAME_RTABLEID_RESPONSE;
+                rdma_store_->PostSend(send_buf, 1, task.remote_server_id,
+                                      task.dc_req_id);
+            } else if (task.request_type == leveldb::CC_ALLOCATE_LOG_BUFFER) {
+                char *send_buf = rdma_store_->GetSendBuf(task.remote_server_id);
+                send_buf[0] = leveldb::CCRequestType::CC_ALLOCATE_LOG_BUFFER_SUCC;
+                leveldb::EncodeFixed64(send_buf + 1, (uint64_t) task.rdma_buf);
+                leveldb::EncodeFixed64(send_buf + 9,
+                                       NovaConfig::config->log_buf_size);
+                rdma_store_->PostSend(send_buf, 1 + 8 + 8,
+                                      task.remote_server_id,
+                                      task.dc_req_id);
+            } else if (task.request_type == leveldb::CC_RTABLE_WRITE_SSTABLE) {
+                char *sendbuf = rdma_store_->GetSendBuf(task.remote_server_id);
+                sendbuf[0] =
+                        leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE_RESPONSE;
+                leveldb::EncodeFixed32(sendbuf + 1,
+                                       task.rtable_id);
+                leveldb::EncodeFixed64(sendbuf + 5, task.rtable_offset);
+                rdma_store_->PostSend(sendbuf, 13, task.remote_server_id,
+                                      task.dc_req_id);
+            } else if (task.request_type == leveldb::CC_DC_READ_STATS) {
+                char *sendbuf = rdma_store_->GetSendBuf(task.remote_server_id);
+                sendbuf[0] =
+                        leveldb::CCRequestType::CC_DC_READ_STATS_RESPONSE;
+                leveldb::EncodeFixed64(sendbuf + 1,
+                                       NovaGlobalVariables::global.dc_queue_depth);
+                leveldb::EncodeFixed64(sendbuf + 9,
+                                       NovaGlobalVariables::global.dc_pending_disk_reads);
+                leveldb::EncodeFixed64(sendbuf + 17,
+                                       NovaGlobalVariables::global.dc_pending_disk_writes);
+                rdma_store_->PostSend(sendbuf, 13, task.remote_server_id,
+                                      task.dc_req_id);
+            } else if (task.request_type ==
+                       leveldb::CCRequestType::CC_RTABLE_READ_BLOCKS) {
                 char *sendbuf = rdma_store_->GetSendBuf(task.remote_server_id);
                 uint64_t wr_id = rdma_store_->PostWrite(task.rdma_buf,
                                                         task.rtable_handle.size,
@@ -118,7 +154,7 @@ namespace nova {
                 leveldb::EncodeFixed64(sendbuf + 13,
                                        (uint64_t) (task.rdma_buf));
             } else if (task.request_type ==
-                       leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE) {
+                       leveldb::CCRequestType::CC_RTABLE_PERSIST) {
                 char *sendbuf = rdma_store_->GetSendBuf(task.remote_server_id);
                 sendbuf[0] = leveldb::CCRequestType::CC_RTABLE_PERSIST_RESPONSE;
                 uint32_t msg_size = 1;
@@ -147,8 +183,18 @@ namespace nova {
                 delete task.compaction_request;
                 delete task.compaction_state->compaction;
                 delete task.compaction_state;
+            } else if (task.request_type ==
+                       leveldb::CCRequestType::CC_IS_READY_FOR_REQUESTS) {
+                char *sendbuf = rdma_store_->GetSendBuf(task.remote_server_id);
+                uint32_t msg_size = 1;
+                sendbuf[0] =
+                        leveldb::CCRequestType::CC_IS_READY_FOR_REQUESTS_RESPONSE;
+                msg_size += leveldb::EncodeBool(sendbuf + 1,
+                                                NovaGlobalVariables::global.is_ready_to_process_requests);
+                rdma_store_->PostSend(sendbuf, msg_size, task.remote_server_id,
+                                      task.dc_req_id);
             } else {
-                RDMA_ASSERT(false);
+                RDMA_ASSERT(false) << task.request_type;
             }
             RDMA_LOG(DEBUG) << fmt::format(
                         "CCServer[{}]: Completed Request ss:{} req:{} type:{}",
@@ -164,9 +210,7 @@ namespace nova {
     NovaCCServer::ProcessRDMAWC(ibv_wc_opcode type, uint64_t wr_id,
                                 int remote_server_id, char *buf,
                                 uint32_t imm_data,
-                                bool *generate_a_new_request) {
-        RDMA_ASSERT(generate_a_new_request);
-        *generate_a_new_request = false;
+                                bool *) {
         bool processed = false;
         switch (type) {
             case IBV_WC_SEND:
@@ -183,7 +227,6 @@ namespace nova {
                                                                   size);
                         mem_manager_->FreeItem(thread_id_, allocated_buf, scid);
                         processed = true;
-
                         RDMA_LOG(DEBUG) << fmt::format(
                                     "dc[{}]: imm:{} type:{} allocated buf:{} size:{} wr:{}.",
                                     thread_id_,
@@ -198,7 +241,6 @@ namespace nova {
             case IBV_WC_RECV_RDMA_WITH_IMM:
                 uint32_t dc_req_id = imm_data;
                 uint64_t req_id = to_req_id(remote_server_id, dc_req_id);
-
                 auto context_it = request_context_map_.find(req_id);
                 if (context_it != request_context_map_.end()) {
                     auto &context = context_it->second;
@@ -224,7 +266,7 @@ namespace nova {
                                         req_id);
 
                             NovaStorageTask task = {};
-                            task.request_type = leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE;
+                            task.request_type = leveldb::CCRequestType::CC_RTABLE_PERSIST;
                             task.remote_server_id = remote_server_id;
                             task.cc_server_thread_id = thread_id_;
                             task.dc_req_id = dc_req_id;
@@ -234,26 +276,18 @@ namespace nova {
                             pair.sstable_id = context.sstable_id;
                             task.persist_pairs.push_back(pair);
                             AddBGStorageTask(task);
-
                             request_context_map_.erase(req_id);
                         }
                     }
                 }
 
                 if (buf[0] == leveldb::CCRequestType::CC_DC_READ_STATS) {
-                    char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
-                    sendbuf[0] =
-                            leveldb::CCRequestType::CC_DC_READ_STATS_RESPONSE;
-                    leveldb::EncodeFixed64(sendbuf + 1,
-                                           DCStats::dc_stats.dc_queue_depth);
-                    leveldb::EncodeFixed64(sendbuf + 9,
-                                           DCStats::dc_stats.dc_pending_disk_reads);
-                    leveldb::EncodeFixed64(sendbuf + 17,
-                                           DCStats::dc_stats.dc_pending_disk_writes);
-                    rdma_store_->PostSend(sendbuf, 13, remote_server_id,
-                                          dc_req_id);
                     processed = true;
-                    *generate_a_new_request = true;
+                    NovaServerCompleteTask ct = {};
+                    ct.remote_server_id = remote_server_id;
+                    ct.request_type = leveldb::CCRequestType::CC_DC_READ_STATS;
+                    ct.dc_req_id = dc_req_id;
+                    private_cq_.push_back(ct);
                 } else if (buf[0] == leveldb::CCRequestType::CC_DELETE_TABLES) {
                     uint32_t msg_size = 1;
                     uint32_t nrtables = leveldb::DecodeFixed32(buf + msg_size);
@@ -375,17 +409,14 @@ namespace nova {
                         << fmt::format("dc{}: {} {}", thread_id_,
                                        rtable->rtable_name_, filename);
 
-                    char *sendbuf = rdma_store_->GetSendBuf(remote_server_id);
-                    sendbuf[0] =
-                            leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE_RESPONSE;
-                    leveldb::EncodeFixed32(sendbuf + 1,
-                                           rtable->rtable_id());
-                    leveldb::EncodeFixed64(sendbuf + 5, rtable_off);
-                    rdma_store_->PostSend(sendbuf, 13, remote_server_id,
-                                          dc_req_id);
-                    *generate_a_new_request = true;
 
-//                    MarkCharAsWaitingForRDMAWRITE((char *) rtable_off, size);
+                    NovaServerCompleteTask task = {};
+                    task.request_type = leveldb::CC_RTABLE_WRITE_SSTABLE;
+                    task.remote_server_id = remote_server_id;
+                    task.dc_req_id = dc_req_id;
+                    task.rtable_id = rtable->rtable_id();
+                    task.rtable_offset = rtable_off;
+                    private_cq_.push_back(task);
 
                     RequestContext context = {};
                     context.request_type = leveldb::CCRequestType::CC_RTABLE_WRITE_SSTABLE;
@@ -411,14 +442,14 @@ namespace nova {
                                                              slabclassid);
                     RDMA_ASSERT(rmda_buf) << "Running out of memory";
                     log_manager_->Add(thread_id_, log_file, rmda_buf);
-                    char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
-                    send_buf[0] = leveldb::CCRequestType::CC_ALLOCATE_LOG_BUFFER_SUCC;
-                    leveldb::EncodeFixed64(send_buf + 1, (uint64_t) rmda_buf);
-                    leveldb::EncodeFixed64(send_buf + 9,
-                                           NovaConfig::config->log_buf_size);
-                    rdma_store_->PostSend(send_buf, 1 + 8 + 8, remote_server_id,
-                                          dc_req_id);
-                    *generate_a_new_request = true;
+
+                    NovaServerCompleteTask task = {};
+                    task.request_type = leveldb::CC_ALLOCATE_LOG_BUFFER;
+                    task.rdma_buf = rmda_buf;
+                    task.remote_server_id = remote_server_id;
+                    task.dc_req_id = dc_req_id;
+                    private_cq_.push_back(task);
+
                     RDMA_LOG(DEBUG) << fmt::format(
                                 "dc[{}]: Allocate log buffer for file {}.",
                                 thread_id_, log_file);
@@ -430,6 +461,7 @@ namespace nova {
                     std::unordered_map<std::string, uint64_t> logfile_offset;
                     log_manager_->QueryLogFiles(server_id, dbid,
                                                 &logfile_offset);
+                    // TODO.
                     uint32_t msg_size = 0;
                     char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
                     send_buf[msg_size] = leveldb::CCRequestType::CC_QUERY_LOG_FILES_RESPONSE;
@@ -444,7 +476,6 @@ namespace nova {
                     }
                     rdma_store_->PostSend(send_buf, msg_size, remote_server_id,
                                           dc_req_id);
-                    *generate_a_new_request = true;
                 } else if (buf[0] ==
                            leveldb::CCRequestType::CC_DELETE_LOG_FILE) {
                     int size = 1;
@@ -477,13 +508,11 @@ namespace nova {
                         fn_rtable[fn] = rtableid;
                     }
                     rtable_manager_->OpenRTables(fn_rtable);
-
-
-                    char *send_buf = rdma_store_->GetSendBuf(remote_server_id);
-                    send_buf[0] = leveldb::CCRequestType::CC_FILENAME_RTABLEID_RESPONSE;
-                    rdma_store_->PostSend(send_buf, 1, remote_server_id,
-                                          dc_req_id);
-                    *generate_a_new_request = true;
+                    NovaServerCompleteTask task = {};
+                    task.remote_server_id = remote_server_id;
+                    task.request_type = leveldb::CC_FILENAME_RTABLEID;
+                    task.dc_req_id = dc_req_id;
+                    private_cq_.push_back(task);
                     RDMA_LOG(DEBUG) << fmt::format(
                                 "dc[{}]: Filename rtable mapping {}.",
                                 thread_id_, fn_rtable.size());
@@ -500,6 +529,14 @@ namespace nova {
                     task.compaction_request = req;
                     AddCompactionStorageTask(task);
                     processed = true;
+                } else if (buf[0] ==
+                           leveldb::CCRequestType::CC_IS_READY_FOR_REQUESTS) {
+                    processed = true;
+                    NovaServerCompleteTask ct = {};
+                    ct.remote_server_id = remote_server_id;
+                    ct.request_type = leveldb::CCRequestType::CC_IS_READY_FOR_REQUESTS;
+                    ct.dc_req_id = dc_req_id;
+                    private_cq_.push_back(ct);
                 }
                 break;
         }

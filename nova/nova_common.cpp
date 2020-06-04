@@ -215,23 +215,6 @@ namespace nova {
                std::to_string(index);
     }
 
-    void
-    ParseDBIndexFromFile(const std::string &logname, uint32_t *sid,
-                         uint32_t *index) {
-        int iend = logname.find_last_of('/') - 1;
-        int istart = logname.find_last_of('/', iend) + 1;
-        int send = istart - 2;
-        int sstart = logname.find_last_of('/', send) + 1;
-
-        uint64_t i64;
-        uint64_t s64;
-        str_to_int(logname.data() + istart, &i64, iend - istart + 1);
-        str_to_int(logname.data() + sstart, &s64, send - sstart + 1);
-
-        *sid = s64;
-        *index = i64;
-    }
-
     void ParseDBIndexFromDBName(const std::string &dbname, uint32_t *server_id,
                                 uint32_t *index) {
         int iend = dbname.size() - 1;
@@ -246,14 +229,6 @@ namespace nova {
 
         *server_id = s64;
         *index = i64;
-    }
-
-    uint64_t LogFileHash(const std::string &logname) {
-        uint32_t sid;
-        uint32_t index;
-        ParseDBIndexFromFile(logname, &sid, &index);
-        uint64_t hash = ((uint64_t) sid) << 32;
-        return hash + index;
     }
 
     void mkdirs(const char *dir) {

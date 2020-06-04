@@ -63,7 +63,7 @@ namespace leveldb {
                     return "alloc_success";
                 case WAIT_FOR_WRITE:
                     return "wait_for_write";
-                case WRITE_SUCESS:
+                case WRITE_SUCCESS:
                     return "write_success";
             }
         }

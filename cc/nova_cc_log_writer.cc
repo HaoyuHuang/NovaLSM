@@ -57,7 +57,6 @@ namespace leveldb {
         meta->stoc_bufs[stoc_server_id].size = size;
         meta->stoc_bufs[stoc_server_id].offset = 0;
         meta->stoc_bufs[stoc_server_id].is_initializing = false;
-        admission_control_->AddRequests(stoc_server_id, 1);
         char *sendbuf = store_->GetSendBuf(stoc_server_id);
         sendbuf[0] = leveldb::CCRequestType::CC_REPLICATE_LOG_RECORDS;
         leveldb::EncodeFixed32(sendbuf + 1, client_req_id);
@@ -77,7 +76,7 @@ namespace leveldb {
         WriteState &state = replicate_log_record_states[remote_sid];
         if (state.rdma_wr_id == wr_id &&
             state.result == WriteResult::WAIT_FOR_WRITE) {
-            state.result = WriteResult::WRITE_SUCESS;
+            state.result = WriteResult::WRITE_SUCCESS;
             return true;
         }
         return false;
@@ -96,9 +95,8 @@ namespace leveldb {
         if (frag->log_replica_stoc_ids.empty()) {
             return true;
         }
-        Init(log_file_name, thread_id, log_records, rdma_backing_buf);
-        uint32_t log_record_size = nova::LogRecordsSize(log_records);
         // If one of the log buf is intializing, return false.
+        Init(log_file_name, thread_id, log_records, rdma_backing_buf);
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
             uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
             auto &it = logfile_last_buf_[log_file_name];
@@ -106,7 +104,7 @@ namespace leveldb {
                 return false;
             }
         }
-
+        uint32_t log_record_size = nova::LogRecordsSize(log_records);
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
             uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
             auto &it = logfile_last_buf_[log_file_name];
@@ -152,8 +150,6 @@ namespace leveldb {
         // Pull all pending writes.
         int acks = 0;
         int total_states = 0;
-        LogFileMetadata *meta = nullptr;
-        char *sendbuf = nullptr;
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
             uint32_t stoc_server_id = nova::NovaConfig::config->dc_servers[frag->log_replica_stoc_ids[i]].server_id;
             switch (replicate_log_record_states[stoc_server_id].result) {
@@ -168,7 +164,7 @@ namespace leveldb {
                 case WriteResult::ALLOC_SUCCESS:
                     total_states += 1;
                     break;
-                case WriteResult::WRITE_SUCESS:
+                case WriteResult::WRITE_SUCCESS:
                     total_states += 1;
                     acks++;
                     break;
