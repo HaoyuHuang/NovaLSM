@@ -14,6 +14,13 @@
 namespace leveldb {
     using namespace rdmaio;
 
+    void NovaBlockCCClient::IncrementReqId() {
+        req_id_++;
+        if (req_id_ == 0) {
+            req_id_ = 1;
+        }
+    }
+
     NovaBlockCCClient::NovaBlockCCClient(uint32_t client_id,
                                          NovaRTableManager *rtable_manager)
             : rtable_manager_(rtable_manager) {
@@ -33,7 +40,7 @@ namespace leveldb {
         req_response[reqid] = response;
         task.response = response;
         AddAsyncTask(task);
-        req_id_++;
+        IncrementReqId();
         return reqid;
     }
 
@@ -51,8 +58,7 @@ namespace leveldb {
         req_response[reqid] = response;
         task.response = response;
         AddAsyncTask(task);
-
-        req_id_++;
+        IncrementReqId();
         return reqid;
     }
 
@@ -98,7 +104,7 @@ namespace leveldb {
             uint32_t reqid = req_id_;
             CCResponse *response = new CCResponse;
             req_response[reqid] = response;
-            req_id_++;
+            IncrementReqId();
             response->rtable_handles.push_back(rh);
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("Wake up local write");
@@ -123,7 +129,7 @@ namespace leveldb {
         req_response[reqid] = response;
         task.response = response;
         AddAsyncTask(task);
-        req_id_++;
+        IncrementReqId();
         return reqid;
     }
 
@@ -135,7 +141,7 @@ namespace leveldb {
             response->dc_queue_depth = nova::NovaGlobalVariables::global.dc_queue_depth;
             response->dc_pending_write_bytes = nova::NovaGlobalVariables::global.dc_pending_disk_writes;
             response->dc_pending_read_bytes = nova::NovaGlobalVariables::global.dc_pending_disk_reads;
-            req_id_++;
+            IncrementReqId();
             RDMA_LOG(rdmaio::DEBUG)
                 << fmt::format("Wake up local read stats");
             sem_post(&sem_);
@@ -152,7 +158,7 @@ namespace leveldb {
         req_response[reqid] = response;
         task.response = response;
         AddAsyncTask(task);
-        req_id_++;
+        IncrementReqId();
         return reqid;
     }
 
@@ -173,8 +179,7 @@ namespace leveldb {
         req_response[reqid] = response;
         task.response = response;
         AddAsyncTask(task);
-
-        req_id_++;
+        IncrementReqId();
         return reqid;
     }
 
@@ -216,7 +221,7 @@ namespace leveldb {
 
         uint32_t reqid = req_id_;
         AddAsyncTask(task);
-        req_id_++;
+        IncrementReqId();
         return reqid;
     }
 
@@ -276,7 +281,7 @@ namespace leveldb {
         task.sem = &sem_;
         AddAsyncTask(task);
         uint32_t reqid = req_id_;
-        req_id_++;
+        IncrementReqId();
         return reqid;
     }
 
@@ -351,7 +356,7 @@ namespace leveldb {
                 << fmt::format("Wake up local read");
             sem_post(&sem_);
             uint32_t reqid = req_id_;
-            req_id_++;
+            IncrementReqId();
             return reqid;
         }
 
@@ -369,7 +374,7 @@ namespace leveldb {
         AddAsyncTask(task);
 
         uint32_t reqid = req_id_;
-        req_id_++;
+        IncrementReqId();
         return reqid;
     }
 

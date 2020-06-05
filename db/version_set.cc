@@ -1095,7 +1095,7 @@ namespace leveldb {
             builder.SaveTo(v);
         }
         Finalize(v);
-        RDMA_LOG(rdmaio::DEBUG) << v->DebugString();
+//        RDMA_LOG(rdmaio::INFO) << v->DebugString();
         if (install_new_version) {
             AppendVersion(v);
         }

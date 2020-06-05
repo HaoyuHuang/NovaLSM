@@ -1396,6 +1396,9 @@ namespace leveldb {
                     std::vector<FileMetaData *> metafiles;
                     for (int i = 0; i < reqs.size(); i++) {
                         if (reqs[i] == 0) {
+                            RDMA_ASSERT(
+                                    selected_storages[i] ==
+                                    nova::NovaConfig::config->my_server_id);
                             continue;
                         }
                         CCResponse response;
@@ -1702,10 +1705,11 @@ namespace leveldb {
 //                value->assign(l1val);
 //            }
         }
-        RDMA_ASSERT(s.ok());
-//            << fmt::format("key:{} seq:{} status:{} l0:{} version:{}",
-//                           key.ToString(), latest_seq, s.ToString(),
-//                           l0fns_str, current->DebugString());
+        RDMA_ASSERT(s.ok())
+            << fmt::format("key:{} val:{} seq:{} status:{} version:{}",
+                           key.ToString(), value->size(), latest_seq,
+                           s.ToString(),
+                           current->DebugString());
         versions_->versions_[vid]->Unref(dbname_);
         return s;
     }

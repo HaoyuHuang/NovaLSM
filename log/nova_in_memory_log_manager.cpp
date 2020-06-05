@@ -109,11 +109,8 @@ namespace nova {
         uint32_t sid;
         uint32_t db_index;
         ParseDBIndexFromLogFileName(log_file[0], &sid, &db_index);
-
         DBLogFiles *db = server_db_log_files_[sid][db_index];
-
         db->mutex_.Lock();
-
         for (int i = 0; i < log_file.size(); i++) {
             auto it = db->logfiles_.find(log_file[i]);
             if (it == db->logfiles_.end()) {

@@ -112,6 +112,8 @@ namespace leveldb {
 
         static std::atomic_int_fast32_t rdma_worker_seq_id_;
         sem_t sem_;
+
+        void IncrementReqId();
     private:
         std::unordered_map<uint32_t, CCResponse *> req_response;
 
@@ -119,7 +121,7 @@ namespace leveldb {
 
         NovaRTableManager *rtable_manager_;
         uint32_t current_cc_id_ = 0;
-        uint32_t req_id_ = 0;
+        uint32_t req_id_ = 1;
         uint32_t dbid_ = 0;
 
     };
