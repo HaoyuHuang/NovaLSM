@@ -23,63 +23,26 @@ namespace leveldb {
 // Grouping of constants.  We may want to make some of these
 // parameters set via options.
     namespace config {
-        static const int kNumLevels = 2;
-
-// Level-0 compaction is started when we hit this many files.
-        static const int kL0_CompactionTrigger = 4;
-
-// Soft limit on number of level-0 files.  We slow down writes at this point.
-        static const int kL0_SlowdownWritesTrigger = 8;
-
-// Maximum number of level-0 files.  We stop writes at this point.
-        static const int kL0_StopWritesTrigger = 12;
-
-// Maximum level to which a new compacted memtable is pushed if it
-// does not create overlap.  We try to push to level 2 to avoid the
-// relatively expensive level 0=>1 compactions and to avoid some
-// expensive manifest file operations.  We do not push all the way to
-// the largest level since that can generate a lot of wasted disk
-// space if the same key space is being repeatedly overwritten.
-        static const int kMaxMemCompactLevel = 0;
-
 // Approximate gap in bytes between samples of data read during iteration.
         static const int kReadBytesPeriod = 1048576;
-
     }  // namespace config
-
-    static size_t TargetFileSize(const Options *options) {
-        return options->max_file_size;
-    }
 
 // Maximum bytes of overlaps in grandparent (i.e., level+2) before we
 // stop building a single file in a level->level+1 compaction.
     static int64_t MaxGrandParentOverlapBytes(const Options *options) {
-        return 10 * TargetFileSize(options);
-    }
-
-// Maximum number of bytes in all compacted files.  We avoid expanding
-// the lower level file set of a compaction if it would make the
-// total compaction cover more than this many bytes.
-    static int64_t ExpandedCompactionByteSizeLimit(const Options *options) {
-        return 25 * TargetFileSize(options);
+        return 10 * options->max_file_size;
     }
 
     static double MaxBytesForLevel(const Options &options, int level) {
-        // Note: the result for level zero is not really used since we set
-        // the level-0 compaction threshold based on number of files.
-
-        // Result for both level-0 and level-1
-        double result = 10. * 1048576.0; // 10 MB.
+        double result = options.l0bytes_start_compaction_trigger;
+        if (result == 0) {
+            result = 4.0 * 1024 * 1024 * 1024;
+        }
         while (level > 1) {
-            result *= 10;
+            result *= 3.2;
             level--;
         }
         return result;
-    }
-
-    static uint64_t MaxFileSizeForLevel(const Options *options, int level) {
-        // We could vary per level to reduce number of files?
-        return TargetFileSize(options);
     }
 
     static int64_t TotalFileSize(const std::vector<FileMetaData *> &files) {

@@ -132,6 +132,7 @@ namespace leveldb {
               l0_stop_write_signal_(&l0_stop_write_mutex_),
               user_comparator_(raw_options.comparator) {
         memtable_id_seq_ = 100;
+        start_compaction_ = false;
         if (options_.enable_table_locator) {
             table_locator_ = new TableLocator;
             for (int i = 0; i < MAX_BUCKETS; i++) {
@@ -210,15 +211,17 @@ namespace leveldb {
                 }
             }
         }
-        for (int i = 0; i < c->inputs_[1].size(); i++) {
-            auto f = c->inputs_[1][i];
-            if (f->memtable_ids.empty()) {
-                continue;
-            }
-            for (auto memtableid : f->memtable_ids) {
-                RDMA_ASSERT(memtableid < MAX_LIVE_MEMTABLES);
-                (*memtableid_l0fns)[memtableid].remove_fns.insert(
-                        f->number);
+        if (c->target_level() == 0 || c->target_level() == 1) {
+            for (int i = 0; i < c->inputs_[1].size(); i++) {
+                auto f = c->inputs_[1][i];
+                if (f->memtable_ids.empty()) {
+                    continue;
+                }
+                for (auto memtableid : f->memtable_ids) {
+                    RDMA_ASSERT(memtableid < MAX_LIVE_MEMTABLES);
+                    (*memtableid_l0fns)[memtableid].remove_fns.insert(
+                            f->number);
+                }
             }
         }
     }
@@ -412,9 +415,9 @@ namespace leveldb {
         versions_->last_sequence_.fetch_add(1);
 
         // Inform all StoCs of the mapping between a file and rtable id.
-        std::vector<FileMetaData *> *files = versions_->current()->files_;
+        const std::vector<std::vector<FileMetaData *>> &files = versions_->current()->files_;
         std::unordered_map<uint32_t, std::unordered_map<std::string, uint32_t>> stoc_fn_rtableid;
-        for (int level = 0; level < config::kNumLevels; level++) {
+        for (int level = 0; level < options_.level; level++) {
             for (int i = 0; i < files[level].size(); i++) {
                 auto meta = files[level][i];
                 std::string metafilename = TableFileName(dbname_, meta->number,
@@ -443,7 +446,7 @@ namespace leveldb {
 
         // Fetch metadata blocks.
         std::vector<FileMetaData *> meta_files;
-        for (int level = 0; level < config::kNumLevels; level++) {
+        for (int level = 0; level < options_.level; level++) {
             for (int i = 0; i < files[level].size(); i++) {
                 meta_files.push_back(files[level][i]);
             }
@@ -1178,47 +1181,20 @@ namespace leveldb {
                                               kCompactInputSSTables,
                                               kCompactOutputSSTables);
         }
-
-        while (options_.major_compaction_type ==
-               MajorCompactionType::kMajorSingleThreaded) {
-            MutexLock l(&mutex_);
-            if (is_major_compaciton_running_) {
-                return;
-            }
-
-            if (versions_->NeedsCompaction() ||
-                versions_->current()->files_[0].size() >=
-                config::kL0_StopWritesTrigger) {
-
-                Compaction *c = versions_->PickCompaction(
-                        bg_thread->thread_id());
-                if (c == nullptr) {
-                    continue;
-                }
-
-                EnvBGTask task = {};
-                task.compaction_task = c;
-                PerformMajorCompaction(bg_thread, task);
-                delete c;
-            } else {
-                return;
-            }
-        }
     }
 
     void DBImpl::ComputeCompactions(leveldb::Version *current,
                                     std::vector<leveldb::Compaction *> *compactions,
                                     VersionEdit *edit) {
         current->ComputeNonOverlappingSet(compactions);
-
-        if (RDMA_LOG_LEVEL == rdmaio::DEBUG) {
+        if (RDMA_LOG_LEVEL == rdmaio::INFO) {
             std::string debug = "Coordinated compaction picks compaction sets: ";
             for (int i = 0; i < compactions->size(); i++) {
                 debug += "set " + std::to_string(i) + ": ";
                 debug += (*compactions)[i]->DebugString(user_comparator_);
                 debug += "\n";
             }
-            RDMA_LOG(rdmaio::DEBUG) << debug;
+            RDMA_LOG(rdmaio::INFO) << debug;
         }
 
         {
@@ -1240,7 +1216,7 @@ namespace leveldb {
                 continue;
             }
             // Move file to next level
-            assert(c->level() == 0);
+//            assert(c->level() == 0);
             assert(c->num_input_files(0) == 1);
             assert(c->num_input_files(1) == 0);
             FileMetaData *f = c->input(0, 0);
@@ -1269,8 +1245,12 @@ namespace leveldb {
                options_.major_compaction_type == kMajorCoordinatedStoC) {
             mutex_.Lock();
             Version *current = versions_->current();
-            if (current->l0_bytes_ <=
-                options_.l0bytes_start_compaction_trigger) {
+            if (!start_compaction_) {
+                mutex_.Unlock();
+                sleep(1);
+                continue;
+            }
+            if (!current->NeedsCompaction() ) {
                 mutex_.Unlock();
                 sleep(1);
                 continue;
@@ -1333,18 +1313,12 @@ namespace leveldb {
                     std::vector<uint32_t> selected_storages;
                     std::vector<nova::Host> dcs;
                     for (auto host : nova::NovaConfig::config->dc_servers) {
-//                        if (host.server_id !=
-//                            nova::NovaConfig::config->my_server_id) {
-//                            dcs.push_back(host);
-//                        }
                         dcs.push_back(host);
                     }
                     int startid = rand_r(&rand_seed_) % dcs.size();
                     for (int i = 0; i < compactions.size(); i++) {
                         int id = (startid + i) % dcs.size();
                         uint32_t sid = dcs[id].server_id;
-//                        RDMA_ASSERT(
-//                                sid != nova::NovaConfig::config->my_server_id);
                         selected_storages.push_back(sid);
                     }
                     RDMA_ASSERT(selected_storages.size() == compactions.size());
@@ -1479,97 +1453,6 @@ namespace leveldb {
             DeleteFiles(compaction_coordinator_thread_, files_to_delete,
                         server_pairs);
         }
-    }
-
-    bool DBImpl::PerformMajorCompaction(EnvBGThread *bg_thread,
-                                        const EnvBGTask &task) {
-        Compaction *c = reinterpret_cast<Compaction *>(task.compaction_task);
-        Status status;
-        if (c == nullptr) {
-            // Nothing to do
-            return false;
-        }
-        is_major_compaciton_running_ = true;
-        if (c->IsTrivialMove()) {
-            // Move file to next level
-            assert(c->level() >= 0);
-            assert(c->num_input_files(0) == 1);
-            assert(c->num_input_files(1) == 0);
-            FileMetaData *f = c->input(0, 0);
-            c->edit()->DeleteFile(c->level(), f->number);
-            c->edit()->AddFile(c->target_level(),
-                               {0},
-                               f->number, f->file_size,
-                               f->converted_file_size,
-                               f->flush_timestamp,
-                               f->smallest,
-                               f->largest,
-                               f->meta_block_handle,
-                               f->data_block_group_handles);
-            Version *v = new Version(&internal_comparator_, table_cache_,
-                                     &options_,
-                                     versions_->version_id_seq_.fetch_add(1));
-            status = versions_->LogAndApply(c->edit(), v, true);
-            if (!status.ok()) {
-                RecordBackgroundError(status);
-            }
-            std::string output = fmt::format(
-                    "Moved #{}@{} to level-{} {} bytes {}\n",
-                    f->number, c->level(), c->target_level(), f->file_size,
-                    status.ToString().c_str());
-            Log(options_.info_log, "%s", output.c_str());
-            RDMA_LOG(rdmaio::DEBUG) << output;
-        } else {
-            // Release mutex while we're actually doing the compaction work
-            mutex_.Unlock();
-            std::vector<std::string> files_to_delete;
-            std::unordered_map<uint32_t, std::vector<SSTableRTablePair>> server_pairs;
-            CompactionState *compact = new CompactionState(c, nullptr,
-                                                           versions_->last_sequence_);
-            Iterator *input = compact->compaction->MakeInputIterator(
-                    table_cache_, bg_thread);
-
-            CompactionStats stats = compact->BuildStats();
-            std::function<uint64_t(void)> fn_generator = std::bind(
-                    &VersionSet::NewFileNumber, versions_);
-            CompactionJob job(fn_generator, env_, dbname_, user_comparator_,
-                              options_, bg_thread, table_cache_);
-            status = job.CompactTables(compact, input, &stats, true,
-                                       kCompactInputSSTables,
-                                       kCompactOutputSSTables);
-            InstallCompactionResults(compact, compact->compaction->edit(),
-                                     c->target_level());
-            versions_->AppendChangesToManifest(compact->compaction->edit(),
-                                               manifest_file_,
-                                               options_.manifest_stoc_id);
-            Version *v = new Version(&internal_comparator_, table_cache_,
-                                     &options_,
-                                     versions_->version_id_seq_.fetch_add(1));
-            Version *compacted_version = reinterpret_cast<Version *>(c->input_version_);
-            mutex_.Lock();
-            versions_->AddCompactedInputs(compact->compaction,
-                                          &compacted_tables_);
-            versions_->LogAndApply(compact->compaction->edit(), v, false);
-            if (!status.ok()) {
-                RecordBackgroundError(status);
-            }
-            DeleteObsoleteVersions(bg_thread);
-            ObtainObsoleteFiles(bg_thread, &files_to_delete, &server_pairs);
-            versions_->AppendVersion(v);
-            delete compact;
-            versions_->versions_[compacted_version->version_id()]->Unref(
-                    dbname_);
-            DeleteFiles(bg_thread, files_to_delete, server_pairs);
-            RDMA_LOG(rdmaio::DEBUG)
-                << fmt::format("!!!!!!!!!!!!!Compaction complete");
-        }
-        is_major_compaciton_running_ = false;
-        if (status.ok()) {
-        } else {
-            Log(options_.info_log, "Compaction error: %s",
-                status.ToString().c_str());
-        }
-        return true;
     }
 
     Status DBImpl::InstallCompactionResults(CompactionState *compact,
@@ -1718,6 +1601,10 @@ namespace leveldb {
         if (db_profiler_) {
             db_profiler_->StartTracing();
         }
+    }
+
+    void DBImpl::StartCompaction() {
+        start_compaction_ = true;
     }
 
     Iterator *DBImpl::NewIterator(const ReadOptions &options) {
@@ -2573,7 +2460,7 @@ namespace leveldb {
             in.remove_prefix(strlen("num-files-at-level"));
             uint64_t level;
             bool ok = ConsumeDecimalNumber(&in, &level) && in.empty();
-            if (!ok || level >= config::kNumLevels) {
+            if (!ok || level >= options_.level) {
                 return false;
             } else {
                 char buf[100];

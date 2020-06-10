@@ -74,6 +74,7 @@ DEFINE_bool(cc_enable_table_locator, false, "");
 
 DEFINE_uint32(cc_l0_start_compaction_mb, 0, "");
 DEFINE_uint32(cc_l0_stop_write_mb, 0, "");
+DEFINE_int32(level, 2, "");
 
 DEFINE_uint64(cc_write_buffer_size_mb, 0, "write buffer size in mb");
 DEFINE_uint64(cc_sstable_size_mb, 0, "sstable size in mb");
@@ -101,6 +102,7 @@ DEFINE_uint32(cc_subrange_no_flush_num_keys, 100, "");
 DEFINE_string(cc_major_compaction_type, "no", "no/st/lc/sc");
 DEFINE_uint32(cc_major_compaction_max_parallism, 1, "");
 DEFINE_uint32(cc_major_compaction_max_tables_in_a_set, 15, "");
+
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq;
@@ -290,6 +292,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->subrange_num_keys_no_flush = FLAGS_cc_subrange_no_flush_num_keys;
     NovaConfig::config->l0_stop_write_mb = FLAGS_cc_l0_stop_write_mb;
     NovaConfig::config->l0_start_compaction_mb = FLAGS_cc_l0_start_compaction_mb;
+    NovaConfig::config->level = FLAGS_level;
     NovaConfig::config->enable_subrange_reorg = FLAGS_cc_enable_subrange_reorg;
 
     leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq = 0;

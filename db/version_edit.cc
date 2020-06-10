@@ -88,7 +88,7 @@ namespace leveldb {
 
     static bool GetLevel(Slice *input, int *level) {
         uint32_t v;
-        if (DecodeFixed32(input, &v) && v < config::kNumLevels) {
+        if (DecodeFixed32(input, &v) && v < nova::NovaConfig::config->level) {
             *level = v;
             return true;
         } else {

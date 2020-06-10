@@ -84,7 +84,8 @@ namespace nova {
 
                 int nreplicas = (tokens.size() - 4);
                 for (int i = 0; i < nreplicas; i++) {
-                    frag->log_replica_stoc_ids.push_back(std::stoi(tokens[i + 4]));
+                    frag->log_replica_stoc_ids.push_back(
+                            std::stoi(tokens[i + 4]));
                 }
                 frags->push_back(frag);
             }
@@ -106,7 +107,7 @@ namespace nova {
             CCFragment *home = nullptr;
             RDMA_ASSERT(
                     key <= config->fragments[config->fragments.size() -
-                                                1]->range.key_end);
+                                             1]->range.key_end);
             uint32_t l = 0;
             uint32_t r = config->fragments.size() - 1;
 
@@ -161,7 +162,7 @@ namespace nova {
         char *nova_buf;
         uint64_t nnovabuf;
 
-        ScatterPolicy  scatter_policy;
+        ScatterPolicy scatter_policy;
         NovaLogRecordMode log_record_mode;
         bool recover_dbs;
         uint32_t number_of_recovery_threads;
@@ -181,6 +182,7 @@ namespace nova {
         int num_compaction_workers;
         int num_rdma_compaction_workers;
         int num_storage_workers;
+        int level;
 
         int block_cache_mb;
         int row_cache_mb;

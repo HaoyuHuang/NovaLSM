@@ -108,6 +108,7 @@ namespace nova {
             options.max_num_sstables_in_nonoverlapping_set = NovaConfig::config->major_compaction_max_tables_in_a_set;
             options.max_num_coordinated_compaction_nonoverlapping_sets = NovaConfig::config->major_compaction_max_parallism;
             options.enable_subrange_reorg = NovaConfig::config->enable_subrange_reorg;
+            options.level = NovaConfig::config->level;
             if (NovaConfig::config->major_compaction_type == "no") {
                 options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
             } else if (NovaConfig::config->major_compaction_type == "st") {
@@ -154,6 +155,7 @@ namespace nova {
             options.max_open_files = 50000;
             options.enable_table_locator = NovaConfig::config->enable_table_locator;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
+            options.level = NovaConfig::config->level;
             options.max_dc_file_size =
                     std::max(options.write_buffer_size, options.max_file_size) +
                     LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
@@ -322,21 +324,29 @@ namespace nova {
             loaded_frags++;
             i = (i + 1) % frags.size();
         }
+
+        for (auto db : dbs_) {
+            db->StartCompaction();
+        }
         // Wait until there are no SSTables at L0.
         while (NovaConfig::config->major_compaction_type != "no") {
             uint32_t l0tables = 0;
             uint32_t nmemtables = 0;
+            bool needs_compaction = false;
             for (auto db : dbs_) {
                 leveldb::DBStats stats;
                 stats.sstable_size_dist = new uint32_t[20];
                 db->QueryDBStats(&stats);
+                if (!needs_compaction) {
+                    needs_compaction = stats.needs_compaction;
+                }
                 l0tables += stats.num_l0_sstables;
                 nmemtables += db->FlushMemTables();
                 delete stats.sstable_size_dist;
             }
             RDMA_LOG(rdmaio::INFO) << fmt::format(
-                        "Waiting for {} L0 tables and {} memtables to go to L1",
-                        l0tables, nmemtables);
+                        "Waiting for {} L0 tables and {} memtables to go to L1 Needs compaction:{}",
+                        l0tables, nmemtables, needs_compaction);
             if (l0tables == 0 && nmemtables == 0) {
                 break;
             }
@@ -984,6 +994,7 @@ namespace nova {
             db->number_of_wait_due_to_contention_ = 0;
             db->number_of_gets_ = 0;
             db->number_of_memtable_hits_ = 0;
+            db->StartCompaction();
         }
 
         stat_thread_ = new NovaStatThread;
@@ -1034,8 +1045,6 @@ namespace nova {
                 }
             }
         }
-
-
         // Start connection threads in the end after we have loaded all data.
         for (int i = 0;
              i <
@@ -1043,7 +1052,6 @@ namespace nova {
             conn_worker_threads.emplace_back(start, conn_workers[i]);
         }
         current_conn_worker_id_ = 0;
-
         usleep(1000000);
         nova::NovaConfig::config->print_mapping();
     }

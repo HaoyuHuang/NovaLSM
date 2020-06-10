@@ -253,12 +253,20 @@ namespace nova {
         RDMA_LOG(rdmaio::INFO) << "Obtain stats";
         NovaCCConnWorker *worker = (NovaCCConnWorker *) conn->worker;
         int num_l0_sstables = 0;
+        bool needs_compaction = false;
         for (auto db : worker->dbs_) {
             leveldb::DBStats stats;
             stats.sstable_size_dist = new uint32_t[20];
             db->QueryDBStats(&stats);
+            if (!needs_compaction) {
+                needs_compaction = stats.needs_compaction;
+            }
             num_l0_sstables += stats.num_l0_sstables;
             delete stats.sstable_size_dist;
+        }
+
+        if (num_l0_sstables == 0 && needs_compaction) {
+            num_l0_sstables = 10000;
         }
 
         char *response_buf = conn->buf;

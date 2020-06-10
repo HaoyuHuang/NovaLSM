@@ -10,7 +10,7 @@
 #include <atomic>
 #include "leveldb/slice.h"
 
-#define MAX_BUCKETS 10000000
+#define MAX_BUCKETS 1000000000
 
 namespace leveldb {
     struct TableLocation {

@@ -92,7 +92,6 @@ namespace leveldb {
         uint32_t rtable_id_ = 0;
         uint32_t persisting_cnt = 0;
         bool deleted_ = false;
-//        std::map<uint64_t, leveldb::BlockHandle> diskoff_memoff_;
         std::mutex mutex_;
 
         std::vector<BatchWrite> written_mem_blocks_;

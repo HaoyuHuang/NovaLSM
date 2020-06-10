@@ -125,7 +125,11 @@ namespace leveldb {
                                const std::vector<LevelDBLogRecord>& log_records,
                                uint32_t memtable_id);
 
+        void StartCompaction();
+
     private:
+        std::atomic_bool start_compaction_;
+
         void ComputeCompactions(Version *current,
                                 std::vector<Compaction *> *compactions,
                                 VersionEdit *edit);

@@ -107,6 +107,14 @@ namespace leveldb {
             int seek_file_level;
         };
 
+        bool NeedsCompaction() {
+            if (compaction_score_ >= 1.0) {
+                RDMA_ASSERT(compaction_level_ >= 0 &&
+                            compaction_level_ + 1 < options_->level);
+            }
+            return compaction_score_ >= 1.0;
+        }
+
         // Append to *iters a sequence of iterators that will
         // yield the contents of this Version when merged together.
         // REQUIRES: This version has been saved (see VersionSet::SaveTo)
@@ -195,12 +203,14 @@ namespace leveldb {
                   refs_(0),
                   file_to_compact_(nullptr),
                   file_to_compact_level_(-1), version_id_(version_id),
-                  compaction_level_(-1), compaction_score_(-1) {};
+                  compaction_level_(-1), compaction_score_(-1) {
+            files_.resize(options->level);
+        };
 
         ~Version();
 
         // List of files per level
-        std::vector<FileMetaData *> files_[config::kNumLevels];
+        std::vector<std::vector<FileMetaData *>> files_;
         uint32_t version_id_;
         uint64_t l0_bytes_ = 0;
     private:
@@ -352,12 +362,6 @@ namespace leveldb {
         void AddCompactedInputs(Compaction *c,
                                 std::unordered_map<uint64_t, FileMetaData> *map);
 
-        // Returns true iff some level needs a compaction.
-        bool NeedsCompaction() const {
-            Version *v = current_;
-            return v->compaction_score_ >= 1;
-        }
-
         // Add all files listed in any live version to *live.
         // May also mutate some internal state.
         void AddLiveFiles(std::set<uint64_t> *live);
@@ -398,8 +402,6 @@ namespace leveldb {
                        const std::vector<FileMetaData *> &inputs2,
                        InternalKey *smallest, InternalKey *largest);
 
-        void SetupOtherInputs(Compaction *c);
-
         Env *const env_;
         const std::string dbname_;
         const Options *const options_;
@@ -413,10 +415,6 @@ namespace leveldb {
         Version dummy_versions_;  // Head of circular doubly-linked list of versions.
         Version *current_;        // == dummy_versions_.prev_
         std::atomic_int_fast32_t current_version_id_;
-
-        // Per-level key at which the next compaction at that level should start.
-        // Either an empty string, or a valid InternalKey.
-        std::string compact_pointer_[config::kNumLevels];
     };
 }  // namespace leveldb
 

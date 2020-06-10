@@ -67,10 +67,10 @@ namespace leveldb {
             WritableFile *writable_file;
             EnvFileMetadata env_meta = {};
             auto sstablename = TableFileName(dbname, meta->number);
-            RDMA_ASSERT(backing_buf[meta->meta_block_handle.size - 1] != 0)
-                << fmt::format("Fetch metadata blocks handle:{} sstable:{}",
-                               meta->meta_block_handle.DebugString(),
-                               sstablename);
+//            RDMA_ASSERT(backing_buf[meta->meta_block_handle.size - 1] != 0)
+//                << fmt::format("Fetch metadata blocks handle:{} sstable:{}",
+//                               meta->meta_block_handle.DebugString(),
+//                               sstablename);
 
             Status s = env->NewWritableFile(sstablename, env_meta,
                                             &writable_file);
@@ -98,13 +98,14 @@ namespace leveldb {
               target_level_(target_level),
               icmp_(icmp),
               options_(options),
-              max_output_file_size_(MaxFileSizeForLevel(options, level)),
+              max_output_file_size_(options->max_file_size),
               input_version_(input_version),
               grandparent_index_(0),
               seen_key_(false),
               overlapped_bytes_(0) {
         sem_init(&complete_signal_, 0, 0);
-        for (int i = 0; i < config::kNumLevels; i++) {
+        level_ptrs_.resize(options->level);
+        for (int i = 0; i < options->level; i++) {
             level_ptrs_[i] = 0;
         }
     }
