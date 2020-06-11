@@ -76,6 +76,7 @@ DEFINE_string(config_path, "/tmp/uniform-3-32-10000000-frags.txt",
               "The path that stores fragment configuration.");
 DEFINE_uint32(cc_l0_start_compaction_mb, 0, "");
 DEFINE_uint32(cc_l0_stop_write_mb, 0, "");
+DEFINE_int32(level, 0, "");
 
 namespace {
     class YCSBKeyComparator : public leveldb::Comparator {
@@ -157,7 +158,7 @@ leveldb::DB *CreateDatabase(int sid, int db_index, leveldb::Cache *cache,
             FLAGS_cc_l0_start_compaction_mb * 1024 * 1024;
     options.l0bytes_stop_writes_trigger =
             FLAGS_cc_l0_stop_write_mb * 1024 * 1024;
-
+    options.level = FLAGS_level;
     if (NovaConfig::config->profiler_file_path.empty()) {
         options.enable_tracing = false;
     } else {
@@ -185,6 +186,7 @@ leveldb::DB *CreateDatabase(int sid, int db_index, leveldb::Cache *cache,
 }
 
 int main(int argc, char *argv[]) {
+    system("sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'");
     gflags::ParseCommandLineFlags(&argc, &argv, true);
     int i;
     const char **methods = event_get_supported_methods();
@@ -202,8 +204,6 @@ int main(int argc, char *argv[]) {
         printf("%s=%s\n", flag.name.c_str(),
                flag.current_value.c_str());
     }
-
-
     // data
     NovaConfig::config = new NovaConfig();
     NovaConfig::config->my_server_id = FLAGS_server_id;

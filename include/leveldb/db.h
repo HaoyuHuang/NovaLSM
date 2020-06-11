@@ -163,7 +163,7 @@ namespace leveldb {
 
         virtual void FlushMemTable(leveldb::NovaLogRecordMode log_record_mode) = 0;
 
-        virtual void MaybeScheduleCompaction() = 0;
+        virtual void ScheduleCompaction() = 0;
 
         virtual Logger* infoLog() = 0;
     };

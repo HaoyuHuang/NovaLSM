@@ -101,7 +101,9 @@ namespace leveldb {
 
         void FlushMemTable(leveldb::NovaLogRecordMode log_record_mode) override;
 
-        void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_) override;
+        void ScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_) override;
+
+        void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         Logger* infoLog() override {
             return options_.info_log;
@@ -254,7 +256,7 @@ namespace leveldb {
         // Have we encountered a background error in paranoid mode?
         Status bg_error_ GUARDED_BY(mutex_);
 
-        CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
+        std::vector<CompactionStats> stats_ GUARDED_BY(mutex_);
         std::string current_log_file_name_ GUARDED_BY(mutex_);
         std::list<std::string> closed_log_files_  GUARDED_BY(mutex_);
     };

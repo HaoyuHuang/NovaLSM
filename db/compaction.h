@@ -46,7 +46,9 @@ namespace leveldb {
                   outfile_(nullptr),
                   builder_(nullptr),
                   total_bytes_(0),
-                  db_profiler_(db_profiler) {}
+                  db_profiler_(db_profiler) {
+            stats_.resize(options.level);
+        }
 
         void CleanupCompaction();
 
@@ -87,7 +89,7 @@ namespace leveldb {
         WritableFile *outfile_;
         TableBuilder *builder_;
         uint64_t total_bytes_;
-        CompactionStats stats_[config::kNumLevels];
+        std::vector<CompactionStats> stats_;
         DBProfiler *db_profiler_;
     };
 }

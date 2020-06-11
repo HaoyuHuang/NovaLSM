@@ -159,6 +159,7 @@ namespace leveldb {
               versions_(new VersionSet(dbname_, &options_, table_cache_,
                                        &internal_comparator_)),
               bg_threads_(raw_options.bg_threads) {
+        stats_.resize(options_.level);
     }
 
     DBImpl::~DBImpl() {
@@ -620,7 +621,7 @@ namespace leveldb {
         {
             MutexLock l(&mutex_);
             Version *base = versions_->current();
-            for (int level = 1; level < config::kNumLevels; level++) {
+            for (int level = 1; level < options_.level; level++) {
                 if (base->OverlapInLevel(level, begin, end)) {
                     max_level_with_files = level;
                 }
@@ -635,7 +636,7 @@ namespace leveldb {
     void DBImpl::TEST_CompactRange(int level, const Slice *begin,
                                    const Slice *end) {
         assert(level >= 0);
-        assert(level + 1 < config::kNumLevels);
+        assert(level + 1 < options_.level);
 
         InternalKey begin_storage, end_storage;
 
@@ -706,7 +707,11 @@ namespace leveldb {
 
     uint64_t DBImpl::L0CurrentBytes() {
         MutexLock lock(&mutex_);
-        return versions_->L0Bytes();
+        uint64_t l0bytes = versions_->L0Bytes();
+        if (l0bytes == 0 && versions_->NeedsCompaction()) {
+            l0bytes = versions_->current()->compaction_score_;
+        }
+        return l0bytes;
     }
 
     void DBImpl::SetL0StartCompactionBytes(uint64_t value) {
@@ -769,13 +774,19 @@ namespace leveldb {
             if (imm_) {
                 mutex_.Unlock();
                 Log(options_.info_log, "%s", fmt::format(
-                        "{} waiting for memtable to be flushed", dbname_).c_str());
+                        "{} waiting for memtable to be flushed",
+                        dbname_).c_str());
                 env_->SleepForMicroseconds(100000);
                 continue;
             }
             mutex_.Unlock();
             break;
         }
+    }
+
+    void DBImpl::ScheduleCompaction() {
+        MutexLock lock(&mutex_);
+        MaybeScheduleCompaction();
     }
 
     void DBImpl::MaybeScheduleCompaction() {
@@ -787,12 +798,12 @@ namespace leveldb {
         } else if (!bg_error_.ok()) {
             // Already got an error; no more changes
         } else if (imm_ == nullptr && manual_compaction_ == nullptr &&
+                   !versions_->NeedsCompaction() &&
                    versions_->L0Bytes() < l0_start_compaction_bytes) {
             // No work to be done
         } else {
             background_compaction_scheduled_ = true;
             Schedule(&DBImpl::BGWork, this);
-//            Log(options_.info_log, "BG: Schedule compaction.");
         }
     }
 
@@ -845,7 +856,7 @@ namespace leveldb {
                 (m->end ? m->end->DebugString().c_str() : "(end)"),
                 (m->done ? "(end)" : manual_end.DebugString().c_str()));
         } else {
-            c = versions_->PickCompaction();
+            c = versions_->PickCompaction(l0_start_compaction_bytes);
         }
 
         Status status;
@@ -1651,7 +1662,7 @@ namespace leveldb {
             in.remove_prefix(strlen("num-files-at-level"));
             uint64_t level;
             bool ok = ConsumeDecimalNumber(&in, &level) && in.empty();
-            if (!ok || level >= config::kNumLevels) {
+            if (!ok || level >= options_.level) {
                 return false;
             } else {
                 char buf[100];
@@ -1667,7 +1678,7 @@ namespace leveldb {
                      "Level  Files Size(MB) Time(sec) Read(MB) Write(MB)\n"
                      "--------------------------------------------------\n");
             value->append(buf);
-            for (int level = 0; level < config::kNumLevels; level++) {
+            for (int level = 0; level < options_.level; level++) {
                 int files = versions_->NumLevelFiles(level);
                 if (stats_[level].micros > 0 || files > 0) {
                     snprintf(buf, sizeof(buf),

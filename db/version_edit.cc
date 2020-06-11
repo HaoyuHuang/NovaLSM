@@ -94,7 +94,7 @@ namespace leveldb {
 
     static bool GetLevel(Slice *input, int *level) {
         uint32_t v;
-        if (GetVarint32(input, &v) && v < config::kNumLevels) {
+        if (GetVarint32(input, &v)) {
             *level = v;
             return true;
         } else {

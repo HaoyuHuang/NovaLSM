@@ -123,6 +123,8 @@ namespace leveldb {
         std::string DebugString() const;
 
         uint64_t l0_bytes = 0;
+        double compaction_score_;
+        int compaction_level_;
 
     private:
         friend class Compaction;
@@ -131,7 +133,7 @@ namespace leveldb {
 
         class LevelFileNumIterator;
 
-        explicit Version(VersionSet *vset)
+        explicit Version(VersionSet *vset, const Options &option)
                 : vset_(vset),
                   next_(this),
                   prev_(this),
@@ -139,7 +141,9 @@ namespace leveldb {
                   file_to_compact_(nullptr),
                   file_to_compact_level_(-1),
                   compaction_score_(-1),
-                  compaction_level_(-1) {}
+                  compaction_level_(-1) {
+            files_.resize(option.level);
+        }
 
         Version(const Version &) = delete;
 
@@ -164,7 +168,7 @@ namespace leveldb {
         int refs_;          // Number of live refs to this version
 
         // List of files per level
-        std::vector<FileMetaData *> files_[config::kNumLevels];
+        std::vector<std::vector<FileMetaData *>> files_;
 
         // Next file to compact based on seek stats.
         FileMetaData *file_to_compact_;
@@ -173,8 +177,7 @@ namespace leveldb {
         // Level that should be compacted next and its compaction score.
         // Score < 1 means compaction is not strictly needed.  These fields
         // are initialized by Finalize().
-        double compaction_score_;
-        int compaction_level_;
+
     };
 
     class VersionSet {
@@ -248,7 +251,7 @@ namespace leveldb {
         // Returns nullptr if there is no compaction to be done.
         // Otherwise returns a pointer to a heap-allocated object that
         // describes the compaction.  Caller should delete the result.
-        Compaction *PickCompaction();
+        Compaction *PickCompaction(uint64_t l0_limit);
 
         // Return a compaction object for compacting the range [begin,end] in
         // the specified level.  Returns nullptr if there is nothing in that
@@ -334,7 +337,7 @@ namespace leveldb {
 
         // Per-level key at which the next compaction at that level should start.
         // Either an empty string, or a valid InternalKey.
-        std::string compact_pointer_[config::kNumLevels];
+        std::vector<std::string> compact_pointer_;
     };
 
 // A Compaction encapsulates information about a compaction.
@@ -409,7 +412,7 @@ namespace leveldb {
         // is that we are positioned at one of the file ranges for each
         // higher level than the ones involved in this compaction (i.e. for
         // all L >= level_ + 2).
-        size_t level_ptrs_[config::kNumLevels];
+        std::vector<size_t> level_ptrs_;
     };
 
 }  // namespace leveldb

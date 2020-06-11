@@ -40,7 +40,6 @@ namespace nova {
             for (uint64_t j = frags[i]->key_end;
                  j >= frags[i]->key_start; j--) {
                 auto v = static_cast<char>((j % 10) + 'a');
-
                 std::string *key = new std::string(std::to_string(j));
                 std::string *val = new std::string(
                         NovaConfig::config->load_default_value_size, v);
@@ -49,7 +48,7 @@ namespace nova {
                 batch.Put(*key, *val);
                 bs += 1;
 
-                if (bs == 1000) {
+                if (bs == 1) {
                     leveldb::Status status = db->Write(option, &batch);
                     RDMA_ASSERT(status.ok()) << status.ToString();
                     batch.Clear();
@@ -81,6 +80,39 @@ namespace nova {
         }
 
         RDMA_LOG(INFO) << "Completed loading data " << loaded_keys;
+        gettimeofday(&start, nullptr);
+        loaded_keys = 0;
+//        for (int i = 0; i < 10000000; i++) {
+//            int index = rand();
+//            int db_index = index % dbs_.size();
+//            nova::Fragment *frag = nova::NovaConfig::config->db_fragment[db_index];
+//            RDMA_ASSERT(frag);
+//            auto db = dbs_[db_index];
+//            RDMA_ASSERT(db);
+//            uint64_t keys = frag->key_end - frag->key_start;
+//            uint32_t key = frag->key_start + index % keys;
+//            RDMA_ASSERT(key >= frag->key_start && key < frag->key_end);
+//
+//            leveldb::WriteBatch batch = {};
+//            auto v = static_cast<char>((key % 10) + 'a');
+//            std::string *strkey = new std::string(std::to_string(key));
+//            std::string *strval = new std::string(
+//                    NovaConfig::config->load_default_value_size, v);
+//            batch.Put(*strkey, *strval);
+//            leveldb::Status status = db->Write(option, &batch);
+//            RDMA_ASSERT(status.ok()) << status.ToString();
+//            delete strkey;
+//            delete strval;
+//
+//            loaded_keys++;
+//            if (loaded_keys % 100000 == 0) {
+//                timeval now{};
+//                gettimeofday(&now, nullptr);
+//                RDMA_LOG(INFO) << "Load " << loaded_keys << " entries took "
+//                               << now.tv_sec - start.tv_sec;
+//            }
+//        }
+
         // Compact the database.
         // db_->CompactRange(nullptr, nullptr);
 
@@ -109,7 +141,8 @@ namespace nova {
 
     void NovaMemServer::LoadData() {
         LoadDataWithRangePartition();
-
+//        LoadDataWithRangePartition();
+//        LoadDataWithRangePartition();
         for (auto &db : dbs_) {
             db->SetL0StartCompactionBytes(0);
             db->FlushMemTable(NovaConfig::config->log_record_mode);
@@ -122,7 +155,7 @@ namespace nova {
                     RDMA_LOG(INFO)
                         << fmt::format("Waiting for {} bytes at L0", bytes);
                     stop = false;
-                    db->MaybeScheduleCompaction();
+                    db->ScheduleCompaction();
                 }
             }
             if (stop) {
@@ -152,6 +185,7 @@ namespace nova {
             RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
             leveldb::Log(dbs_[i]->infoLog(), "%s", "Load complete");
         }
+        system("sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'");
     }
 
     NovaMemServer::NovaMemServer(const std::vector<leveldb::DB *> &dbs,
@@ -177,7 +211,6 @@ namespace nova {
             db->StartTracing();
         }
         NovaAsyncCompleteQueue **async_cq = new NovaAsyncCompleteQueue *[NovaConfig::config->num_conn_workers];
-
         for (int worker_id = 0;
              worker_id < NovaConfig::config->num_conn_workers; worker_id++) {
             async_cq[worker_id] = new NovaAsyncCompleteQueue;
@@ -186,12 +219,10 @@ namespace nova {
             conn_workers[worker_id]->set_dbs(dbs);
             conn_workers[worker_id]->log_manager_ = log_manager;
         }
-
         for (int worker_id = 0;
              worker_id < NovaConfig::config->num_async_workers; worker_id++) {
             async_workers[worker_id] = new NovaAsyncWorker(dbs, async_cq);
             NovaRDMAStore *store = nullptr;
-
             std::vector<QPEndPoint> endpoints;
             for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
                 QPEndPoint qp;
@@ -199,14 +230,12 @@ namespace nova {
                 qp.thread_id = worker_id;
                 endpoints.push_back(qp);
             }
-
             if (NovaConfig::config->enable_rdma) {
                 store = new NovaRDMARCStore(buf, worker_id, endpoints,
                                             async_workers[worker_id]);
             } else {
                 store = new NovaRDMANoopStore();
             }
-
             // Log writers.
             async_workers[worker_id]->nic_log_writer_ = new leveldb::log::NICLogWriter(
                     &async_workers[worker_id]->socks_, log_manager);
