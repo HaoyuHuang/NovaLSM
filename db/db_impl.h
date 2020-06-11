@@ -132,7 +132,8 @@ namespace leveldb {
 
         void ComputeCompactions(Version *current,
                                 std::vector<Compaction *> *compactions,
-                                VersionEdit *edit);
+                                VersionEdit *edit,
+                                std::unordered_map<uint32_t, leveldb::MemTableL0FilesEdit> *memtableid_l0fns);
 
         class NovaCCRecoveryThread {
         public:

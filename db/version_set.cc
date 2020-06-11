@@ -320,9 +320,10 @@ namespace leveldb {
                 if (ucmp->Compare(user_key, f->smallest.user_key()) < 0) {
                     // All of "f" is past any data for user_key
                 } else {
-                    if (!(*func)(arg, level, f)) {
-                        return;
-                    }
+                    (*func)(arg, level, f);
+//                    if (!) {
+//                        return;
+//                    }
                 }
             }
         }
@@ -1455,8 +1456,6 @@ namespace leveldb {
                 Slice largest = compaction->inputs_[0][0]->largest.user_key();
                 GetOverlappingInputs(l1files, smallest, largest,
                                      &compaction->inputs_[1]);
-
-
                 int new_l1files = compaction->num_input_files(1);
 
                 std::set<uint64_t> skip_files;

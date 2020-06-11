@@ -131,11 +131,11 @@ namespace leveldb {
                 files += ",";
             }
         }
-
-        std::string debug = fmt::format("{}@0 + {}@1 s:{} l:{} {}",
-                                        inputs_[0].size(), inputs_[1].size(),
+        std::string debug = fmt::format("{}@{} + {}@{} s:{} l:{} {} {}",
+                                        inputs_[0].size(), level_,
+                                        inputs_[1].size(), target_level_,
                                         smallest.ToString(), largest.ToString(),
-                                        files);
+                                        files, grandparents_.size());
         return debug;
     }
 
@@ -144,9 +144,10 @@ namespace leveldb {
 //         Otherwise, the move could create a parent file that will require
 //         a very expensive merge later on.
         return (num_input_files(0) == 1 && num_input_files(1) == 0 &&
-                level_ != target_level_ &&
-                TotalFileSize(grandparents_) <=
-                MaxGrandParentOverlapBytes(options_));
+                level_ != target_level_);
+//        &&
+//                TotalFileSize(grandparents_) <=
+//                MaxGrandParentOverlapBytes(options_));
     }
 
     void Compaction::AddInputDeletions(VersionEdit *edit) {
@@ -166,13 +167,15 @@ namespace leveldb {
                               grandparents_[grandparent_index_]->largest.Encode()) >
                0) {
             if (seen_key_) {
-                overlapped_bytes_ += grandparents_[grandparent_index_]->file_size;
+                overlapped_bytes_ += 1; //grandparents_[grandparent_index_]->file_size;
             }
             grandparent_index_++;
         }
         seen_key_ = true;
-
-        if (overlapped_bytes_ > MaxGrandParentOverlapBytes(options_)) {
+        int max_overlap = 5;
+        max_overlap  = std::min(max_overlap, (int) grandparents_.size() / 4);
+        max_overlap = std::max(max_overlap, 1);
+        if (overlapped_bytes_ >= max_overlap) {
             // Too much overlap for current output; start new output
             overlapped_bytes_ = 0;
             return true;

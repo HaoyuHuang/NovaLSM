@@ -1185,7 +1185,8 @@ namespace leveldb {
 
     void DBImpl::ComputeCompactions(leveldb::Version *current,
                                     std::vector<leveldb::Compaction *> *compactions,
-                                    VersionEdit *edit) {
+                                    VersionEdit *edit,
+                                    std::unordered_map<uint32_t, leveldb::MemTableL0FilesEdit> *memtableid_l0fns) {
         current->ComputeNonOverlappingSet(compactions);
         if (RDMA_LOG_LEVEL == rdmaio::INFO) {
             std::string debug = "Coordinated compaction picks compaction sets: ";
@@ -1196,18 +1197,15 @@ namespace leveldb {
             }
             RDMA_LOG(rdmaio::INFO) << debug;
         }
-
         {
             std::string reason;
             bool valid = current->AssertNonOverlappingSet(*compactions,
                                                           &reason);
             RDMA_ASSERT(valid) << fmt::format("assertion failed {}", reason);
         }
-
         if (compactions->empty()) {
             return;
         }
-
         auto it = compactions->begin();
         while (it != compactions->end()) {
             auto c = *it;
@@ -1216,7 +1214,6 @@ namespace leveldb {
                 continue;
             }
             // Move file to next level
-//            assert(c->level() == 0);
             assert(c->num_input_files(0) == 1);
             assert(c->num_input_files(1) == 0);
             FileMetaData *f = c->input(0, 0);
@@ -1235,6 +1232,19 @@ namespace leveldb {
                     f->number, c->level(), c->target_level(), f->file_size);
             Log(options_.info_log, "%s", output.c_str());
             RDMA_LOG(rdmaio::DEBUG) << output;
+
+            if (c->level() == 0 && c->target_level() == 1) {
+                // Compact L0 SSTables to L1.
+                for (int i = 0; i < c->inputs_[0].size(); i++) {
+                    auto f = c->inputs_[0][i];
+                    RDMA_ASSERT(f->memtable_ids.size() > 0);
+                    for (auto memtableid : f->memtable_ids) {
+                        RDMA_ASSERT(memtableid < MAX_LIVE_MEMTABLES);
+                        (*memtableid_l0fns)[memtableid].remove_fns.insert(
+                                f->number);
+                    }
+                }
+            }
             delete c;
             it = compactions->erase(it);
         }
@@ -1267,7 +1277,8 @@ namespace leveldb {
             std::vector<CompactionState *> states;
             std::vector<std::string> files_to_delete;
             std::unordered_map<uint32_t, std::vector<SSTableRTablePair>> server_pairs;
-            ComputeCompactions(current, &compactions, &edit);
+            std::unordered_map<uint32_t, MemTableL0FilesEdit> edits;
+            ComputeCompactions(current, &compactions, &edit, &edits);
             versions_->versions_[current->version_id()]->Unref(dbname_);
             if (!compactions.empty()) {
                 if (subrange_manager_) {
@@ -1413,7 +1424,6 @@ namespace leveldb {
                 }
             }
 
-            std::unordered_map<uint32_t, MemTableL0FilesEdit> edits;
             for (auto state : states) {
                 ObtainTableLocatorEdits(state, &edits);
             }
@@ -1573,10 +1583,10 @@ namespace leveldb {
 //            l0fns_str.append(std::to_string(l0));
 //            l0fns_str += ",";
 //        }
-        RDMA_ASSERT(!s.IsIOError());
-//            << fmt::format("v:{} status:{} mid:{} l0:{} version:{}", vid,
-//                           s.ToString(),
-//                           memtableid, l0fns_str, current->DebugString());
+        RDMA_ASSERT(!s.IsIOError())
+            << fmt::format("v:{} status:{} mid:{} version:{}", vid,
+                           s.ToString(),
+                           memtableid, current->DebugString());
         if (s.IsNotFound()) {
             // Search L1 files.
             Version::GetStats stats = {};
