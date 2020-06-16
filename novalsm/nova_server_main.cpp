@@ -109,7 +109,7 @@ void StartServer() {
     RdmaCtrl *rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
                                        NovaConfig::config->rdma_port);
     int port = NovaConfig::config->servers[NovaConfig::config->my_server_id].port;
-    uint64_t nrdmatotal = nrdma_buf_cc();
+    uint64_t nrdmatotal = nrdma_buf_server();
     uint64_t ntotal = nrdmatotal;
     ntotal += NovaConfig::config->mem_pool_size_gb * 1024 * 1024 * 1024;
     NOVA_LOG(INFO) << "Allocated buffer size in bytes: " << ntotal;
@@ -164,7 +164,7 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config->block_cache_mb = FLAGS_cc_block_cache_mb;
     NovaConfig::config->row_cache_mb = FLAGS_cc_row_cache_mb;
-    NovaConfig::config->write_buffer_size_mb = FLAGS_cc_write_buffer_size_mb;
+    NovaConfig::config->memtable_size_mb = FLAGS_cc_write_buffer_size_mb;
 
     NovaConfig::config->db_path = FLAGS_db_path;
     NovaConfig::config->enable_rdma = FLAGS_enable_rdma;
@@ -241,10 +241,10 @@ int main(int argc, char *argv[]) {
     }
 
     NovaConfig::config->num_conn_workers = FLAGS_cc_num_conn_workers;
-    NovaConfig::config->num_conn_async_workers = FLAGS_cc_num_async_workers;
+    NovaConfig::config->num_fg_rdma_workers = FLAGS_cc_num_async_workers;
     NovaConfig::config->num_storage_workers = FLAGS_cc_num_storage_workers;
     NovaConfig::config->num_compaction_workers = FLAGS_cc_num_compaction_workers;
-    NovaConfig::config->num_rdma_compaction_workers = FLAGS_cc_num_rdma_compaction_workers;
+    NovaConfig::config->num_bg_rdma_workers = FLAGS_cc_num_rdma_compaction_workers;
     NovaConfig::config->num_memtables = FLAGS_cc_num_memtables;
     NovaConfig::config->num_memtable_partitions = FLAGS_cc_num_memtable_partitions;
     NovaConfig::config->enable_subrange = FLAGS_cc_enable_subrange;
@@ -273,7 +273,7 @@ int main(int argc, char *argv[]) {
         NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_RDMA;
     }
 
-    NovaConfig::config->enable_table_locator = FLAGS_cc_enable_table_locator;
+    NovaConfig::config->enable_lookup_index = FLAGS_cc_enable_table_locator;
     NovaConfig::config->subrange_sampling_ratio = FLAGS_cc_sampling_ratio;
     NovaConfig::config->zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
     NovaConfig::config->ReadZipfianDist();

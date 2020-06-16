@@ -63,10 +63,10 @@ namespace nova {
             options.enable_detailed_stats = NovaConfig::config->enable_detailed_db_stats;
             options.block_cache = cache;
             options.memtable_pool = memtable_pool;
-            if (NovaConfig::config->write_buffer_size_mb > 0) {
+            if (NovaConfig::config->memtable_size_mb > 0) {
                 options.write_buffer_size =
                         (uint64_t) (
-                                NovaConfig::config->write_buffer_size_mb) *
+                                NovaConfig::config->memtable_size_mb) *
                         1024 * 1024;
             }
             if (NovaConfig::config->sstable_size > 0) {
@@ -81,7 +81,7 @@ namespace nova {
             options.l0bytes_stop_writes_trigger =
                     NovaConfig::config->l0_stop_write_mb * 1024 * 1024;
             options.max_open_files = 50000;
-            options.enable_table_locator = NovaConfig::config->enable_table_locator;
+            options.enable_table_locator = NovaConfig::config->enable_lookup_index;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
             options.num_compaction_threads = bg_flush_memtable_threads.size();
             options.max_stoc_file_size =
@@ -139,10 +139,10 @@ namespace nova {
             leveldb::Options options;
             options.block_cache = nullptr;
             options.memtable_pool = nullptr;
-            if (NovaConfig::config->write_buffer_size_mb > 0) {
+            if (NovaConfig::config->memtable_size_mb > 0) {
                 options.write_buffer_size =
                         (uint64_t) (
-                                NovaConfig::config->write_buffer_size_mb) *
+                                NovaConfig::config->memtable_size_mb) *
                         1024 * 1024;
             }
             if (NovaConfig::config->sstable_size > 0) {
@@ -153,7 +153,7 @@ namespace nova {
             options.num_memtable_partitions = NovaConfig::config->num_memtable_partitions;
             options.num_memtables = NovaConfig::config->num_memtables;
             options.max_open_files = 50000;
-            options.enable_table_locator = NovaConfig::config->enable_table_locator;
+            options.enable_table_locator = NovaConfig::config->enable_lookup_index;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
             options.level = NovaConfig::config->level;
             options.max_stoc_file_size =
@@ -249,7 +249,7 @@ namespace nova {
         timeval start{};
         gettimeofday(&start, nullptr);
         uint64_t loaded_keys = 0;
-        std::vector<CCFragment *> &frags = NovaConfig::config->fragments;
+        std::vector<LTCFragment *> &frags = NovaConfig::config->fragments;
         leveldb::StoCReplicateLogRecordState *state = new leveldb::StoCReplicateLogRecordState[NovaConfig::config->servers.size()];
         for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
             state[i].rdma_wr_id = -1;
@@ -367,7 +367,7 @@ namespace nova {
 
         read_options.thread_id = tid_;
         read_options.verify_checksums = false;
-        std::vector<CCFragment *> &frags = NovaConfig::config->fragments;
+        std::vector<LTCFragment *> &frags = NovaConfig::config->fragments;
         for (int i = 0; i < frags.size(); i++) {
             if (frags[i]->ltc_server_id !=
                 NovaConfig::config->my_server_id) {
@@ -530,7 +530,7 @@ namespace nova {
                 NovaConfig::config->my_server_id);
 
         char *buf = rdmabuf;
-        char *cache_buf = buf + nrdma_buf_cc();
+        char *cache_buf = buf + nrdma_buf_server();
 
         uint32_t num_mem_partitions = 1;
         NovaConfig::config->num_mem_partitions = num_mem_partitions;
@@ -639,7 +639,7 @@ namespace nova {
         std::vector<RDMAServerImpl *> rdma_servers;
         for (worker_id = 0;
              worker_id <
-             NovaConfig::config->num_conn_async_workers; worker_id++) {
+             NovaConfig::config->num_fg_rdma_workers; worker_id++) {
             RDMAAdmissionCtrl *admission_ctrl = new RDMAAdmissionCtrl;
             RDMAMsgHandler *rdma_msg_handler = new RDMAMsgHandler(
                     rdma_ctrl, mem_manager, dbs_, admission_ctrl);
@@ -710,7 +710,7 @@ namespace nova {
         }
 
         for (int i = 0;
-             i < NovaConfig::config->num_rdma_compaction_workers; i++) {
+             i < NovaConfig::config->num_bg_rdma_workers; i++) {
             RDMAAdmissionCtrl *admission_ctrl = new RDMAAdmissionCtrl;
             RDMAMsgHandler *cc = new RDMAMsgHandler(
                     rdma_ctrl,
@@ -898,12 +898,12 @@ namespace nova {
         // Start the threads.
         for (int i = 0;
              i <
-             NovaConfig::config->num_conn_async_workers; i++) {
+             NovaConfig::config->num_fg_rdma_workers; i++) {
             fg_rdma_workers.emplace_back(&RDMAMsgHandler::Start,
                                          fg_rdma_msg_handlers[i]);
         }
         for (int i = 0;
-             i < NovaConfig::config->num_rdma_compaction_workers; i++) {
+             i < NovaConfig::config->num_bg_rdma_workers; i++) {
             fg_rdma_workers.emplace_back(&RDMAMsgHandler::Start,
                                          bg_rdma_msg_handlers[i]);
         }

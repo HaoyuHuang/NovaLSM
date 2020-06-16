@@ -12,11 +12,11 @@ namespace nova {
                NovaConfig::config->max_msg_size;
     }
 
-    uint64_t nrdma_buf_cc() {
+    uint64_t nrdma_buf_server() {
         // A CC async/bg thread connects to one thread at each DC.
         uint64_t nrdmatotal = nrdma_buf_unit() *
-                              (NovaConfig::config->num_conn_async_workers +
-                               NovaConfig::config->num_rdma_compaction_workers) *
+                              (NovaConfig::config->num_fg_rdma_workers +
+                               NovaConfig::config->num_bg_rdma_workers) *
                               NovaConfig::config->servers.size();
         return nrdmatotal;
     }

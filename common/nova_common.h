@@ -81,7 +81,7 @@ namespace nova {
         uint64_t key_end;
     };
 
-    struct CCFragment {
+    struct LTCFragment {
         // for range partition only.
         RangePartition range;
         uint32_t dbid;

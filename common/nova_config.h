@@ -38,8 +38,8 @@ namespace nova {
     class NovaConfig {
     public:
         static int
-        ParseNumberOfDatabases(const std::vector<CCFragment *> &fragments,
-                               std::vector<CCFragment *> *db_fragments,
+        ParseNumberOfDatabases(const std::vector<LTCFragment *> &fragments,
+                               std::vector<LTCFragment *> *db_fragments,
                                uint32_t server_id) {
             std::set<uint32_t> ndbs;
             for (int i = 0; i < fragments.size(); i++) {
@@ -58,7 +58,7 @@ namespace nova {
         }
 
         static std::unordered_map<uint32_t, std::set<uint32_t >>
-        ReadDatabases(const std::vector<CCFragment *> &fragments) {
+        ReadDatabases(const std::vector<LTCFragment *> &fragments) {
             std::unordered_map<uint32_t, std::set<uint32_t >> server_dbs;
             for (int i = 0; i < fragments.size(); i++) {
                 uint32_t sid = fragments[i]->ltc_server_id;
@@ -70,12 +70,12 @@ namespace nova {
 
         static void
         ReadFragments(const std::string &path,
-                      std::vector<CCFragment *> *frags) {
+                      std::vector<LTCFragment *> *frags) {
             std::string line;
             ifstream file;
             file.open(path);
             while (std::getline(file, line)) {
-                auto *frag = new CCFragment();
+                auto *frag = new LTCFragment();
                 std::vector<std::string> tokens = SplitByDelimiter(&line, ",");
                 frag->range.key_start = std::stoi(tokens[0]);
                 frag->range.key_end = std::stoi(tokens[1]);
@@ -103,8 +103,8 @@ namespace nova {
             }
         }
 
-        static CCFragment *home_fragment(uint64_t key) {
-            CCFragment *home = nullptr;
+        static LTCFragment *home_fragment(uint64_t key) {
+            LTCFragment *home = nullptr;
             NOVA_ASSERT(
                     key <= config->fragments[config->fragments.size() -
                                              1]->range.key_end);
@@ -178,22 +178,22 @@ namespace nova {
         vector<Host> ltc_servers;
         vector<Host> stoc_servers;
         int num_conn_workers;
-        int num_conn_async_workers;
+        int num_fg_rdma_workers;
         int num_compaction_workers;
-        int num_rdma_compaction_workers;
+        int num_bg_rdma_workers;
         int num_storage_workers;
         int level;
 
         int block_cache_mb;
         int row_cache_mb;
-        bool enable_table_locator;
+        bool enable_lookup_index;
         uint32_t num_memtables;
         uint32_t num_memtable_partitions;
-        uint64_t write_buffer_size_mb;
+        uint64_t memtable_size_mb;
         uint64_t l0_stop_write_mb;
         uint64_t l0_start_compaction_mb;
-        std::vector<CCFragment *> fragments;
-        std::vector<CCFragment *> db_fragment;
+        std::vector<LTCFragment *> fragments;
+        std::vector<LTCFragment *> db_fragment;
         int num_stocs_scatter_data_blocks;
 
         void ReadZipfianDist() {
@@ -236,7 +236,7 @@ namespace nova {
         static NovaConfig *config;
     };
 
-    uint64_t nrdma_buf_cc();
+    uint64_t nrdma_buf_server();
 
     uint64_t nrdma_buf_unit();
 }

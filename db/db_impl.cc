@@ -575,7 +575,7 @@ namespace leveldb {
 
         std::vector<char *> rdma_bufs;
         std::vector<uint32_t> reqs;
-        nova::CCFragment *frag = nova::NovaConfig::config->db_fragment[dbid_];
+        nova::LTCFragment *frag = nova::NovaConfig::config->db_fragment[dbid_];
         uint32_t stoc_server_id = nova::NovaConfig::config->stoc_servers[frag->log_replica_stoc_ids[0]].server_id;
         for (auto &replica : logfile_buf) {
             uint32_t scid = options_.mem_manager->slabclassid(0,

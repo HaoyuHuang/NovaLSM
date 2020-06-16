@@ -181,7 +181,7 @@ namespace nova {
         worker->stats.nget_hits++;
 
         leveldb::Slice key(buf, nkey);
-        CCFragment *frag = NovaConfig::home_fragment(hv);
+        LTCFragment *frag = NovaConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
         std::string value;
         leveldb::ReadOptions read_options;
@@ -337,7 +337,7 @@ namespace nova {
 //                        << fd << " key:" << skey << " nkey:" << nkey
 //                        << " nrecords: " << nrecords;
         uint64_t hv = keyhash(startkey, nkey);
-        CCFragment *frag = NovaConfig::home_fragment(hv);
+        LTCFragment *frag = NovaConfig::home_fragment(hv);
         leveldb::Iterator *iterator = worker->dbs_[frag->dbid]->NewIterator(
                 leveldb::ReadOptions());
         iterator->Seek(startkey);
@@ -418,7 +418,7 @@ namespace nova {
         option.rdma_backing_mem = worker->rdma_backing_mem;
         option.rdma_backing_mem_size = worker->rdma_backing_mem_size;
         option.is_loading_db = false;
-        CCFragment *frag = NovaConfig::home_fragment(hv);
+        LTCFragment *frag = NovaConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
         NOVA_ASSERT(db);
 

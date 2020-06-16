@@ -92,10 +92,10 @@ namespace {
         options.subrange_reorg_sampling_ratio = FLAGS_cc_sampling_ratio;
         options.zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
 
-        if (NovaConfig::config->write_buffer_size_mb > 0) {
+        if (NovaConfig::config->memtable_size_mb > 0) {
             options.write_buffer_size =
                     (uint64_t) (
-                            NovaConfig::config->write_buffer_size_mb) *
+                            NovaConfig::config->memtable_size_mb) *
                     1024 * 1024;
         }
         if (NovaConfig::config->sstable_size > 0) {
@@ -106,7 +106,7 @@ namespace {
         options.num_memtables = NovaConfig::config->num_memtables;
         options.l0bytes_stop_writes_trigger = 0;
         options.max_open_files = 50000;
-        options.enable_table_locator = NovaConfig::config->enable_table_locator;
+        options.enable_table_locator = NovaConfig::config->enable_lookup_index;
         options.max_stoc_file_size =
                 std::max(options.write_buffer_size, options.max_file_size) +
                 LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
@@ -167,7 +167,7 @@ void start(NICServer *server) {
 }
 
 void TestSubRanges() {
-    uint64_t nrdmatotal = nrdma_buf_cc();
+    uint64_t nrdmatotal = nrdma_buf_server();
     uint64_t ntotal = nrdmatotal;
     ntotal += NovaConfig::config->mem_pool_size_gb * 1024 * 1024 * 1024;
     NOVA_LOG(INFO) << "Allocated buffer size in bytes: " << ntotal;
@@ -214,7 +214,7 @@ void TestSubRanges() {
     timeval start{};
     gettimeofday(&start, nullptr);
     uint64_t loaded_keys = 0;
-    std::vector<CCFragment *> &frags = NovaConfig::config->fragments;
+    std::vector<LTCFragment *> &frags = NovaConfig::config->fragments;
     leveldb::StoCReplicateLogRecordState *state = new leveldb::StoCReplicateLogRecordState[NovaConfig::config->servers.size()];
     for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
         state[i].rdma_wr_id = -1;
@@ -289,7 +289,7 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config->block_cache_mb = 0;
     NovaConfig::config->row_cache_mb = 0;
-    NovaConfig::config->write_buffer_size_mb = 16;
+    NovaConfig::config->memtable_size_mb = 16;
 
     NovaConfig::config->db_path = "/tmp/db";
     NovaConfig::config->enable_rdma = false;
@@ -334,10 +334,10 @@ int main(int argc, char *argv[]) {
     }
 
     NovaConfig::config->num_conn_workers = 1;
-    NovaConfig::config->num_conn_async_workers = 1;
+    NovaConfig::config->num_fg_rdma_workers = 1;
     NovaConfig::config->num_storage_workers = 1;
     NovaConfig::config->num_compaction_workers = 1;
-    NovaConfig::config->num_rdma_compaction_workers = 1;
+    NovaConfig::config->num_bg_rdma_workers = 1;
     NovaConfig::config->num_memtables = FLAGS_cc_num_memtables;
     NovaConfig::config->num_memtable_partitions = FLAGS_cc_num_memtable_partitions;
     NovaConfig::config->l0_stop_write_mb = 0;
@@ -352,7 +352,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->scatter_policy = ScatterPolicy::RANDOM;
     NovaConfig::config->log_record_mode = NovaLogRecordMode::LOG_NONE;
 
-    NovaConfig::config->enable_table_locator = true;
+    NovaConfig::config->enable_lookup_index = true;
     leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq = 0;
     leveldb::EnvBGThread::bg_compaction_thread_id_seq = 0;
     nova::RDMAServerImpl::bg_storage_worker_seq_id_ = 0;
