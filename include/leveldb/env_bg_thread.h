@@ -11,7 +11,7 @@
 
 #include "leveldb/export.h"
 #include "leveldb/status.h"
-#include "leveldb/cc_client.h"
+#include "leveldb/stoc_client.h"
 #include "leveldb/db_types.h"
 
 #define BUCKET_SIZE 18
@@ -41,7 +41,7 @@ namespace leveldb {
         // serialized.
         virtual bool Schedule(const EnvBGTask &task) = 0;
 
-        virtual CCClient *dc_client() = 0;
+        virtual StoCClient *stoc_client() = 0;
 
         virtual MemManager *mem_manager() = 0;
 

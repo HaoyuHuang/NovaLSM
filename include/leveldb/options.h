@@ -7,10 +7,9 @@
 
 #include <stddef.h>
 #include <string>
-#include <nova/nova_msg_callback.h>
 
 #include "leveldb/export.h"
-#include "leveldb/cc_client.h"
+#include "leveldb/stoc_client.h"
 #include "log_writer.h"
 #include "env.h"
 #include "env_bg_thread.h"
@@ -74,7 +73,7 @@ namespace leveldb {
         MemManager *mem_manager = nullptr;
         uint32_t num_recovery_thread = 0;
 
-        CCClient *dc_client = nullptr;
+        StoCClient *stoc_client = nullptr;
 
         uint32_t manifest_stoc_id = 0;
 
@@ -199,7 +198,7 @@ namespace leveldb {
         // When the log file is full, MC flushes the log to DC.
         size_t max_log_file_size = 4 * 1024 * 1024;
 
-        size_t max_dc_file_size = 4 * 1024 * 1024 + 1024 * 1024;
+        size_t max_stoc_file_size = 4 * 1024 * 1024 + 1024 * 1024;
 
         // Compress blocks using the specified compression algorithm.  This
         // parameter can be changed dynamically.
@@ -241,7 +240,7 @@ namespace leveldb {
 
         MemManager *mem_manager = nullptr;
 
-        CCClient *dc_client = nullptr;
+        StoCClient *stoc_client = nullptr;
         char *rdma_backing_mem = nullptr;
         uint32_t rdma_backing_mem_size = 0;
 
@@ -258,22 +257,6 @@ namespace leveldb {
     struct LEVELDB_EXPORT WriteOptions {
         WriteOptions() = default;
 
-        // If true, the write will be flushed from the operating system
-        // buffer cache (by calling WritableFile::Sync()) before the write
-        // is considered complete.  If this flag is true, writes will be
-        // slower.
-        //
-        // If this flag is false, and the machine crashes, some recent
-        // writes may be lost.  Note that if it is just the process that
-        // crashes (i.e., the machine does not reboot), no writes will be
-        // lost even if sync==false.
-        //
-        // In other words, a DB write with sync==false has similar
-        // crash semantics as the "write()" system call.  A DB write
-        // with sync==true has similar crash semantics to a "write()"
-        // system call followed by "fsync()".
-        bool sync = false;
-
         bool local_write = false;
         unsigned int *rand_seed;
         bool is_loading_db = false;
@@ -281,12 +264,12 @@ namespace leveldb {
         uint64_t hash = 0;
         // For replicating log records.
         uint64_t thread_id;
-        CCClient *dc_client = nullptr;
+        StoCClient *stoc_client = nullptr;
 
         uint64_t total_writes = 0;
         char *rdma_backing_mem = nullptr;
         uint32_t rdma_backing_mem_size = 0;
-        WriteState *replicate_log_record_states = nullptr;
+        StoCReplicateLogRecordState *replicate_log_record_states = nullptr;
     };
 
 }  // namespace leveldb

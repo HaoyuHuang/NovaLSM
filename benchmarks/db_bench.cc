@@ -78,15 +78,15 @@ static double FLAGS_compression_ratio = 0.5;
 static bool FLAGS_histogram = false;
 
 // Number of bytes to buffer in memtable before compacting
-// (initialized to default value by "main")
+// (initialized to default value by "novalsm")
 static int FLAGS_write_buffer_size = 0;
 
 // Number of bytes written to each file.
-// (initialized to default value by "main")
+// (initialized to default value by "novalsm")
 static int FLAGS_max_file_size = 0;
 
 // Approximate size of user data packed per block (before compression.
-// (initialized to default value by "main")
+// (initialized to default value by "novalsm")
 static int FLAGS_block_size = 0;
 
 // Number of bytes to use as a cache of uncompressed data.

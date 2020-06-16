@@ -16,11 +16,11 @@
 #include "port/port.h"
 #include "port/thread_annotations.h"
 #include "memtable.h"
-#include "cc/nova_cc.h"
+#include "ltc/stoc_file_client_impl.h"
 #include "table_cache.h"
 
 #include "leveldb/subrange.h"
-#include "cc/nova_cc_client.h"
+#include "ltc/stoc_client_impl.h"
 
 #define FETCH_METADATA_BATCH_SIZE 128
 
@@ -28,7 +28,7 @@ namespace leveldb {
 
     class VersionFileMap;
 
-    class NovaBlockCCClient;
+    class StoCBlockClient;
 
     enum CompactInputType {
         kCompactInputMemTables = 0,
@@ -255,13 +255,13 @@ namespace leveldb {
     FetchMetadataFilesInParallel(const std::vector<FileMetaData *> &files,
                                  const std::string &dbname,
                                  const Options &options,
-                                 NovaBlockCCClient *client,
+                                 StoCBlockClient *client,
                                  Env *env);
 
     void
     FetchMetadataFiles(const std::vector<FileMetaData *> &files,
                        const std::string &dbname,
-                       const Options &options, NovaBlockCCClient *client,
+                       const Options &options, StoCBlockClient *client,
                        Env *env);
 }
 

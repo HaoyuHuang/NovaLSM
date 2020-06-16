@@ -5,7 +5,7 @@
 #include "leveldb/table_builder.h"
 
 #include <assert.h>
-#include <nova/logging.hpp>
+#include <common/nova_console_logging.h>
 #include <fmt/core.h>
 #include <db/dbformat.h>
 
@@ -227,7 +227,7 @@ namespace leveldb {
         if (ok() && r->filter_block != nullptr) {
             WriteRawBlock(r->filter_block->Finish(), kNoCompression,
                           &filter_block_handle);
-            RDMA_LOG(rdmaio::DEBUG)
+            NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("filter handle off:{} size:{}",
                                filter_block_handle.offset(),
                                filter_block_handle.size());

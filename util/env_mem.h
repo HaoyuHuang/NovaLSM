@@ -118,7 +118,7 @@ namespace leveldb {
 
         ~MemRandomAccessFile() override { file_->Unref(); }
 
-        Status Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n, Slice *result,
+        Status Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset, size_t n, Slice *result,
                     char *scratch) override;
         MemFile *file_;
     private:
@@ -130,7 +130,7 @@ namespace leveldb {
 
         ~MemRandomRWFile() override { file_->Unref(); }
 
-        Status Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n, Slice *result,
+        Status Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset, size_t n, Slice *result,
                     char *scratch) override;
 
     private:

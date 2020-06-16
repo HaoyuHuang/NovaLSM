@@ -28,7 +28,7 @@ namespace {
     constexpr int kTextCloseOnExecHelperDup2FailedCode = 62;
     constexpr int kTextCloseOnExecHelperFoundOpenFdCode = 63;
 
-// Global set by main() and read in TestCloseOnExec.
+// Global set by novalsm() and read in TestCloseOnExec.
 //
 // The argv[0] value is stored in a std::vector instead of a std::string because
 // std::string does not return a mutable pointer to its buffer until C++17.
@@ -44,16 +44,16 @@ namespace {
 
 // Executed in a separate process by TestCloseOnExec* tests.
 //
-// main() delegates to this function when the test executable is launched with
+// novalsm() delegates to this function when the test executable is launched with
 // a special command-line switch. TestCloseOnExec* tests fork()+exec() the test
 // executable and pass the special command-line switch.
 //
 
-// main() delegates to this function when the test executable is launched with
+// novalsm() delegates to this function when the test executable is launched with
 // a special command-line switch. TestCloseOnExec* tests fork()+exec() the test
 // executable and pass the special command-line switch.
 //
-// When main() delegates to this function, the process probes whether a given
+// When novalsm() delegates to this function, the process probes whether a given
 // file descriptor is open, and communicates the result via its exit code.
     int TestCloseOnExecHelperMain(char *pid_arg) {
         int fd = std::atoi(pid_arg);

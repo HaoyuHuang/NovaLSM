@@ -30,7 +30,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdlib>
-#include <nova/logging.hpp>
+#include <common/nova_console_logging.h>
 
 #include "util/arena.h"
 #include "util/random.h"
@@ -246,7 +246,7 @@ namespace leveldb {
 
     template<typename Key, class Comparator>
     inline void SkipList<Key, Comparator>::Iterator::Prev() {
-        RDMA_ASSERT(sampled_puts_ == 0);
+        NOVA_ASSERT(sampled_puts_ == 0);
         // Instead of using explicit "prev" links, we just search for the
         // last node that falls before key.
         assert(Valid());
@@ -258,7 +258,7 @@ namespace leveldb {
 
     template<typename Key, class Comparator>
     inline void SkipList<Key, Comparator>::Iterator::Seek(const Key &target) {
-        RDMA_ASSERT(sampled_puts_ == 0);
+        NOVA_ASSERT(sampled_puts_ == 0);
         node_ = list_->FindGreaterOrEqual(target, nullptr);
     }
 
@@ -269,7 +269,7 @@ namespace leveldb {
 
     template<typename Key, class Comparator>
     inline void SkipList<Key, Comparator>::Iterator::SeekToLast() {
-        RDMA_ASSERT(sampled_puts_ == 0);
+        NOVA_ASSERT(sampled_puts_ == 0);
         node_ = list_->FindLast();
         if (node_ == list_->head_) {
             node_ = nullptr;

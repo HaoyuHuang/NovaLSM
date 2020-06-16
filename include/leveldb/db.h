@@ -13,6 +13,7 @@
 #include "leveldb/export.h"
 #include "leveldb/iterator.h"
 #include "leveldb/options.h"
+#include "rdma/nova_msg_callback.h"
 
 namespace leveldb {
 
@@ -106,10 +107,6 @@ namespace leveldb {
         // Note: consider setting options.sync = true.
         virtual Status Put(const WriteOptions &options, const Slice &key,
                            const Slice &value) = 0;
-
-        virtual Status
-        GenerateLogRecords(const WriteOptions &options,
-                           WriteBatch *updates) = 0;
 
         virtual void EvictFileFromCache(uint64_t file_number) = 0;
 

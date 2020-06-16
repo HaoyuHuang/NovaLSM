@@ -9,9 +9,9 @@
 #include <algorithm>
 #include <fmt/core.h>
 #include <getopt.h>
-#include <nova/nova_common.h>
-#include "cc/nova_cc.h"
-#include "nova/logging.hpp"
+#include <common/nova_common.h>
+#include "ltc/stoc_file_client_impl.h"
+#include "common/nova_console_logging.h"
 
 #include "db/compaction.h"
 #include "db/filename.h"
@@ -190,11 +190,11 @@ namespace leveldb {
                     const ReadOptions &options,
                     const Slice &file_value) {
         VersionFileMap *v = reinterpret_cast<VersionFileMap *>(arg);
-        RDMA_ASSERT(v);
-        RDMA_ASSERT(file_value.size() == 8);
+        NOVA_ASSERT(v);
+        NOVA_ASSERT(file_value.size() == 8);
         uint64_t fn = DecodeFixed64(file_value.data());
         FileMetaData *meta = v->file_meta(fn);
-        RDMA_ASSERT(meta) << fn;
+        NOVA_ASSERT(meta) << fn;
         return v->table_cache()->NewIterator(context.caller, options,
                                              meta,
                                              meta->number,
@@ -342,8 +342,8 @@ namespace leveldb {
             }
 
             FileMetaData *file = fn_files_[fn];
-            RDMA_ASSERT(file) << fn;
-            RDMA_ASSERT(file->number == fn);
+            NOVA_ASSERT(file) << fn;
+            NOVA_ASSERT(file->number == fn);
 
             if (icmp_->user_comparator()->Compare(
                     file->smallest.user_key(), key.user_key()) > 0) {
@@ -731,13 +731,13 @@ namespace leveldb {
                                         &stats->num_overlapping_sstables_per_table);
         ComputeOverlappingFilesStats(&all_fnfile,
                                      &stats->num_overlapping_sstables);
-        RDMA_ASSERT(all_fnfile.empty());
+        NOVA_ASSERT(all_fnfile.empty());
 
         ComputeOverlappingFilesPerTable(&new_fnfile,
                                         &stats->num_overlapping_sstables_per_table_since_last_query);
         ComputeOverlappingFilesStats(&new_fnfile,
                                      &stats->num_overlapping_sstables_since_last_query);
-        RDMA_ASSERT(new_fnfile.empty());
+        NOVA_ASSERT(new_fnfile.empty());
     }
 
     std::string Version::DebugString() const {
@@ -817,7 +817,7 @@ namespace leveldb {
         // Initialize a builder with the files from *base and other info from *vset
         Builder(VersionSet *vset, Version *base) : vset_(vset), base_(base) {
             Version *v = vset->versions_[base->version_id_]->Ref();
-            RDMA_ASSERT(v == base);
+            NOVA_ASSERT(v == base);
             BySmallestKey cmp;
             cmp.internal_comparator = &vset_->icmp_;
             levels_.resize(vset->options_->level);
@@ -912,7 +912,7 @@ namespace leveldb {
                          base_iter != bpos; ++base_iter) {
                         MaybeAddFile(v, level, *base_iter);
                     }
-                    RDMA_ASSERT(added_file->compaction_status !=
+                    NOVA_ASSERT(added_file->compaction_status !=
                                 FileCompactionStatus::COMPACTING)
                         << fmt::format("{}@{}", added_file->number, level);
                     MaybeAddFile(v, level, added_file);
@@ -950,7 +950,7 @@ namespace leveldb {
                 std::vector<FileMetaData *> *files = &v->files_[level];
                 if (level > 0 && !files->empty()) {
                     // Must not overlap
-                    RDMA_ASSERT(vset_->icmp_.Compare(
+                    NOVA_ASSERT(vset_->icmp_.Compare(
                             (*files)[files->size() - 1]->largest,
                             f->smallest) < 0)
                         << fmt::format("level:{} fn:{} f:{} v:{}", level,
@@ -962,7 +962,7 @@ namespace leveldb {
                 if (f->level == 0) {
                     v->l0_bytes_ += f->file_size;
                 }
-                RDMA_ASSERT(v->fn_files_.find(f->number) == v->fn_files_.end())
+                NOVA_ASSERT(v->fn_files_.find(f->number) == v->fn_files_.end())
                     << fmt::format("{}@{}", f->number, level);
                 v->fn_files_[f->number] = f;
             }
@@ -1021,7 +1021,7 @@ namespace leveldb {
     }
 
     void VersionSet::AppendChangesToManifest(leveldb::VersionEdit *edit,
-                                             NovaCCMemFile *manifest_file,
+                                             StoCWritableFileClient *manifest_file,
                                              uint32_t stoc_id) {
         if (!manifest_file) {
             return;
@@ -1031,12 +1031,12 @@ namespace leveldb {
         edit->SetLastSequence(last_sequence_);
         char *edit_str = manifest_file->Buf();
         uint32_t msg_size = edit->EncodeTo(edit_str);
-        if (RDMA_LOG_LEVEL == rdmaio::DEBUG) {
+        if (NOVA_LOG_LEVEL == rdmaio::DEBUG) {
             VersionEdit decode;
-            RDMA_ASSERT(decode.DecodeFrom(Slice(edit_str, msg_size)).ok());
-            RDMA_LOG(rdmaio::DEBUG) << decode.DebugString();
+            NOVA_ASSERT(decode.DecodeFrom(Slice(edit_str, msg_size)).ok());
+            NOVA_LOG(rdmaio::DEBUG) << decode.DebugString();
         }
-        RDMA_ASSERT(manifest_file->SyncAppend(Slice(edit_str, msg_size),
+        NOVA_ASSERT(manifest_file->SyncAppend(Slice(edit_str, msg_size),
                                               stoc_id).ok());
         manifest_lock_.unlock();
     }
@@ -1069,13 +1069,13 @@ namespace leveldb {
             Status s = edit.DecodeFrom(input, &next);
             input = next;
             if (!s.ok()) {
-                RDMA_LOG(rdmaio::INFO)
+                NOVA_LOG(rdmaio::INFO)
                     << fmt::format("Read manifest file {} bytes",
                                    (uint64_t) (next.data()) -
                                    (uint64_t) (record.data()));
                 break;
             }
-            RDMA_LOG(rdmaio::DEBUG)
+            NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("stats:{} edit:{}", s.ToString(),
                                edit.DebugString());
 
@@ -1263,7 +1263,7 @@ namespace leveldb {
         options.fill_cache = false;
         options.thread_id = bg_thread->thread_id();
         options.mem_manager = bg_thread->mem_manager();
-        options.dc_client = bg_thread->dc_client();
+        options.stoc_client = bg_thread->stoc_client();
 
         // Level-0 files have to be merged together.  For other levels,
         // we will make a concatenating iterator per level.
@@ -1375,7 +1375,7 @@ namespace leveldb {
         }
 
         // check sets are non overlapping.
-        RDMA_ASSERT(ranges.size() <= compactions.size());
+        NOVA_ASSERT(ranges.size() <= compactions.size());
         for (int pivot = 0; pivot < ranges.size(); pivot++) {
             Range &p = ranges[pivot];
             for (int i = 0; i < ranges.size(); i++) {
@@ -1408,7 +1408,7 @@ namespace leveldb {
         std::vector<FileMetaData *> l0files;
         std::vector<FileMetaData *> l1files;
         int level = compaction_level_;
-        RDMA_ASSERT(level >= 0 && level + 1 < options_->level);
+        NOVA_ASSERT(level >= 0 && level + 1 < options_->level);
         // fill in l0 and l1 files.
         for (int which = 0; which < 2; which++) {
             for (int i = 0; i < files_[level + which].size(); i++) {
@@ -1419,7 +1419,7 @@ namespace leveldb {
                 }
             }
         }
-        RDMA_LOG(rdmaio::INFO)
+        NOVA_LOG(rdmaio::INFO)
             << fmt::format("Compacting level {} {}:{}", level, l0files.size(),
                            l1files.size());
         int set_index = 0;
@@ -1432,7 +1432,7 @@ namespace leveldb {
                 std::vector<FileMetaData *> l0copy(l0files);
                 std::vector<FileMetaData *> l1copy(l1files);
                 ComputeOverlappingFilesForRange(&l0copy, &l1copy, compaction);
-                RDMA_LOG(rdmaio::DEBUG)
+                NOVA_LOG(rdmaio::DEBUG)
                     << fmt::format("Original set {}: {}", set_index,
                                    compaction->DebugString(
                                            icmp_->user_comparator()));
@@ -1460,7 +1460,7 @@ namespace leveldb {
 
                 std::set<uint64_t> skip_files;
                 skip_files.insert(compaction->inputs_[0][0]->number);
-                RDMA_ASSERT(compaction->num_input_files(0) == 1);
+                NOVA_ASSERT(compaction->num_input_files(0) == 1);
 
                 if (1 + new_l1files >
                     options_->max_num_sstables_in_nonoverlapping_set) {
@@ -1478,7 +1478,7 @@ namespace leveldb {
                         compaction->grandparents_.push_back(l1o);
                     }
                     compaction->inputs_[1].clear();
-                    RDMA_ASSERT(compaction->inputs_[0].size() <=
+                    NOVA_ASSERT(compaction->inputs_[0].size() <=
                                 options_->max_num_sstables_in_nonoverlapping_set);
                     compaction->target_level_ = level;
                 } else if (new_l1files > 0 && 1 + new_l1files <
@@ -1502,13 +1502,13 @@ namespace leveldb {
                 }
             }
             if (!update_reason.empty()) {
-                RDMA_LOG(rdmaio::DEBUG)
+                NOVA_LOG(rdmaio::DEBUG)
                     << fmt::format("Updated set {}: {} Reason:{}", set_index,
                                    compaction->DebugString(
                                            icmp_->user_comparator()),
                                    update_reason);
             }
-            RDMA_ASSERT(compaction->num_input_files(0) +
+            NOVA_ASSERT(compaction->num_input_files(0) +
                         compaction->num_input_files(1) <=
                         options_->max_num_sstables_in_nonoverlapping_set);
             if (remove_overlapping_tables) {
@@ -1596,7 +1596,7 @@ namespace leveldb {
                 break;
             }
         }
-        RDMA_ASSERT(lower <= upper);
+        NOVA_ASSERT(lower <= upper);
         while (lower > 0) {
             auto prior = inputs[lower - 1];
             if (icmp_->user_comparator()->Compare(*smallest,
@@ -1766,7 +1766,7 @@ namespace leveldb {
 
     void AtomicVersion::SetVersion(leveldb::Version *v) {
         mutex.lock();
-        RDMA_ASSERT(!version);
+        NOVA_ASSERT(!version);
         version = v;
         v->Ref();
         mutex.unlock();

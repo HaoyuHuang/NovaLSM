@@ -109,7 +109,7 @@ namespace leveldb {
         ~PosixRandomAccessFile() override;
 
         Status
-        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
+        Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset, size_t n,
              Slice *result,
              char *scratch) override;
 
@@ -141,9 +141,8 @@ namespace leveldb {
         ~PosixMmapReadableFile() override;
 
         Status
-        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
-             Slice *result,
-             char *scratch) override;
+        Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset, size_t n,
+             Slice *result, char *scratch) override;
 
     private:
         char *const mmap_base_;
@@ -159,9 +158,8 @@ namespace leveldb {
         ~PosixReadWriteFile();
 
         Status
-        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
-             Slice *result,
-             char *scratch) override;
+        Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset, size_t n,
+             Slice *result, char *scratch) override;
 
         Status Append(const Slice &data) override;
 

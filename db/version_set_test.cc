@@ -403,7 +403,7 @@ namespace leveldb {
                                      c->DebugString(user_comparator));
             }
 
-            RDMA_LOG(rdmaio::INFO) << debug;
+            NOVA_LOG(rdmaio::INFO) << debug;
         }
 
         uint32_t fn = 0;
@@ -595,8 +595,8 @@ using namespace nova;
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq;
-std::atomic_int_fast32_t nova::NovaCCServer::bg_storage_worker_seq_id_;
-std::atomic_int_fast32_t leveldb::NovaBlockCCClient::rdma_worker_seq_id_;
+std::atomic_int_fast32_t nova::RDMAServerImpl::bg_storage_worker_seq_id_;
+std::atomic_int_fast32_t leveldb::StoCBlockClient::rdma_worker_seq_id_;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 nova::NovaGlobalVariables nova::NovaGlobalVariables::global;
 

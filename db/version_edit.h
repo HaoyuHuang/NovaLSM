@@ -65,8 +65,8 @@ namespace leveldb {
                 uint64_t flush_timestamp,
                 const InternalKey &smallest,
                 const InternalKey &largest,
-                RTableHandle meta_block_handle,
-                const std::vector<RTableHandle> &data_block_group_handles) {
+                StoCBlockHandle meta_block_handle,
+                const std::vector<StoCBlockHandle> &data_block_group_handles) {
             FileMetaData f;
             f.level = level;
             f.memtable_ids = memtable_ids;

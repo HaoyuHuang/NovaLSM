@@ -534,7 +534,6 @@ leveldb_writeoptions_t *leveldb_writeoptions_create() {
 void leveldb_writeoptions_destroy(leveldb_writeoptions_t *opt) { delete opt; }
 
 void leveldb_writeoptions_set_sync(leveldb_writeoptions_t *opt, uint8_t v) {
-    opt->rep.sync = v;
 }
 
 leveldb_cache_t *leveldb_cache_create_lru(size_t capacity) {

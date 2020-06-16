@@ -5,7 +5,7 @@
 #include <fmt/core.h>
 #include "db/table_cache.h"
 
-#include "cc/nova_cc.h"
+#include "ltc/stoc_file_client_impl.h"
 #include "db/filename.h"
 #include "leveldb/env.h"
 #include "leveldb/table.h"
@@ -83,14 +83,14 @@ namespace leveldb {
         *handle = cache_->Lookup(key);
 
         bool cache_hit = true;
-        NovaCCRandomAccessFile *file;
+        StoCRandomAccessFileClientImpl *file;
 
         if (*handle) {
             cache_hit = true;
             // Check if the file is deleted.
             TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache_->Value(
                     *handle));
-            file = dynamic_cast<NovaCCRandomAccessFile *>(tf->file);
+            file = dynamic_cast<StoCRandomAccessFileClientImpl *>(tf->file);
         } else {
             cache_hit = false;
         }
@@ -102,15 +102,15 @@ namespace leveldb {
                 prefetch_all = true;
             }
             std::string filename = TableFileName(dbname_, file_number);
-            file = new NovaCCRandomAccessFile(env_, dbname_, file_number, meta,
-                                              options.dc_client,
-                                              options.mem_manager,
-                                              options.thread_id,
-                                              prefetch_all,
-                                              filename);
+            file = new StoCRandomAccessFileClientImpl(env_, dbname_, file_number, meta,
+                                                      options.stoc_client,
+                                                      options.mem_manager,
+                                                      options.thread_id,
+                                                      prefetch_all,
+                                                      filename);
             s = Table::Open(options_, options, meta, file, file_size, level,
                             file_number, &table, db_profiler_);
-            RDMA_ASSERT(s.ok())
+            NOVA_ASSERT(s.ok())
                 << fmt::format("file:{} status:{}", meta->DebugString(),
                                s.ToString());
 
@@ -126,8 +126,8 @@ namespace leveldb {
                 *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
             }
         }
-        RDMA_LOG(rdmaio::DEBUG)
-            << fmt::format("table cache hit {} fn:{} cs:{} cc:{}", cache_hit,
+        NOVA_LOG(rdmaio::DEBUG)
+            << fmt::format("table cache hit {} fn:{} cs:{} ltc:{}", cache_hit,
                            file_number, cache_->TotalCharge(),
                            cache_->TotalCapacity());
         return s;
@@ -185,7 +185,7 @@ namespace leveldb {
         Cache::Handle *handle = nullptr;
         Status s = FindTable(caller, options, meta, file_number,
                              file_size, level, &handle);
-        RDMA_ASSERT(s.ok());
+        NOVA_ASSERT(s.ok());
         cache_->Release(handle);
         return s;
     }

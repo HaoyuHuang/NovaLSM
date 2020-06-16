@@ -5,11 +5,11 @@
 #include "util/crc32c.h"
 #include <fmt/core.h>
 #include <db/dbformat.h>
-#include <nova/logging.hpp>
+#include <common/nova_console_logging.h>
 #include <unordered_map>
 #include "leveldb/table.h"
 
-#include "nova/logging.hpp"
+#include "common/nova_console_logging.h"
 
 #include "leveldb/cache.h"
 #include "leveldb/comparator.h"
@@ -40,7 +40,7 @@ namespace leveldb {
         const char *filter_data;
         int level;
         uint64_t file_number;
-        std::unordered_map<uint64_t, uint64_t> rtable_data_relative_offset;
+        std::unordered_map<uint64_t, uint64_t> stoc_file_data_relative_offset;
 
         BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
         Block *index_block;
@@ -60,15 +60,15 @@ namespace leveldb {
 
         char footer_space[Footer::kEncodedLength];
         Slice footer_input;
-        RTableHandle h = {};
+        StoCBlockHandle h = {};
         h.offset = size - Footer::kEncodedLength;
         h.size = Footer::kEncodedLength;
 
-        auto f = reinterpret_cast<CCRandomAccessFile *>(file);
+        auto f = reinterpret_cast<StoCRandomAccessFileClient *>(file);
         Status s = f->Read(read_options, h, size - Footer::kEncodedLength,
                            Footer::kEncodedLength,
                            &footer_input, footer_space);
-        RDMA_ASSERT(footer_input.size() == Footer::kEncodedLength)
+        NOVA_ASSERT(footer_input.size() == Footer::kEncodedLength)
             << fmt::format("{} {} {}", footer_input.size(),
                            Footer::kEncodedLength, meta->DebugString());
         if (!s.ok()) return s;
@@ -81,7 +81,7 @@ namespace leveldb {
         *table = new Table();
         BlockContents index_block_contents;
         if (s.ok()) {
-            RTableHandle h = {};
+            StoCBlockHandle h = {};
             h.offset = footer.index_handle().offset();
             h.size = footer.index_handle().size();
             s = (*table)->ReadBlock(file, read_options, h,
@@ -112,32 +112,12 @@ namespace leveldb {
             uint64_t offset = 0;
             for (const auto &handle : meta->data_block_group_handles) {
                 auto sid = static_cast<uint64_t>(handle.server_id);
-                uint64_t id = (sid << 32) | handle.rtable_id;
-                RDMA_ASSERT(rep->rtable_data_relative_offset.find(id) ==
-                            rep->rtable_data_relative_offset.end());
-                rep->rtable_data_relative_offset[id] = offset;
+                uint64_t id = (sid << 32) | handle.stoc_file_id;
+                NOVA_ASSERT(rep->stoc_file_data_relative_offset.find(id) ==
+                            rep->stoc_file_data_relative_offset.end());
+                rep->stoc_file_data_relative_offset[id] = offset;
                 offset += handle.size;
             }
-
-//            auto it = index_block->NewIterator(options.comparator);
-//            it->SeekToFirst();
-//            while (it->Valid()) {
-//                Slice key = it->key();
-//                Slice value = it->value();
-//
-//                leveldb::ParsedInternalKey ikey;
-//                leveldb::ParseInternalKey(key, &ikey);
-//                RTableHandle handle;
-//                handle.DecodeHandle(value.data());
-//                RDMA_LOG(rdmaio::DEBUG)
-//                    << fmt::format("key:{} handle:{} {} {} {}",
-//                                   ikey.user_key.ToString(), handle.server_id,
-//                                   handle.rtable_id, handle.offset,
-//                                   handle.size);
-//                it->Next();
-//            }
-//            delete it;
-
         }
         return s;
     }
@@ -154,10 +134,10 @@ namespace leveldb {
             opt.verify_checksums = true;
         }
         BlockContents contents;
-        RTableHandle h = {};
+        StoCBlockHandle h = {};
         h.offset = footer.metaindex_handle().offset();
         h.size = footer.metaindex_handle().size();
-        RDMA_ASSERT(ReadBlock(rep_->file, opt, h, &contents).ok());
+        NOVA_ASSERT(ReadBlock(rep_->file, opt, h, &contents).ok());
         Block *meta = new Block(contents,
                                 rep_->file_number,
                                 footer.metaindex_handle().offset());
@@ -166,7 +146,7 @@ namespace leveldb {
         std::string key = "filter.";
         key.append(rep_->options.filter_policy->Name());
         iter->Seek(key);
-        RDMA_ASSERT(iter->Valid() && iter->key() == Slice(key));
+        NOVA_ASSERT(iter->Valid() && iter->key() == Slice(key));
         ReadFilter(iter->value());
         delete iter;
         delete meta;
@@ -175,7 +155,7 @@ namespace leveldb {
     void Table::ReadFilter(const Slice &filter_handle_value) {
         Slice v = filter_handle_value;
         BlockHandle filter_handle;
-        RDMA_ASSERT(filter_handle.DecodeFrom(&v).ok());
+        NOVA_ASSERT(filter_handle.DecodeFrom(&v).ok());
         // We might want to unify with ReadBlock() if we start
         // requiring checksum verification in Table::Open.
         ReadOptions opt;
@@ -183,10 +163,10 @@ namespace leveldb {
             opt.verify_checksums = true;
         }
         BlockContents block;
-        RTableHandle h = {};
+        StoCBlockHandle h = {};
         h.offset = filter_handle.offset();
         h.size = filter_handle.size();
-        RDMA_ASSERT(ReadBlock(rep_->file, opt, h, &block).ok());
+        NOVA_ASSERT(ReadBlock(rep_->file, opt, h, &block).ok());
         if (block.heap_allocated) {
             rep_->filter_data = block.data.data();  // Will need to delete later
         }
@@ -220,21 +200,19 @@ namespace leveldb {
         Cache *block_cache = table->rep_->options.block_cache;
         Block *block = nullptr;
         Cache::Handle *cache_handle = nullptr;
-
-        // It is an RTableHandle.
-        RTableHandle rtable_handle = {};
+        StoCBlockHandle stoc_block_handle = {};
         Slice input = index_value;
         Status s;
-        rtable_handle.DecodeHandle(input.data());
+        stoc_block_handle.DecodeHandle(input.data());
         // We intentionally allow extra stuff in index_value so that we
         // can add more features in the future.
         bool cache_hit = false;
         bool insert = false;
         BlockContents contents;
         if (block_cache != nullptr) {
-            char cache_key_buffer[8 + RTableHandle::HandleSize()];
+            char cache_key_buffer[8 + StoCBlockHandle::HandleSize()];
             EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
-            rtable_handle.EncodeHandle(cache_key_buffer + 8);
+            stoc_block_handle.EncodeHandle(cache_key_buffer + 8);
             Slice key(cache_key_buffer, sizeof(cache_key_buffer));
             cache_handle = block_cache->Lookup(key);
             if (cache_handle != nullptr) {
@@ -242,11 +220,11 @@ namespace leveldb {
                         cache_handle));
                 cache_hit = true;
             } else {
-                s = table->ReadBlock(table->rep_->file, options, rtable_handle,
+                s = table->ReadBlock(table->rep_->file, options, stoc_block_handle,
                                      &contents);
                 if (s.ok()) {
                     block = new Block(contents, table->rep_->file_number,
-                                      rtable_handle.offset);
+                                      stoc_block_handle.offset);
                     if (contents.cachable && options.fill_cache) {
                         cache_handle = block_cache->Insert(key, block,
                                                            block->size(),
@@ -256,15 +234,15 @@ namespace leveldb {
                 }
             }
         } else {
-            s = table->ReadBlock(table->rep_->file, options, rtable_handle,
+            s = table->ReadBlock(table->rep_->file, options, stoc_block_handle,
                                  &contents);
             if (s.ok()) {
                 block = new Block(contents, table->rep_->file_number,
-                                  rtable_handle.offset);
+                                  stoc_block_handle.offset);
             }
         }
 
-        RDMA_ASSERT(s.ok())
+        NOVA_ASSERT(s.ok())
             <<
             fmt::format(
                     "{} Cache hit {} Insert {} fn:{} rs:{} rr:{} roff:{} rsize:{}",
@@ -272,9 +250,9 @@ namespace leveldb {
                     cache_hit,
                     insert,
                     table->rep_->file_number,
-                    rtable_handle.server_id,
-                    rtable_handle.rtable_id,
-                    rtable_handle.offset, rtable_handle.size);
+                    stoc_block_handle.server_id,
+                    stoc_block_handle.stoc_file_id,
+                    stoc_block_handle.offset, stoc_block_handle.size);
 
         if (table->db_profiler_ != nullptr) {
             Access access = {
@@ -330,11 +308,11 @@ namespace leveldb {
     }
 
     uint64_t Table::TranslateToDataBlockOffset(
-            const leveldb::RTableHandle &handle) {
+            const leveldb::StoCBlockHandle &handle) {
         uint64_t sid = handle.server_id;
-        uint64_t id = (sid << 32) | handle.rtable_id;
-        auto it = rep_->rtable_data_relative_offset.find(id);
-        RDMA_ASSERT(it != rep_->rtable_data_relative_offset.end());
+        uint64_t id = (sid << 32) | handle.stoc_file_id;
+        auto it = rep_->stoc_file_data_relative_offset.find(id);
+        NOVA_ASSERT(it != rep_->stoc_file_data_relative_offset.end());
         return it->second + handle.offset;
     }
 
@@ -362,12 +340,12 @@ namespace leveldb {
         if (iiter->Valid()) {
             Slice handle_value = iiter->value();
             FilterBlockReader *filter = rep_->filter;
-            RTableHandle handle;
+            StoCBlockHandle handle;
             bool found = true;
             bool key_doest_not_exist = false;
             uint64_t data_block_offset = 0;
-            RDMA_ASSERT(filter != nullptr);
-            RDMA_ASSERT(RTableHandle::DecodeHandle(&handle_value, &handle));
+            NOVA_ASSERT(filter != nullptr);
+            NOVA_ASSERT(StoCBlockHandle::DecodeHandle(&handle_value, &handle));
             // Not found
             if (db_profiler_ != nullptr) {
                 Access access = {
@@ -404,7 +382,7 @@ namespace leveldb {
                             ExtractUserKey(block_iter->key()),
                             ExtractUserKey(k)) == 0 &&
                         key_doest_not_exist) {
-                        RDMA_LOG(rdmaio::INFO)
+                        NOVA_LOG(rdmaio::INFO)
                             << fmt::format(
                                     "found:{} handle:{} offset:{} k:{} key:{} debug:{} meta:{} ",
                                     found,
@@ -431,7 +409,7 @@ namespace leveldb {
     Status
     Table::ReadBlock(const char *buf, const Slice &contents,
                      const ReadOptions &options,
-                     const RTableHandle &handle, BlockContents *result) {
+                     const StoCBlockHandle &handle, BlockContents *result) {
         size_t n = static_cast<size_t>(handle.size);
         Status s;
 
@@ -493,19 +471,19 @@ namespace leveldb {
 
     Status Table::ReadBlock(leveldb::RandomAccessFile *file,
                             const leveldb::ReadOptions &options,
-                            const RTableHandle &rtable_handle,
+                            const StoCBlockHandle &stoc_block_handle,
                             leveldb::BlockContents *result) {
         result->data = Slice();
         result->cachable = false;
         result->heap_allocated = false;
 
         // Read the block contents as well as the type/crc footer.
-        // See table_builder.cc for the code that built this structure.
-        size_t n = static_cast<size_t>(rtable_handle.size);
+        // See table_builder.ltc for the code that built this structure.
+        size_t n = static_cast<size_t>(stoc_block_handle.size);
         char *buf = new char[n + kBlockTrailerSize];
         Slice contents;
-        auto f = reinterpret_cast<CCRandomAccessFile *>(file);
-        Status s = f->Read(options, rtable_handle, rtable_handle.offset,
+        auto f = reinterpret_cast<StoCRandomAccessFileClient *>(file);
+        Status s = f->Read(options, stoc_block_handle, stoc_block_handle.offset,
                            n + kBlockTrailerSize, &contents,
                            buf);
         if (!s.ok()) {
@@ -516,7 +494,7 @@ namespace leveldb {
             delete[] buf;
             return Status::Corruption("truncated block read");
         }
-        return ReadBlock(buf, contents, options, rtable_handle, result);
+        return ReadBlock(buf, contents, options, stoc_block_handle, result);
     }
 
     uint64_t Table::ApproximateOffsetOf(const Slice &key) const {

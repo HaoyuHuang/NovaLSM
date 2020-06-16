@@ -5,7 +5,7 @@
 //
 
 #include "leveldb/subrange.h"
-#include "nova/nova_common.h"
+#include "common/nova_common.h"
 
 namespace leveldb {
 
@@ -238,7 +238,7 @@ namespace leveldb {
         }
         int range = end_tid - start_tid + 1;
         int index = rr_id->fetch_add(1, std::memory_order_relaxed) % range;
-        RDMA_ASSERT(start_tid + index <= end_tid);
+        NOVA_ASSERT(start_tid + index <= end_tid);
         return start_tid + index;
     }
 
@@ -285,14 +285,14 @@ namespace leveldb {
     bool
     SubRange::IsSmallerThanLower(const Slice &key,
                                  const Comparator *comparator) const {
-        RDMA_ASSERT(!tiny_ranges.empty());
+        NOVA_ASSERT(!tiny_ranges.empty());
         return tiny_ranges[0].IsSmallerThanLower(key, comparator);
     }
 
     bool
     SubRange::IsGreaterThanLower(const Slice &key,
                                  const Comparator *comparator) const {
-        RDMA_ASSERT(!tiny_ranges.empty());
+        NOVA_ASSERT(!tiny_ranges.empty());
         return tiny_ranges[0].IsGreaterThanLower(key,
                                                  comparator);
     }
@@ -300,7 +300,7 @@ namespace leveldb {
     bool
     SubRange::IsGreaterThanUpper(const Slice &key,
                                  const Comparator *comparator) const {
-        RDMA_ASSERT(!tiny_ranges.empty());
+        NOVA_ASSERT(!tiny_ranges.empty());
         return tiny_ranges[tiny_ranges.size() - 1].IsGreaterThanUpper(key,
                                                                       comparator);
     }
@@ -359,18 +359,18 @@ namespace leveldb {
         // Assert duplicates.
         auto it = subranges.begin();
         while (it != subranges.end()) {
-            RDMA_ASSERT(!it->tiny_ranges.empty()) << DebugString();
+            NOVA_ASSERT(!it->tiny_ranges.empty()) << DebugString();
             if (it->num_duplicates > 0) {
-                RDMA_ASSERT(it->tiny_ranges.size() == 1) << DebugString();
-                RDMA_ASSERT(it->IsAPoint(comparator)) << DebugString();
+                NOVA_ASSERT(it->tiny_ranges.size() == 1) << DebugString();
+                NOVA_ASSERT(it->IsAPoint(comparator)) << DebugString();
                 uint64_t lk = it->tiny_ranges[0].lower_int();
                 for (int i = 0; i < it->num_duplicates - 1; i++) {
-                    RDMA_ASSERT(it->tiny_ranges.size() == 1) << DebugString();
-                    RDMA_ASSERT(it->IsAPoint(comparator)) << DebugString();
+                    NOVA_ASSERT(it->tiny_ranges.size() == 1) << DebugString();
+                    NOVA_ASSERT(it->IsAPoint(comparator)) << DebugString();
                     uint64_t other = it->tiny_ranges[0].lower_int();
-                    RDMA_ASSERT(lk == other)
+                    NOVA_ASSERT(lk == other)
                         << fmt::format("{} {} {}", lk, other, DebugString());
-                    RDMA_ASSERT(it->tiny_ranges[0].num_duplicates ==
+                    NOVA_ASSERT(it->tiny_ranges[0].num_duplicates ==
                                 it->num_duplicates) << DebugString();
                     it++;
                 }
@@ -385,12 +385,12 @@ namespace leveldb {
         bool isPriorDup = false;
         for (int i = 0; i < subranges.size(); i++) {
             for (int j = 0; j < subranges[i].tiny_ranges.size(); j++) {
-                RDMA_ASSERT(subranges[i].num_duplicates ==
+                NOVA_ASSERT(subranges[i].num_duplicates ==
                             subranges[i].tiny_ranges[j].num_duplicates)
                     << DebugString();
                 Range &range = subranges[i].tiny_ranges[j];
-                RDMA_ASSERT(range.lower_inclusive) << DebugString();
-                RDMA_ASSERT(!range.upper_inclusive) << DebugString();
+                NOVA_ASSERT(range.lower_inclusive) << DebugString();
+                NOVA_ASSERT(!range.upper_inclusive) << DebugString();
                 if (prior_lower == -1) {
                     prior_lower = range.lower_int();
                     prior_upper = range.upper_int();
@@ -398,14 +398,14 @@ namespace leveldb {
                     continue;
                 }
                 if (range.lower_int() == prior_lower) {
-                    RDMA_ASSERT(range.upper_int() == prior_upper)
+                    NOVA_ASSERT(range.upper_int() == prior_upper)
                         << DebugString();
-                    RDMA_ASSERT(range.num_duplicates > 0) << DebugString();
-                    RDMA_ASSERT(isPriorDup) << DebugString();
+                    NOVA_ASSERT(range.num_duplicates > 0) << DebugString();
+                    NOVA_ASSERT(isPriorDup) << DebugString();
                 } else {
-                    RDMA_ASSERT(range.lower_int() >= prior_upper)
+                    NOVA_ASSERT(range.lower_int() >= prior_upper)
                         << DebugString();
-                    RDMA_ASSERT(range.upper_int() > range.lower_int())
+                    NOVA_ASSERT(range.upper_int() > range.lower_int())
                         << fmt::format("{} {}", range.DebugString(),
                                        DebugString());
                     prior_lower = range.lower_int();
@@ -460,7 +460,7 @@ namespace leveldb {
             return false;
         }
 
-        RDMA_ASSERT(*subrange_id >= 0);
+        NOVA_ASSERT(*subrange_id >= 0);
         const SubRange &sr = subranges[*subrange_id];
         if (sr.num_duplicates == 0) {
             return true;
@@ -484,7 +484,7 @@ namespace leveldb {
         }
         {
             const SubRange &sr = subranges[*subrange_id];
-            RDMA_ASSERT(!sr.IsSmallerThanLower(key, user_comparator) &&
+            NOVA_ASSERT(!sr.IsSmallerThanLower(key, user_comparator) &&
                         !sr.IsGreaterThanUpper(key, user_comparator))
                 << fmt::format("key:{} id:{} ranges:{}", key.ToString(),
                                *subrange_id, DebugString());

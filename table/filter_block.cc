@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-#include <nova/logging.hpp>
+#include <common/nova_console_logging.h>
 #include <fmt/core.h>
 #include "table/filter_block.h"
 
@@ -89,9 +89,9 @@ namespace leveldb {
         filter_size_ = DecodeFixed32(contents.data() + n - 5);
         uint32_t num_filter_offsets = DecodeFixed32(contents.data() + n - 9);
 
-        RDMA_ASSERT(base_lg_ == kFilterBaseLg);
+        NOVA_ASSERT(base_lg_ == kFilterBaseLg);
         uint32_t size = filter_size_ + num_filter_offsets * 4 + 4 + 4 + 1;
-        RDMA_ASSERT(size == n) << fmt::format("{} {}", size, n);
+        NOVA_ASSERT(size == n) << fmt::format("{} {}", size, n);
         data_ = contents.data();
 
         for (int i = 0; i < num_filter_offsets; i++) {

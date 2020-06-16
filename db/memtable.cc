@@ -3,7 +3,7 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include <leveldb/db_profiler.h>
-#include <nova/logging.hpp>
+#include <common/nova_console_logging.h>
 #include <fmt/core.h>
 #include "db/memtable.h"
 #include "db/dbformat.h"
@@ -184,7 +184,7 @@ namespace leveldb {
         l0_file_numbers_.clear();
         is_flushed_ = false;
         is_immutable_ = false;
-        RDMA_ASSERT(!memtable_);
+        NOVA_ASSERT(!memtable_);
         memtable_ = mem;
         memtable_->Ref();
         mutex_.unlock();
@@ -194,17 +194,17 @@ namespace leveldb {
                                     const std::vector<uint64_t> &l0_file_numbers,
                                     uint32_t version_id) {
         mutex_.lock();
-        RDMA_ASSERT(!is_flushed_);
-        RDMA_ASSERT(l0_file_numbers_.empty());
-        RDMA_ASSERT(is_immutable_);
+        NOVA_ASSERT(!is_flushed_);
+        NOVA_ASSERT(l0_file_numbers_.empty());
+        NOVA_ASSERT(is_immutable_);
         last_version_id_ = std::max(last_version_id_, version_id);
         l0_file_numbers_.insert(l0_file_numbers.begin(), l0_file_numbers.end());
         is_flushed_ = true;
-        RDMA_ASSERT(memtable_);
+        NOVA_ASSERT(memtable_);
         uint32_t mid = memtable_->memtableid();
         uint32_t refs = memtable_->Unref();
         if (refs <= 0) {
-            RDMA_LOG(rdmaio::DEBUG)
+            NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("flush delete db-{} mid-{}", dbname, mid);
             delete memtable_;
             memtable_ = nullptr;
@@ -243,8 +243,8 @@ namespace leveldb {
     }
 
     void AtomicMemTable::UpdateL0Files(uint32_t version_id, const MemTableL0FilesEdit &edit) {
-        RDMA_ASSERT(is_immutable_);
-        RDMA_ASSERT(is_flushed_);
+        NOVA_ASSERT(is_immutable_);
+        NOVA_ASSERT(is_flushed_);
         mutex_.lock();
         last_version_id_ = std::max(last_version_id_, version_id);
         for (auto add : edit.add_fns) {
@@ -258,11 +258,11 @@ namespace leveldb {
 
     void AtomicMemTable::Unref(const std::string &dbname) {
         mutex_.lock();
-        RDMA_ASSERT(memtable_);
+        NOVA_ASSERT(memtable_);
         uint32_t mid = memtable_->memtableid();
         uint32_t refs = memtable_->Unref();
         if (refs == 0) {
-            RDMA_LOG(rdmaio::DEBUG)
+            NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("unref delete db-{} mid-{}", dbname, mid);
             delete memtable_;
             memtable_ = nullptr;

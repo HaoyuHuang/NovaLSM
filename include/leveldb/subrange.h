@@ -9,7 +9,7 @@
 
 #include <vector>
 #include <atomic>
-#include "nova/logging.hpp"
+#include "common/nova_console_logging.h"
 
 #include "leveldb/slice.h"
 #include "leveldb/comparator.h"
@@ -52,7 +52,6 @@ namespace leveldb {
 
         uint64_t upper_int() const;
     };
-
 
     struct SubRange {
         std::vector<Range> tiny_ranges;

@@ -12,7 +12,7 @@
 #include "leveldb/db.h"
 #include "leveldb/env.h"
 #include "leveldb/iterator.h"
-#include "cc/nova_cc.h"
+#include "ltc/stoc_file_client_impl.h"
 
 #include <fmt/core.h>
 
@@ -40,7 +40,7 @@ namespace leveldb {
                 insert = true;
                 Slice key = iter->key();
                 if (options.prune_memtable_before_flushing) {
-                    RDMA_ASSERT(ParseInternalKey(key, &ik));
+                    NOVA_ASSERT(ParseInternalKey(key, &ik));
                     if (user_key.empty()) {
                         user_key = ik.user_key;
                     } else {
@@ -58,10 +58,10 @@ namespace leveldb {
 
             }
 
-            RDMA_LOG(rdmaio::DEBUG)
+            NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format(
                         "!!!!!!!!!!!!!!!!!!!!! CompactMemTable tid:{} alloc_size:{} nentries:{} nblocks:{}",
-                        key, options.max_dc_file_size, nentries, -1);
+                        key, options.max_stoc_file_size, nentries, -1);
 
             // Finish and check for builder errors
             meta->file_size = file_size;
@@ -91,17 +91,18 @@ namespace leveldb {
             MemManager *mem_manager = bg_thread->mem_manager();
             std::string filename = TableFileName(dbname,
                                                  meta->number);
-            NovaCCMemFile *cc_file = new NovaCCMemFile(env,
-                                                       options,
-                                                       meta->number,
-                                                       mem_manager,
-                                                       bg_thread->dc_client(),
-                                                       dbname,
-                                                       bg_thread->thread_id(),
-                                                       options.max_dc_file_size,
-                                                       bg_thread->rand_seed(),
-                                                       filename);
-            WritableFile *file = new MemWritableFile(cc_file);
+            StoCWritableFileClient *stoc_writable_file = new StoCWritableFileClient(
+                    env,
+                    options,
+                    meta->number,
+                    mem_manager,
+                    bg_thread->stoc_client(),
+                    dbname,
+                    bg_thread->thread_id(),
+                    options.max_stoc_file_size,
+                    bg_thread->rand_seed(),
+                    filename);
+            WritableFile *file = new MemWritableFile(stoc_writable_file);
             TableBuilder *builder = new TableBuilder(options, file);
 
             Slice user_key;
@@ -123,10 +124,10 @@ namespace leveldb {
                     builder->Add(key, iter->value());
                 }
             }
-            RDMA_LOG(rdmaio::DEBUG)
+            NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format(
                         "!!!!!!!!!!!!!!!!!!!!! CompactMemTable tid:{} alloc_size:{} nentries:{} nblocks:{}",
-                        bg_thread->thread_id(), options.max_dc_file_size,
+                        bg_thread->thread_id(), options.max_stoc_file_size,
                         builder->NumEntries(),
                         builder->NumDataBlocks());
 
@@ -137,8 +138,9 @@ namespace leveldb {
                 meta->converted_file_size = meta->file_size;
                 assert(meta->file_size > 0);
 
-                cc_file->set_meta(*meta);
-                cc_file->set_num_data_blocks(builder->NumDataBlocks());
+                stoc_writable_file->set_meta(*meta);
+                stoc_writable_file->set_num_data_blocks(
+                        builder->NumDataBlocks());
             }
             delete builder;
             builder = nullptr;
@@ -152,14 +154,14 @@ namespace leveldb {
             }
 
             // Make sure WRITEs are complete before we persist them.
-            cc_file->WaitForPersistingDataBlocks();
-            uint32_t new_file_size = cc_file->Finalize();
-            meta->meta_block_handle = cc_file->meta_block_handle();
-            meta->data_block_group_handles = cc_file->rhs();
+            stoc_writable_file->WaitForPersistingDataBlocks();
+            uint32_t new_file_size = stoc_writable_file->Finalize();
+            meta->meta_block_handle = stoc_writable_file->meta_block_handle();
+            meta->data_block_group_handles = stoc_writable_file->rhs();
             meta->converted_file_size = new_file_size;
 
-            delete cc_file;
-            cc_file = nullptr;
+            delete stoc_writable_file;
+            stoc_writable_file = nullptr;
             delete file;
             file = nullptr;
         }

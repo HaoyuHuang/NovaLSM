@@ -381,7 +381,7 @@ namespace leveldb {
             ASSERT_EQ("EOF", Read());
         }
 
-// Tests of all the error paths in log_reader.cc follow:
+// Tests of all the error paths in log_reader.ltc follow:
 
         TEST(LogTest, ReadError) {
             Write("foo");

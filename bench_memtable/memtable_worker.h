@@ -7,7 +7,7 @@
 #ifndef LEVELDB_MEMTABLE_WORKER_H
 #define LEVELDB_MEMTABLE_WORKER_H
 
-#include "nova/nova_common.h"
+#include "common/nova_common.h"
 #include "db/memtable.h"
 
 #include <queue>

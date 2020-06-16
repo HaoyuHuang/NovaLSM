@@ -59,7 +59,7 @@ namespace leveldb {
         // The caller must ensure that the underlying MemTable remains live
         // while the returned iterator is live.  The keys returned by this
         // iterator are internal keys encoded by AppendInternalKey in the
-        // db/format.{h,cc} module.
+        // db/format.{h,ltc} module.
         Iterator *NewIterator(TraceType trace_type, AccessCaller caller,
                               uint32_t sample_size = 0);
 

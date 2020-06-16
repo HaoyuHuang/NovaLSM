@@ -67,7 +67,7 @@ namespace leveldb {
     private:
         const FilterPolicy *policy_;
         const char *data_;    // Pointer to filter data (at block-start)
-        size_t base_lg_;      // Encoding parameter (see kFilterBaseLg in .cc file)
+        size_t base_lg_;      // Encoding parameter (see kFilterBaseLg in .ltc file)
         const uint64_t size_; // size of the filter block.
         std::vector<uint32_t> filter_offsets_;
         uint32_t filter_size_ = 0;

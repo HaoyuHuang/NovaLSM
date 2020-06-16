@@ -21,7 +21,7 @@
 
 #include "leveldb/export.h"
 #include "leveldb/status.h"
-#include "leveldb/cc_client.h"
+#include "leveldb/stoc_client.h"
 #include "leveldb/db_types.h"
 
 #if defined(_WIN32)
@@ -270,9 +270,8 @@ namespace leveldb {
         //
         // Safe for concurrent use by multiple threads.
         virtual Status
-        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
-             Slice *result,
-             char *scratch) = 0;
+        Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset,
+             size_t n, Slice *result, char *scratch) = 0;
     };
 
     // A file abstraction for randomly reading the contents of a file.
@@ -294,9 +293,8 @@ namespace leveldb {
         //
         // Safe for concurrent use by multiple threads.
         virtual Status
-        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
-             Slice *result,
-             char *scratch) = 0;
+        Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset,
+             size_t n, Slice *result, char *scratch) = 0;
 
         virtual Status Append(const Slice &data) = 0;
 
@@ -480,9 +478,8 @@ namespace leveldb {
                   filename_(std::move(filename)) {}
 
         Status
-        Read(const RTableHandle &rtable_handle, uint64_t offset, size_t n,
-             Slice *result,
-             char *scratch) override {
+        Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset,
+             size_t n, Slice *result, char *scratch) override {
             if (offset + n > length_) {
                 *result = Slice();
                 return Status::InvalidArgument("");

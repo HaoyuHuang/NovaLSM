@@ -14,22 +14,6 @@ set(CMAKE_CXX_COMPILER /usr/bin/g++)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# C standard can be overridden when this is used as a sub-project.
-#if (NOT CMAKE_C_STANDARD)
-#    # This project can use C11, but will gracefully decay down to C89.
-#    set(CMAKE_C_STANDARD 11)
-#    set(CMAKE_C_STANDARD_REQUIRED OFF)
-#    set(CMAKE_C_EXTENSIONS OFF)
-#endif (NOT CMAKE_C_STANDARD)
-#
-## C++ standard can be overridden when this is used as a sub-project.
-#if (NOT CMAKE_CXX_STANDARD)
-#    # This project requires C++11.
-#    set(CMAKE_CXX_STANDARD 11)
-#    set(CMAKE_CXX_STANDARD_REQUIRED ON)
-#    set(CMAKE_CXX_EXTENSIONS OFF)
-#endif (NOT CMAKE_CXX_STANDARD)
-
 if (WIN32)
     set(LEVELDB_PLATFORM_NAME LEVELDB_PLATFORM_WINDOWS)
     # TODO(cmumford): Make UNICODE configurable for Windows.
@@ -62,30 +46,6 @@ include(CheckCXXSymbolExists)
 check_cxx_symbol_exists(fdatasync "unistd.h" HAVE_FDATASYNC)
 check_cxx_symbol_exists(F_FULLFSYNC "fcntl.h" HAVE_FULLFSYNC)
 check_cxx_symbol_exists(O_CLOEXEC "fcntl.h" HAVE_O_CLOEXEC)
-
-#if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-#    # Disable C++ exceptions.
-#    string(REGEX REPLACE "/EH[a-z]+" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-#    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHs-c-")
-#    add_definitions(-D_HAS_EXCEPTIONS=0)
-#
-#    # Disable RTTI.
-#    string(REGEX REPLACE "/GR" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-#    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /GR-")
-#else (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-#    # Enable strict prototype warnings for C code in clang and gcc.
-#    if (NOT CMAKE_C_FLAGS MATCHES "-Wstrict-prototypes")
-#        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wstrict-prototypes")
-#    endif (NOT CMAKE_C_FLAGS MATCHES "-Wstrict-prototypes")
-#
-#    # Disable C++ exceptions.
-#    string(REGEX REPLACE "-fexceptions" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-#    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-exceptions")
-#
-#    # Disable RTTI.
-#    string(REGEX REPLACE "-frtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-#    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
-#endif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
 
 # Test whether -Wthread-safety is available. See
 # https://clang.llvm.org/docs/ThreadSafetyAnalysis.html
@@ -123,23 +83,23 @@ endif (BUILD_SHARED_LIBS)
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
 
-add_library(leveldb "" )
+add_library(leveldb "" db/range_index.cpp db/range_index.h)
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
-        include/leveldb/cc_client.h
+        include/leveldb/stoc_client.h
         include/leveldb/db_types.h
 
-        cc/rdma_admission_ctrl.cpp
-        cc/rdma_admission_ctrl.h
-        db/table_locator.cpp
-        db/table_locator.h
-        cc/nova_storage_worker.cpp
-        cc/nova_storage_worker.h
-        cc/storage_selector.cpp
-        cc/storage_selector.h
-        cc/nova_cc_stat_thread.cpp
-        cc/nova_cc_stat_thread.h
+        novalsm/rdma_admission_ctrl.cpp
+        novalsm/rdma_admission_ctrl.h
+        db/lookup_index.cpp
+        db/lookup_index.h
+        stoc/storage_worker.cpp
+        stoc/storage_worker.h
+        ltc/storage_selector.cpp
+        ltc/storage_selector.h
+        ltc/stat_thread.cpp
+        ltc/stat_thread.h
         db/subrange.cpp
         include/leveldb/subrange.h
         db/compaction.cpp
@@ -219,77 +179,80 @@ target_sources(leveldb
         "util/env_mem.cc"
         "util/env_mem.h"
         "util/env_posix.h"
-        "cc/nova_cc_client.cpp"
-        "cc/nova_cc_client.h"
-        "cc/nova_cc_server.cpp"
-        "cc/nova_cc_server.h"
+        "ltc/stoc_client_impl.cpp"
+        "ltc/stoc_client_impl.h"
+        "novalsm/rdma_server.cpp"
+        "novalsm/rdma_server.h"
 
         "util/testharness.cc"
         "util/testharness.h"
         "util/testutil.cc"
         "util/testutil.h"
 
-        cc/nova_rtable.cpp
-        cc/nova_rtable.h
+        stoc/persistent_stoc_file.cpp
+        stoc/persistent_stoc_file.h
         bench_memtable/memtable_worker.cpp
         bench_memtable/memtable_worker.h
-        cc/db_compaction_thread.cpp
-        cc/db_compaction_thread.h
-        nova/city_hash.h
-        nova/city_hash.cpp
-        nova/common.hpp
-        nova/logging.hpp
-        nova/mr.hpp
-        nova/msg_interface.hpp
-        nova/pre_connector.hpp
-        nova/qp.hpp
-        nova/qp_impl.hpp
-        nova/rdma_ctrl.hpp
-        nova/rdma_ctrl_impl.hpp
-        nova/rnic.hpp
-        nova/nova_config.h
-        nova/nova_config.cc
-        nova/nova_msg_parser.h
-        cc/nova_cc_nic_server.cpp
-        cc/nova_cc_nic_server.h
-        cc/nova_cc_conn_worker.cpp
-        cc/nova_cc_conn_worker.h
-        nova/nova_common.cpp
-        nova/nova_common.h
-        nova/nova_msg_callback.h
-        nova/nova_rdma_rc_store.cpp
-        nova/nova_rdma_rc_store.h
-        nova/nova_rdma_store.h
-        mc/nova_mem_manager.h
-        mc/nova_mem_manager.cpp
-        nova/linked_list.h
-        mc/nova_chained_hashtable.cpp
-        mc/nova_chained_hashtable.h
+        ltc/compaction_thread.cpp
+        ltc/compaction_thread.h
+        common/city_hash.h
+        common/city_hash.cpp
+        rdma/common.hpp
+        common/nova_console_logging.h
+        rdma/mr.hpp
+        rdma/msg_interface.hpp
+        rdma/pre_connector.hpp
+        rdma/qp.hpp
+        rdma/qp_impl.hpp
+        rdma/rdma_ctrl.hpp
+        rdma/rdma_ctrl_impl.hpp
+        rdma/rnic.hpp
+        common/nova_config.h
+        common/nova_config.cc
+        rdma/nova_msg_parser.h
+        novalsm/nic_server.cpp
+        novalsm/nic_server.h
+        novalsm/conn_worker.cpp
+        novalsm/conn_worker.h
+        common/nova_common.cpp
+        common/nova_common.h
+        rdma/nova_msg_callback.h
+        rdma/nova_rdma_rc_broker.cpp
+        rdma/nova_rdma_rc_broker.h
+        rdma/nova_rdma_broker.h
+        common/nova_mem_manager.h
+        common/nova_mem_manager.cpp
+        common/nova_chained_hashtable.cpp
+        common/nova_chained_hashtable.h
 
-        log/nova_in_memory_log_manager.cpp
-        log/nova_in_memory_log_manager.h
-        cc/nova_cc_log_writer.cc
-        cc/nova_cc_log_writer.h
-        nova/nova_client_sock.cpp
-        nova/nova_client_sock.h
-        cc/nova_rdma_cc.cpp
-        cc/nova_rdma_cc.h
-        cc/nova_cc.cpp
-        cc/nova_cc.h
+        log/stoc_log_manager.cpp
+        log/stoc_log_manager.h
+        log/logc_log_writer.cc
+        log/logc_log_writer.h
+        common/nova_client_sock.cpp
+        common/nova_client_sock.h
+        novalsm/rdma_msg_handler.cpp
+        novalsm/rdma_msg_handler.h
+        ltc/stoc_file_client_impl.cpp
+        ltc/stoc_file_client_impl.h
 
-        bench/bench_common.h
-        bench/mock_rtable.h
-        bench/mock_rtable.cpp
-        bench/rdma_write_client.h
-        bench/rdma_write_client.cpp
+        benchmarks/bench_common.h
+        benchmarks/mock_rtable.h
+        benchmarks/mock_rtable.cpp
+        benchmarks/rdma_write_client.h
+        benchmarks/rdma_write_client.cpp
 
-        bench/rdma_write_server_worker.cpp
-        bench/rdma_write_server_worker.h
+        benchmarks/rdma_write_server_worker.cpp
+        benchmarks/rdma_write_server_worker.h
 
-        ycsb/generator.h
-        ycsb/utils.h
-        ycsb/zipfian_generator.h
-        ycsb/uniform_generator.h
+        util/generator.h
+        util/zipfian_generator.h
+        util/uniform_generator.h
+        util/counter_generator.h
+        util/discrete_generator.h
+        util/scrambled_zipfian_generator.h
+        util/skewed_latest_generator.h
+        util/utils.h
 
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
@@ -324,13 +287,6 @@ else (WIN32)
             "util/posix_logger.h"
             )
 endif (WIN32)
-
-# MemEnv is not part of the interface and could be pulled to a separate library.
-#target_sources(leveldb
-#        PRIVATE
-#        "helpers/memenv/memenv.cc"
-#        "helpers/memenv/memenv.h"
-#        )
 
 target_include_directories(leveldb
         PUBLIC
@@ -384,219 +340,13 @@ find_package(Threads REQUIRED)
 target_link_libraries(leveldb Threads::Threads -lpthread)
 target_link_libraries(leveldb ibverbs event fmt)
 
-#add_executable(leveldbutil
-#        "db/leveldbutil.cc"
-#        )
-#target_link_libraries(leveldbutil leveldb)
+add_executable(nova_server_main "novalsm/nova_server_main.cpp")
+target_link_libraries(nova_server_main -lgflags leveldb)
 
-#if (LEVELDB_BUILD_TESTS)
-#    enable_testing()
-#
-#    function(leveldb_test test_file)
-#        get_filename_component(test_target_name "${test_file}" NAME_WE)
-#
-#        add_executable("${test_target_name}" "")
-#        target_sources("${test_target_name}"
-#                PRIVATE
-#                "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
-#                "util/testharness.cc"
-#                "util/testharness.h"
-#                "util/testutil.cc"
-#                "util/testutil.h"
-#
-#                "${test_file}"
-#                )
-#        target_link_libraries("${test_target_name}" leveldb)
-#        target_compile_definitions("${test_target_name}"
-#                PRIVATE
-#                ${LEVELDB_PLATFORM_NAME}=1
-#                )
-#        if (NOT HAVE_CXX17_HAS_INCLUDE)
-#            target_compile_definitions("${test_target_name}"
-#                    PRIVATE
-#                    LEVELDB_HAS_PORT_CONFIG_H=1
-#                    )
-#        endif (NOT HAVE_CXX17_HAS_INCLUDE)
-#
-#        add_test(NAME "${test_target_name}" COMMAND "${test_target_name}")
-#    endfunction(leveldb_test)
-#
-#    leveldb_test("db/c_test.c")
-#    leveldb_test("db/fault_injection_test.cc")
-#
-#    leveldb_test("issues/issue178_test.cc")
-#    leveldb_test("issues/issue200_test.cc")
-#    leveldb_test("issues/issue320_test.cc")
-#
-#    leveldb_test("util/env_test.cc")
-#    leveldb_test("util/status_test.cc")
-#    leveldb_test("util/no_destructor_test.cc")
-#
-#    if (NOT BUILD_SHARED_LIBS)
-#        leveldb_test("db/autocompact_test.cc")
-#        leveldb_test("db/corruption_test.cc")
-#        leveldb_test("db/db_test.cc")
-#        leveldb_test("db/dbformat_test.cc")
-#        leveldb_test("db/filename_test.cc")
-#        leveldb_test("db/log_test.cc")
-#        leveldb_test("db/recovery_test.cc")
-#        leveldb_test("db/skiplist_test.cc")
-#        leveldb_test("db/version_edit_test.cc")
-#        leveldb_test("db/version_set_test.cc")
-#        leveldb_test("db/write_batch_test.cc")
-#
-#        leveldb_test("helpers/memenv/memenv_test.cc")
-#
-#        leveldb_test("table/filter_block_test.cc")
-#        leveldb_test("table/table_test.cc")
-#
-#        leveldb_test("util/arena_test.cc")
-#        leveldb_test("util/bloom_test.cc")
-#        leveldb_test("util/cache_test.cc")
-#        leveldb_test("util/coding_test.cc")
-#        leveldb_test("util/crc32c_test.cc")
-#        leveldb_test("util/hash_test.cc")
-#        leveldb_test("util/logging_test.cc")
-#
-#        # TODO(costan): This test also uses
-#        #               "util/env_{posix|windows}_test_helper.h"
-#        if (WIN32)
-#            leveldb_test("util/env_windows_test.cc")
-#        else (WIN32)
-#            leveldb_test("util/env_posix_test.cc")
-#        endif (WIN32)
-#    endif (NOT BUILD_SHARED_LIBS)
-#endif (LEVELDB_BUILD_TESTS)
-
-#if (LEVELDB_BUILD_BENCHMARKS)
-#    function(leveldb_benchmark bench_file)
-#        get_filename_component(bench_target_name "${bench_file}" NAME_WE)
-#
-#        add_executable("${bench_target_name}" "")
-#        target_sources("${bench_target_name}"
-#                PRIVATE
-#                "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
-#                "util/histogram.cc"
-#                "util/histogram.h"
-#                "util/testharness.cc"
-#                "util/testharness.h"
-#                "util/testutil.cc"
-#                "util/testutil.h"
-#
-#                "${bench_file}"
-#                )
-#        target_link_libraries("${bench_target_name}" leveldb)
-#        target_compile_definitions("${bench_target_name}"
-#                PRIVATE
-#                ${LEVELDB_PLATFORM_NAME}=1
-#                )
-#        if (NOT HAVE_CXX17_HAS_INCLUDE)
-#            target_compile_definitions("${bench_target_name}"
-#                    PRIVATE
-#                    LEVELDB_HAS_PORT_CONFIG_H=1
-#                    )
-#        endif (NOT HAVE_CXX17_HAS_INCLUDE)
-#    endfunction(leveldb_benchmark)
-#
-#    if (NOT BUILD_SHARED_LIBS)
-#        leveldb_benchmark("benchmarks/db_bench.cc")
-#    endif (NOT BUILD_SHARED_LIBS)
-#
-#    check_library_exists(sqlite3 sqlite3_open "" HAVE_SQLITE3)
-#    if (HAVE_SQLITE3)
-#        leveldb_benchmark("benchmarks/db_bench_sqlite3.cc")
-#        target_link_libraries(db_bench_sqlite3 sqlite3)
-#    endif (HAVE_SQLITE3)
-#
-#    # check_library_exists is insufficient here because the library names have
-#    # different manglings when compiled with clang or gcc, at least when installed
-#    # with Homebrew on Mac.
-#    set(OLD_CMAKE_REQURED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES})
-#    list(APPEND CMAKE_REQUIRED_LIBRARIES kyotocabinet)
-#    check_cxx_source_compiles("
-##include <kcpolydb.h>
-#
-#int main() {
-#  kyotocabinet::TreeDB* db = new kyotocabinet::TreeDB();
-#  delete db;
-#  return 0;
-#}
-#  " HAVE_KYOTOCABINET)
-#    set(CMAKE_REQUIRED_LIBRARIES ${OLD_CMAKE_REQURED_LIBRARIES})
-#    if (HAVE_KYOTOCABINET)
-#        leveldb_benchmark("benchmarks/db_bench_tree_db.cc")
-#        target_link_libraries(db_bench_tree_db kyotocabinet)
-#    endif (HAVE_KYOTOCABINET)
-#endif (LEVELDB_BUILD_BENCHMARKS)
-#
-#if (LEVELDB_INSTALL)
-#    install(TARGETS leveldb
-#            EXPORT leveldbTargets
-#            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-#            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-#            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-#            )
-#    install(
-#            FILES
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/c.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/cache.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/comparator.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/db.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/dumpfile.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/env.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/export.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/filter_policy.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/iterator.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/options.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/slice.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/status.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/table_builder.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/table.h"
-#            "${LEVELDB_PUBLIC_INCLUDE_DIR}/write_batch.h"
-#            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/leveldb"
-#    )
-#
-#    include(CMakePackageConfigHelpers)
-#    configure_package_config_file(
-#            "cmake/${PROJECT_NAME}Config.cmake.in"
-#            "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake"
-#            INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
-#    )
-#    write_basic_package_version_file(
-#            "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake"
-#            COMPATIBILITY SameMajorVersion
-#    )
-#    install(
-#            EXPORT leveldbTargets
-#            NAMESPACE leveldb::
-#            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
-#    )
-#    install(
-#            FILES
-#            "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake"
-#            "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake"
-#            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
-#    )
-#endif (LEVELDB_INSTALL)
-
-
-#add_executable(nova_disaggregate_main "nova/nova_disaggregate_main.cpp")
-#target_link_libraries(nova_disaggregate_main -lgflags leveldb)
-
-add_executable(nova_shared_main "nova/nova_shared_main.cpp")
-target_link_libraries(nova_shared_main -lgflags leveldb)
-
-#add_executable(nova_storage_test "nova/nova_storage_test.cpp")
-#target_link_libraries(nova_storage_test -lgflags leveldb)
-
-
-add_executable(nova_subrange_sim "nova/nova_subrange_sim.cc")
+add_executable(nova_subrange_sim "novalsm/nova_subrange_sim_test.cpp")
 target_link_libraries(nova_subrange_sim -lgflags leveldb)
 
-#add_executable(table_main "table/table_main.cc")
-#target_link_libraries(table_main -lgflags leveldb)
-
-add_executable(scatter_bench "bench/scatter_bench.cpp")
+add_executable(scatter_bench "benchmarks/scatter_bench.cpp")
 target_link_libraries(scatter_bench -lgflags leveldb)
 
 add_executable(memtable_bench "bench_memtable/memtable_bench.cpp")
@@ -610,7 +360,3 @@ target_link_libraries(bloom_test -lgflags leveldb)
 
 add_executable(filter_block_test "table/filter_block_test.cc")
 target_link_libraries(filter_block_test -lgflags leveldb)
-
-#add_executable(table_test "table/table_test.cc")
-#target_link_libraries(table_test -lgflags leveldb)
-

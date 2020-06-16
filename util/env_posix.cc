@@ -108,7 +108,7 @@ namespace leveldb {
         }
     }
 
-    Status PosixRandomAccessFile::Read(const RTableHandle &rtable_handle,
+    Status PosixRandomAccessFile::Read(const StoCBlockHandle &stoc_block_handle,
                                        uint64_t offset, size_t n, Slice *result,
                                        char *scratch) {
         int fd = fd_;
@@ -151,7 +151,7 @@ namespace leveldb {
         mmap_limiter_->Release();
     }
 
-    Status PosixMmapReadableFile::Read(const RTableHandle &rtable_handle,
+    Status PosixMmapReadableFile::Read(const StoCBlockHandle &stoc_block_handle,
                                        uint64_t offset, size_t n, Slice *result,
                                        char *scratch) {
         if (offset + n > length_) {
@@ -180,7 +180,7 @@ namespace leveldb {
         }
     }
 
-    Status PosixReadWriteFile::Read(const RTableHandle &rtable_handle,
+    Status PosixReadWriteFile::Read(const StoCBlockHandle &stoc_block_handle,
                                     uint64_t offset, size_t n, Slice *result,
                                     char *scratch) {
         assert(fd_ != -1);

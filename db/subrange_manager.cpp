@@ -8,7 +8,7 @@
 #include "memtable.h"
 
 namespace leveldb {
-    SubRangeManager::SubRangeManager(leveldb::NovaCCMemFile *manifest_file,
+    SubRangeManager::SubRangeManager(leveldb::StoCWritableFileClient *manifest_file,
                                      const std::string &dbname,
                                      leveldb::VersionSet *versions,
                                      const leveldb::Options &options,
@@ -22,7 +22,7 @@ namespace leveldb {
               partitioned_imms_(partitioned_imms) {
         for (int i = 0; i < nova::NovaConfig::config->fragments.size(); i++) {
             auto &frag = nova::NovaConfig::config->fragments[i];
-            if (frag->cc_server_id == nova::NovaConfig::config->my_server_id) {
+            if (frag->ltc_server_id == nova::NovaConfig::config->my_server_id) {
                 if (lower_bound_ == 0) {
                     lower_bound_ = frag->range.key_start;
                 }
@@ -40,7 +40,7 @@ namespace leveldb {
         }
         ComputeCompactionThreadsAssignment(sr);
         latest_subranges_.store(sr);
-        RDMA_LOG(rdmaio::INFO)
+        NOVA_LOG(rdmaio::INFO)
             << fmt::format("keys:{},{}", lower_bound_, upper_bound_);
     }
 
@@ -57,7 +57,7 @@ namespace leveldb {
                                                         &subrange_id,
                                                         user_comparator_);
             if (found) {
-                RDMA_ASSERT(subrange_id != -1);
+                NOVA_ASSERT(subrange_id != -1);
                 *subrange = &ref->subranges[subrange_id];
                 return subrange_id;
             }
@@ -73,14 +73,14 @@ namespace leveldb {
                                                         user_comparator_);
             if (found &&
                 ref->subranges.size() == options_.num_memtable_partitions) {
-                RDMA_ASSERT(subrange_id != -1);
+                NOVA_ASSERT(subrange_id != -1);
                 break;
             }
             new_subranges = new SubRanges(*ref);
             if (found &&
                 new_subranges->subranges.size() <
                 options_.num_memtable_partitions) {
-                RDMA_ASSERT(subrange_id != -1);
+                NOVA_ASSERT(subrange_id != -1);
                 SubRange &sr = new_subranges->subranges[subrange_id];
                 if (sr.first().lower_inclusive &&
                     user_comparator_->Compare(sr.first().lower, key) == 0) {
@@ -131,7 +131,7 @@ namespace leveldb {
             if (!found &&
                 new_subranges->subranges.size() ==
                 options_.num_memtable_partitions) {
-                RDMA_ASSERT(subrange_id == -1);
+                NOVA_ASSERT(subrange_id == -1);
                 // didn't find the key but we have enough subranges.
                 // Extend the lower boundary of the next subrange to include this key.
                 if (new_subranges->first().IsSmallerThanLower(
@@ -147,7 +147,7 @@ namespace leveldb {
                     }
                     subrange_id = 0;
                 } else {
-                    RDMA_ASSERT(
+                    NOVA_ASSERT(
                             new_subranges->last().IsGreaterThanUpper(
                                     key, user_comparator_));
                     SubRange &sr = new_subranges->last();
@@ -224,12 +224,12 @@ namespace leveldb {
                 subrange_id = new_subranges->subranges.size() - 1;
                 break;
             }
-            RDMA_ASSERT(false);
+            NOVA_ASSERT(false);
         }
 
         if (new_subranges) {
             if (options_.enable_detailed_stats) {
-                RDMA_LOG(rdmaio::INFO)
+                NOVA_LOG(rdmaio::INFO)
                     << fmt::format("Expand subranges for key {} ",
                                    key.ToString());
             }
@@ -257,7 +257,7 @@ namespace leveldb {
             (*partitioned_active_memtables_)[i]->mutex.Lock();
             MemTable *m = (*partitioned_active_memtables_)[i]->memtable;
             if (m) {
-                RDMA_ASSERT(
+                NOVA_ASSERT(
                         versions_->mid_table_mapping_[m->memtableid()]->RefMemTable());
                 memtables.push_back(
                         versions_->mid_table_mapping_[m->memtableid()]);
@@ -340,7 +340,7 @@ namespace leveldb {
                     it->Next();
                 }
                 if (options_.enable_detailed_stats) {
-                    RDMA_LOG(rdmaio::INFO)
+                    NOVA_LOG(rdmaio::INFO)
                         << fmt::format(
                                 "Sample {} {} {} {} from mid-{} subrange-{}",
                                 samples, sample_size,
@@ -408,7 +408,7 @@ namespace leveldb {
             }
         }
         if (options_.enable_detailed_stats) {
-            RDMA_LOG(rdmaio::INFO)
+            NOVA_LOG(rdmaio::INFO)
                 << fmt::format("major with {} keys: {}",
                                userkey_rate.size(), latest_->DebugString());
         }
@@ -426,7 +426,7 @@ namespace leveldb {
             if (r.num_duplicates == 0) {
                 continue;
             }
-            RDMA_ASSERT(r.tiny_ranges.size() == 1);
+            NOVA_ASSERT(r.tiny_ranges.size() == 1);
             if (r.tiny_ranges[0].lower_int() != lower) {
                 continue;
             }
@@ -437,7 +437,7 @@ namespace leveldb {
         }
 
         remaining_num_duplicates = end - start;
-        RDMA_ASSERT(sr.num_duplicates == remaining_num_duplicates + 1);
+        NOVA_ASSERT(sr.num_duplicates == remaining_num_duplicates + 1);
         double share = sr.ninserts / remaining_num_duplicates;
         for (int i = start; i <= end; i++) {
             SubRange &r = latest_->subranges[i];
@@ -458,8 +458,8 @@ namespace leveldb {
             uint64_t lower, uint64_t upper, uint32_t num_ranges_to_construct,
             bool is_constructing_subranges,
             std::vector<leveldb::Range> *ranges) {
-        RDMA_ASSERT(upper - lower > 1);
-        RDMA_ASSERT(num_ranges_to_construct > 1);
+        NOVA_ASSERT(upper - lower > 1);
+        NOVA_ASSERT(num_ranges_to_construct > 1);
         double share_per_range = total_rate / (double) num_ranges_to_construct;
         double fair_rate = total_rate / (double) num_ranges_to_construct;
         double total = total_rate;
@@ -468,12 +468,12 @@ namespace leveldb {
         uint32_t current_upper = 0;
         double current_rate = 0.0;
         for (auto it : userkey_rate) {
-            RDMA_ASSERT(it.first >= lower);
-            RDMA_ASSERT(it.first < upper);
+            NOVA_ASSERT(it.first >= lower);
+            NOVA_ASSERT(it.first < upper);
             double rate = it.second;
             if (rate >= fair_rate && is_constructing_subranges) {
                 if (options_.enable_detailed_stats) {
-                    RDMA_LOG(rdmaio::INFO)
+                    NOVA_LOG(rdmaio::INFO)
                         << fmt::format("hot key {}:{}:{}", it.first,
                                        rate / total,
                                        fair_rate / total);
@@ -548,14 +548,14 @@ namespace leveldb {
             Range r = {};
             r.lower = std::to_string(current_lower);
             ranges->push_back(std::move(r));
-            RDMA_ASSERT(ranges->size() == num_ranges_to_construct);
+            NOVA_ASSERT(ranges->size() == num_ranges_to_construct);
         } else {
             if (current_lower < upper) {
                 Range r = {};
                 r.lower = std::to_string(current_lower);
                 ranges->push_back(std::move(r));
             }
-            RDMA_ASSERT(ranges->size() <= num_ranges_to_construct);
+            NOVA_ASSERT(ranges->size() <= num_ranges_to_construct);
         }
 
         (*ranges)[0].lower = std::to_string(lower);
@@ -581,7 +581,7 @@ namespace leveldb {
         }
         num_minor_reorgs_for_dup++;
         if (options_.enable_detailed_stats) {
-            RDMA_LOG(rdmaio::INFO)
+            NOVA_LOG(rdmaio::INFO)
                 << fmt::format("Destroy subrange {}", subrange_id);
         }
         // destroy this duplicate.
@@ -636,7 +636,7 @@ namespace leveldb {
                     start = i;
                 }
             }
-            RDMA_ASSERT(start != -1 && end != -1);
+            NOVA_ASSERT(start != -1 && end != -1);
             for (int i = start; i <= end; i++) {
                 SubRange &r = latest_->subranges[i];
                 r.tiny_ranges[0].num_duplicates = total_num_dups;
@@ -697,7 +697,7 @@ namespace leveldb {
                     min_range_id = i;
                 }
             }
-            RDMA_ASSERT(min_range_id != -1);
+            NOVA_ASSERT(min_range_id != -1);
             if (latest_->subranges[min_range_id].num_duplicates > 0) {
                 DestroyDuplicates(min_range_id, true);
                 continue;
@@ -727,11 +727,11 @@ namespace leveldb {
                 bool dummy;
                 int nranges = latest_->subranges[min_range_id].tiny_ranges.size();
                 int pushed_ranges = PushTinyRanges(min_range_id, false, &dummy);
-                RDMA_ASSERT(pushed_ranges <= nranges);
+                NOVA_ASSERT(pushed_ranges <= nranges);
             }
         }
         if (options_.enable_detailed_stats) {
-            RDMA_LOG(rdmaio::INFO)
+            NOVA_LOG(rdmaio::INFO)
                 << fmt::format("minor duplicate subrange {} new d:{}",
                                subrange_id,
                                new_num_duplicates);
@@ -918,13 +918,13 @@ namespace leveldb {
             (*partitioned_active_memtables_)[subrange_id]->mutex.Lock();
             MemTable *m = (*partitioned_active_memtables_)[subrange_id]->memtable;
             if (m) {
-                RDMA_ASSERT(
+                NOVA_ASSERT(
                         versions_->mid_table_mapping_[m->memtableid()]->RefMemTable());
                 subrange_imms.push_back(
                         versions_->mid_table_mapping_[m->memtableid()]);
             }
             for (int j = 0; j < slots; j++) {
-                RDMA_ASSERT(slot_id + j < (*partitioned_imms_).size());
+                NOVA_ASSERT(slot_id + j < (*partitioned_imms_).size());
                 uint32_t imm_id = (*partitioned_imms_)[slot_id + j];
                 if (imm_id == 0) {
                     continue;
@@ -981,7 +981,7 @@ namespace leveldb {
                 sr.tiny_ranges.clear();
                 sr.tiny_ranges = ranges;
                 sr.UpdateStats(total_num_inserts_since_last_major_);
-                RDMA_LOG(rdmaio::INFO)
+                NOVA_LOG(rdmaio::INFO)
                     << fmt::format("Minor sampling {} {}", total_accesses,
                                    sr.DebugString());
             }
@@ -1003,10 +1003,10 @@ namespace leveldb {
             return false;
         }
 
-        RDMA_ASSERT(sr.insertion_ratio > fair_ratio_);
+        NOVA_ASSERT(sr.insertion_ratio > fair_ratio_);
 
         if (options_.enable_detailed_stats) {
-            RDMA_LOG(rdmaio::INFO)
+            NOVA_LOG(rdmaio::INFO)
                 << fmt::format("{} push minor before {}", subrange_id,
                                sr.DebugString());
         }
@@ -1018,7 +1018,7 @@ namespace leveldb {
         if (success) {
             num_minor_reorgs++;
             if (options_.enable_detailed_stats) {
-                RDMA_LOG(rdmaio::INFO)
+                NOVA_LOG(rdmaio::INFO)
                     << fmt::format("{} push minor after {}", subrange_id,
                                    sr.DebugString());
             }
@@ -1033,7 +1033,7 @@ namespace leveldb {
     void
     SubRangeManager::ReorganizeSubranges() {
         if (options_.enable_detailed_stats) {
-            RDMA_LOG(rdmaio::INFO) << "Perform subrange reorg";
+            NOVA_LOG(rdmaio::INFO) << "Perform subrange reorg";
         }
         uint64_t latest_seq_number = versions_->last_sequence_;
         SubRanges *ref = latest_subranges_;
@@ -1181,7 +1181,7 @@ namespace leveldb {
             return;;
         }
 
-        RDMA_ASSERT(
+        NOVA_ASSERT(
                 options_.num_compaction_threads >= subranges->subranges.size());
         int thread_id = 0;
         // MemTables of a subrange is assigned to only one thread.

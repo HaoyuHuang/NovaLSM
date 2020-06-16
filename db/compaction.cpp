@@ -12,7 +12,7 @@ namespace leveldb {
     FetchMetadataFilesInParallel(const std::vector<FileMetaData *> &files,
                                  const std::string &dbname,
                                  const Options &options,
-                                 NovaBlockCCClient *client,
+                                 StoCBlockClient *client,
                                  Env *env) {
         uint32_t fetched_files = 0;
         std::vector<FileMetaData *> batch;
@@ -29,13 +29,13 @@ namespace leveldb {
             fetched_files += batch.size();
             FetchMetadataFiles(batch, dbname, options, client, env);
         }
-        RDMA_ASSERT(fetched_files == files.size());
+        NOVA_ASSERT(fetched_files == files.size());
     }
 
     void
     FetchMetadataFiles(const std::vector<FileMetaData *> &files,
                        const std::string &dbname,
-                       const Options &options, NovaBlockCCClient *client,
+                       const Options &options, StoCBlockClient *client,
                        Env *env) {
         // Fetch all metadata files in parallel.
         char *backing_mems[files.size()];
@@ -45,11 +45,11 @@ namespace leveldb {
             uint32_t backing_scid = options.mem_manager->slabclassid(0,
                                                                      meta->meta_block_handle.size);
             char *backing_buf = options.mem_manager->ItemAlloc(0, backing_scid);
-            RDMA_LOG(rdmaio::DEBUG)
+            NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("Fetch metadata blocks {} handle:{}",
                                filename, meta->DebugString());
             backing_buf[meta->meta_block_handle.size - 1] = 0;
-            uint32_t req_id = client->InitiateRTableReadDataBlock(
+            uint32_t req_id = client->InitiateReadDataBlock(
                     meta->meta_block_handle, 0, meta->meta_block_handle.size,
                     backing_buf, meta->meta_block_handle.size, filename, false);
             backing_mems[i] = backing_buf;
@@ -74,17 +74,17 @@ namespace leveldb {
 
             Status s = env->NewWritableFile(sstablename, env_meta,
                                             &writable_file);
-            RDMA_ASSERT(s.ok());
-            Slice sstable_rtable(backing_buf,
-                                 meta->meta_block_handle.size);
-            s = writable_file->Append(sstable_rtable);
-            RDMA_ASSERT(s.ok());
+            NOVA_ASSERT(s.ok());
+            Slice sstable_meta(backing_buf,
+                               meta->meta_block_handle.size);
+            s = writable_file->Append(sstable_meta);
+            NOVA_ASSERT(s.ok());
             s = writable_file->Flush();
-            RDMA_ASSERT(s.ok());
+            NOVA_ASSERT(s.ok());
             s = writable_file->Sync();
-            RDMA_ASSERT(s.ok());
+            NOVA_ASSERT(s.ok());
             s = writable_file->Close();
-            RDMA_ASSERT(s.ok());
+            NOVA_ASSERT(s.ok());
             delete writable_file;
             writable_file = nullptr;
             options.mem_manager->FreeItem(0, backing_buf, backing_scid);
@@ -173,7 +173,7 @@ namespace leveldb {
         }
         seen_key_ = true;
         int max_overlap = 5;
-        max_overlap  = std::min(max_overlap, (int) grandparents_.size() / 4);
+        max_overlap = std::min(max_overlap, (int) grandparents_.size() / 4);
         max_overlap = std::max(max_overlap, 1);
         if (overlapped_bytes_ >= max_overlap) {
             // Too much overlap for current output; start new output
@@ -221,7 +221,7 @@ namespace leveldb {
                 if (compact->compaction) {
                     str = compact->compaction->DebugString(user_comparator_);
                 }
-                RDMA_ASSERT(false) << str;
+                NOVA_ASSERT(false) << str;
             }
             out.number = file_number;
             out.smallest.Clear();
@@ -231,17 +231,18 @@ namespace leveldb {
         // Make the output file
         MemManager *mem_manager = bg_thread_->mem_manager();
         std::string filename = TableFileName(dbname_, file_number);
-        NovaCCMemFile *cc_file = new NovaCCMemFile(options_.env,
-                                                   options_,
-                                                   file_number,
-                                                   mem_manager,
-                                                   bg_thread_->dc_client(),
-                                                   dbname_,
-                                                   bg_thread_->thread_id(),
-                                                   options_.max_dc_file_size,
-                                                   bg_thread_->rand_seed(),
-                                                   filename);
-        compact->outfile = new MemWritableFile(cc_file);
+        StoCWritableFileClient *stoc_writable_file = new StoCWritableFileClient(
+                options_.env,
+                options_,
+                file_number,
+                mem_manager,
+                bg_thread_->stoc_client(),
+                dbname_,
+                bg_thread_->thread_id(),
+                options_.max_stoc_file_size,
+                bg_thread_->rand_seed(),
+                filename);
+        compact->outfile = new MemWritableFile(stoc_writable_file);
         compact->builder = new TableBuilder(options_, compact->outfile);
         return Status::OK();
     }
@@ -272,7 +273,7 @@ namespace leveldb {
         delete compact->builder;
         compact->builder = nullptr;
 
-        RDMA_LOG(rdmaio::DEBUG)
+        NOVA_LOG(rdmaio::DEBUG)
             << fmt::format("Close table-{} at {} bytes", output_number,
                            current_bytes);
         FileMetaData meta;
@@ -281,12 +282,12 @@ namespace leveldb {
         meta.smallest = compact->current_output()->smallest;
         meta.largest = compact->current_output()->largest;
         // Set meta in order to flush to the corresponding DC node.
-        NovaCCMemFile *mem_file = static_cast<NovaCCMemFile *>(compact->outfile->mem_file());
+        StoCWritableFileClient *mem_file = static_cast<StoCWritableFileClient *>(compact->outfile->mem_file());
         mem_file->set_meta(meta);
         mem_file->set_num_data_blocks(current_data_blocks);
 
         // Finish and check for file errors
-        RDMA_ASSERT(s.ok());
+        NOVA_ASSERT(s.ok());
         s = compact->outfile->Sync();
         s = compact->outfile->Close();
 
@@ -330,7 +331,7 @@ namespace leveldb {
                     stats->input_target.level);
         }
         Log(options_.info_log, "%s", output.c_str());
-        RDMA_LOG(rdmaio::INFO) << output;
+        NOVA_LOG(rdmaio::INFO) << output;
 
         assert(compact->builder == nullptr);
         assert(compact->outfile == nullptr);
@@ -346,7 +347,7 @@ namespace leveldb {
         uint64_t memtable_size = 0;
         while (input->Valid()) {
             Slice key = input->key();
-            RDMA_ASSERT(ParseInternalKey(key, &ikey));
+            NOVA_ASSERT(ParseInternalKey(key, &ikey));
 
             if (output_type == kCompactOutputSSTables &&
                 compact->ShouldStopBefore(key, user_comparator_) &&
@@ -414,13 +415,13 @@ namespace leveldb {
                             added_keys += k;
                             added_keys += "\n";
                         }
-                        RDMA_ASSERT(false) << fmt::format("{}\n {}",
+                        NOVA_ASSERT(false) << fmt::format("{}\n {}",
                                                           compact->compaction->DebugString(
                                                                   user_comparator_),
                                                           added_keys);
                     }
                 } else {
-                    RDMA_ASSERT(output_type == kCompactOutputMemTables);
+                    NOVA_ASSERT(output_type == kCompactOutputMemTables);
                     add_to_memtable(ikey, input->value());
                     memtable_size +=
                             input->key().size() + input->value().size();
@@ -479,7 +480,7 @@ namespace leveldb {
                     compact->compaction->num_input_files(1),
                     dest_level,
                     compact->total_bytes);
-            RDMA_LOG(rdmaio::INFO) << output;
+            NOVA_LOG(rdmaio::INFO) << output;
         }
         Log(options_.info_log, "%s", output.c_str());
 
@@ -501,7 +502,7 @@ namespace leveldb {
                                  stats->output.num_files,
                                  stats->output.file_size,
                                  stats->micros);
-            RDMA_LOG(rdmaio::INFO) << output;
+            NOVA_LOG(rdmaio::INFO) << output;
         }
         Log(options_.info_log, "%s", output.c_str());
 

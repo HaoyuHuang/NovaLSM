@@ -6,7 +6,7 @@
 
 #include <gflags/gflags.h>
 
-#include "bench/bench_common.h"
+#include "benchmarks/bench_common.h"
 #include "leveldb/comparator.h"
 
 #include <stdlib.h>
@@ -77,6 +77,6 @@ int main(int argc, char *argv[]) {
         thpt += workers[i]->throughput_;
     }
 
-    RDMA_LOG(INFO) << fmt::format("throughput,{}", thpt);
+    NOVA_LOG(INFO) << fmt::format("throughput,{}", thpt);
     return 0;
 }

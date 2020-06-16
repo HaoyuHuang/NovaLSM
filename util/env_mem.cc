@@ -145,7 +145,7 @@ namespace leveldb {
             file) { file_->Ref(); }
 
 
-    Status MemRandomAccessFile::Read(const RTableHandle &rtable_handle,
+    Status MemRandomAccessFile::Read(const StoCBlockHandle &stoc_block_handle,
                                      uint64_t offset, size_t n, Slice *result,
                                      char *scratch) {
         return file_->Read(offset, n, result, scratch);
@@ -155,7 +155,7 @@ namespace leveldb {
             file) { file_->Ref(); }
 
     Status
-    MemRandomRWFile::Read(const RTableHandle &rtable_handle, uint64_t offset,
+    MemRandomRWFile::Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset,
                           size_t n, Slice *result,
                           char *scratch) {
         return file_->Read(offset, n, result, scratch);

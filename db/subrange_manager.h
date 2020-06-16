@@ -22,7 +22,7 @@
 namespace leveldb {
     class SubRangeManager {
     public:
-        SubRangeManager(NovaCCMemFile *manifest_file,
+        SubRangeManager(StoCWritableFileClient *manifest_file,
                         const std::string &dbname,
                         VersionSet *versions,
                         const Options &options,
@@ -88,7 +88,7 @@ namespace leveldb {
         bool CreateDuplicates(int subrange_id);
 
         port::Mutex range_lock_;
-        NovaCCMemFile *manifest_file_ = nullptr;
+        StoCWritableFileClient *manifest_file_ = nullptr;
         std::string dbname_;
         VersionSet *versions_ = nullptr;
         const Options options_;

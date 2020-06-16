@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 #include <sstream>
-#include "nova/logging.hpp"
+#include "common/nova_console_logging.h"
 
 #include "port/port.h"
 #include "util/coding.h"
@@ -67,27 +67,27 @@ namespace leveldb {
         sendbuf += DecodeStr(sendbuf, &dbname);
 
         Slice input(sendbuf, buf_size);
-        RDMA_ASSERT(DecodeFixed64(&input, &smallest_snapshot));
-        RDMA_ASSERT(DecodeFixed32(&input, &source_level));
-        RDMA_ASSERT(DecodeFixed32(&input, &target_level));
+        NOVA_ASSERT(DecodeFixed64(&input, &smallest_snapshot));
+        NOVA_ASSERT(DecodeFixed32(&input, &source_level));
+        NOVA_ASSERT(DecodeFixed32(&input, &target_level));
         for (int which = 0; which < 2; which++) {
-            RDMA_ASSERT(DecodeFixed32(&input, &num_inputs));
+            NOVA_ASSERT(DecodeFixed32(&input, &num_inputs));
             for (int i = 0; i < num_inputs; i++) {
                 FileMetaData *meta = new FileMetaData;
-                RDMA_ASSERT(meta->Decode(&input, false));
+                NOVA_ASSERT(meta->Decode(&input, false));
                 inputs[which].push_back(meta);
             }
         }
-        RDMA_ASSERT(DecodeFixed32(&input, &num_guides));
+        NOVA_ASSERT(DecodeFixed32(&input, &num_guides));
         for (int i = 0; i < num_guides; i++) {
             FileMetaData *meta = new FileMetaData;
-            RDMA_ASSERT(meta->Decode(&input, false));
+            NOVA_ASSERT(meta->Decode(&input, false));
             guides.push_back(meta);
         }
-        RDMA_ASSERT(DecodeFixed32(&input, &num_subranges));
+        NOVA_ASSERT(DecodeFixed32(&input, &num_subranges));
         for (int i = 0; i < num_subranges; i++) {
             SubRange sr = {};
-            RDMA_ASSERT(sr.DecodeForCompaction(&input));
+            NOVA_ASSERT(sr.DecodeForCompaction(&input));
             subranges.push_back(std::move(sr));
         }
     }
@@ -105,13 +105,13 @@ namespace leveldb {
         msg_size += EncodeFixed64(dst + msg_size, flush_timestamp);
         msg_size += EncodeFixed32(dst + msg_size, level);
         meta_block_handle.EncodeHandle(dst + msg_size);
-        msg_size += RTableHandle::HandleSize();
+        msg_size += StoCBlockHandle::HandleSize();
 
         msg_size += EncodeFixed32(dst + msg_size,
                                   data_block_group_handles.size());
         for (auto &handle : data_block_group_handles) {
             handle.EncodeHandle(dst + msg_size);
-            msg_size += RTableHandle::HandleSize();
+            msg_size += StoCBlockHandle::HandleSize();
         }
         return msg_size;
     }
@@ -133,10 +133,10 @@ namespace leveldb {
                GetInternalKey(input, &largest, copy) &&
                DecodeFixed64(input, &flush_timestamp) &&
                DecodeFixed32(input, &level) &&
-               RTableHandle::DecodeHandle(input,
-                                          &meta_block_handle) &&
-               RTableHandle::DecodeHandles(input,
-                                           &data_block_group_handles);
+                StoCBlockHandle::DecodeHandle(input,
+                                              &meta_block_handle) &&
+                StoCBlockHandle::DecodeHandles(input,
+                                               &data_block_group_handles);
     }
 
     std::string FileMetaData::ShortDebugString() const {
@@ -319,7 +319,7 @@ namespace leveldb {
 
     void InternalFilterPolicy::CreateFilter(const Slice *keys, int n,
                                             std::string *dst) const {
-        // We rely on the fact that the code in table.cc does not mind us
+        // We rely on the fact that the code in table.ltc does not mind us
         // adjusting keys[].
         Slice *mkey = const_cast<Slice *>(keys);
         for (int i = 0; i < n; i++) {

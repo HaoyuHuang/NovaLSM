@@ -16,7 +16,7 @@
 #include <gflags/gflags.h>
 #include <util/env_posix.h>
 #include "db/filename.h"
-#include "nova/logging.hpp"
+#include "common/nova_console_logging.h"
 #include <fmt/core.h>
 #include "db/dbformat.h"
 

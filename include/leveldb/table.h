@@ -81,13 +81,14 @@ namespace leveldb {
 
         static Status
         ReadBlock(RandomAccessFile *file, const ReadOptions &options,
-                  const RTableHandle &rtable_handle, BlockContents *result);
+                  const StoCBlockHandle &stoc_block_handle,
+                  BlockContents *result);
 
 
         static Status
         ReadBlock(const char *buf, const Slice &content,
                   const ReadOptions &options,
-                  const RTableHandle &handle, BlockContents *result);
+                  const StoCBlockHandle &handle, BlockContents *result);
 
     private:
 
@@ -107,7 +108,7 @@ namespace leveldb {
                            void (*handle_result)(void *arg, const Slice &k,
                                                  const Slice &v));
 
-        uint64_t TranslateToDataBlockOffset(const RTableHandle& handle);
+        uint64_t TranslateToDataBlockOffset(const StoCBlockHandle &handle);
 
         void ReadMeta(const Footer &footer);
 
@@ -117,13 +118,12 @@ namespace leveldb {
         DBProfiler *db_profiler_ = nullptr;
     };
 
-    class CCRandomAccessFile : public RandomAccessFile {
+    class StoCRandomAccessFileClient : public RandomAccessFile {
     public:
-
         virtual Status
-        Read(const ReadOptions &read_options, const RTableHandle &rtable_handle,
-             uint64_t offset, size_t n,
-             Slice *result, char *scratch) = 0;
+        Read(const ReadOptions &read_options,
+             const StoCBlockHandle &stoc_block_handle,
+             uint64_t offset, size_t n, Slice *result, char *scratch) = 0;
     };
 
 }  // namespace leveldb

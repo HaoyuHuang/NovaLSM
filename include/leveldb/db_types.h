@@ -19,10 +19,10 @@
 #include "slice.h"
 
 namespace leveldb {
-    class RTableHandle {
+    class StoCBlockHandle {
     public:
         uint32_t server_id = 0;
-        uint32_t rtable_id = 0;
+        uint32_t stoc_file_id = 0;
         uint64_t offset = 0;
         uint32_t size = 0;
 
@@ -36,15 +36,15 @@ namespace leveldb {
 
         void DecodeHandle(const char *buf);
 
-        static bool DecodeHandle(Slice *data, RTableHandle *handle);
+        static bool DecodeHandle(Slice *data, StoCBlockHandle *handle);
 
         static bool
-        DecodeHandles(Slice *data, std::vector<RTableHandle> *handles);
+        DecodeHandles(Slice *data, std::vector<StoCBlockHandle> *handles);
     };
 
-    struct SSTableRTablePair {
-        std::string sstable_id;
-        uint32_t rtable_id;
+    struct SSTableStoCFilePair {
+        std::string sstable_name;
+        uint32_t stoc_file_id;
     };
 
     typedef uint64_t SequenceNumber;
@@ -127,14 +127,14 @@ namespace leveldb {
         std::set<uint32_t> memtable_ids;
         uint64_t number = 0;
         uint64_t file_size = 0;    // File size in bytes in original SSTable format.
-        uint64_t converted_file_size = 0; // File size in bytes after converted to RTable.
+        uint64_t converted_file_size = 0; // File size in bytes after converted to StoC file.
         uint64_t flush_timestamp = 0;
         uint32_t level = 0;
         InternalKey smallest;  // Smallest internal key served by table
         InternalKey largest;   // Largest internal key served by table
         FileCompactionStatus compaction_status;
-        RTableHandle meta_block_handle;
-        std::vector<RTableHandle> data_block_group_handles;
+        StoCBlockHandle meta_block_handle;
+        std::vector<StoCBlockHandle> data_block_group_handles;
     };
 
     class LEVELDB_EXPORT MemManager {
@@ -150,7 +150,7 @@ namespace leveldb {
         virtual uint32_t slabclassid(uint64_t key, uint64_t size) = 0;
     };
 
-    class CCServer {
+    class RDMAServer {
     public:
         virtual int ProcessCompletionQueue() = 0;
     };

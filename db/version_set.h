@@ -25,7 +25,7 @@
 #include "port/port.h"
 #include "port/thread_annotations.h"
 #include "memtable.h"
-#include "cc/nova_cc.h"
+#include "ltc/stoc_file_client_impl.h"
 #include "table_cache.h"
 
 #define MAX_LIVE_MEMTABLES 100000
@@ -109,7 +109,7 @@ namespace leveldb {
 
         bool NeedsCompaction() {
             if (compaction_score_ >= 1.0) {
-                RDMA_ASSERT(compaction_level_ >= 0 &&
+                NOVA_ASSERT(compaction_level_ >= 0 &&
                             compaction_level_ + 1 < options_->level);
             }
             return compaction_score_ >= 1.0;
@@ -317,7 +317,7 @@ namespace leveldb {
                            bool install_new_version);
 
         void AppendChangesToManifest(VersionEdit *edit,
-                                     NovaCCMemFile *manifest_file,
+                                     StoCWritableFileClient *manifest_file,
                                      uint32_t stoc_id);
 
         // Recover the last saved descriptor from persistent storage.

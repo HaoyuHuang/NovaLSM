@@ -78,7 +78,7 @@ namespace leveldb {
     private:
         friend class WriteBatchInternal;
 
-        std::string rep_;  // See comment in write_batch.cc for the format of rep_
+        std::string rep_;  // See comment in write_batch.ltc for the format of rep_
     };
 
 }  // namespace leveldb

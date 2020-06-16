@@ -10,14 +10,14 @@
 #include <queue>
 #include <set>
 #include <string>
-#include "nova/nova_common.h"
+#include "common/nova_common.h"
 
 #include <list>
 #include <map>
 #include <fmt/core.h>
 #include "leveldb/db_profiler.h"
 #include "leveldb/cache.h"
-#include "cc/nova_cc.h"
+#include "ltc/stoc_file_client_impl.h"
 
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -30,7 +30,7 @@
 #include "leveldb/subrange.h"
 #include "subrange_manager.h"
 #include "compaction.h"
-#include "table_locator.h"
+#include "lookup_index.h"
 
 namespace leveldb {
 
@@ -57,10 +57,6 @@ namespace leveldb {
         // Implementations of the DB interface
         Status Put(const WriteOptions &, const Slice &key,
                    const Slice &value) override;
-
-        Status
-        GenerateLogRecords(const WriteOptions &options,
-                           WriteBatch *updates) override;
 
         void EvictFileFromCache(uint64_t file_number) override;
 
@@ -122,7 +118,7 @@ namespace leveldb {
                                uint32_t memtable_id);
 
         void GenerateLogRecord(const WriteOptions &options,
-                               const std::vector<LevelDBLogRecord>& log_records,
+                               const std::vector<LevelDBLogRecord> &log_records,
                                uint32_t memtable_id);
 
         void StartCompaction();
@@ -162,7 +158,7 @@ namespace leveldb {
         // Errors are recorded in bg_error_.
         void CompactMemTableStaticPartition(EnvBGThread *bg_thread,
                                             const std::vector<EnvBGTask> &tasks,
-                                            VersionEdit* edit,
+                                            VersionEdit *edit,
                                             bool prune_memtable);
 
         bool CompactMultipleMemTablesStaticPartitionToMemTable(
@@ -196,18 +192,18 @@ namespace leveldb {
         void
         ObtainObsoleteFiles(EnvBGThread *bg_thread,
                             std::vector<std::string> *files_to_delete,
-                            std::unordered_map<uint32_t, std::vector<SSTableRTablePair>> *server_pairs);
+                            std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> *server_pairs);
 
         void DeleteFiles(EnvBGThread *bg_thread,
                          std::vector<std::string> &files_to_delete,
-                         std::unordered_map<uint32_t, std::vector<SSTableRTablePair>> &server_pairs);
+                         std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> &server_pairs);
 
         void
-        ObtainTableLocatorEdits(CompactionState *state,
-                                std::unordered_map<uint32_t, MemTableL0FilesEdit> *memtableid_l0fns);
+        ObtainLookupIndexEdits(CompactionState *state,
+                               std::unordered_map<uint32_t, MemTableL0FilesEdit> *memtableid_l0fns);
 
-        void UpdateTableLocator(uint32_t version_id,
-                                const std::unordered_map<uint32_t, MemTableL0FilesEdit> &edits);
+        void UpdateLookupIndex(uint32_t version_id,
+                               const std::unordered_map<uint32_t, MemTableL0FilesEdit> &edits);
 
         void
         DeleteObsoleteVersions(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
@@ -228,11 +224,6 @@ namespace leveldb {
                 unsigned int *rand_seed, bool merge_memtables_without_flushing);
 
         void ScheduleCompactionTask(int thread_id, void *compaction);
-
-        bool
-        PerformMajorCompaction(EnvBGThread *bg_thread,
-                               const EnvBGTask &task) EXCLUSIVE_LOCKS_REQUIRED(
-                mutex_);
 
         Status
         InstallCompactionResults(CompactionState *compact, VersionEdit *edit,
@@ -282,7 +273,7 @@ namespace leveldb {
         SubRangeManager *subrange_manager_ = nullptr;
 
         // key -> memtable-id.
-        TableLocator *table_locator_ = nullptr;
+        LookupIndex *lookup_index_ = nullptr;
 
         // memtable pool.
         std::vector<AtomicMemTable *> active_memtables_;
@@ -319,7 +310,7 @@ namespace leveldb {
                                   bool should_wait, uint64_t last_sequence,
                                   SubRange *subrange);
 
-        NovaCCMemFile *manifest_file_ = nullptr;
+        StoCWritableFileClient *manifest_file_ = nullptr;
         unsigned int rand_seed_ = 0;
     };
 
