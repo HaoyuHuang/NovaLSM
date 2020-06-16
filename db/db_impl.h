@@ -10,11 +10,11 @@
 #include <queue>
 #include <set>
 #include <string>
-#include "common/nova_common.h"
 
 #include <list>
 #include <map>
 #include <fmt/core.h>
+#include "common/nova_common.h"
 #include "leveldb/db_profiler.h"
 #include "leveldb/cache.h"
 #include "ltc/stoc_file_client_impl.h"
@@ -31,6 +31,7 @@
 #include "subrange_manager.h"
 #include "compaction.h"
 #include "lookup_index.h"
+#include "range_index.h"
 
 namespace leveldb {
 
@@ -274,6 +275,7 @@ namespace leveldb {
 
         // key -> memtable-id.
         LookupIndex *lookup_index_ = nullptr;
+        RangeIndexManager *range_index_manager_ = nullptr;
 
         // memtable pool.
         std::vector<AtomicMemTable *> active_memtables_;

@@ -106,7 +106,7 @@ namespace {
         options.num_memtables = NovaConfig::config->num_memtables;
         options.l0bytes_stop_writes_trigger = 0;
         options.max_open_files = 50000;
-        options.enable_table_locator = NovaConfig::config->enable_lookup_index;
+        options.enable_lookup_index = NovaConfig::config->enable_lookup_index;
         options.max_stoc_file_size =
                 std::max(options.write_buffer_size, options.max_file_size) +
                 LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;

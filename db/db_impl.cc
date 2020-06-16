@@ -130,9 +130,8 @@ namespace leveldb {
               memtable_available_signal_(&range_lock_),
               l0_stop_write_signal_(&l0_stop_write_mutex_),
               user_comparator_(raw_options.comparator) {
-        memtable_id_seq_ = 100;
         start_compaction_ = false;
-        if (options_.enable_table_locator) {
+        if (options_.enable_lookup_index) {
             lookup_index_ = new LookupIndex;
             for (int i = 0; i < MAX_BUCKETS; i++) {
                 lookup_index_->Insert(Slice(), i, 0);
@@ -438,8 +437,9 @@ namespace leveldb {
                            stoc_fn_stocfileid.size());
         for (const auto &mapping : stoc_fn_stocfileid) {
             NOVA_LOG(rdmaio::INFO)
-                << fmt::format("Recover Install FileStoCFile mapping {} size:{}",
-                               mapping.first, mapping.second.size());
+                << fmt::format(
+                        "Recover Install FileStoCFile mapping {} size:{}",
+                        mapping.first, mapping.second.size());
             client->InitiateInstallFileNameStoCFileMapping(mapping.first,
                                                            mapping.second);
             client->Wait();
@@ -497,6 +497,31 @@ namespace leveldb {
             NOVA_LOG(rdmaio::INFO)
                 << fmt::format("Recovered Subranges: {}",
                                new_srs->DebugString());
+            if (options_.enable_range_index) {
+                range_index_manager_ = new RangeIndexManager(versions_,
+                                                             user_comparator_);
+                RangeIndex *init = new RangeIndex;
+                std::string last_key;
+                int range_index_id = -1;
+                for (int i = 0; i < new_srs->subranges.size(); i++) {
+                    const auto &sr = new_srs->subranges[i];
+                    if (last_key == sr.tiny_ranges[0].lower) {
+                        init->range_tables[range_index_id].memtable_ids.insert(
+                                partitioned_active_memtables_[i]->memtable->memtableid());
+                        continue;
+                    }
+                    Range r = {};
+                    r.lower = sr.tiny_ranges[0].lower;
+                    r.upper = sr.tiny_ranges[sr.tiny_ranges.size() - 1].upper;
+                    init->ranges.push_back(r);
+                    RangeTables tables = {};
+                    tables.memtable_ids.insert(
+                            partitioned_active_memtables_[i]->memtable->memtableid());
+                    init->range_tables.push_back(tables);
+                    last_key = sr.tiny_ranges[0].lower;
+                    range_index_id += 1;
+                }
+            }
         }
 
         for (const auto &logfile : logfile_buf) {
@@ -1772,8 +1797,8 @@ namespace leveldb {
         partition->mutex.Lock();
         if (subrange != nullptr) {
             int tinyrange_id;
-            NOVA_ASSERT(subrange->BinarySearch(key, &tinyrange_id,
-                                               user_comparator_))
+            NOVA_ASSERT(BinarySearch(subrange->tiny_ranges, key, &tinyrange_id,
+                                     user_comparator_))
                 << fmt::format("key:{} range:{}", key.ToString(),
                                subrange->DebugString());
             subrange->tiny_ranges[tinyrange_id].ninserts++;

@@ -247,22 +247,23 @@ namespace leveldb {
                tiny_ranges[0].lower_int();
     }
 
-    bool SubRange::BinarySearch(const leveldb::Slice &key, int *tinyrange_id,
-                                const leveldb::Comparator *user_comparator) const {
-        int l = 0, r = tiny_ranges.size() - 1;
+    bool
+    BinarySearch(const std::vector<Range> &ranges, const leveldb::Slice &key,
+                int *range_id, const Comparator *user_comparator) {
+        int l = 0, r = ranges.size() - 1;
         while (l <= r) {
             int m = l + (r - l) / 2;
-            const Range &range = tiny_ranges[m];
+            const Range &range = ranges[m];
             if (range.IsSmallerThanLower(key, user_comparator)) {
                 r = m - 1;
             } else if (range.IsGreaterThanUpper(key, user_comparator)) {
                 l = m + 1;
             } else {
-                *tinyrange_id = m;
+                *range_id = m;
                 return true;
             }
         }
-        *tinyrange_id = -1;
+        *range_id = -1;
         return false;
     }
 

@@ -53,6 +53,10 @@ namespace leveldb {
         uint64_t upper_int() const;
     };
 
+    bool
+    BinarySearch(const std::vector<Range> &ranges, const leveldb::Slice &key,
+                 int *range_id, const Comparator *user_comparator);
+
     struct SubRange {
         std::vector<Range> tiny_ranges;
         uint32_t num_duplicates = 0;
@@ -70,10 +74,6 @@ namespace leveldb {
         uint32_t decoded_subrange_id = 0;
 
         void UpdateStats(double num_inserts_since_last_major);
-
-        bool BinarySearch(const leveldb::Slice &key,
-                          int *tinyrange_id,
-                          const Comparator *user_comparator) const;
 
         Range &first() {
             return tiny_ranges[0];

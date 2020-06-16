@@ -81,7 +81,7 @@ namespace nova {
             options.l0bytes_stop_writes_trigger =
                     NovaConfig::config->l0_stop_write_mb * 1024 * 1024;
             options.max_open_files = 50000;
-            options.enable_table_locator = NovaConfig::config->enable_lookup_index;
+            options.enable_lookup_index = NovaConfig::config->enable_lookup_index;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
             options.num_compaction_threads = bg_flush_memtable_threads.size();
             options.max_stoc_file_size =
@@ -153,7 +153,7 @@ namespace nova {
             options.num_memtable_partitions = NovaConfig::config->num_memtable_partitions;
             options.num_memtables = NovaConfig::config->num_memtables;
             options.max_open_files = 50000;
-            options.enable_table_locator = NovaConfig::config->enable_lookup_index;
+            options.enable_lookup_index = NovaConfig::config->enable_lookup_index;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
             options.level = NovaConfig::config->level;
             options.max_stoc_file_size =

@@ -138,7 +138,8 @@ namespace leveldb {
 
         uint32_t num_memtable_partitions = 1;
 
-        bool enable_table_locator = false;
+        bool enable_lookup_index = false;
+        bool enable_range_index = false;
 
         uint32_t subrange_no_flush_num_keys = 100;
         uint32_t num_compaction_threads = 0;
