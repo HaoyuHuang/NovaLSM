@@ -38,33 +38,6 @@ namespace nova {
     Connection *nova_conns[NOVA_MAX_CONN];
     mutex new_conn_mutex;
 
-//    void rdma_timer_event_handler(int fd, short event, void *arg) {
-//        auto *worker = (NovaConnWorker *) arg;
-//        worker->rdma_store_->FlushPendingSends();
-//        worker->rdma_store_->PollSQ();
-//        worker->rdma_store_->PollRQ();
-//    }
-//
-//    void async_complete_timer_event_handler(int fd, short event, void *arg) {
-//        auto *worker = (NovaConnWorker *) arg;
-//        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_
-//                        << "]: read async complete queue";
-//        worker->async_cq_.mutex.Lock();
-//        for (const NovaAsyncCompleteTask &task : worker->async_cq_.queue) {
-//            char *response_buf = task.conn->buf;
-//            int nlen = 1;
-//            int len = int_to_str(response_buf, nlen);
-//            task.conn->response_buf = task.conn->buf;
-//            task.conn->response_size = len + nlen;
-//
-//            RDMA_ASSERT(socket_write_handler(task.conn->fd, task.conn) ==
-//                        SocketState::COMPLETE);
-//            write_socket_complete(task.sock_fd, task.conn);
-//        }
-//        worker->async_cq_.queue.clear();
-//        worker->async_cq_.mutex.Unlock();
-//    }
-
     void async_complete_event_handler(int fd, short event, void *arg) {
         auto *worker = (NovaConnWorker *) arg;
         RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_
@@ -81,21 +54,6 @@ namespace nova {
             }
         }
         worker->async_cq_->queue.clear();
-
-//        if (!worker->async_cq_.queue.empty()) {
-//            const NovaAsyncCompleteTask &task = worker->async_cq_.queue.front();
-//            char *response_buf = task.conn->buf;
-//            int nlen = 1;
-//            int len = int_to_str(response_buf, nlen);
-//            task.conn->response_buf = task.conn->buf;
-//            task.conn->response_size = len + nlen;
-//
-//            if (socket_write_handler(task.sock_fd, task.conn) ==
-//                SocketState::COMPLETE) {
-//                write_socket_complete(task.sock_fd, task.conn);
-//            }
-//            worker->async_cq_.queue.pop_front();
-//        }
         worker->async_cq_->mutex.Unlock();
     }
 
@@ -190,20 +148,9 @@ namespace nova {
         }
 
         if (state == CLOSED) {
-//            RDMA_LOG(INFO) << "closed " << fd;
             RDMA_ASSERT(event_del(&conn->event) == 0) << fd;
             close(fd);
         }
-//
-//        if (NovaConfig::config->enable_rdma) {
-//            if (worker->stats.nreqs_to_poll_rdma ==
-//                NovaConfig::config->rdma_pq_batch_size) {
-//                worker->rdma_store_->FlushPendingSends();
-//                worker->rdma_store_->PollSQ();
-//                worker->rdma_store_->PollRQ();
-//                worker->stats.nreqs_to_poll_rdma = 0;
-//            }
-//        }
     }
 
     void write_socket_complete(int fd, Connection *conn) {
@@ -280,28 +227,16 @@ namespace nova {
 
         leveldb::Slice key(buf, nkey);
         return process_leveldb_get(worker, conn, key);
-//        // I'm the home.
-//        NovaAsyncTask task = {
-//                .type = RequestType::GET,
-//                .conn_worker_id = worker->thread_id_,
-//                .key = key.ToString(),
-//                .value = "",
-//                .sock_fd = fd,
-//                .conn = conn
-//        };
-//        worker->AddTask(task);
-//        return false;
     }
 
     bool
-    process_socket_range(int fd, Connection *conn) {
+    process_socket_scan(int fd, Connection *conn) {
         // Stats.
         NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
         worker->stats.nranges++;
         char *buf = conn->request_buf;
-        RDMA_ASSERT(buf[0] == RequestType::REQ_RANGE) << buf;
+        RDMA_ASSERT(buf[0] == RequestType::REQ_SCAN) << buf;
         char *startkey;
-
         uint64_t key = 0;
         buf++;
         startkey = buf;
@@ -317,34 +252,38 @@ namespace nova {
                         << " nrecords: " << nrecords;
         uint64_t hv = NovaConfig::keyhash(startkey, nkey);
         Fragment *frag = NovaConfig::home_fragment(hv);
-        leveldb::Iterator *iterator = worker->dbs_[frag->dbid]->NewIterator(
-                leveldb::ReadOptions());
-        iterator->Seek(startkey);
-        int records = 0;
+        int pivot_db_id = frag->dbid;
+        int read_records = 0;
         leveldb::Slice keys[nrecords];
         leveldb::Slice values[nrecords];
-        uint64_t rangesize = 0;
-        while (iterator->Valid() && records < nrecords) {
-            keys[records] = iterator->key();
-            values[records] = iterator->value();
-            rangesize += nint_to_str(keys[records].size()) + 1;
-            rangesize += keys[records].size();
-            rangesize += nint_to_str(values[records].size()) + 1;
-            rangesize += values[records].size();
-            RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-                            << " Range key " << keys[records].ToString()
-                            << " value "
-                            << values[records].ToString();
-            records++;
-            iterator->Next();
+        uint64_t scan_size = 0;
+        std::vector<leveldb::Iterator *> its;
+        while (read_records < nrecords && pivot_db_id < worker->dbs_.size()) {
+            leveldb::Iterator *iterator = worker->dbs_[pivot_db_id]->NewIterator(
+                    leveldb::ReadOptions());
+            its.push_back(iterator);
+            iterator->Seek(startkey);
+            while (iterator->Valid() && read_records < nrecords) {
+                keys[read_records] = iterator->key();
+                values[read_records] = iterator->value();
+                scan_size += nint_to_str(keys[read_records].size()) + 1;
+                scan_size += keys[read_records].size();
+                scan_size += nint_to_str(values[read_records].size()) + 1;
+                scan_size += values[read_records].size();
+                RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
+                                << " Range key " << keys[read_records].ToString()
+                                << " value "
+                                << values[read_records].ToString();
+                read_records++;
+                iterator->Next();
+            }
+            pivot_db_id += 1;
         }
-
         conn->response_buf = conn->buf;
         char *response_buf = conn->response_buf;
-        conn->response_size = nint_to_str(rangesize) + 1 + rangesize;
-        response_buf += int_to_str(response_buf, rangesize);
-
-        for (int i = 0; i < records; i++) {
+        conn->response_size = nint_to_str(scan_size) + 1 + scan_size;
+        response_buf += int_to_str(response_buf, scan_size);
+        for (int i = 0; i < read_records; i++) {
             response_buf += int_to_str(response_buf, keys[i].size());
             memcpy(response_buf, keys[i].data(), keys[i].size());
             response_buf += keys[i].size();
@@ -352,7 +291,9 @@ namespace nova {
             memcpy(response_buf, values[i].data(), values[i].size());
             response_buf += values[i].size();
         }
-
+        for (auto it : its) {
+            delete it;
+        }
         RDMA_ASSERT(
                 conn->response_size < NovaConfig::config->max_msg_size);
         return true;
@@ -489,8 +430,8 @@ namespace nova {
         if (buf[0] == RequestType::FORCE_GET) {
             return process_socket_get(fd, conn, /*no_redirect=*/true);
         }
-        if (buf[0] == RequestType::REQ_RANGE) {
-            return process_socket_range(fd, conn);
+        if (buf[0] == RequestType::REQ_SCAN) {
+            return process_socket_scan(fd, conn);
         }
         if (buf[0] == RequestType::PUT) {
             return process_socket_put(fd, conn);
@@ -606,19 +547,6 @@ namespace nova {
                        << " treplicate=" << store->stats.nreplicate_log_records
                        << " tclose=" << store->stats.nremove_log_records;
         store->prev_stats = store->stats;
-
-//        if (store->store_id_ == 0) {
-//            for (int i = 0; i < store->dbs_.size(); i++) {
-//                RDMA_LOG(INFO) << "Database index " + i;
-//                std::string value;
-//                store->dbs_[i]->GetProperty("leveldb.sstables", &value);
-//                RDMA_LOG(INFO) << "\n" << value;
-//                value.clear();
-//                store->dbs_[i]->GetProperty("leveldb.approximate-memory-usage",
-//                                            &value);
-//                RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
-//            }
-//        }
     }
 
     void new_conn_handler(int fd, short which, void *arg) {
@@ -655,25 +583,12 @@ namespace nova {
         new_conn_mutex.unlock();
     }
 
-//void signal_new_conn_handler(int fd, short which, void *arg) {
-//    NovaConnWorker *store = (NovaConnWorker *) arg;
-//    RDMA_ASSERT(fd == store->on_new_conn_recv_fd);
-//
-//    char buf[1];
-//    int n = read(fd, buf, 1);
-//    RDMA_ASSERT(n > 0);
-//    RDMA_ASSERT(buf[0] == 'c');
-//    new_conn_handler(fd, which, store);
-//}
-
     void NovaConnWorker::AddTask(const nova::NovaAsyncTask &task) {
         uint64_t hv = NovaConfig::keyhash(task.key.data(),
                                           task.key.size());
         Fragment *frag = NovaConfig::home_fragment(hv);
         uint32_t dbid = frag->dbid;
         async_workers_[dbid % async_workers_.size()]->AddTask(task);
-//        current_async_worker_id_ += 1;
-//        current_async_worker_id_ %= async_workers_.size();
     }
 
     void NovaConnWorker::Start() {
@@ -761,17 +676,6 @@ namespace nova {
 //                                 (void *) this) == 0);
 //            RDMA_ASSERT(event_add(&stats_event, &tv) == 0);
         }
-        /* Timer event for RDMA */
-//        if (NovaConfig::config->enable_rdma) {
-//            struct timeval tv;
-//            tv.tv_sec = 0;
-//            tv.tv_usec = 10000;
-//            memset(&rdma_timer_event, 0, sizeof(struct event));
-//            RDMA_ASSERT(
-//                    event_assign(&rdma_timer_event, base, -1, EV_PERSIST,
-//                                 rdma_timer_event_handler, (void *) this) == 0);
-//            RDMA_ASSERT(event_add(&rdma_timer_event, &tv) == 0);
-//        }
         RDMA_LOG(DEBUG) << "NIC worker started";
         RDMA_ASSERT(event_base_loop(base, 0) == 0);
 

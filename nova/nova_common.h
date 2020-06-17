@@ -76,7 +76,7 @@ namespace nova {
     enum RequestType : char {
         GET = 'g',
         PUT = 'p',
-        REQ_RANGE = 'r',
+        REQ_SCAN = 'r',
         ALLOCATE_LOG_BUFFER = 'a',
         ALLOCATE_LOG_BUFFER_SUCC = 'A',
         DELETE_LOG_FILE = 'd',
