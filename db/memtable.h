@@ -43,8 +43,8 @@ namespace leveldb {
         }
 
         // Drop reference count.  Delete if no more references exist.
-        uint32_t Unref() {
-            --refs_;
+        uint32_t Unref(uint32_t unrefcount = 1) {
+            refs_ -= unrefcount;
             uint32_t refs = refs_;
             assert(refs_ >= 0);
             return refs;
@@ -127,7 +127,11 @@ namespace leveldb {
 
         void UpdateL0Files(uint32_t version_id, const MemTableL0FilesEdit &edit);
 
-        void Unref(const std::string &dbname);
+        void Unref(const std::string &dbname, uint32_t unrefcnt = 1);
+
+        uint32_t Encode(char *buf);
+
+        uint32_t Decode(char *buf);
 
         bool locked = false;
         bool is_immutable_ = false;

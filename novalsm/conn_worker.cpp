@@ -40,7 +40,6 @@ namespace nova {
     mutex new_conn_mutex;
 
     SocketState socket_write_handler(int fd, Connection *conn) {
-//        RDMA_LOG(DEBUG) << "WSOCK " << conn->response_size;
         NOVA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
         NICConnWorker *store = (NICConnWorker *) conn->worker;
         struct iovec iovec_array[1];
@@ -173,11 +172,6 @@ namespace nova {
         uint64_t hv = keyhash(buf, nkey);
         char *tmp = buf;
         tmp += nkey + 1;
-//        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-//                        << " Get fd:"
-//                        << fd << " key:" << int_key << " nkey:" << nkey
-//                        << " hv:"
-//                        << hv;
         worker->stats.nget_hits++;
 
         leveldb::Slice key(buf, nkey);
@@ -303,7 +297,8 @@ namespace nova {
         for (auto &fn : worker->stoc_file_manager_->fn_stoc_file_map_) {
             NOVA_LOG(rdmaio::INFO)
                 << fmt::format("Close stoc file {} name:{} id:{}", fn.first,
-                               fn.second->stoc_file_name_, fn.second->file_id());
+                               fn.second->stoc_file_name_,
+                               fn.second->file_id());
             fn.second->Close();
         }
         char *response_buf = conn->buf;
@@ -315,12 +310,11 @@ namespace nova {
     }
 
     bool
-    process_socket_range(int fd, Connection *conn) {
-        // Stats.
+    process_socket_scan(int fd, Connection *conn) {
         NICConnWorker *worker = (NICConnWorker *) conn->worker;
-        worker->stats.nranges++;
+        worker->stats.nscans++;
         char *buf = conn->request_buf;
-        NOVA_ASSERT(buf[0] == RequestType::REQ_RANGE) << buf;
+        NOVA_ASSERT(buf[0] == RequestType::REQ_SCAN) << buf;
         char *startkey;
 
         uint64_t key = 0;
@@ -330,41 +324,40 @@ namespace nova {
         buf += nkey + 1;
         uint64_t nrecords;
         buf += str_to_int(buf, &nrecords);
-
         std::string skey(startkey, nkey);
-//        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-//                        << " Range fd:"
-//                        << fd << " key:" << skey << " nkey:" << nkey
-//                        << " nrecords: " << nrecords;
+        NOVA_LOG(INFO) << "memstore[" << worker->thread_id_ << "]: "
+                       << " Scan fd:"
+                       << fd << " key:" << skey << " nkey:" << nkey
+                       << " nrecords: " << nrecords;
         uint64_t hv = keyhash(startkey, nkey);
         LTCFragment *frag = NovaConfig::home_fragment(hv);
+        leveldb::ReadOptions read_options;
+        read_options.stoc_client = worker->stoc_client_;
+        read_options.mem_manager = worker->mem_manager_;
+        read_options.thread_id = worker->thread_id_;
+        read_options.rdma_backing_mem = worker->rdma_backing_mem;
+        read_options.rdma_backing_mem_size = worker->rdma_backing_mem_size;
         leveldb::Iterator *iterator = worker->dbs_[frag->dbid]->NewIterator(
-                leveldb::ReadOptions());
+                read_options);
         iterator->Seek(startkey);
         int records = 0;
         leveldb::Slice keys[nrecords];
         leveldb::Slice values[nrecords];
-        uint64_t rangesize = 0;
+        uint64_t scan_size = 0;
         while (iterator->Valid() && records < nrecords) {
             keys[records] = iterator->key();
             values[records] = iterator->value();
-            rangesize += nint_to_str(keys[records].size()) + 1;
-            rangesize += keys[records].size();
-            rangesize += nint_to_str(values[records].size()) + 1;
-            rangesize += values[records].size();
-//            RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-//                            << " Range key " << keys[records].ToString()
-//                            << " value "
-//                            << values[records].ToString();
+            scan_size += nint_to_str(keys[records].size()) + 1;
+            scan_size += keys[records].size();
+            scan_size += nint_to_str(values[records].size()) + 1;
+            scan_size += values[records].size();
             records++;
             iterator->Next();
         }
-
         conn->response_buf = conn->buf;
         char *response_buf = conn->response_buf;
-        conn->response_size = nint_to_str(rangesize) + 1 + rangesize;
-        response_buf += int_to_str(response_buf, rangesize);
-
+        conn->response_size = nint_to_str(scan_size) + 1 + scan_size;
+        response_buf += int_to_str(response_buf, scan_size);
         for (int i = 0; i < records; i++) {
             response_buf += int_to_str(response_buf, keys[i].size());
             memcpy(response_buf, keys[i].data(), keys[i].size());
@@ -373,9 +366,10 @@ namespace nova {
             memcpy(response_buf, values[i].data(), values[i].size());
             response_buf += values[i].size();
         }
-
         NOVA_ASSERT(
                 conn->response_size < NovaConfig::config->max_msg_size);
+        delete iterator;
+        iterator = nullptr;
         return true;
     }
 
@@ -467,8 +461,8 @@ namespace nova {
         if (buf[0] == RequestType::FORCE_GET) {
             return process_socket_get(fd, conn, /*no_redirect=*/true);
         }
-        if (buf[0] == RequestType::REQ_RANGE) {
-            return process_socket_range(fd, conn);
+        if (buf[0] == RequestType::REQ_SCAN) {
+            return process_socket_scan(fd, conn);
         }
         if (buf[0] == RequestType::PUT) {
             return process_socket_put(fd, conn);
@@ -562,7 +556,7 @@ namespace nova {
                        << " wa=" << diff.nwritesagain
                        << " g=" << diff.ngets
                        << " p=" << diff.nputs
-                       << " range=" << diff.nranges
+                       << " range=" << diff.nscans
                        << " gh=" << diff.nget_hits
                        << " pl=" << diff.nput_lc
                        << " gl=" << diff.nget_lc

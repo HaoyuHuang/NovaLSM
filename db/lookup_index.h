@@ -10,8 +10,6 @@
 #include <atomic>
 #include "leveldb/slice.h"
 
-#define MAX_BUCKETS 1000000000
-
 namespace leveldb {
     struct TableLocation {
         std::atomic<uint32_t> memtable_id;
@@ -19,6 +17,8 @@ namespace leveldb {
 
     class LookupIndex {
     public:
+        LookupIndex(uint32_t size);
+
         uint64_t Lookup(const Slice &key, uint64_t hash);
 
         void Insert(const Slice &key, uint64_t hash, uint32_t memtableid);
@@ -26,8 +26,12 @@ namespace leveldb {
         void CAS(const Slice &key, uint64_t hash, uint32_t current_memtableid,
                  uint32_t new_memtableid);
 
+        uint32_t Encode(char *buf);
+
+        uint32_t Decode(char *buf);
     private:
-        TableLocation table_locator_[MAX_BUCKETS];
+        uint32_t size_ = 0;
+        TableLocation *table_locator_ = nullptr;
     };
 }
 

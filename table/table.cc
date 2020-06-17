@@ -195,7 +195,8 @@ namespace leveldb {
 // into an iterator over the contents of the corresponding block.
     Iterator *Table::DataBlockReader(void *arg, BlockReadContext context,
                                      const ReadOptions &options,
-                                     const Slice &index_value) {
+                                     const Slice &index_value,
+                                     std::string *next_key) {
         Table *table = reinterpret_cast<Table *>(arg);
         Cache *block_cache = table->rep_->options.block_cache;
         Block *block = nullptr;
@@ -220,7 +221,8 @@ namespace leveldb {
                         cache_handle));
                 cache_hit = true;
             } else {
-                s = table->ReadBlock(table->rep_->file, options, stoc_block_handle,
+                s = table->ReadBlock(table->rep_->file, options,
+                                     stoc_block_handle,
                                      &contents);
                 if (s.ok()) {
                     block = new Block(contents, table->rep_->file_number,
@@ -371,7 +373,7 @@ namespace leveldb {
                 };
                 Iterator *block_iter = DataBlockReader(this, context,
                                                        options,
-                                                       iiter->value());
+                                                       iiter->value(), nullptr);
                 block_iter->Seek(k);
                 if (block_iter->Valid()) {
                     if (handle_result) {

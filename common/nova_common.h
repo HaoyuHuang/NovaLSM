@@ -142,7 +142,7 @@ namespace nova {
         GET = 'g',
         PUT = 'p',
         VERIFY_LOAD = 'v',
-        REQ_RANGE = 'r',
+        REQ_SCAN = 'r',
         REDIRECT = 'r',
         GET_INDEX = 'i',
         EXISTS = 'h',

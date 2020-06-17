@@ -566,7 +566,7 @@ namespace leveldb {
         Options options;
         options.max_num_coordinated_compaction_nonoverlapping_sets = 2;
         options.max_num_sstables_in_nonoverlapping_set = 3;
-        Version *version = new Version(&icmp, nullptr, &options, 1);
+        Version *version = new Version(&icmp, nullptr, &options, 1, nullptr);
 
         CreateFileMetaData(version, 0, 0, 8);
         CreateFileMetaData(version, 0, 10, 15);

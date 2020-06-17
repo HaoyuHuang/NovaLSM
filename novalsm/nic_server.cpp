@@ -82,6 +82,7 @@ namespace nova {
                     NovaConfig::config->l0_stop_write_mb * 1024 * 1024;
             options.max_open_files = 50000;
             options.enable_lookup_index = NovaConfig::config->enable_lookup_index;
+            options.enable_range_index = NovaConfig::config->enable_range_index;
             options.num_recovery_thread = NovaConfig::config->number_of_recovery_threads;
             options.num_compaction_threads = bg_flush_memtable_threads.size();
             options.max_stoc_file_size =
@@ -121,7 +122,8 @@ namespace nova {
                 options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
             }
             options.subrange_no_flush_num_keys = NovaConfig::config->subrange_num_keys_no_flush;
-
+            options.lower_key = NovaConfig::config->db_fragment[db_index]->range.key_start;
+            options.upper_key = NovaConfig::config->db_fragment[db_index]->range.key_end;
             if (NovaConfig::config->use_local_disk) {
                 options.manifest_stoc_id = NovaConfig::config->my_server_id;
             } else {
@@ -129,7 +131,6 @@ namespace nova {
                                   NovaConfig::config->stoc_servers.size();
                 options.manifest_stoc_id = NovaConfig::config->stoc_servers[stocid].server_id;
             }
-
             options.num_tiny_ranges_per_subrange = NovaConfig::config->num_tinyranges_per_subrange;
             return options;
         }
@@ -480,24 +481,6 @@ namespace nova {
         }
         NOVA_LOG(INFO) << fmt::format("Total throughput: {}", thpt);
 
-//        ts.clear();
-//        load_threads.clear();
-//        for (int i = 0; i < nloading_threads; i++) {
-//            std::set<uint32_t> dbids;
-//            for (int i = 0; i < ndb_per_thread; i++) {
-//                dbids.insert(current_db_id);
-//                current_db_id += 1;
-//            }
-//            NovaCCLoadThread *t = new NovaCCLoadThread(dbs_, async_workers,
-//                                                       mem_manager, dbids, i);
-//            load_threads.emplace_back(
-//                    std::thread(&NovaCCLoadThread::VerifyLoad, t));
-//        }
-//
-//        for (int i = 0; i < nloading_threads; i++) {
-//            load_threads[i].join();
-//        }
-
         for (int i = 0; i < dbs_.size(); i++) {
             NOVA_LOG(INFO) << "Database " << i;
             std::string value;
@@ -507,9 +490,6 @@ namespace nova {
             dbs_[i]->GetProperty("leveldb.approximate-memory-usage", &value);
             NOVA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
         }
-
-//        RDMA_ASSERT(false)
-//            << fmt::format("Loading complete {}", (end.tv_sec - start.tv_sec));
     }
 
     NICServer::NICServer(RdmaCtrl *rdma_ctrl,
@@ -587,7 +567,6 @@ namespace nova {
         uint32_t nranges = NovaConfig::config->fragments.size() /
                            NovaConfig::config->ltc_servers.size();
 
-//        uint64_t NovaConfig::config->sstable_size + LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
         leveldb::StocPersistentFileManager *stoc_file_manager = new leveldb::StocPersistentFileManager(
                 env, mem_manager, NovaConfig::config->stoc_file_path,
                 NovaConfig::config->max_stoc_file_size,

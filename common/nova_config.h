@@ -187,6 +187,7 @@ namespace nova {
         int block_cache_mb;
         int row_cache_mb;
         bool enable_lookup_index;
+        bool enable_range_index;
         uint32_t num_memtables;
         uint32_t num_memtable_partitions;
         uint64_t memtable_size_mb;

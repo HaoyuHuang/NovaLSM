@@ -4,8 +4,8 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
-#ifndef NOVA_MEM_SERVER_H
-#define NOVA_MEM_SERVER_H
+#ifndef NIC_SERVER_H
+#define NIC_SERVER_H
 
 #include "leveldb/db_types.h"
 #include "common/nova_mem_manager.h"
@@ -88,5 +88,4 @@ namespace nova {
         std::vector<std::thread> storage_worker_threads;
     };
 }
-
-#endif //NOVA_MEM_SERVER_H
+#endif //NIC_SERVER_H

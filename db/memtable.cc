@@ -242,7 +242,29 @@ namespace leveldb {
         return mem;
     }
 
-    void AtomicMemTable::UpdateL0Files(uint32_t version_id, const MemTableL0FilesEdit &edit) {
+    uint32_t AtomicMemTable::Encode(char *buf) {
+        uint32_t msg_size = 0;
+        msg_size += EncodeFixed32(buf + msg_size, memtable_->memtableid());
+        msg_size += EncodeFixed32(buf + msg_size, l0_file_numbers_.size());
+        for (auto tableid : l0_file_numbers_) {
+            msg_size += EncodeFixed64(buf + msg_size, tableid);
+        }
+        return msg_size;
+    }
+
+    uint32_t AtomicMemTable::Decode(char *buf) {
+        uint32_t read_size = 0;
+        uint32_t size = DecodeFixed32(buf);
+        read_size += 4;
+        for (int i = 0; i < size; i++) {
+            l0_file_numbers_.insert(DecodeFixed64(buf + read_size));
+            read_size += 8;
+        }
+        return read_size;
+    }
+
+    void AtomicMemTable::UpdateL0Files(uint32_t version_id,
+                                       const MemTableL0FilesEdit &edit) {
         NOVA_ASSERT(is_immutable_);
         NOVA_ASSERT(is_flushed_);
         mutex_.lock();
@@ -256,11 +278,11 @@ namespace leveldb {
         mutex_.unlock();
     }
 
-    void AtomicMemTable::Unref(const std::string &dbname) {
+    void AtomicMemTable::Unref(const std::string &dbname, uint32_t unrefcount) {
         mutex_.lock();
         NOVA_ASSERT(memtable_);
         uint32_t mid = memtable_->memtableid();
-        uint32_t refs = memtable_->Unref();
+        uint32_t refs = memtable_->Unref(unrefcount);
         if (refs == 0) {
             NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("unref delete db-{} mid-{}", dbname, mid);

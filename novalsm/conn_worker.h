@@ -28,8 +28,6 @@ namespace nova {
 
     void event_handler(int fd, short which, void *arg);
 
-    void rdma_timer_event_handler(int fd, short event, void *arg);
-
     struct Stats {
         uint64_t nreqs = 0;
         uint64_t nresponses = 0;
@@ -57,7 +55,7 @@ namespace nova {
         uint64_t nputs = 0;
         uint64_t nput_lc = 0;
 
-        uint64_t nranges = 0;
+        uint64_t nscans = 0;
 
         uint64_t nreplicate_log_records = 0;
 
@@ -88,7 +86,7 @@ namespace nova {
                     ngetindex_rdma_indirect - other.ngetindex_rdma_indirect;
             diff.nputs = nputs - other.nputs;
             diff.nput_lc = nput_lc - other.nput_lc;
-            diff.nranges = nranges - other.nranges;
+            diff.nscans = nscans - other.nscans;
             return diff;
         }
     };

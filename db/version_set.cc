@@ -33,6 +33,8 @@ namespace leveldb {
         // Remove from linked list
         prev_->next_ = next_;
         next_->prev_ = prev_;
+        NOVA_LOG(rdmaio::DEBUG)
+            << fmt::format("Delete version {}", version_id_);
 
         // TODO: Drop references to files
 //        for (int level = 0; level < config::kNumLevels; level++) {
@@ -188,7 +190,7 @@ namespace leveldb {
     static Iterator *
     GetFileIterator(void *arg, BlockReadContext context,
                     const ReadOptions &options,
-                    const Slice &file_value) {
+                    const Slice &file_value, std::string *next_key) {
         VersionFileMap *v = reinterpret_cast<VersionFileMap *>(arg);
         NOVA_ASSERT(v);
         NOVA_ASSERT(file_value.size() == 8);
@@ -217,15 +219,19 @@ namespace leveldb {
     }
 
     void Version::AddIterators(const ReadOptions &options,
+                               const RangeIndex *range_index,
                                std::vector<Iterator *> *iters) {
-        // Merge all level zero files together since they may overlap
-        for (size_t i = 0; i < files_[0].size(); i++) {
-            iters->push_back(table_cache_->NewIterator(
-                    AccessCaller::kUserIterator,
-                    options, files_[0][i], files_[0][i]->number, 0,
-                    files_[0][i]->converted_file_size));
-        }
-
+        NOVA_ASSERT(range_index);
+        NOVA_ASSERT(iters);
+        BlockReadContext context = {
+                .caller = AccessCaller::kUserIterator,
+                .file_number = 0,
+                .level = 0,
+        };
+        iters->push_back(NewTwoLevelIterator(
+                new RangeIndexIterator(icmp_, range_index),
+                context, &GetRangeIndexFragmentIterator,
+                (void *) this, options, icmp_, true));
         // For levels > 0, we can use a concatenating iterator that sequentially
         // walks through the non-overlapping files in the level, opening them
         // lazily.
@@ -982,7 +988,8 @@ namespace leveldb {
               descriptor_file_(nullptr),
               descriptor_log_(nullptr),
               version_id_seq_(0),
-              dummy_versions_(cmp, table_cache, options, version_id_seq_++),
+              dummy_versions_(cmp, table_cache, options, version_id_seq_++,
+                              nullptr),
               current_(nullptr) {
         for (int i = 0; i < MAX_LIVE_MEMTABLES; i++) {
             mid_table_mapping_[i] = new AtomicMemTable;
@@ -990,7 +997,8 @@ namespace leveldb {
             versions_[i] = new AtomicVersion;
         }
         AppendVersion(
-                new Version(cmp, table_cache, options, version_id_seq_++));
+                new Version(cmp, table_cache, options, version_id_seq_++,
+                            this));
     }
 
     VersionSet::~VersionSet() {
@@ -1100,7 +1108,7 @@ namespace leveldb {
         }
 
         Version *v = new Version(&icmp_, table_cache_, options_,
-                                 version_id_seq_++);
+                                 version_id_seq_++, this);
         builder.SaveTo(v);
         // Install recovered version
         Finalize(v);
@@ -1208,39 +1216,88 @@ namespace leveldb {
         }
     }
 
-// Stores the minimal range that covers all entries in inputs in
-// *smallest, *largest.
-// REQUIRES: inputs is not empty
-    void VersionSet::GetRange(const std::vector<FileMetaData *> &inputs,
-                              InternalKey *smallest, InternalKey *largest) {
-        assert(!inputs.empty());
-        smallest->Clear();
-        largest->Clear();
-        for (size_t i = 0; i < inputs.size(); i++) {
-            FileMetaData *f = inputs[i];
-            if (i == 0) {
-                *smallest = f->smallest;
-                *largest = f->largest;
-            } else {
-                if (icmp_.Compare(f->smallest, *smallest) < 0) {
-                    *smallest = f->smallest;
-                }
-                if (icmp_.Compare(f->largest, *largest) > 0) {
-                    *largest = f->largest;
-                }
+//// Stores the minimal range that covers all entries in inputs in
+//// *smallest, *largest.
+//// REQUIRES: inputs is not empty
+//    void VersionSet::GetRange(const std::vector<FileMetaData *> &inputs,
+//                              InternalKey *smallest, InternalKey *largest) {
+//        assert(!inputs.empty());
+//        smallest->Clear();
+//        largest->Clear();
+//        for (size_t i = 0; i < inputs.size(); i++) {
+//            FileMetaData *f = inputs[i];
+//            if (i == 0) {
+//                *smallest = f->smallest;
+//                *largest = f->largest;
+//            } else {
+//                if (icmp_.Compare(f->smallest, *smallest) < 0) {
+//                    *smallest = f->smallest;
+//                }
+//                if (icmp_.Compare(f->largest, *largest) > 0) {
+//                    *largest = f->largest;
+//                }
+//            }
+//        }
+//    }
+
+    uint32_t Version::Encode(char *buf) {
+        uint32_t msg_size = 0;
+        msg_size += EncodeFixed32(buf + msg_size, files_.size());
+        for (int level = 0; level < files_.size(); level++) {
+            msg_size += EncodeFixed32(buf + msg_size, files_[level].size());
+            for (auto meta : files_[level]) {
+                msg_size += meta->Encode(buf + msg_size);
+            }
+        }
+        return msg_size;
+    }
+
+    void Version::Decode(Slice *buf) {
+        uint32_t read_size = 0;
+        uint32_t levels;
+        NOVA_ASSERT(DecodeFixed32(buf, &levels));
+        NOVA_ASSERT(levels == options_->level);
+        for (int level = 0; level < levels; level++) {
+            uint32_t nfiles = 0;
+            NOVA_ASSERT(DecodeFixed32(buf, &nfiles));
+            for (int i = 0; i < nfiles; i++) {
+                FileMetaData *meta = new FileMetaData;
+                NOVA_ASSERT(meta->Decode(buf, false));
+                files_[level].push_back(meta);
+                fn_files_[meta->number] = meta;
             }
         }
     }
 
-// Stores the minimal range that covers all entries in inputs1 and inputs2
-// in *smallest, *largest.
-// REQUIRES: inputs is not empty
-    void VersionSet::GetRange2(const std::vector<FileMetaData *> &inputs1,
-                               const std::vector<FileMetaData *> &inputs2,
-                               InternalKey *smallest, InternalKey *largest) {
-        std::vector<FileMetaData *> all = inputs1;
-        all.insert(all.end(), inputs2.begin(), inputs2.end());
-        GetRange(all, smallest, largest);
+    uint32_t
+    VersionSet::EncodeTableIdMapping(char *buf, uint32_t latest_memtableid) {
+        uint32_t msg_size = 0;
+        msg_size += EncodeFixed32(buf + msg_size, 0);
+        for (int i = 0; i < latest_memtableid; i++) {
+            auto atomic_memtable = mid_table_mapping_[i];
+            if (atomic_memtable->memtable_ != nullptr &&
+                atomic_memtable->l0_file_numbers_.empty()) {
+                continue;
+            }
+            msg_size += atomic_memtable->Encode(buf + msg_size);
+        }
+        msg_size += EncodeFixed32(buf + msg_size, 0);
+        return msg_size;
+    }
+
+    uint32_t VersionSet::DecodeTableIdMapping(char *buf) {
+        uint32_t read_size = 0;
+        NOVA_ASSERT(DecodeFixed32(buf) == 0);
+        while (true) {
+            uint32_t mid = DecodeFixed32(buf + read_size);
+            read_size += 4;
+            if (mid == 0) {
+                break;
+            }
+            NOVA_ASSERT(mid < MAX_LIVE_MEMTABLES);
+            read_size += mid_table_mapping_[mid]->Decode(buf + read_size);
+        }
+        return read_size;
     }
 
     void VersionSet::AddCompactedInputs(leveldb::Compaction *c,

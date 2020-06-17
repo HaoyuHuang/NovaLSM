@@ -75,7 +75,6 @@ namespace leveldb {
                     }
                     direction_ = kForward;
                 }
-
                 current_->Next();
                 FindSmallest();
             }

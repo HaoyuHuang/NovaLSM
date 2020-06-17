@@ -28,8 +28,10 @@ namespace leveldb {
             Iterator *(*block_function)(void *arg,
                                         BlockReadContext context,
                                         const ReadOptions &options,
-                                        const Slice &index_value),
-            void *arg, const ReadOptions &options);
+                                        const Slice &index_value,
+                                        std::string* next_key),
+            void *arg, const ReadOptions &options,
+            const Comparator *comparator = nullptr, bool merging = false);
 
 }  // namespace leveldb
 

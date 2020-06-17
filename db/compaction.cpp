@@ -329,9 +329,9 @@ namespace leveldb {
                     stats->input_source.level,
                     stats->input_target.num_files,
                     stats->input_target.level);
+            Log(options_.info_log, "%s", output.c_str());
+            NOVA_LOG(rdmaio::INFO) << output;
         }
-        Log(options_.info_log, "%s", output.c_str());
-        NOVA_LOG(rdmaio::INFO) << output;
 
         assert(compact->builder == nullptr);
         assert(compact->outfile == nullptr);
@@ -481,8 +481,8 @@ namespace leveldb {
                     dest_level,
                     compact->total_bytes);
             NOVA_LOG(rdmaio::INFO) << output;
+            Log(options_.info_log, "%s", output.c_str());
         }
-        Log(options_.info_log, "%s", output.c_str());
 
         if (input_type == CompactInputType::kCompactInputMemTables) {
             output = fmt::format(
@@ -503,8 +503,8 @@ namespace leveldb {
                                  stats->output.file_size,
                                  stats->micros);
             NOVA_LOG(rdmaio::INFO) << output;
+            Log(options_.info_log, "%s", output.c_str());
         }
-        Log(options_.info_log, "%s", output.c_str());
 
         // Remove input files from table cache.
         if (table_cache_) {
@@ -518,7 +518,6 @@ namespace leveldb {
                 }
             }
         }
-
         if (compact->compaction) {
             sem_post(&compact->compaction->complete_signal_);
         }

@@ -20,15 +20,8 @@ namespace leveldb {
               user_comparator_(user_comparator),
               partitioned_active_memtables_(partitioned_active_memtables),
               partitioned_imms_(partitioned_imms) {
-        for (int i = 0; i < nova::NovaConfig::config->fragments.size(); i++) {
-            auto &frag = nova::NovaConfig::config->fragments[i];
-            if (frag->ltc_server_id == nova::NovaConfig::config->my_server_id) {
-                if (lower_bound_ == 0) {
-                    lower_bound_ = frag->range.key_start;
-                }
-                upper_bound_ = frag->range.key_end;
-            }
-        }
+        lower_bound_ = options.lower_key;
+        upper_bound_ = options.upper_key;
         auto sr = new SubRanges;
         {
             SubRange nsr;

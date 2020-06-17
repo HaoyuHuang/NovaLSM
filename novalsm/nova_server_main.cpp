@@ -61,6 +61,7 @@ DEFINE_uint64(cc_row_cache_mb, 0, "leveldb row cache size in mb");
 DEFINE_uint32(cc_num_memtables, 0, "");
 DEFINE_uint32(cc_num_memtable_partitions, 0, "");
 DEFINE_bool(cc_enable_table_locator, false, "");
+DEFINE_bool(cc_enable_range_index, false, "");
 
 DEFINE_uint32(cc_l0_start_compaction_mb, 0, "");
 DEFINE_uint32(cc_l0_stop_write_mb, 0, "");
@@ -274,6 +275,7 @@ int main(int argc, char *argv[]) {
     }
 
     NovaConfig::config->enable_lookup_index = FLAGS_cc_enable_table_locator;
+    NovaConfig::config->enable_range_index = FLAGS_cc_enable_range_index;
     NovaConfig::config->subrange_sampling_ratio = FLAGS_cc_sampling_ratio;
     NovaConfig::config->zipfian_dist_file_path = FLAGS_cc_zipfian_dist;
     NovaConfig::config->ReadZipfianDist();

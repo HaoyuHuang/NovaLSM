@@ -57,14 +57,12 @@ namespace leveldb {
         double total_num_inserts_since_last_major_ = 0;
         double fair_ratio_ = 0;
         VersionEdit edit_;
-
     private:
         uint64_t lower_bound_ = 0;
         uint64_t upper_bound_ = 0;
 
         void ComputeLoadImbalance(const std::vector<double> &loads,
                                   leveldb::DBStats *db_stats);
-
 
         void ConstructRanges(const std::map<uint64_t, double> &userkey_rate,
                              double total_rate, uint64_t lower, uint64_t upper,

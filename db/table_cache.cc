@@ -29,11 +29,6 @@ namespace leveldb {
         Cache *cache = reinterpret_cast<Cache *>(arg1);
         Cache::Handle *h = reinterpret_cast<Cache::Handle *>(arg2);
         cache->Release(h);
-
-//        // Unref the table.
-//        TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache->Value(
-//                h));
-//        NovaCCRandomAccessFile *file = dynamic_cast<NovaCCRandomAccessFile *>(tf->file);
     }
 
     TableCache::TableCache(const std::string &dbname, const Options &options,

@@ -97,7 +97,7 @@ namespace leveldb {
         static Iterator *
         DataBlockReader(void *arg, BlockReadContext context,
                         const ReadOptions &options,
-                        const Slice &index_value);
+                        const Slice &index_value, std::string *next_key);
 
         explicit Table() {}
 
