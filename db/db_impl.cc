@@ -252,7 +252,7 @@ namespace leveldb {
                                                            it.second);
             for (auto &tble : it.second) {
                 NOVA_LOG(rdmaio::DEBUG)
-                    << fmt::format("Delete {} {}", tble.stoc_file_id,
+                    << fmt::format("Delete File {} {}", tble.stoc_file_id,
                                    tble.sstable_name);
             }
         }
@@ -272,6 +272,7 @@ namespace leveldb {
         std::set<uint64_t> live;
         versions_->AddLiveFiles(&live);
         auto it = compacted_tables_.begin();
+        uint32_t success = 0;
         while (it != compacted_tables_.end()) {
             uint64_t fn = it->first;
             FileMetaData &meta = it->second;
@@ -311,8 +312,12 @@ namespace leveldb {
                     it.push_back(pair);
                 }
             }
+            success += 1;
             it = compacted_tables_.erase(it);
         }
+        NOVA_LOG(rdmaio::INFO)
+            << fmt::format("Delete files. Success:{} Failed:{}", success,
+                           compacted_tables_.size());
     }
 
     DBImpl::NovaCCRecoveryThread::NovaCCRecoveryThread(
@@ -448,7 +453,7 @@ namespace leveldb {
         }
 
         // Fetch metadata blocks.
-        std::vector<FileMetaData *> meta_files;
+        std::vector<const FileMetaData *> meta_files;
         for (int level = 0; level < options_.level; level++) {
             for (int i = 0; i < files[level].size(); i++) {
                 meta_files.push_back(files[level][i]);
@@ -499,34 +504,36 @@ namespace leveldb {
             NOVA_LOG(rdmaio::INFO)
                 << fmt::format("Recovered Subranges: {}",
                                new_srs->DebugString());
-            if (options_.enable_range_index) {
-                range_index_manager_ = new RangeIndexManager(versions_,
-                                                             user_comparator_);
-                RangeIndex *init = new RangeIndex(0,
-                        versions_->current_version_id());
-                std::string last_key;
-                int range_index_id = -1;
-                for (int i = 0; i < new_srs->subranges.size(); i++) {
-                    const auto &sr = new_srs->subranges[i];
-                    if (last_key == sr.tiny_ranges[0].lower) {
-                        init->range_tables[range_index_id].memtable_ids.insert(
-                                partitioned_active_memtables_[i]->memtable->memtableid());
-                        continue;
-                    }
-                    Range r = {};
-                    r.lower = sr.tiny_ranges[0].lower;
-                    r.upper = sr.tiny_ranges[sr.tiny_ranges.size() - 1].upper;
-                    init->ranges.push_back(r);
-                    RangeTables tables = {};
-                    tables.memtable_ids.insert(
+        }
+
+        if (options_.enable_range_index && options_.enable_subranges) {
+            auto new_srs = subrange_manager_->latest_subranges_.load();
+            range_index_manager_ = new RangeIndexManager(versions_,
+                                                         user_comparator_);
+            RangeIndex *init = new RangeIndex(0,
+                                              versions_->current_version_id());
+            std::string last_key;
+            int range_index_id = -1;
+            for (int i = 0; i < new_srs->subranges.size(); i++) {
+                const auto &sr = new_srs->subranges[i];
+                if (last_key == sr.tiny_ranges[0].lower) {
+                    init->range_tables_[range_index_id].memtable_ids.insert(
                             partitioned_active_memtables_[i]->memtable->memtableid());
-                    init->range_tables.push_back(tables);
-                    last_key = sr.tiny_ranges[0].lower;
-                    range_index_id += 1;
+                    continue;
                 }
-                range_index_manager_->Initialize(init);
-                NOVA_LOG(rdmaio::INFO) << init->DebugString();
+                Range r = {};
+                r.lower = sr.tiny_ranges[0].lower;
+                r.upper = sr.tiny_ranges[sr.tiny_ranges.size() - 1].upper;
+                init->ranges_.push_back(r);
+                RangeTables tables = {};
+                tables.memtable_ids.insert(
+                        partitioned_active_memtables_[i]->memtable->memtableid());
+                init->range_tables_.push_back(tables);
+                last_key = sr.tiny_ranges[0].lower;
+                range_index_id += 1;
             }
+            range_index_manager_->Initialize(init);
+            NOVA_LOG(rdmaio::INFO) << init->DebugString();
         }
 
         for (const auto &logfile : logfile_buf) {
@@ -1070,6 +1077,14 @@ namespace leveldb {
         }
     }
 
+    void DBImpl::ScheduleFileDeletionTask(int thread_id) {
+        EnvBGTask task = {};
+        task.db = this;
+        task.delete_obsolete_files = true;
+        if (bg_compaction_threads_[thread_id]->Schedule(task)) {
+        }
+    }
+
     void DBImpl::ScheduleFlushMemTableTask(int thread_id,
                                            MemTable *imm,
                                            uint32_t partition_id,
@@ -1091,9 +1106,11 @@ namespace leveldb {
 
     void DBImpl::PerformCompaction(leveldb::EnvBGThread *bg_thread,
                                    const std::vector<EnvBGTask> &tasks) {
+
         std::vector<EnvBGTask> memtable_tasks;
         std::unordered_map<uint32_t, std::vector<EnvBGTask>> pid_mergable_memtables;
         std::vector<EnvBGTask> sstable_tasks;
+        bool delete_obsolete_files = false;
         for (auto &task : tasks) {
             if (task.memtable) {
                 if (task.merge_memtables_without_flushing) {
@@ -1106,6 +1123,9 @@ namespace leveldb {
             if (task.compaction_task) {
                 sstable_tasks.push_back(task);
             }
+            if (task.delete_obsolete_files) {
+                delete_obsolete_files = true;
+            }
         }
 
         if (!pid_mergable_memtables.empty()) {
@@ -1115,6 +1135,8 @@ namespace leveldb {
         }
         std::vector<uint32_t> closed_memtable_log_files;
         VersionEdit edit;
+        std::vector<std::string> files_to_delete;
+        std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> server_pairs;
         NOVA_ASSERT(
                 options_.memtable_type == MemTableType::kStaticPartition);
         // flush memtables belong to the same memtable partition.
@@ -1132,6 +1154,9 @@ namespace leveldb {
                                                options_.manifest_stoc_id);
             std::unordered_map<uint32_t, std::vector<EnvBGTask>> pid_tasks;
             RangeIndexVersionEdit range_edit;
+            if (range_index_manager_) {
+                range_index_manager_->DeleteObsoleteVersions();
+            }
             mutex_.Lock();
             Version *v = new Version(&internal_comparator_, table_cache_,
                                      &options_,
@@ -1157,11 +1182,12 @@ namespace leveldb {
                 range_index_manager_->AppendNewVersion(range_edit);
             }
             NOVA_ASSERT(s.ok());
-            mutex_.Unlock();
-
-            if (range_index_manager_) {
-                range_index_manager_->DeleteObsoleteVersions();
+            if (!compacted_tables_.empty()) {
+                DeleteObsoleteVersions(bg_thread);
+                ObtainObsoleteFiles(bg_thread,
+                                    &files_to_delete, &server_pairs);
             }
+            mutex_.Unlock();
 
             for (const auto &it : pid_tasks) {
                 // New verion is installed. Then remove it from the immutable memtables.
@@ -1187,7 +1213,19 @@ namespace leveldb {
                 p->closed_log_files.clear();
                 p->mutex.Unlock();
             }
+        } else if (delete_obsolete_files) {
+            mutex_.Lock();
+            if (!compacted_tables_.empty()) {
+                DeleteObsoleteVersions(bg_thread);
+                ObtainObsoleteFiles(bg_thread,
+                                    &files_to_delete, &server_pairs);
+            }
+            if (!compacted_tables_.empty()) {
+                ScheduleFileDeletionTask(bg_thread->thread_id());
+            }
+            mutex_.Unlock();
         }
+        DeleteFiles(bg_thread, files_to_delete, server_pairs);
         // Delete log files.
         if (nova::NovaConfig::config->log_record_mode ==
             nova::NovaLogRecordMode::LOG_RDMA &&
@@ -1315,7 +1353,6 @@ namespace leveldb {
             std::unordered_map<uint32_t, MemTableL0FilesEdit> edits;
             ComputeCompactions(current, &compactions, &edit, &range_edit,
                                &edits);
-            versions_->versions_[current->version_id()]->Unref(dbname_);
             if (!compactions.empty()) {
                 if (subrange_manager_) {
                     subs = subrange_manager_->latest_subranges_;
@@ -1414,7 +1451,7 @@ namespace leveldb {
                             client->Wait();
                         }
                     }
-                    std::vector<FileMetaData *> metafiles;
+                    std::vector<const FileMetaData *> metafiles;
                     for (int i = 0; i < reqs.size(); i++) {
                         if (reqs[i] == 0) {
                             NOVA_ASSERT(
@@ -1459,6 +1496,7 @@ namespace leveldb {
                                        input_size - output_size);
                 }
             }
+            versions_->versions_[current->version_id()]->Unref(dbname_);
 
             for (auto state : states) {
                 ObtainLookupIndexEdits(state, &edits);
@@ -1490,6 +1528,9 @@ namespace leveldb {
             versions_->AppendChangesToManifest(&edit,
                                                manifest_file_,
                                                options_.manifest_stoc_id);
+            if (range_index_manager_) {
+                range_index_manager_->DeleteObsoleteVersions();
+            }
             mutex_.Lock();
             Version *v = new Version(&internal_comparator_, table_cache_,
                                      &options_,
@@ -1508,12 +1549,12 @@ namespace leveldb {
             if (range_index_manager_) {
                 range_index_manager_->AppendNewVersion(range_edit);
             }
+            if (!compacted_tables_.empty()) {
+                ScheduleFileDeletionTask(0);
+            }
             mutex_.Unlock();
             l0_stop_write_signal_.SignalAll();
 
-            if (range_index_manager_) {
-                range_index_manager_->DeleteObsoleteVersions();
-            }
             for (auto c : compactions) {
                 delete c;
             }
@@ -1554,14 +1595,17 @@ namespace leveldb {
     namespace {
         struct IterState {
             RangeIndex *const range_index = nullptr;
+            VersionSet *const versions_ = nullptr;
 
-            IterState(RangeIndex *_range_index)
-                    : range_index(_range_index) {}
+            IterState(RangeIndex *_range_index, VersionSet *versions)
+                    : range_index(_range_index), versions_(versions) {}
         };
 
         static void CleanupIteratorState(void *arg1, void *arg2) {
             IterState *state = reinterpret_cast<IterState *>(arg1);
             state->range_index->UnRef();
+            state->versions_->versions_[state->range_index->lsm_version_id_]->Unref(
+                    "");
             delete state;
         }
     }  // anonymous namespace
@@ -1575,13 +1619,14 @@ namespace leveldb {
         std::vector<Iterator *> list;
         RangeIndex *range_index = range_index_manager_->current();
         NOVA_ASSERT(range_index);
-        auto atomic_version = versions_->versions_[range_index->lsm_version_id];
-        NOVA_ASSERT(atomic_version) << range_index->lsm_version_id;
-        atomic_version->version->AddIterators(options, range_index, &list);
+        auto atomic_version = versions_->versions_[range_index->lsm_version_id_];
+        NOVA_ASSERT(atomic_version) << range_index->lsm_version_id_;
+        atomic_version->version->AddIterators(options, range_index, &list,
+                                              &scan_stats);
         Iterator *internal_iter =
                 NewMergingIterator(&internal_comparator_, &list[0],
                                    list.size());
-        IterState *cleanup = new IterState(range_index);
+        IterState *cleanup = new IterState(range_index, versions_);
         internal_iter->RegisterCleanup(CleanupIteratorState, cleanup, nullptr);
         return internal_iter;
     }
@@ -1643,7 +1688,7 @@ namespace leveldb {
 
         if (!l0fns.empty()) {
             s = current->Get(options, l0fns, lkey, &latest_seq, value,
-                             &number_of_files_to_search_);
+                             &number_of_files_to_search_for_get_);
         }
 //        std::string l0fns_str;
 //        for (auto &l0 : l0fns) {
@@ -1660,7 +1705,7 @@ namespace leveldb {
             SequenceNumber l1seq;
             s = current->Get(options, lkey, &l1seq, value,
                              &stats, GetSearchScope::kL1AndAbove,
-                             &number_of_files_to_search_);
+                             &number_of_files_to_search_for_get_);
 //            if (l1seq > latest_seq) {
 //                value->assign(l1val);
 //            }
@@ -1685,6 +1730,7 @@ namespace leveldb {
     }
 
     Iterator *DBImpl::NewIterator(const ReadOptions &options) {
+        scan_stats.number_of_scans_ += 1;
         SequenceNumber latest_snapshot;
         uint32_t seed;
         Iterator *iter = NewInternalIterator(options, &latest_snapshot, &seed);
@@ -1799,6 +1845,58 @@ namespace leveldb {
             if (steal_success) {
                 break;
             }
+        }
+    }
+
+    uint32_t DBImpl::EncodeMemTablePartitions(char *buf) {
+        uint32_t msg_size = 0;
+        for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
+            MemTablePartition *p = partitioned_active_memtables_[i];
+            p->mutex.Lock();
+            uint32_t memtableid = 0;
+            if (p->memtable) {
+                memtableid = p->memtable->memtableid();
+            }
+            msg_size += EncodeFixed32(buf + msg_size, memtableid);
+            msg_size += EncodeFixed32(buf + msg_size,
+                                      p->closed_log_files.size());
+            for (auto logfile : p->closed_log_files) {
+                msg_size += EncodeFixed32(buf + msg_size, logfile);
+            }
+            p->closed_log_files.clear();
+            p->mutex.Unlock();
+        }
+        return msg_size;
+    }
+
+    void DBImpl::DecodeMemTablePartitions(Slice *buf) {
+        for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
+            MemTablePartition *p = partitioned_active_memtables_[i];
+            p->mutex.Lock();
+            uint32_t memtableid = 0;
+            NOVA_ASSERT(DecodeFixed32(buf, &memtableid));
+            if (memtableid != 0) {
+                p->memtable = new MemTable(internal_comparator_, memtableid,
+                                           nullptr);
+                versions_->mid_table_mapping_[memtableid]->SetMemTable(
+                        p->memtable);
+            }
+            uint32_t size = 0;
+            NOVA_ASSERT(DecodeFixed32(buf, &size));
+            for (int j = 0; j < size; j++) {
+                uint32_t imm_memtableid = 0;
+                NOVA_ASSERT(DecodeFixed32(buf, &imm_memtableid));
+                MemTable *table = new MemTable(internal_comparator_,
+                                               imm_memtableid,
+                                               nullptr);
+                uint32_t slotid = p->available_slots.front();
+                p->available_slots.pop();
+                partitioned_imms_[slotid] = imm_memtableid;
+                p->closed_log_files.push_back(imm_memtableid);
+                versions_->mid_table_mapping_[imm_memtableid]->SetMemTable(
+                        table);
+            }
+            p->mutex.Unlock();
         }
     }
 

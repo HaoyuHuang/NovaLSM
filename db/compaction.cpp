@@ -9,13 +9,13 @@
 
 namespace leveldb {
     void
-    FetchMetadataFilesInParallel(const std::vector<FileMetaData *> &files,
+    FetchMetadataFilesInParallel(const std::vector<const FileMetaData *> &files,
                                  const std::string &dbname,
                                  const Options &options,
                                  StoCBlockClient *client,
                                  Env *env) {
         uint32_t fetched_files = 0;
-        std::vector<FileMetaData *> batch;
+        std::vector<const FileMetaData *> batch;
         for (int i = 0; i < files.size(); i++) {
             if (batch.size() == FETCH_METADATA_BATCH_SIZE &&
                 files.size() - i > FETCH_METADATA_BATCH_SIZE) {
@@ -33,10 +33,9 @@ namespace leveldb {
     }
 
     void
-    FetchMetadataFiles(const std::vector<FileMetaData *> &files,
-                       const std::string &dbname,
-                       const Options &options, StoCBlockClient *client,
-                       Env *env) {
+    FetchMetadataFiles(const std::vector<const FileMetaData *> &files,
+                       const std::string &dbname, const Options &options,
+                       StoCBlockClient *client, Env *env) {
         // Fetch all metadata files in parallel.
         char *backing_mems[files.size()];
         for (int i = 0; i < files.size(); i++) {

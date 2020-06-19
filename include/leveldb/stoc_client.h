@@ -72,6 +72,9 @@ namespace leveldb {
         STOC_COMPACTION_RESPONSE = 'R',
         STOC_IS_READY_FOR_REQUESTS = 'A',
         STOC_IS_READY_FOR_REQUESTS_RESPONSE = 'B',
+        RDMA_WRITE_REQUEST = 'D',
+        RDMA_WRITE_REMOTE_BUF_ALLOCATED = 'E',
+        LTC_MIGRATION = 'F',
     };
 
     struct StoCRequestContext {
@@ -129,6 +132,8 @@ namespace leveldb {
         RDMA_CLIENT_WRITE_SSTABLE_RESPONSE = 'k',
         RDMA_CLIENT_ALLOCATE_LOG_BUFFER_SUCC = 'l',
         RDMA_CLIENT_IS_READY_FOR_REQUESTS = 'm',
+        RDMA_CLIENT_RDMA_WRITE_REQUEST = 'n',
+        RDMA_CLIENT_RDMA_WRITE_REMOTE_BUF_ALLOCATED = 'o',
     };
 
     struct LevelDBLogRecord {
@@ -180,6 +185,10 @@ namespace leveldb {
     public:
         virtual uint32_t InitiateCompaction(uint32_t remote_server_id,
                                             CompactionRequest *compaction_request) = 0;
+
+        virtual uint32_t
+        InitiateRDMAWRITE(uint32_t remote_server_id, char *data,
+                          uint32_t size) = 0;
 
         virtual uint32_t
         InitiateIsReadyForProcessingRequests(uint32_t remote_server_id) = 0;

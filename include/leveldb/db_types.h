@@ -14,6 +14,8 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <fmt/core.h>
+
 #include "port/port.h"
 
 #include "slice.h"
@@ -54,6 +56,20 @@ namespace leveldb {
 // data structures.
     enum ValueType {
         kTypeDeletion = 0x0, kTypeValue = 0x1
+    };
+
+    struct ScanStats {
+        uint64_t number_of_scans_ = 0;
+        uint64_t number_of_scan_memtables_ = 0;
+        uint64_t number_of_scan_l0_sstables_ = 0;
+        uint64_t number_of_scan_sstables_ = 0;
+
+        std::string DebugString() {
+            return fmt::format("{}-{}-{}-{}", number_of_scans_,
+                               number_of_scan_memtables_,
+                               number_of_scan_l0_sstables_,
+                               number_of_scan_sstables_);
+        }
     };
 
     struct ParsedInternalKey {

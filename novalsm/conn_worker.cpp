@@ -325,7 +325,7 @@ namespace nova {
         uint64_t nrecords;
         buf += str_to_int(buf, &nrecords);
         std::string skey(startkey, nkey);
-        NOVA_LOG(INFO) << "memstore[" << worker->thread_id_ << "]: "
+        NOVA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
                        << " Scan fd:"
                        << fd << " key:" << skey << " nkey:" << nkey
                        << " nrecords: " << nrecords;
@@ -341,31 +341,35 @@ namespace nova {
                 read_options);
         iterator->Seek(startkey);
         int records = 0;
-        leveldb::Slice keys[nrecords];
-        leveldb::Slice values[nrecords];
         uint64_t scan_size = 0;
+
+        conn->response_buf = conn->buf;
+        char *response_buf = conn->response_buf;
+
         while (iterator->Valid() && records < nrecords) {
-            keys[records] = iterator->key();
-            values[records] = iterator->value();
-            scan_size += nint_to_str(keys[records].size()) + 1;
-            scan_size += keys[records].size();
-            scan_size += nint_to_str(values[records].size()) + 1;
-            scan_size += values[records].size();
+            leveldb::Slice key = iterator->key();
+            leveldb::Slice value = iterator->value();
+            scan_size += nint_to_str(key.size()) + 1;
+            scan_size += key.size();
+            scan_size += nint_to_str(value.size()) + 1;
+            scan_size += value.size();
+
+            NOVA_LOG(DEBUG)
+                << fmt::format("Scan key:{} value:{}", key.ToString(),
+                               value.size());
+
+            response_buf += int_to_str(response_buf, key.size());
+            memcpy(response_buf, key.data(), key.size());
+            response_buf += key.size();
+            response_buf += int_to_str(response_buf, value.size());
+            memcpy(response_buf, value.data(), value.size());
+            response_buf += value.size();
             records++;
             iterator->Next();
         }
-        conn->response_buf = conn->buf;
-        char *response_buf = conn->response_buf;
-        conn->response_size = nint_to_str(scan_size) + 1 + scan_size;
-        response_buf += int_to_str(response_buf, scan_size);
-        for (int i = 0; i < records; i++) {
-            response_buf += int_to_str(response_buf, keys[i].size());
-            memcpy(response_buf, keys[i].data(), keys[i].size());
-            response_buf += keys[i].size();
-            response_buf += int_to_str(response_buf, values[i].size());
-            memcpy(response_buf, values[i].data(), values[i].size());
-            response_buf += values[i].size();
-        }
+        conn->response_buf[scan_size] = MSG_TERMINATER_CHAR;
+        scan_size += 1;
+        conn->response_size = scan_size;
         NOVA_ASSERT(
                 conn->response_size < NovaConfig::config->max_msg_size);
         delete iterator;

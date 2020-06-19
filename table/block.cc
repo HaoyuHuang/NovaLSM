@@ -14,6 +14,8 @@
 #include "table/format.h"
 #include "util/coding.h"
 #include "util/logging.h"
+#include "db/dbformat.h"
+#include "common/nova_common.h"
 
 namespace leveldb {
 
@@ -99,6 +101,7 @@ namespace leveldb {
         std::string key_;
         Slice value_;
         Status status_;
+        bool seeked_ = false;
 
         inline int Compare(const Slice &a, const Slice &b) const {
             return comparator_->Compare(a, b);
@@ -176,7 +179,29 @@ namespace leveldb {
             } while (ParseNextKey() && NextEntryOffset() < original);
         }
 
+        void SkipToNextUserKey(const Slice &target) override {
+            if (!seeked_) {
+                Seek(target);
+            }
+            auto userkey = ExtractUserKey(target);
+            uint64_t userkeyint;
+            nova::str_to_int(userkey.data(), &userkeyint, userkey.size());
+            while (Valid()) {
+                auto pivot = ExtractUserKey(key());
+                uint64_t pivot_uk;
+                nova::str_to_int(pivot.data(), &pivot_uk, pivot.size());
+                NOVA_LOG(rdmaio::DEBUG)
+                    << fmt::format("Block skip:{} {}", userkey.ToString(),
+                                   pivot_uk);
+                if (pivot_uk > userkeyint) {
+                    return;
+                }
+                ParseNextKey();
+            }
+        }
+
         void Seek(const Slice &target) override {
+            seeked_ = true;
             // Binary search in restart array to find the last restart point
             // with a key < target
             uint32_t left = 0;
@@ -218,11 +243,13 @@ namespace leveldb {
         }
 
         void SeekToFirst() override {
+            seeked_ = true;
             SeekToRestartPoint(0);
             ParseNextKey();
         }
 
         void SeekToLast() override {
+            seeked_ = true;
             SeekToRestartPoint(num_restarts_ - 1);
             while (ParseNextKey() && NextEntryOffset() < restarts_) {
                 // Keep skipping

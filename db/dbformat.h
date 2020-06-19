@@ -38,7 +38,7 @@ namespace leveldb {
         if (result == 0) {
             result = 4.0 * 1024 * 1024 * 1024;
         }
-        while (level > 1) {
+        while (level > 0) {
             result *= 3.2;
             level--;
         }

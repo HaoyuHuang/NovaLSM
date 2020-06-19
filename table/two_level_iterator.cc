@@ -9,6 +9,8 @@
 #include "table/block.h"
 #include "table/format.h"
 #include "table/iterator_wrapper.h"
+#include "db/dbformat.h"
+#include "common/nova_common.h"
 
 namespace leveldb {
 
@@ -43,6 +45,8 @@ namespace leveldb {
             void Next() override;
 
             void Prev() override;
+
+            void SkipToNextUserKey(const Slice &target) override;
 
             bool Valid() const override { return data_iter_.Valid(); }
 
@@ -85,7 +89,7 @@ namespace leveldb {
 
             void SetDataIterator(Iterator *data_iter);
 
-            void InitDataBlock(std::string *);
+            bool InitDataBlock(std::string *);
 
             const BlockReadContext context_;
             BlockFunction block_function_;
@@ -128,6 +132,25 @@ namespace leveldb {
             InitDataBlock(nullptr);
             if (data_iter_.iter() != nullptr) data_iter_.Seek(target);
             SkipEmptyDataBlocksForward();
+        }
+
+        void TwoLevelIterator::SkipToNextUserKey(const Slice &target) {
+
+            NOVA_LOG(rdmaio::DEBUG) << fmt::format("Two level skip index {}",
+                                                  ExtractUserKey(
+                                                          target).ToString());
+            index_iter_.SkipToNextUserKey(target);
+            bool new_data_block = InitDataBlock(nullptr);
+            NOVA_LOG(rdmaio::DEBUG) << fmt::format("Two level skip data {}",
+                                                  ExtractUserKey(
+                                                          target).ToString());
+            if (data_iter_.iter() != nullptr)
+                data_iter_.SkipToNextUserKey(target);
+            if (merging_) {
+                MergingDataBlocksForward();
+            } else {
+                SkipEmptyDataBlocksForward();
+            }
         }
 
         void TwoLevelIterator::SeekToFirst() {
@@ -196,33 +219,29 @@ namespace leveldb {
             data_iter_.Set(data_iter);
         }
 
-        void TwoLevelIterator::InitDataBlock(std::string *next_key) {
+        bool TwoLevelIterator::InitDataBlock(std::string *next_key) {
             if (!index_iter_.Valid()) {
                 SetDataIterator(nullptr);
+                return true;
             } else {
                 Slice handle = index_iter_.value();
                 if (data_iter_.iter() != nullptr &&
                     handle.compare(data_block_handle_) == 0) {
                     // data_iter_ is already constructed with this iterator, so
                     // no need to change anything
+                    return false;
                 } else {
                     Iterator *iter = (*block_function_)(arg_, context_,
                                                         options_, handle,
                                                         next_key);
                     data_block_handle_.assign(handle.data(), handle.size());
-//                    if (merging_ && data_iter_.iter() != nullptr) {
-//                        std::vector<Iterator *> list;
-//                        list.push_back(data_iter_.iter());
-//                        list.push_back(iter);
-//                        iter = NewMergingIterator(comparator_, &list[0], 2);
-//                    }
                     SetDataIterator(iter);
+                    return true;
                 }
             }
         }
 
         void TwoLevelIterator::MergingDataBlocksForward() {
-            std::string next_key;
             while (data_iter_.iter() == nullptr || !data_iter_.Valid()) {
                 // Move to next block
                 if (!index_iter_.Valid()) {
@@ -230,13 +249,14 @@ namespace leveldb {
                     return;
                 }
                 index_iter_.Next();
-                InitDataBlock(&next_key);
+                InitDataBlock(nullptr);
             }
         }
 
         void TwoLevelIterator::MergingSeek(const Slice &target) {
+            std::string next_key;
             index_iter_.Seek(target);
-            InitDataBlock(nullptr);
+            InitDataBlock(&next_key);
             if (data_iter_.iter() != nullptr) data_iter_.Seek(target);
             MergingDataBlocksForward();
         }

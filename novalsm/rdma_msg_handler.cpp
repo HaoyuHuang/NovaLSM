@@ -97,6 +97,22 @@ namespace nova {
                                                      task.replicate_log_record_states);
                     ctx.req_id = task.thread_id;
                     break;
+                case leveldb::RDMA_CLIENT_RDMA_WRITE_REQUEST:
+                    ctx.req_id = stoc_client_->InitiateRDMAWRITE(task.server_id,
+                                                                 task.write_buf,
+                                                                 task.size);
+                    break;
+                case leveldb::RDMA_CLIENT_RDMA_WRITE_REMOTE_BUF_ALLOCATED: {
+                    char *sendbuf = rdma_broker_->GetSendBuf(task.server_id);
+                    sendbuf[0] = leveldb::StoCRequestType::RDMA_WRITE_REMOTE_BUF_ALLOCATED;
+                    leveldb::EncodeFixed32(sendbuf +  1, (uint64_t) task.thread_id);
+                    rdma_broker_->PostWrite(
+                            task.write_buf,
+                            task.write_size, task.server_id,
+                            task.offset, false, task.thread_id);
+                    ctx.req_id = task.thread_id;
+                }
+                    break;
                 case leveldb::RDMA_CLIENT_WRITE_SSTABLE_RESPONSE:
                     rdma_broker_->PostWrite(
                             task.write_buf,
@@ -264,7 +280,8 @@ namespace nova {
         bool processed_by_server = rdma_server_->ProcessRDMAWC(opcode, wr_id,
                                                                remote_server_id,
                                                                buf,
-                                                               imm_data, nullptr);
+                                                               imm_data,
+                                                               nullptr);
         if (processed_by_client && processed_by_server) {
             NOVA_ASSERT(false)
                 << fmt::format("Processed by both client and server");

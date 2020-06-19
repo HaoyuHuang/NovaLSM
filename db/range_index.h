@@ -38,9 +38,9 @@ namespace leveldb {
 
         void UnRef();
 
-        std::vector<Range> ranges;
-        std::vector<RangeTables> range_tables;
-        const uint32_t lsm_version_id = 0;
+        std::vector<Range> ranges_;
+        std::vector<RangeTables> range_tables_;
+        uint32_t lsm_version_id_ = 0;
 
         std::string DebugString() const;
 
@@ -64,25 +64,28 @@ namespace leveldb {
     class RangeIndexIterator : public Iterator {
     public:
         RangeIndexIterator(const InternalKeyComparator *icmp,
-                           const RangeIndex *range_index)
+                           const RangeIndex *range_index, ScanStats *stats)
                 : icmp_(icmp), range_index_(range_index),
-                  index_(range_index_->ranges.size()) {  // Marks as invalid
+                  index_(range_index_->ranges_.size()),
+                  stats_(stats) {  // Marks as invalid
         }
 
         bool Valid() const override {
-            return index_ < range_index_->ranges.size();
+            return index_ < range_index_->ranges_.size();
         }
 
         void Seek(const Slice &target) override {
-            BinarySearch(range_index_->ranges, target, &index_,
+            BinarySearch(range_index_->ranges_, target, &index_,
                          icmp_->user_comparator());
         }
+
+        void SkipToNextUserKey(const Slice &target) override;
 
         void SeekToFirst() override { index_ = 0; }
 
         void SeekToLast() override {
-            index_ = range_index_->ranges.empty() ? 0 :
-                     range_index_->ranges.size() - 1;
+            index_ = range_index_->ranges_.empty() ? 0 :
+                     range_index_->ranges_.size() - 1;
         }
 
         void Next() override {
@@ -93,7 +96,7 @@ namespace leveldb {
         void Prev() override {
             assert(Valid());
             if (index_ == 0) {
-                index_ = range_index_->ranges.size();  // Marks as invalid
+                index_ = range_index_->ranges_.size();  // Marks as invalid
             } else {
                 index_--;
             }
@@ -101,13 +104,13 @@ namespace leveldb {
 
         Slice key() const override {
             assert(Valid());
-            return range_index_->ranges[index_].upper;
+            return range_index_->ranges_[index_].upper;
         }
 
         Slice value() const override {
             assert(Valid());
-            const auto &range = range_index_->ranges[index_];
-            const auto &range_table = range_index_->range_tables[index_];
+            const auto &range = range_index_->ranges_[index_];
+            const auto &range_table = range_index_->range_tables_[index_];
             uint32_t msg_size = EncodeStr(value_buf_, range.lower);
             for (uint32_t memtableid : range_table.memtable_ids) {
                 msg_size += EncodeFixed32(value_buf_ + msg_size,
@@ -117,8 +120,12 @@ namespace leveldb {
             for (uint64_t sstableid : range_table.l0_sstable_ids) {
                 msg_size += EncodeFixed64(value_buf_ + msg_size, sstableid);
             }
+            if (stats_) {
+                stats_->number_of_scan_memtables_ += range_table.memtable_ids.size();
+                stats_->number_of_scan_l0_sstables_ += range_table.l0_sstable_ids.size();
+            }
             NOVA_ASSERT(msg_size <= 1024) << msg_size;
-            NOVA_LOG(rdmaio::INFO)
+            NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("RangeIndexScan Encode: {} {} {} {}", index_,
                                msg_size, range.DebugString(),
                                range_table.DebugString());
@@ -130,6 +137,7 @@ namespace leveldb {
     private:
         const InternalKeyComparator *icmp_;
         const RangeIndex *range_index_;
+        ScanStats *stats_ = nullptr;
         int index_;
         // Backing store for value().  Holds the file number and size.
         mutable char value_buf_[1024];
@@ -164,10 +172,10 @@ namespace leveldb {
 
         std::mutex mutex_;
 
-        uint32_t range_index_seq_id_ = 1;
+        uint32_t range_index_version_seq_id_ = 1;
         RangeIndex *first_ = nullptr;
         RangeIndex *last_ = nullptr;
-        RangeIndex *current_ = nullptr;
+        RangeIndex * current_;
         VersionSet *versions_ = nullptr;
         const Comparator *user_comparator_ = nullptr;
     };

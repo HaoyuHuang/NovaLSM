@@ -118,7 +118,8 @@ namespace leveldb {
 
     class StoCRandomAccessFileClientImpl : public StoCRandomAccessFileClient {
     public:
-        StoCRandomAccessFileClientImpl(Env *env, const std::string &dbname,
+        StoCRandomAccessFileClientImpl(Env *env, const Options &options,
+                                       const std::string &dbname,
                                        uint64_t file_number,
                                        const FileMetaData *meta,
                                        StoCClient *stoc_client,

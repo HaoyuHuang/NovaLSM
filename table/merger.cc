@@ -4,9 +4,14 @@
 
 #include "table/merger.h"
 
+#include <fmt/core.h>
+
+#include "common/nova_common.h"
+#include "common/nova_console_logging.h"
 #include "leveldb/comparator.h"
 #include "leveldb/iterator.h"
 #include "table/iterator_wrapper.h"
+#include "db/dbformat.h"
 
 namespace leveldb {
 
@@ -32,6 +37,19 @@ namespace leveldb {
             void SeekToFirst() override {
                 for (int i = 0; i < n_; i++) {
                     children_[i].SeekToFirst();
+                }
+                FindSmallest();
+                direction_ = kForward;
+            }
+
+            void SkipToNextUserKey(const Slice &target) override {
+                for (int i = 0; i < n_; i++) {
+                    uint64_t uk;
+                    auto user = ExtractUserKey(target);
+                    nova::str_to_int(user.data(), &uk, user.size());
+                    NOVA_LOG(rdmaio::DEBUG)
+                        << fmt::format("Merge skip {} key:{}", i, uk);
+                    children_[i].SkipToNextUserKey(target);
                 }
                 FindSmallest();
                 direction_ = kForward;

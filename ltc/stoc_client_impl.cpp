@@ -28,7 +28,25 @@ namespace leveldb {
         current_rdma_msg_handler_id_ = client_id;
     }
 
-    uint32_t StoCBlockClient::InitiateIsReadyForProcessingRequests(uint32_t remote_server_id) {
+    uint32_t
+    StoCBlockClient::InitiateRDMAWRITE(uint32_t remote_server_id, char *data,
+                                       uint32_t size) {
+        NOVA_ASSERT(remote_server_id != nova::NovaConfig::config->my_server_id);
+        RDMARequestTask task = {};
+        task.type = RDMA_CLIENT_RDMA_WRITE_REQUEST;
+        task.server_id = remote_server_id;
+        task.write_buf = data;
+        task.size = size;
+        task.sem = &sem_;
+
+        uint32_t reqid = req_id_;
+        AddAsyncTask(task);
+        IncrementReqId();
+        return reqid;
+    }
+
+    uint32_t StoCBlockClient::InitiateIsReadyForProcessingRequests(
+            uint32_t remote_server_id) {
         NOVA_ASSERT(remote_server_id != nova::NovaConfig::config->my_server_id);
         RDMARequestTask task = {};
         task.type = RDMA_CLIENT_IS_READY_FOR_REQUESTS;
@@ -85,7 +103,8 @@ namespace leveldb {
             char *stoc_file_buf = (char *) stoc_file_off;
             memcpy(stoc_file_buf, buf, size);
             NOVA_ASSERT(stoc_file->MarkOffsetAsWritten(stoc_file->file_id(),
-                                                       stoc_file_off)) << stoc_id;
+                                                       stoc_file_off))
+                << stoc_id;
             uint64_t persisted_bytes = stoc_file->Persist(stoc_file->file_id());
             NOVA_ASSERT(persisted_bytes == size)
                 << fmt::format("persisted bytes:{} written bytes:{}",
@@ -248,8 +267,9 @@ namespace leveldb {
                 stoc_file->DeleteSSTable(stoc_file_ids[i].stoc_file_id,
                                          stoc_file_ids[i].sstable_name);
                 leveldb::FileType type;
-                NOVA_ASSERT(leveldb::ParseFileName(stoc_file_ids[i].sstable_name,
-                                                   &type));
+                NOVA_ASSERT(
+                        leveldb::ParseFileName(stoc_file_ids[i].sstable_name,
+                                               &type));
                 if (type == leveldb::FileType::kTableFile) {
                     stoc_file_manager_->DeleteSSTable(
                             stoc_file_ids[i].sstable_name + "-meta");
@@ -266,8 +286,9 @@ namespace leveldb {
         return 0;
     }
 
-    uint32_t StoCBlockClient::InitiateInstallFileNameStoCFileMapping(uint32_t stoc_id,
-                                                                     const std::unordered_map<std::string, uint32_t> &fn_stocfnid) {
+    uint32_t
+    StoCBlockClient::InitiateInstallFileNameStoCFileMapping(uint32_t stoc_id,
+                                                            const std::unordered_map<std::string, uint32_t> &fn_stocfnid) {
         if (stoc_id == nova::NovaConfig::config->my_server_id) {
             stoc_file_manager_->OpenStoCFiles(fn_stocfnid);
             sem_post(&sem_);
@@ -284,8 +305,9 @@ namespace leveldb {
         return reqid;
     }
 
-    uint32_t StoCRDMAClient::InitiateInstallFileNameStoCFileMapping(uint32_t stoc_id,
-                                                                    const std::unordered_map<std::string, uint32_t> &fn_stocid) {
+    uint32_t
+    StoCRDMAClient::InitiateInstallFileNameStoCFileMapping(uint32_t stoc_id,
+                                                           const std::unordered_map<std::string, uint32_t> &fn_stocid) {
         uint32_t req_id = current_req_id_;
         StoCRequestContext context = {};
         context.done = false;
@@ -298,7 +320,7 @@ namespace leveldb {
         for (const auto &it : fn_stocid) {
             msg_size += EncodeStr(send_buf + msg_size, it.first);
             msg_size += EncodeFixed32(send_buf + msg_size, it.second);
-            NOVA_LOG(INFO)
+            NOVA_LOG(DEBUG)
                 << fmt::format("Install {} {} at StoC-{}", it.first, it.second,
                                stoc_id);
         }
@@ -523,7 +545,8 @@ namespace leveldb {
         uint32_t msg_size = 1;
         send_buf[0] = StoCRequestType::STOC_READ_BLOCKS;
         msg_size += EncodeBool(send_buf + msg_size, is_foreground_reads);
-        msg_size += EncodeFixed32(send_buf + msg_size, block_handle.stoc_file_id);
+        msg_size += EncodeFixed32(send_buf + msg_size,
+                                  block_handle.stoc_file_id);
         msg_size += EncodeFixed64(send_buf + msg_size, offset);
         msg_size += EncodeFixed32(send_buf + msg_size, size);
         msg_size += EncodeFixed64(send_buf + msg_size, (uint64_t) result);
@@ -543,7 +566,8 @@ namespace leveldb {
         return req_id;
     }
 
-    uint32_t StoCRDMAClient::InitiateIsReadyForProcessingRequests(uint32_t stoc_id) {
+    uint32_t
+    StoCRDMAClient::InitiateIsReadyForProcessingRequests(uint32_t stoc_id) {
         NOVA_ASSERT(stoc_id != nova::NovaConfig::config->my_server_id);
         uint32_t req_id = current_req_id_;
         StoCRequestContext context = {};
@@ -575,6 +599,31 @@ namespace leveldb {
         return req_id;
     }
 
+    uint32_t
+    StoCRDMAClient::InitiateRDMAWRITE(uint32_t remote_server_id, char *data,
+                                      uint32_t size) {
+        NOVA_ASSERT(remote_server_id != nova::NovaConfig::config->my_server_id);
+        uint32_t req_id = current_req_id_;
+        StoCRequestContext context = {};
+        context.done = false;
+        context.req_type = StoCRequestType::RDMA_WRITE_REQUEST;
+
+        char *send_buf = rdma_broker_->GetSendBuf(remote_server_id);
+        uint32_t msg_size = 1;
+        send_buf[0] = StoCRequestType::RDMA_WRITE_REQUEST;
+        EncodeFixed32(send_buf + msg_size, size);
+        msg_size += 4;
+        rdma_broker_->PostSend(send_buf, msg_size, remote_server_id, req_id);
+        context.backing_mem = data;
+        context.size = size;
+        request_context_[req_id] = context;
+        IncrementReqId();
+        NOVA_LOG(DEBUG)
+            << fmt::format(
+                    "stocclient[{}]: Migration server:{} size:{} req:{}",
+                    stoc_client_id_, remote_server_id, size, req_id);
+        return req_id;
+    }
 
     uint32_t StoCRDMAClient::InitiateAppendBlock(uint32_t stoc_id,
                                                  uint32_t thread_id,
@@ -751,6 +800,22 @@ namespace leveldb {
                         context.done = true;
                     }
                     processed = true;
+                } else if (buf[0] == leveldb::RDMA_WRITE_REMOTE_BUF_ALLOCATED) {
+                    req_id = leveldb::DecodeFixed32(buf + 1);
+                    auto context_it = request_context_.find(req_id);
+                    NOVA_ASSERT(context_it != request_context_.end())
+                        << fmt::format(
+                                "stocclient[{}]: BUG req:{} wr_id:{} first:{}",
+                                stoc_client_id_, req_id, wr_id, buf[0]);
+                    auto &context = context_it->second;
+
+                    NOVA_LOG(DEBUG) << fmt::format(
+                                "stocclient[{}]: Log record replicated req:{} wr_id:{} first:{}",
+                                stoc_client_id_, req_id, wr_id, buf[0]);
+                    auto scid = mem_manager_->slabclassid(0, context.size);
+                    mem_manager_->FreeItem(0, context.backing_mem, scid);
+                    context.done = true;
+                    processed = true;
                 }
             }
                 break;
@@ -780,7 +845,8 @@ namespace leveldb {
                         context.stoc_file_id = stoc_file_id;
                         NOVA_LOG(DEBUG) << fmt::format(
                                     "stocclient[{}]: Write StoC file received off id:{} offset:{} req:{}",
-                                    stoc_client_id_, stoc_file_id, stoc_file_offset,
+                                    stoc_client_id_, stoc_file_id,
+                                    stoc_file_offset,
                                     req_id);
                         processed = true;
                     } else if (context.req_type ==
@@ -808,7 +874,8 @@ namespace leveldb {
                         NOVA_ASSERT(context.req_type ==
                                     StoCRequestType::STOC_WRITE_SSTABLE);
                         uint32_t msg_size = 1;
-                        uint32_t stoc_block_handles = DecodeFixed32(buf + msg_size);
+                        uint32_t stoc_block_handles = DecodeFixed32(
+                                buf + msg_size);
                         msg_size += 4;
                         std::string rids;
                         for (int i = 0; i < stoc_block_handles; i++) {
@@ -856,6 +923,24 @@ namespace leveldb {
                                     stoc_client_id_, req_id);
                         processed = true;
                     } else if (buf[0] ==
+                               StoCRequestType::RDMA_WRITE_REMOTE_BUF_ALLOCATED) {
+                        uint64_t remote_buf = leveldb::DecodeFixed64(buf + 1);
+                        uint64_t size = leveldb::DecodeFixed64(buf + 9);
+
+                        RDMARequestTask task = {};
+                        task.type = RDMA_CLIENT_RDMA_WRITE_REMOTE_BUF_ALLOCATED;
+                        task.server_id = remote_server_id;
+                        task.offset = remote_buf;
+                        task.size = size;
+                        task.write_buf = context.backing_mem;
+                        task.write_size = context.size;
+                        task.thread_id = req_id;
+                        rdma_msg_handler_->private_queue_.push_back(task);
+                        NOVA_LOG(DEBUG) << fmt::format(
+                                    "stocclient[{}]: Allocate log buffer success req:{}",
+                                    stoc_client_id_, req_id);
+                        processed = true;
+                    } else if (buf[0] ==
                                StoCRequestType::STOC_QUERY_LOG_FILES_RESPONSE) {
                         uint32_t read_size = 1;
                         uint32_t size = leveldb::DecodeFixed32(buf + read_size);
@@ -887,7 +972,8 @@ namespace leveldb {
                         }
                         context.done = true;
                         processed = true;
-                    } else if (buf[0] == StoCRequestType::STOC_IS_READY_FOR_REQUESTS_RESPONSE) {
+                    } else if (buf[0] ==
+                               StoCRequestType::STOC_IS_READY_FOR_REQUESTS_RESPONSE) {
                         bool is_ready = leveldb::DecodeBool(buf + 1);
                         context.is_ready_for_requests = is_ready;
                         context.done = true;

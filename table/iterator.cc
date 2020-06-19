@@ -51,6 +51,8 @@ namespace leveldb {
 
             void Seek(const Slice &target) override {}
 
+            void SkipToNextUserKey(const Slice &target) override {}
+
             void SeekToFirst() override {}
 
             void SeekToLast() override {}

@@ -37,6 +37,10 @@ namespace leveldb {
         InitiateIsReadyForProcessingRequests(
                 uint32_t remote_server_id) override;
 
+        uint32_t
+        InitiateRDMAWRITE(uint32_t remote_server_id, char *data,
+                          uint32_t size) override;
+
         uint32_t InitiateCompaction(uint32_t remote_server_id,
                                     CompactionRequest *compaction_request) override;
 
@@ -140,6 +144,10 @@ namespace leveldb {
                   lower_req_id_(lower_req_id), upper_req_id_(upper_req_id),
                   current_req_id_(lower_req_id), rdma_server_(rdma_server) {
         }
+
+        uint32_t
+        InitiateRDMAWRITE(uint32_t remote_server_id, char *data,
+                          uint32_t size) override;
 
         uint32_t
         InitiateIsReadyForProcessingRequests(uint32_t stoc_id) override;
