@@ -51,6 +51,10 @@ namespace leveldb {
         kMajorCoordinatedStoC = 3
     };
 
+    enum ClientAccessPattern {
+        kClientAccessSkewed = 0,
+        kClientAccessUniform = 1,
+    };
 
     // Options to control the behavior of a database (passed to DB::Open)
     struct LEVELDB_EXPORT Options {
@@ -89,6 +93,8 @@ namespace leveldb {
 
         // Enable tracing accesses.
         bool enable_tracing = false;
+
+        ClientAccessPattern client_access_pattern;
 
         // Trace file path to log accesses.
         std::string trace_file_path = "/tmp/leveldb_trace_log";

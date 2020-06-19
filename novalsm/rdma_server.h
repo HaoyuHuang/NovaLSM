@@ -57,6 +57,7 @@ namespace nova {
 
         // Read result.
         char *rdma_buf = nullptr;
+        uint32_t size = 0;
         uint64_t ltc_mr_offset = 0;
         leveldb::StoCBlockHandle stoc_block_handle = {};
         // Persist result.
@@ -70,10 +71,7 @@ namespace nova {
     struct RequestContext {
         leveldb::StoCRequestType request_type;
         uint32_t remote_server_id;
-        std::string db_name;
-        uint32_t file_number;
         char *buf;
-        uint32_t sstable_size;
         uint32_t stoc_file_id;
         uint64_t stoc_file_buf_offset;
         uint32_t size;

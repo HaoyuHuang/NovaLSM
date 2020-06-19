@@ -105,17 +105,28 @@ namespace nova {
             }
 
             if (task.request_type == leveldb::STOC_FILENAME_STOCFILEID) {
-                char *send_buf = rdma_broker_->GetSendBuf(task.remote_server_id);
+                char *send_buf = rdma_broker_->GetSendBuf(
+                        task.remote_server_id);
                 send_buf[0] = leveldb::StoCRequestType::STOC_FILENAME_STOCFILEID_RESPONSE;
                 rdma_broker_->PostSend(send_buf, 1, task.remote_server_id,
                                        task.stoc_req_id);
             } else if (task.request_type == leveldb::STOC_ALLOCATE_LOG_BUFFER) {
-                char *send_buf = rdma_broker_->GetSendBuf(task.remote_server_id);
+                char *send_buf = rdma_broker_->GetSendBuf(
+                        task.remote_server_id);
                 send_buf[0] = leveldb::StoCRequestType::STOC_ALLOCATE_LOG_BUFFER_SUCC;
                 leveldb::EncodeFixed64(send_buf + 1, (uint64_t) task.rdma_buf);
                 leveldb::EncodeFixed64(send_buf + 9,
                                        NovaConfig::config->log_buf_size);
                 rdma_broker_->PostSend(send_buf, 1 + 8 + 8,
+                                       task.remote_server_id,
+                                       task.stoc_req_id);
+            } else if (task.request_type == leveldb::RDMA_WRITE_REQUEST) {
+                char *sendbuf = rdma_broker_->GetSendBuf(task.remote_server_id);
+                sendbuf[0] =
+                        leveldb::StoCRequestType::RDMA_WRITE_REMOTE_BUF_ALLOCATED;
+                leveldb::EncodeFixed64(sendbuf + 1, (uint64_t) task.rdma_buf);
+                leveldb::EncodeFixed64(sendbuf + 9, (uint64_t) task.size);
+                rdma_broker_->PostSend(sendbuf, 1 + 8 + 8,
                                        task.remote_server_id,
                                        task.stoc_req_id);
             } else if (task.request_type == leveldb::STOC_WRITE_SSTABLE) {
@@ -150,7 +161,8 @@ namespace nova {
                                                          task.stoc_req_id);
                 sendbuf[0] = leveldb::StoCRequestType::STOC_READ_BLOCKS;
                 leveldb::EncodeFixed64(sendbuf + 1, wr_id);
-                leveldb::EncodeFixed32(sendbuf + 9, task.stoc_block_handle.size);
+                leveldb::EncodeFixed32(sendbuf + 9,
+                                       task.stoc_block_handle.size);
                 leveldb::EncodeFixed64(sendbuf + 13,
                                        (uint64_t) (task.rdma_buf));
             } else if (task.request_type ==
@@ -247,22 +259,26 @@ namespace nova {
                     // Waiting for writes.
                     if (context.request_type ==
                         leveldb::StoCRequestType::STOC_WRITE_SSTABLE) {
-                        if (IsRDMAWRITEComplete((char *) context.stoc_file_buf_offset,
-                                                context.size)) {
+                        if (IsRDMAWRITEComplete(
+                                (char *) context.stoc_file_buf_offset,
+                                context.size)) {
                             NOVA_ASSERT(stoc_file_manager_->FindStoCFile(
-                                    context.file_number)->MarkOffsetAsWritten(
-                                    context.file_number,
-                                    context.stoc_file_buf_offset)) << fmt::format(
+                                    context.stoc_file_id)->MarkOffsetAsWritten(
+                                    context.stoc_file_id,
+                                    context.stoc_file_buf_offset))
+                                << fmt::format(
                                         "dc[{}]: Write StoC file failed id:{} offset:{} creq_id:{} req_id:{}",
                                         thread_id_, context.stoc_file_id,
-                                        context.stoc_file_buf_offset, stoc_req_id,
+                                        context.stoc_file_buf_offset,
+                                        stoc_req_id,
                                         req_id);
                             processed = true;
 
                             NOVA_LOG(DEBUG) << fmt::format(
                                         "dc[{}]: Write StoC file complete id:{} offset:{} creq_id:{} req_id:{}",
                                         thread_id_, context.stoc_file_id,
-                                        context.stoc_file_buf_offset, stoc_req_id,
+                                        context.stoc_file_buf_offset,
+                                        stoc_req_id,
                                         req_id);
 
                             StorageTask task = {};
@@ -278,6 +294,13 @@ namespace nova {
                             AddBGStorageTask(task);
                             request_context_map_.erase(req_id);
                         }
+                    } else if (context.request_type ==
+                               leveldb::StoCRequestType::RDMA_WRITE_REMOTE_BUF_ALLOCATED) {
+                        // TODO: RDMA WRITE TASK.
+//                        auto scid = mem_manager_->slabclassid(0, context.size);
+//                        mem_manager_->FreeItem(0, context.buf, scid);
+                        request_context_map_.erase(req_id);
+                        processed = true;
                     }
                 }
 
@@ -288,7 +311,8 @@ namespace nova {
                     ct.request_type = leveldb::StoCRequestType::STOC_READ_STATS;
                     ct.stoc_req_id = stoc_req_id;
                     private_cq_.push_back(ct);
-                } else if (buf[0] == leveldb::StoCRequestType::STOC_DELETE_TABLES) {
+                } else if (buf[0] ==
+                           leveldb::StoCRequestType::STOC_DELETE_TABLES) {
                     uint32_t msg_size = 1;
                     uint32_t nfiles = leveldb::DecodeFixed32(buf + msg_size);
                     msg_size += 4;
@@ -339,8 +363,9 @@ namespace nova {
                                 filename);
 
                     if (!filename.empty()) {
-                        stoc_file_id = stoc_file_manager_->OpenStoCFile(thread_id_,
-                                                                        filename)->file_id();
+                        stoc_file_id = stoc_file_manager_->OpenStoCFile(
+                                thread_id_,
+                                filename)->file_id();
                     }
 
                     uint32_t scid = mem_manager_->slabclassid(thread_id_,
@@ -455,6 +480,32 @@ namespace nova {
                                 thread_id_, log_file);
                     processed = true;
                 } else if (buf[0] ==
+                           leveldb::StoCRequestType::RDMA_WRITE_REQUEST) {
+                    uint32_t size = leveldb::DecodeFixed32(buf + 1);
+                    uint32_t slabclassid = mem_manager_->slabclassid(thread_id_,
+                                                                     size);
+                    char *rdmabuf = mem_manager_->ItemAlloc(thread_id_,
+                                                             slabclassid);
+                    NOVA_ASSERT(rdmabuf) << "Running out of memory";
+
+                    ServerCompleteTask task = {};
+                    task.request_type = leveldb::RDMA_WRITE_REQUEST;
+                    task.rdma_buf = rdmabuf;
+                    task.size = size;
+                    task.remote_server_id = remote_server_id;
+                    task.stoc_req_id = stoc_req_id;
+                    private_cq_.push_back(task);
+
+                    RequestContext context = {};
+                    context.request_type = leveldb::StoCRequestType::RDMA_WRITE_REMOTE_BUF_ALLOCATED;
+                    context.buf = rdmabuf;
+                    context.size = size;
+                    request_context_map_[req_id] = context;
+                    NOVA_LOG(DEBUG) << fmt::format(
+                                "dc[{}]: Allocate buffer for RDMA WRITE.",
+                                thread_id_);
+                    processed = true;
+                } else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_QUERY_LOG_FILES) {
                     uint32_t server_id = leveldb::DecodeFixed32(buf + 1);
                     uint32_t dbid = leveldb::DecodeFixed32(buf + 5);
@@ -517,7 +568,8 @@ namespace nova {
                                 "dc[{}]: Filename stoc file mapping {}.",
                                 thread_id_, fn_stocfile.size());
                     processed = true;
-                } else if (buf[0] == leveldb::StoCRequestType::STOC_COMPACTION) {
+                } else if (buf[0] ==
+                           leveldb::StoCRequestType::STOC_COMPACTION) {
                     auto req = new leveldb::CompactionRequest;
                     req->DecodeRequest(buf + 1,
                                        nova::NovaConfig::config->max_msg_size);

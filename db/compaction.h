@@ -252,14 +252,14 @@ namespace leveldb {
     };
 
     void
-    FetchMetadataFilesInParallel(const std::vector<FileMetaData *> &files,
+    FetchMetadataFilesInParallel(const std::vector<const FileMetaData *> &files,
                                  const std::string &dbname,
                                  const Options &options,
                                  StoCBlockClient *client,
                                  Env *env);
 
     void
-    FetchMetadataFiles(const std::vector<FileMetaData *> &files,
+    FetchMetadataFiles(const std::vector<const FileMetaData *> &files,
                        const std::string &dbname,
                        const Options &options, StoCBlockClient *client,
                        Env *env);

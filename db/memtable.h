@@ -131,12 +131,13 @@ namespace leveldb {
 
         uint32_t Encode(char *buf);
 
-        uint32_t Decode(char *buf);
+        void Decode(Slice *buf);
 
         bool locked = false;
         bool is_immutable_ = false;
         bool is_flushed_ = false;
         uint32_t last_version_id_ = 0;
+        uint32_t memtable_id_ = 0;
 
         std::set<uint64_t> l0_file_numbers_;
 

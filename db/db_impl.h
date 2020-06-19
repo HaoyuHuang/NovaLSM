@@ -14,6 +14,8 @@
 #include <list>
 #include <map>
 #include <fmt/core.h>
+#include <semaphore.h>
+
 #include "common/nova_common.h"
 #include "leveldb/db_profiler.h"
 #include "leveldb/cache.h"
@@ -124,8 +126,15 @@ namespace leveldb {
 
         void StartCompaction();
 
+        uint32_t EncodeMemTablePartitions(char *buf);
+
+        void DecodeMemTablePartitions(Slice *buf);
+
     private:
         std::atomic_bool start_compaction_;
+        sem_t init_lsmtree_meta_signal_;
+        char *lsmtree_meta_buf_ = nullptr;
+        bool is_ready_to_process_request = false;
 
         void ComputeCompactions(Version *current,
                                 std::vector<Compaction *> *compactions,
@@ -170,6 +179,8 @@ namespace leveldb {
                 std::vector<uint32_t> *closed_memtable_log_files);
 
         friend class DB;
+        friend class SourceMigration;
+        friend class DestinationMigration;
 
         struct Writer;
 
@@ -226,6 +237,8 @@ namespace leveldb {
                 unsigned int *rand_seed, bool merge_memtables_without_flushing);
 
         void ScheduleCompactionTask(int thread_id, void *compaction);
+
+        void ScheduleFileDeletionTask(int thread_id);
 
         Status
         InstallCompactionResults(CompactionState *compact, VersionEdit *edit,

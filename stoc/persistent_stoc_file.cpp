@@ -536,7 +536,7 @@ namespace leveldb {
         for (const auto &it : fn_files) {
             const auto &fn = it.first;
             const auto &fileid = it.second;
-            NOVA_LOG(rdmaio::INFO)
+            NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("Open StoC file {} for file {}", fileid, fn);
             StoCPersistentFile *stoc_file = new StoCPersistentFile(
                     fileid, env_,

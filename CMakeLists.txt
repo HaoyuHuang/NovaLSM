@@ -83,7 +83,7 @@ endif (BUILD_SHARED_LIBS)
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
 
-add_library(leveldb "" db/range_index.cpp db/range_index.h)
+add_library(leveldb "")
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
@@ -188,6 +188,19 @@ target_sources(leveldb
         "util/testharness.h"
         "util/testutil.cc"
         "util/testutil.h"
+
+        db/range_index.cpp
+        db/range_index.h
+#        ltc/source_migration.cpp
+#        ltc/source_migration.h
+#        ltc/destination_migration.cpp
+#        ltc/destination_migration.h
+#        log/log_recovery.cpp
+#        log/log_recovery.h
+#        ltc/rdma_write_handler.cpp
+#        ltc/rdma_write_handler.h
+        ltc/db_helper.cpp
+        ltc/db_helper.h
 
         stoc/persistent_stoc_file.cpp
         stoc/persistent_stoc_file.h
@@ -343,8 +356,11 @@ target_link_libraries(leveldb ibverbs event fmt)
 add_executable(nova_server_main "novalsm/nova_server_main.cpp")
 target_link_libraries(nova_server_main -lgflags leveldb)
 
+add_executable(nova_server_main_debug "novalsm/nova_server_main.cpp")
+target_link_libraries(nova_server_main_debug -lgflags leveldb -pg)
+
 add_executable(nova_subrange_sim "novalsm/nova_subrange_sim_test.cpp")
-target_link_libraries(nova_subrange_sim -lgflags leveldb)
+target_link_libraries(nova_subrange_sim -lgflags leveldb -pg)
 
 add_executable(scatter_bench "benchmarks/scatter_bench.cpp")
 target_link_libraries(scatter_bench -lgflags leveldb)

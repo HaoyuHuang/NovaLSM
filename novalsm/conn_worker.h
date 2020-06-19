@@ -105,6 +105,15 @@ namespace nova {
             rand_seed = thread_id;
             replicate_log_record_states = new leveldb::StoCReplicateLogRecordState[nova::NovaConfig::config->servers.size()];
             ResetReplicateState();
+
+            request_buf = (char *) malloc(NovaConfig::config->max_msg_size);
+            buf = (char *) malloc(NovaConfig::config->max_msg_size);
+            NOVA_ASSERT(request_buf != NULL);
+            NOVA_ASSERT(buf != NULL);
+
+            memset(request_buf, 0, NovaConfig::config->max_msg_size);
+            memset(buf, 0, NovaConfig::config->max_msg_size);
+
         }
 
         void Start();
@@ -149,6 +158,9 @@ namespace nova {
         char *rdma_backing_mem = nullptr;
         uint32_t rdma_backing_mem_size = 0;
         leveldb::StoCReplicateLogRecordState *replicate_log_record_states;
+        char *request_buf = nullptr;
+        char *buf = nullptr;
+        uint32_t req_ind = 0;
     };
 }
 

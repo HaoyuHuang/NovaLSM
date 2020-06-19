@@ -159,7 +159,7 @@ namespace nova {
                         return (stocid << 32) | fn;
                     };
                     {
-                        std::vector<leveldb::FileMetaData *> files;
+                        std::vector<const leveldb::FileMetaData *> files;
                         for (int which = 0; which < 2; which++) {
                             for (int i = 0;
                                  i < compaction->num_input_files(which); i++) {

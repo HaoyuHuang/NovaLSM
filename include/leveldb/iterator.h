@@ -48,6 +48,9 @@ namespace leveldb {
         // an entry that comes at or past target.
         virtual void Seek(const Slice &target) = 0;
 
+        // Skip to the next key.
+        virtual void SkipToNextUserKey(const Slice& target) = 0;
+
         // Moves to the next entry in the source.  After this call, Valid() is
         // true iff the iterator was not positioned at the last entry in the source.
         // REQUIRES: Valid()

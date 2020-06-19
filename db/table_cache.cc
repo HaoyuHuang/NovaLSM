@@ -40,7 +40,8 @@ namespace leveldb {
 
     TableCache::~TableCache() { delete cache_; }
 
-    bool TableCache::IsTableCached(AccessCaller caller, const FileMetaData *meta) {
+    bool
+    TableCache::IsTableCached(AccessCaller caller, const FileMetaData *meta) {
         Status s;
         char buf[1 + sizeof(meta->number)];
 
@@ -97,7 +98,8 @@ namespace leveldb {
                 prefetch_all = true;
             }
             std::string filename = TableFileName(dbname_, file_number);
-            file = new StoCRandomAccessFileClientImpl(env_, dbname_, file_number, meta,
+            file = new StoCRandomAccessFileClientImpl(env_, options_, dbname_,
+                                                      file_number, meta,
                                                       options.stoc_client,
                                                       options.mem_manager,
                                                       options.thread_id,

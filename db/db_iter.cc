@@ -70,12 +70,16 @@ namespace leveldb {
             Slice key() const override {
                 assert(valid_);
                 return (direction_ == kForward) ? ExtractUserKey(iter_->key())
-                                                : saved_key_;
+                                                : ExtractUserKey(saved_ikey_);
             }
 
             Slice value() const override {
                 assert(valid_);
                 return (direction_ == kForward) ? iter_->value() : saved_value_;
+            }
+
+            void SkipToNextUserKey(const Slice& userkey) override {
+                assert(false);
             }
 
             Status status() const override {
@@ -126,7 +130,7 @@ namespace leveldb {
             Iterator *const iter_;
             SequenceNumber const sequence_;
             Status status_;
-            std::string saved_key_;    // == current key when direction_==kReverse
+            std::string saved_ikey_;    // == current key when direction_==kReverse
             std::string saved_value_;  // == current raw value when direction_==kReverse
             Direction direction_;
             bool valid_;
@@ -140,7 +144,6 @@ namespace leveldb {
             size_t bytes_read = k.size() + iter_->value().size();
             while (bytes_until_read_sampling_ < bytes_read) {
                 bytes_until_read_sampling_ += RandomCompactionPeriod();
-//                db_->RecordReadSample(k);
             }
             assert(bytes_until_read_sampling_ >= bytes_read);
             bytes_until_read_sampling_ -= bytes_read;
@@ -169,25 +172,23 @@ namespace leveldb {
                 }
                 if (!iter_->Valid()) {
                     valid_ = false;
-                    saved_key_.clear();
+                    saved_ikey_.clear();
                     return;
                 }
                 // saved_key_ already contains the key to skip past.
             } else {
                 // Store in saved_key_ the current key so we skip it below.
-                SaveKey(ExtractUserKey(iter_->key()), &saved_key_);
+                SaveKey(iter_->key(), &saved_ikey_);
 
                 // iter_ is pointing to current key. We can now safely move to the next to
                 // avoid checking current key.
-                iter_->Next();
+                iter_->SkipToNextUserKey(saved_ikey_);
                 if (!iter_->Valid()) {
                     valid_ = false;
-                    saved_key_.clear();
+                    saved_ikey_.clear();
                     return;
                 }
             }
-
-            FindNextUserEntry(true, &saved_key_);
         }
 
         void DBIter::FindNextUserEntry(bool skipping, std::string *skip) {
@@ -207,11 +208,11 @@ namespace leveldb {
                         case kTypeValue:
                             if (skipping &&
                                 user_comparator_->Compare(ikey.user_key,
-                                                          *skip) <= 0) {
+                                                          ExtractUserKey(*skip)) <= 0) {
                                 // Entry hidden
                             } else {
                                 valid_ = true;
-                                saved_key_.clear();
+                                saved_ikey_.clear();
                                 return;
                             }
                             break;
@@ -219,7 +220,7 @@ namespace leveldb {
                 }
                 iter_->Next();
             } while (iter_->Valid());
-            saved_key_.clear();
+            saved_ikey_.clear();
             valid_ = false;
         }
 
@@ -230,17 +231,17 @@ namespace leveldb {
                 // iter_ is pointing at the current entry.  Scan backwards until
                 // the key changes so we can use the normal reverse scanning code.
                 assert(iter_->Valid());  // Otherwise valid_ would have been false
-                SaveKey(ExtractUserKey(iter_->key()), &saved_key_);
+                SaveKey(iter_->key(), &saved_ikey_);
                 while (true) {
                     iter_->Prev();
                     if (!iter_->Valid()) {
                         valid_ = false;
-                        saved_key_.clear();
+                        saved_ikey_.clear();
                         ClearSavedValue();
                         return;
                     }
                     if (user_comparator_->Compare(ExtractUserKey(iter_->key()),
-                                                  saved_key_) <
+                                                  ExtractUserKey(saved_ikey_)) <
                         0) {
                         break;
                     }
@@ -261,13 +262,13 @@ namespace leveldb {
                     if (ParseKey(&ikey) && ikey.sequence <= sequence_) {
                         if ((value_type != kTypeDeletion) &&
                             user_comparator_->Compare(ikey.user_key,
-                                                      saved_key_) < 0) {
+                                                      ExtractUserKey(saved_ikey_)) < 0) {
                             // We encountered a non-deleted value in entries for previous keys,
                             break;
                         }
                         value_type = ikey.type;
                         if (value_type == kTypeDeletion) {
-                            saved_key_.clear();
+                            saved_ikey_.clear();
                             ClearSavedValue();
                         } else {
                             Slice raw_value = iter_->value();
@@ -276,7 +277,7 @@ namespace leveldb {
                                 std::string empty;
                                 swap(empty, saved_value_);
                             }
-                            SaveKey(ExtractUserKey(iter_->key()), &saved_key_);
+                            SaveKey(iter_->key(), &saved_ikey_);
                             saved_value_.assign(raw_value.data(),
                                                 raw_value.size());
                         }
@@ -288,7 +289,7 @@ namespace leveldb {
             if (value_type == kTypeDeletion) {
                 // End
                 valid_ = false;
-                saved_key_.clear();
+                saved_ikey_.clear();
                 ClearSavedValue();
                 direction_ = kForward;
             } else {
@@ -299,13 +300,13 @@ namespace leveldb {
         void DBIter::Seek(const Slice &target) {
             direction_ = kForward;
             ClearSavedValue();
-            saved_key_.clear();
-            AppendInternalKey(&saved_key_,
+            saved_ikey_.clear();
+            AppendInternalKey(&saved_ikey_,
                               ParsedInternalKey(target, sequence_,
                                                 kValueTypeForSeek));
-            iter_->Seek(saved_key_);
+            iter_->Seek(saved_ikey_);
             if (iter_->Valid()) {
-                FindNextUserEntry(false, &saved_key_ /* temporary storage */);
+                FindNextUserEntry(false, &saved_ikey_ /* temporary storage */);
             } else {
                 valid_ = false;
             }
@@ -316,7 +317,7 @@ namespace leveldb {
             ClearSavedValue();
             iter_->SeekToFirst();
             if (iter_->Valid()) {
-                FindNextUserEntry(false, &saved_key_ /* temporary storage */);
+                FindNextUserEntry(false, &saved_ikey_ /* temporary storage */);
             } else {
                 valid_ = false;
             }

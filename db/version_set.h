@@ -122,7 +122,7 @@ namespace leveldb {
         // yield the contents of this Version when merged together.
         // REQUIRES: This version has been saved (see VersionSet::SaveTo)
         void AddIterators(const ReadOptions &, const RangeIndex *range_index,
-                          std::vector<Iterator *> *iters);
+                          std::vector<Iterator *> *iters, ScanStats *stats);
 
         Status
         Get(const ReadOptions &, const LookupKey &key, SequenceNumber *seq,
@@ -214,7 +214,9 @@ namespace leveldb {
         const Options *const options_;
 
         uint32_t Encode(char *buf);
+
         void Decode(Slice *buf);
+
     private:
         friend class Compaction;
 
@@ -253,7 +255,8 @@ namespace leveldb {
 
 
         Iterator *
-        NewConcatenatingIterator(const ReadOptions &, int level) const;
+        NewConcatenatingIterator(const ReadOptions &, int level,
+                                 ScanStats *scan_stats) const;
 
         // Call func(arg, level, f) for every file that overlaps user_key in
         // order from newest to oldest.  If an invocation of func returns
@@ -323,6 +326,9 @@ namespace leveldb {
         Status Recover(Slice manifest_file,
                        std::vector<SubRange> *subrange_edits);
 
+        void
+        Restore(Slice *buf, uint64_t last_sequence, uint64_t next_file_number);
+
         // Return the current version.
         Version *current() const { return current_; }
 
@@ -375,11 +381,13 @@ namespace leveldb {
         AtomicMemTable *mid_table_mapping_[MAX_LIVE_MEMTABLES];
         AtomicVersion *versions_[MAX_LIVE_MEMTABLES];
         std::atomic_int_fast32_t version_id_seq_;
+        std::atomic_int_fast64_t next_file_number_;
         std::mutex manifest_lock_;
 
         uint32_t EncodeTableIdMapping(char *buf, uint32_t latest_memtableid);
 
-        uint32_t DecodeTableIdMapping(char *buf);
+        void DecodeTableIdMapping(Slice *buf);
+
     private:
         class Builder;
 
@@ -394,8 +402,6 @@ namespace leveldb {
         const Options *const options_;
         TableCache *const table_cache_;
         const InternalKeyComparator icmp_;
-        std::atomic_int_fast64_t next_file_number_;
-
         // Opened lazily
         WritableFile *descriptor_file_;
         log::Writer *descriptor_log_;

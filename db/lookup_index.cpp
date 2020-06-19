@@ -51,20 +51,19 @@ namespace leveldb {
         return msg_size;
     }
 
-    uint32_t LookupIndex::Decode(char *buf) {
-        uint32_t read_size = 0;
-        NOVA_ASSERT(DecodeFixed32(buf + read_size) == 0);
-        read_size += 4;
+    void LookupIndex::Decode(Slice *buf) {
+        uint32_t pivot = 0;
+        NOVA_ASSERT(DecodeFixed32(buf, &pivot));
+        NOVA_ASSERT(pivot == 0);
         int i = 0;
         while (true) {
-            uint32_t id = DecodeFixed32(buf + read_size);
+            uint32_t id;
+            NOVA_ASSERT(DecodeFixed32(buf, &id));
             if (id == 0) {
                 break;
             }
             table_locator_[i].memtable_id = id;
             i++;
-            read_size += 4;
         }
-        return read_size;
     }
 }

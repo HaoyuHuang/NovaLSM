@@ -122,6 +122,10 @@ namespace leveldb {
 
         explicit SubRanges(const std::vector<SubRange> &other);
 
+        uint32_t Encode(char *buf);
+
+        uint32_t Decode(Slice *buf);
+
         SubRange &first() {
             return subranges[0];
         }

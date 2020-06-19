@@ -28,7 +28,7 @@ namespace leveldb {
 
         uint32_t Encode(char *buf);
 
-        uint32_t Decode(char *buf);
+        void Decode(Slice *buf);
     private:
         uint32_t size_ = 0;
         TableLocation *table_locator_ = nullptr;

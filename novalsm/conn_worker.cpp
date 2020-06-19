@@ -151,9 +151,9 @@ namespace nova {
         }
         conn->UpdateEventFlags(EV_READ | EV_PERSIST);
         // processing complete.
-        conn->request_buf[0] = '~';
+        worker->request_buf[0] = '~';
         conn->state = READ;
-        conn->req_ind = 0;
+        worker->req_ind = 0;
         conn->response_ind = 0;
     }
 
@@ -162,7 +162,7 @@ namespace nova {
         // Stats.
         NICConnWorker *worker = (NICConnWorker *) conn->worker;
         worker->stats.ngets++;
-        char *buf = conn->request_buf;
+        char *buf = worker->request_buf;
         NOVA_ASSERT(
                 buf[0] == RequestType::GET || buf[0] == RequestType::FORCE_GET)
             << buf;
@@ -190,7 +190,7 @@ namespace nova {
         NOVA_ASSERT(s.ok())
             << fmt::format("k:{} status:{}", key.ToString(), s.ToString());
 
-        conn->response_buf = conn->buf;
+        conn->response_buf = worker->buf;
         char *response_buf = conn->response_buf;
         conn->response_size =
                 nint_to_str(value.size()) + 1 + 1 + value.size();
@@ -234,10 +234,10 @@ namespace nova {
             thread->should_pause = false;
             sem_post(&thread->sem_);
         }
-        char *response_buf = conn->buf;
+        char *response_buf = worker->buf;
         int nlen = 1;
         int len = int_to_str(response_buf, nlen);
-        conn->response_buf = conn->buf;
+        conn->response_buf = worker->buf;
         conn->response_size = len + nlen;
         return true;
     }
@@ -263,10 +263,10 @@ namespace nova {
             num_l0_sstables = 10000;
         }
 
-        char *response_buf = conn->buf;
+        char *response_buf = worker->buf;
         int nlen = 0;
         int len = int_to_str(response_buf, num_l0_sstables);
-        conn->response_buf = conn->buf;
+        conn->response_buf = worker->buf;
         conn->response_size = len;
         return true;
     }
@@ -301,10 +301,10 @@ namespace nova {
                                fn.second->file_id());
             fn.second->Close();
         }
-        char *response_buf = conn->buf;
+        char *response_buf = worker->buf;
         int nlen = 1;
         int len = int_to_str(response_buf, nlen);
-        conn->response_buf = conn->buf;
+        conn->response_buf = worker->buf;
         conn->response_size = len + nlen;
         return true;
     }
@@ -313,7 +313,7 @@ namespace nova {
     process_socket_scan(int fd, Connection *conn) {
         NICConnWorker *worker = (NICConnWorker *) conn->worker;
         worker->stats.nscans++;
-        char *buf = conn->request_buf;
+        char *buf = worker->request_buf;
         NOVA_ASSERT(buf[0] == RequestType::REQ_SCAN) << buf;
         char *startkey;
 
@@ -325,7 +325,7 @@ namespace nova {
         uint64_t nrecords;
         buf += str_to_int(buf, &nrecords);
         std::string skey(startkey, nkey);
-        NOVA_LOG(INFO) << "memstore[" << worker->thread_id_ << "]: "
+        NOVA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
                        << " Scan fd:"
                        << fd << " key:" << skey << " nkey:" << nkey
                        << " nrecords: " << nrecords;
@@ -341,31 +341,35 @@ namespace nova {
                 read_options);
         iterator->Seek(startkey);
         int records = 0;
-        leveldb::Slice keys[nrecords];
-        leveldb::Slice values[nrecords];
         uint64_t scan_size = 0;
+
+        conn->response_buf = worker->buf;
+        char *response_buf = conn->response_buf;
+
         while (iterator->Valid() && records < nrecords) {
-            keys[records] = iterator->key();
-            values[records] = iterator->value();
-            scan_size += nint_to_str(keys[records].size()) + 1;
-            scan_size += keys[records].size();
-            scan_size += nint_to_str(values[records].size()) + 1;
-            scan_size += values[records].size();
+            leveldb::Slice key = iterator->key();
+            leveldb::Slice value = iterator->value();
+            scan_size += nint_to_str(key.size()) + 1;
+            scan_size += key.size();
+            scan_size += nint_to_str(value.size()) + 1;
+            scan_size += value.size();
+
+            NOVA_LOG(DEBUG)
+                << fmt::format("Scan key:{} value:{}", key.ToString(),
+                               value.size());
+
+            response_buf += int_to_str(response_buf, key.size());
+            memcpy(response_buf, key.data(), key.size());
+            response_buf += key.size();
+            response_buf += int_to_str(response_buf, value.size());
+            memcpy(response_buf, value.data(), value.size());
+            response_buf += value.size();
             records++;
             iterator->Next();
         }
-        conn->response_buf = conn->buf;
-        char *response_buf = conn->response_buf;
-        conn->response_size = nint_to_str(scan_size) + 1 + scan_size;
-        response_buf += int_to_str(response_buf, scan_size);
-        for (int i = 0; i < records; i++) {
-            response_buf += int_to_str(response_buf, keys[i].size());
-            memcpy(response_buf, keys[i].data(), keys[i].size());
-            response_buf += keys[i].size();
-            response_buf += int_to_str(response_buf, values[i].size());
-            memcpy(response_buf, values[i].data(), values[i].size());
-            response_buf += values[i].size();
-        }
+        conn->response_buf[scan_size] = MSG_TERMINATER_CHAR;
+        scan_size += 1;
+        conn->response_size = scan_size;
         NOVA_ASSERT(
                 conn->response_size < NovaConfig::config->max_msg_size);
         delete iterator;
@@ -379,7 +383,7 @@ namespace nova {
         // Stats.
         NICConnWorker *worker = (NICConnWorker *) conn->worker;
         worker->stats.nputs++;
-        char *buf = conn->request_buf;
+        char *buf = worker->request_buf;
         NOVA_ASSERT(buf[0] == RequestType::PUT) << buf;
         char *ckey;
         uint64_t key = 0;
@@ -419,10 +423,10 @@ namespace nova {
         leveldb::Status status = db->Put(option, dbkey, dbval);
         NOVA_ASSERT(status.ok()) << status.ToString();
 
-        char *response_buf = conn->buf;
+        char *response_buf = worker->buf;
         int nlen = 1;
         int len = int_to_str(response_buf, nlen);
-        conn->response_buf = conn->buf;
+        conn->response_buf = worker->buf;
         conn->response_size = len + nlen;
         return true;
     }
@@ -454,7 +458,8 @@ namespace nova {
     }
 
     bool process_socket_request_handler(int fd, Connection *conn) {
-        char *buf = conn->request_buf;
+        auto worker = (NICConnWorker*) conn->worker;
+        char *buf = worker->request_buf;
         if (buf[0] == RequestType::GET) {
             return process_socket_get(fd, conn, /*no_redirect=*/false);
         }
@@ -485,11 +490,11 @@ namespace nova {
 
     SocketState socket_read_handler(int fd, short which, Connection *conn) {
         NOVA_ASSERT((which & EV_READ) > 0) << which;
-        char *buf = conn->request_buf + conn->req_ind;
-        bool complete = false;
         NICConnWorker *worker = (NICConnWorker *) conn->worker;
+        char *buf = worker->request_buf + worker->req_ind;
+        bool complete = false;
 
-        if (conn->req_ind == 0) {
+        if (worker->req_ind == 0) {
             int count = read(fd, buf, NovaConfig::config->max_msg_size);
             worker->stats.nreads++;
             if (count <= 0) {
@@ -503,7 +508,7 @@ namespace nova {
                 if (buf[count - 1] == MSG_TERMINATER_CHAR) {
                     complete = true;
                 }
-                conn->req_ind += count;
+                worker->req_ind += count;
                 buf += count;
             }
         }
@@ -521,9 +526,9 @@ namespace nova {
                 if (buf[0] == MSG_TERMINATER_CHAR) {
                     break;
                 }
-                conn->req_ind += 1;
+                worker->req_ind += 1;
                 buf += 1;
-                NOVA_ASSERT(conn->req_ind < NovaConfig::config->max_msg_size);
+                NOVA_ASSERT(worker->req_ind < NovaConfig::config->max_msg_size);
             }
         }
         return COMPLETE;
@@ -702,15 +707,7 @@ namespace nova {
     }
 
     void Connection::Init(int f, void *store) {
-        request_buf = (char *) malloc(NovaConfig::config->max_msg_size);
-        buf = (char *) malloc(NovaConfig::config->max_msg_size);
-        NOVA_ASSERT(request_buf != NULL);
-        NOVA_ASSERT(buf != NULL);
-
-        memset(request_buf, 0, NovaConfig::config->max_msg_size);
-        memset(buf, 0, NovaConfig::config->max_msg_size);
         fd = f;
-        req_ind = 0;
         req_size = -1;
         response_ind = 0;
         response_size = 0;

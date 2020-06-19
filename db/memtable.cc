@@ -81,11 +81,39 @@ namespace leveldb {
 
         void Seek(const Slice &k) override {
             iter_.Seek(EncodeKey(&tmp_, k));
+            seeked_ = true;
         }
 
-        void SeekToFirst() override { iter_.SeekToFirst(); }
+        void SeekToFirst() override {
+            iter_.SeekToFirst();
+            seeked_ = true;
+        }
 
-        void SeekToLast() override { iter_.SeekToLast(); }
+        void SeekToLast() override {
+            iter_.SeekToLast();
+            seeked_ = true;
+        }
+
+        void SkipToNextUserKey(const Slice &target) override {
+            if (!seeked_) {
+                Seek(target);
+            }
+            auto userkey = ExtractUserKey(target);
+            uint64_t userkeyint;
+            nova::str_to_int(userkey.data(), &userkeyint, userkey.size());
+            while (Valid()) {
+                auto current_key = ExtractUserKey(key());
+                uint64_t pivot = 0;
+                nova::str_to_int(current_key.data(), &pivot,
+                                 current_key.size());
+                NOVA_LOG(rdmaio::DEBUG)
+                    << fmt::format("memtable skip:{} {}", userkeyint, pivot);
+                if (userkeyint != pivot) {
+                    return;
+                }
+                Next();
+            }
+        }
 
         void Next() override {
             iter_.Next();
@@ -109,6 +137,7 @@ namespace leveldb {
         TraceType trace_type_;
         AccessCaller caller_;
         MemTable::Table::Iterator iter_;
+        bool seeked_ = false;
         std::string tmp_;  // For passing to EncodeKey
     };
 
@@ -252,15 +281,18 @@ namespace leveldb {
         return msg_size;
     }
 
-    uint32_t AtomicMemTable::Decode(char *buf) {
-        uint32_t read_size = 0;
-        uint32_t size = DecodeFixed32(buf);
-        read_size += 4;
+    void AtomicMemTable::Decode(Slice *buf) {
+        uint32_t size;
+        // TODO:
+        NOVA_ASSERT(DecodeFixed32(buf, &memtable_id_));
+        NOVA_ASSERT(memtable_);
+        NOVA_ASSERT(memtable_->memtableid() == memtable_id_);
+        NOVA_ASSERT(DecodeFixed32(buf, &size));
         for (int i = 0; i < size; i++) {
-            l0_file_numbers_.insert(DecodeFixed64(buf + read_size));
-            read_size += 8;
+            uint64_t l0;
+            NOVA_ASSERT(DecodeFixed64(buf, &l0));
+            l0_file_numbers_.insert(l0);
         }
-        return read_size;
     }
 
     void AtomicMemTable::UpdateL0Files(uint32_t version_id,

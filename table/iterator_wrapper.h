@@ -36,6 +36,12 @@ namespace leveldb {
             }
         }
 
+        void SkipToNextUserKey(const Slice &user_key) {
+            assert(iter_);
+            iter_->SkipToNextUserKey(user_key);
+            Update();
+        }
+
         // Iterator interface methods
         bool Valid() const { return valid_; }
 

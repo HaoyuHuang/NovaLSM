@@ -30,7 +30,8 @@
 #include <atomic>
 #include <cassert>
 #include <cstdlib>
-#include <common/nova_console_logging.h>
+#include "common/nova_console_logging.h"
+#include "common/nova_common.h"
 
 #include "util/arena.h"
 #include "util/random.h"
@@ -224,7 +225,6 @@ namespace leveldb {
                 iter_level_ = 0;
             }
         }
-//        RDMA_LOG(rdmaio::INFO) << fmt::format("Search {}", iter_level_);
     }
 
     template<typename Key, class Comparator>
@@ -243,6 +243,7 @@ namespace leveldb {
         assert(Valid());
         node_ = node_->Next(iter_level_);
     }
+
 
     template<typename Key, class Comparator>
     inline void SkipList<Key, Comparator>::Iterator::Prev() {

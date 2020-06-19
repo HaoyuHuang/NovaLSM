@@ -16,13 +16,15 @@
 #include "common/nova_config.h"
 
 namespace leveldb {
-    StoCWritableFileClient::StoCWritableFileClient(Env *env, const Options &options,
+    StoCWritableFileClient::StoCWritableFileClient(Env *env,
+                                                   const Options &options,
                                                    uint64_t file_number,
                                                    MemManager *mem_manager,
                                                    StoCClient *stoc_client,
                                                    const std::string &dbname,
                                                    uint64_t thread_id,
-                                                   uint64_t file_size, unsigned int *rand_seed,
+                                                   uint64_t file_size,
+                                                   unsigned int *rand_seed,
                                                    std::string &filename)
             : mem_env_(env), options_(options), file_number_(file_number),
               fname_(filename),
@@ -63,7 +65,8 @@ namespace leveldb {
     }
 
     Status
-    StoCWritableFileClient::Read(uint64_t offset, size_t n, leveldb::Slice *result,
+    StoCWritableFileClient::Read(uint64_t offset, size_t n,
+                                 leveldb::Slice *result,
                                  char *scratch) {
         const uint64_t available = Size() - std::min(Size(), offset);
         size_t offset_ = static_cast<size_t>(offset);
@@ -98,7 +101,8 @@ namespace leveldb {
     }
 
     Status
-    StoCWritableFileClient::SyncAppend(const leveldb::Slice &data, uint32_t stoc_id) {
+    StoCWritableFileClient::SyncAppend(const leveldb::Slice &data,
+                                       uint32_t stoc_id) {
         char *buf = backing_mem_ + used_size_;
         NOVA_ASSERT(used_size_ + data.size() < allocated_size_)
             << fmt::format(
@@ -442,7 +446,8 @@ namespace leveldb {
             StoCResponse response = {};
             NOVA_ASSERT(client->IsDone(req_id, &response, nullptr));
             NOVA_ASSERT(response.stoc_block_handles.size() == 1)
-                << fmt::format("{} {}", req_id, response.stoc_block_handles.size());
+                << fmt::format("{} {}", req_id,
+                               response.stoc_block_handles.size());
             meta_block_handle_ = response.stoc_block_handles[0];
         }
         return new_file_size;
@@ -502,32 +507,39 @@ namespace leveldb {
 
 
     StoCRandomAccessFileClientImpl::StoCRandomAccessFileClientImpl(
-            Env *env, const std::string &dbname, uint64_t file_number,
-            const leveldb::FileMetaData *meta, leveldb::StoCClient *stoc_client,
+            Env *env, const Options &options, const std::string &dbname,
+            uint64_t file_number, const leveldb::FileMetaData *meta,
+            leveldb::StoCClient *stoc_client,
             leveldb::MemManager *mem_manager,
-            uint64_t thread_id,
-            bool prefetch_all, std::string &filename) : env_(env),
-                                                        dbname_(dbname),
-                                                        file_number_(
-                                                                file_number),
-                                                        meta_(meta),
-                                                        mem_manager_(
-                                                                mem_manager),
-                                                        thread_id_(thread_id),
-                                                        prefetch_all_(
-                                                                prefetch_all),
-                                                        filename(filename) {
+            uint64_t thread_id, bool prefetch_all, std::string &filename)
+            : env_(env),
+              dbname_(dbname),
+              file_number_(file_number),
+              meta_(meta),
+              mem_manager_(mem_manager),
+              thread_id_(thread_id),
+              prefetch_all_(prefetch_all),
+              filename(filename) {
         if (prefetch_all) {
             NOVA_LOG(rdmaio::DEBUG) << fmt::format("create file {}", filename);
         }
         NOVA_ASSERT(mem_manager_);
         uint32_t server_id = 0;
         nova::ParseDBIndexFromDBName(dbname, &server_id, &dbid_);
-        Status s = env_->NewRandomAccessFile(TableFileName(dbname, file_number),
-                                             &local_ra_file_);
-        auto dc = reinterpret_cast<leveldb::StoCBlockClient *>(stoc_client);
-        NOVA_ASSERT(dc);
-        dc->set_dbid(dbid_);
+        Status s;
+        auto stoc_block_client = reinterpret_cast<leveldb::StoCBlockClient *>(stoc_client);
+        NOVA_ASSERT(stoc_block_client);
+        stoc_block_client->set_dbid(dbid_);
+        {
+            auto metafile = TableFileName(dbname, file_number);
+            if (!env_->FileExists(metafile)) {
+                std::vector<const FileMetaData*> files;
+                files.push_back(meta);
+                FetchMetadataFiles(files, dbname, options, stoc_block_client, env_);
+            }
+            s = env_->NewRandomAccessFile(TableFileName(dbname, file_number),
+                                          &local_ra_file_);
+        }
         if (prefetch_all_) {
             NOVA_ASSERT(ReadAll(stoc_client).ok());
         }
@@ -607,9 +619,10 @@ namespace leveldb {
         }
     }
 
-    Status StoCRandomAccessFileClientImpl::Read(const StoCBlockHandle &stoc_block_handle,
-                                                uint64_t offset, size_t n,
-                                                leveldb::Slice *result, char *scratch) {
+    Status StoCRandomAccessFileClientImpl::Read(
+            const StoCBlockHandle &stoc_block_handle,
+            uint64_t offset, size_t n,
+            leveldb::Slice *result, char *scratch) {
         NOVA_ASSERT(false);
         return Status::OK();
     }

@@ -192,9 +192,10 @@ namespace nova {
             }
             output += "\n";
 
-            output += "searched_file,";
+            output += "scans,";
             for (int i = 0; i < dbs_.size(); i++) {
-                output += std::to_string(dbs_[i]->number_of_files_to_search_);
+                output += fmt::format("[{}]",
+                                      dbs_[i]->scan_stats.DebugString());
                 output += ",";
             }
             output += "\n";
@@ -203,7 +204,7 @@ namespace nova {
             for (int i = 0; i < dbs_.size(); i++) {
                 double miss = dbs_[i]->number_of_gets_ -
                               dbs_[i]->number_of_memtable_hits_;
-                double files = dbs_[i]->number_of_files_to_search_;
+                double files = dbs_[i]->number_of_files_to_search_for_get_;
                 output += std::to_string(files / miss);
                 output += ",";
             }
@@ -354,9 +355,11 @@ namespace nova {
             output += std::to_string(
                     nova::NovaGlobalVariables::global.written_memtable_sizes);
             output += ",";
-            output += std::to_string(nova::NovaGlobalVariables::global.total_disk_reads);
+            output += std::to_string(
+                    nova::NovaGlobalVariables::global.total_disk_reads);
             output += ",";
-            output += std::to_string(nova::NovaGlobalVariables::global.total_disk_writes);
+            output += std::to_string(
+                    nova::NovaGlobalVariables::global.total_disk_writes);
             output += ",";
             for (int j = 0; j < BUCKET_SIZE; j++) {
                 output += std::to_string(aggregated_stats.sstable_size_dist[j]);

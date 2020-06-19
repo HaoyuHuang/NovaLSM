@@ -70,7 +70,8 @@ namespace leveldb {
             bool reorg = false;
             for (auto &task : tasks) {
                 if (task.memtable == nullptr &&
-                    task.compaction_task == nullptr) {
+                    task.compaction_task == nullptr &&
+                    !task.delete_obsolete_files) {
                     auto db = reinterpret_cast<DB *>(tasks[0].db);
                     db->PerformSubRangeReorganization();
                     reorg = true;

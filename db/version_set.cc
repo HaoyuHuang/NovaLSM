@@ -133,21 +133,51 @@ namespace leveldb {
     class Version::LevelFileNumIterator : public Iterator {
     public:
         LevelFileNumIterator(const InternalKeyComparator &icmp,
-                             const std::vector<FileMetaData *> *flist)
+                             const std::vector<FileMetaData *> *flist,
+                             ScanStats *scan_stats)
                 : icmp_(icmp), flist_(flist),
-                  index_(flist->size()) {  // Marks as invalid
+                  index_(flist->size()),
+                  scan_stats_(scan_stats) {  // Marks as invalid
         }
 
         bool Valid() const override { return index_ < flist_->size(); }
 
         void Seek(const Slice &target) override {
             index_ = FindFile(icmp_, *flist_, target);
+            seeked_ = true;
         }
 
-        void SeekToFirst() override { index_ = 0; }
+        void SeekToFirst() override {
+            index_ = 0;
+            seeked_ = true;
+        }
 
         void SeekToLast() override {
             index_ = flist_->empty() ? 0 : flist_->size() - 1;
+            seeked_ = true;
+        }
+
+        void SkipToNextUserKey(const Slice &target) override {
+            if (!seeked_) {
+                Seek(target);
+            }
+
+            auto userkey = ExtractUserKey(target);
+            uint64_t userkeyint;
+            nova::str_to_int(userkey.data(), &userkeyint, userkey.size());
+            while (Valid()) {
+                auto current_key = ExtractUserKey(key());
+                uint64_t pivot = 0;
+                nova::str_to_int(current_key.data(), &pivot,
+                                 current_key.size());
+                NOVA_LOG(rdmaio::DEBUG)
+                    << fmt::format("Level file skip:{} {}", userkeyint, pivot);
+
+                if (userkeyint != pivot) {
+                    return;
+                }
+                index_++;
+            }
         }
 
         void Next() override {
@@ -173,6 +203,9 @@ namespace leveldb {
             assert(Valid());
             FileMetaData &meta = *(*flist_)[index_];
             EncodeFixed64(value_buf_, meta.number);
+            if (scan_stats_) {
+                scan_stats_->number_of_scan_sstables_ += 1;
+            }
             return Slice(value_buf_, 8);
         }
 
@@ -182,6 +215,8 @@ namespace leveldb {
         const InternalKeyComparator icmp_;
         const std::vector<FileMetaData *> *const flist_;
         uint32_t index_;
+        ScanStats *scan_stats_ = nullptr;
+        bool seeked_ = false;
 
         // Backing store for value().  Holds the file number and size.
         mutable char value_buf_[8];
@@ -205,14 +240,15 @@ namespace leveldb {
     }
 
     Iterator *Version::NewConcatenatingIterator(const ReadOptions &options,
-                                                int level) const {
+                                                int level,
+                                                ScanStats *scan_stats) const {
         BlockReadContext context = {
                 .caller = AccessCaller::kUserIterator,
                 .file_number = 0,
                 .level = level,
         };
         return NewTwoLevelIterator(
-                new LevelFileNumIterator(*icmp_, &files_[level]),
+                new LevelFileNumIterator(*icmp_, &files_[level], scan_stats),
                 context,
                 &GetFileIterator,
                 (void *) this, options);
@@ -220,7 +256,8 @@ namespace leveldb {
 
     void Version::AddIterators(const ReadOptions &options,
                                const RangeIndex *range_index,
-                               std::vector<Iterator *> *iters) {
+                               std::vector<Iterator *> *iters,
+                               ScanStats *stats) {
         NOVA_ASSERT(range_index);
         NOVA_ASSERT(iters);
         BlockReadContext context = {
@@ -229,7 +266,7 @@ namespace leveldb {
                 .level = 0,
         };
         iters->push_back(NewTwoLevelIterator(
-                new RangeIndexIterator(icmp_, range_index),
+                new RangeIndexIterator(icmp_, range_index, stats),
                 context, &GetRangeIndexFragmentIterator,
                 (void *) this, options, icmp_, true));
         // For levels > 0, we can use a concatenating iterator that sequentially
@@ -237,7 +274,8 @@ namespace leveldb {
         // lazily.
         for (int level = 1; level < options_->level; level++) {
             if (!files_[level].empty()) {
-                iters->push_back(NewConcatenatingIterator(options, level));
+                iters->push_back(
+                        NewConcatenatingIterator(options, level, stats));
             }
         }
     }
@@ -1064,6 +1102,17 @@ namespace leveldb {
         return Status::OK();
     }
 
+    void VersionSet::Restore(Slice *buf, uint64_t last_sequence,
+                             uint64_t next_file_number) {
+        Version *version = new Version(&icmp_, table_cache_, options_, 0, this);
+        version->Decode(buf);
+        // Install recovered version
+        Finalize(version);
+        AppendVersion(version);
+        next_file_number_ = next_file_number + 1;
+        last_sequence_ = last_sequence;
+    }
+
     Status VersionSet::Recover(Slice record,
                                std::vector<SubRange> *subrange_edits) {
         uint64_t next_file = 0;
@@ -1073,7 +1122,6 @@ namespace leveldb {
         Slice next;
         while (true) {
             VersionEdit edit;
-
             Status s = edit.DecodeFrom(input, &next);
             input = next;
             if (!s.ok()) {
@@ -1091,7 +1139,6 @@ namespace leveldb {
             if (edit.has_next_file_number_) {
                 next_file = std::max(next_file, edit.next_file_number_);
             }
-
             if (edit.has_last_sequence_) {
                 last_sequence = std::max(last_sequence,
                                          edit.last_sequence_);
@@ -1285,19 +1332,19 @@ namespace leveldb {
         return msg_size;
     }
 
-    uint32_t VersionSet::DecodeTableIdMapping(char *buf) {
-        uint32_t read_size = 0;
-        NOVA_ASSERT(DecodeFixed32(buf) == 0);
+    void VersionSet::DecodeTableIdMapping(Slice *buf) {
+        uint32_t pivot = 0;
+        NOVA_ASSERT(DecodeFixed32(buf, &pivot));
+        NOVA_ASSERT(pivot == 0);
         while (true) {
-            uint32_t mid = DecodeFixed32(buf + read_size);
-            read_size += 4;
+            uint32_t mid;
+            NOVA_ASSERT(DecodeFixed32(buf, &mid));
             if (mid == 0) {
                 break;
             }
             NOVA_ASSERT(mid < MAX_LIVE_MEMTABLES);
-            read_size += mid_table_mapping_[mid]->Decode(buf + read_size);
+            mid_table_mapping_[mid]->Decode(buf);
         }
-        return read_size;
     }
 
     void VersionSet::AddCompactedInputs(leveldb::Compaction *c,
@@ -1354,7 +1401,8 @@ namespace leveldb {
                     };
                     list[num++] = NewTwoLevelIterator(
                             new Version::LevelFileNumIterator(*icmp_,
-                                                              &inputs_[which]),
+                                                              &inputs_[which],
+                                                              nullptr),
                             context,
                             &GetFileIterator, input_version_, options);
                 }
@@ -1461,9 +1509,10 @@ namespace leveldb {
     }
 
     void Version::ComputeNonOverlappingSet(
-            std::vector<leveldb::Compaction *> *compactions) {
+            std::vector<leveldb::Compaction *> *compactions_result) {
         std::vector<FileMetaData *> l0files;
         std::vector<FileMetaData *> l1files;
+        std::vector<Compaction *> compactions;
         int level = compaction_level_;
         NOVA_ASSERT(level >= 0 && level + 1 < options_->level);
         // fill in l0 and l1 files.
@@ -1480,8 +1529,7 @@ namespace leveldb {
             << fmt::format("Compacting level {} {}:{}", level, l0files.size(),
                            l1files.size());
         int set_index = 0;
-        while (!l0files.empty() && compactions->size() <
-                                   options_->max_num_coordinated_compaction_nonoverlapping_sets) {
+        while (!l0files.empty() && compactions.size() < 64) {
             auto compaction = new Compaction(this, icmp_, options_, level,
                                              level + 1);
             // Make a copy.
@@ -1589,8 +1637,25 @@ namespace leveldb {
                       [&](FileMetaData *f1, FileMetaData *f2) {
                           return icmp_->Compare(f1->smallest, f2->smallest) < 0;
                       });
-            compactions->push_back(compaction);
+            compactions.push_back(compaction);
         }
+
+        if (compactions.size() >
+            options_->max_num_coordinated_compaction_nonoverlapping_sets) {
+            std::sort(compactions.begin(), compactions.end(),
+                      [](Compaction *c1, Compaction *c2) {
+                          return c1->inputs_[0].size() > c2->inputs_[0].size();
+                      });
+            for (int i = options_->max_num_coordinated_compaction_nonoverlapping_sets;
+                 i < compactions.size(); i++) {
+                delete compactions[i];
+                compactions[i] = nullptr;
+            }
+            compactions.resize(
+                    options_->max_num_coordinated_compaction_nonoverlapping_sets);
+        }
+        compactions_result->insert(compactions_result->begin(),
+                                   compactions.begin(), compactions.end());
     }
 
     void Version::GetOverlappingInputs(

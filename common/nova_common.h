@@ -106,13 +106,12 @@ namespace nova {
     class Connection {
     public:
         int fd;
-        int req_ind;
+//        int req_ind;
         int req_size;
         int response_ind;
         uint32_t response_size;
-        char *request_buf;
+//        char *request_buf;
         char *response_buf = nullptr; // A pointer points to the response buffer.
-        char *buf; // buf used for responses.
         ConnState state;
         void *worker;
         struct event event;
@@ -271,7 +270,25 @@ namespace nova {
 
     uint32_t int_to_str(char *str, uint64_t x);
 
-    uint32_t str_to_int(const char *str, uint64_t *out, uint32_t nkey = 0);
+    inline uint32_t str_to_int(const char *str, uint64_t *out, uint32_t nkey = 0) {
+        if (str[0] == MSG_TERMINATER_CHAR) {
+            return 0;
+        }
+        uint32_t len = 0;
+        uint64_t x = 0;
+        while (str[len] != TERMINATER_CHAR) {
+            if (nkey != 0 && len == nkey) {
+                break;
+            }
+            if (str[len] > '9' || str[len] < '0') {
+                break;
+            }
+            x = x * 10 + (str[len] - '0');
+            len += 1;
+        }
+        *out = x;
+        return len + 1;
+    }
 
     inline std::string
     LogFileName(uint32_t server_id, uint32_t db_id, uint32_t memtableid) {
