@@ -75,14 +75,12 @@ namespace leveldb {
                     }
                     direction_ = kForward;
                 }
-
                 current_->Next();
                 FindSmallest();
             }
 
             void Prev() override {
                 assert(Valid());
-
                 // Ensure that all children are positioned before key().
                 // If we are moving in the reverse direction, it is already
                 // true for all of the non-current_ children since current_ is

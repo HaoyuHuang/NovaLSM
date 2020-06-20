@@ -29,6 +29,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <fmt/core.h>
 
 #include <event.h>
 
@@ -246,56 +247,58 @@ namespace nova {
         buf += str_to_int(buf, &nrecords);
 
         std::string skey(startkey, nkey);
-        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-                        << " Range fd:"
-                        << fd << " key:" << skey << " nkey:" << nkey
-                        << " nrecords: " << nrecords;
         uint64_t hv = NovaConfig::keyhash(startkey, nkey);
         Fragment *frag = NovaConfig::home_fragment(hv);
         int pivot_db_id = frag->dbid;
         int read_records = 0;
-        leveldb::Slice keys[nrecords];
-        leveldb::Slice values[nrecords];
-        uint64_t scan_size = 0;
-        std::vector<leveldb::Iterator *> its;
+        std::vector<std::string> keys;
+        std::vector<std::string> values;
+
+        conn->response_buf = conn->buf;
+        char *response_buf = conn->response_buf;
+        uint64_t msg_size = 0;
         while (read_records < nrecords && pivot_db_id < worker->dbs_.size()) {
             leveldb::Iterator *iterator = worker->dbs_[pivot_db_id]->NewIterator(
                     leveldb::ReadOptions());
-            its.push_back(iterator);
+//            RDMA_LOG(INFO) << fmt::format("Open iterator on {}", pivot_db_id);
             iterator->Seek(startkey);
+//            std::string val;
+//            leveldb::Status s = worker->dbs_[pivot_db_id]->Get(
+//                    leveldb::ReadOptions(), "562500", &val);
+//            RDMA_LOG(INFO)
+//                << fmt::format("s:{} db:{} val:{}", s.ToString(), pivot_db_id,
+//                               val.size());
             while (iterator->Valid() && read_records < nrecords) {
-                keys[read_records] = iterator->key();
-                values[read_records] = iterator->value();
-                scan_size += nint_to_str(keys[read_records].size()) + 1;
-                scan_size += keys[read_records].size();
-                scan_size += nint_to_str(values[read_records].size()) + 1;
-                scan_size += values[read_records].size();
-                RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-                                << " Range key " << keys[read_records].ToString()
-                                << " value "
-                                << values[read_records].ToString();
+                leveldb::Slice key = iterator->key();
+                leveldb::Slice value = iterator->value();
+                msg_size += nint_to_str(key.size()) + 1;
+                msg_size += key.size();
+                msg_size += nint_to_str(value.size()) + 1;
+                msg_size += value.size();
+//                RDMA_LOG(INFO) << fmt::format("Scan key {} value:{}:{}",
+//                                              key.ToString(),
+//                                              value.size(), value.data()[0]);
+                response_buf += int_to_str(response_buf, key.size());
+                memcpy(response_buf, key.data(), key.size());
+                response_buf += key.size();
+                response_buf += int_to_str(response_buf, value.size());
+                memcpy(response_buf, value.data(), value.size());
+                response_buf += value.size();
                 read_records++;
                 iterator->Next();
             }
+            delete iterator;
             pivot_db_id += 1;
         }
-        conn->response_buf = conn->buf;
-        char *response_buf = conn->response_buf;
-        conn->response_size = nint_to_str(scan_size) + 1 + scan_size;
-        response_buf += int_to_str(response_buf, scan_size);
-        for (int i = 0; i < read_records; i++) {
-            response_buf += int_to_str(response_buf, keys[i].size());
-            memcpy(response_buf, keys[i].data(), keys[i].size());
-            response_buf += keys[i].size();
-            response_buf += int_to_str(response_buf, values[i].size());
-            memcpy(response_buf, values[i].data(), values[i].size());
-            response_buf += values[i].size();
-        }
-        for (auto it : its) {
-            delete it;
-        }
+        response_buf[0] = MSG_TERMINATER_CHAR;
+        msg_size += 1;
+        conn->response_size = msg_size;
+//        RDMA_LOG(INFO)
+//            << fmt::format("Scan fd: {} key:{} nkey:{} cardinality:{} size:{}",
+//                           fd, skey, nkey, nrecords, msg_size);
         RDMA_ASSERT(
-                conn->response_size < NovaConfig::config->max_msg_size);
+                conn->response_size < NovaConfig::config->max_msg_size)
+            << conn->response_size;
         return true;
     }
 
@@ -593,7 +596,7 @@ namespace nova {
 
     void NovaConnWorker::Start() {
         RDMA_LOG(DEBUG) << "memstore[" << thread_id_ << "]: "
-                       << "starting mem worker";
+                        << "starting mem worker";
 
         if (NovaConfig::config->log_record_mode == leveldb::LOG_NIC) {
             bool all_initialized = false;
@@ -626,7 +629,7 @@ namespace nova {
             exit(1);
         }
         RDMA_LOG(DEBUG) << "Using Libevent with backend method "
-                       << event_base_get_method(base);
+                        << event_base_get_method(base);
         const int f = event_base_get_features(base);
         if ((f & EV_FEATURE_ET)) {
             RDMA_LOG(DEBUG) << "Edge-triggered events are supported.";
@@ -634,7 +637,7 @@ namespace nova {
 
         if ((f & EV_FEATURE_O1)) {
             RDMA_LOG(DEBUG) <<
-                           "O(1) event notification is supported.";
+                            "O(1) event notification is supported.";
         }
 
         if ((f & EV_FEATURE_FDS)) {

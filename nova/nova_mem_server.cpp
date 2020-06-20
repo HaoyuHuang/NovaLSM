@@ -28,36 +28,20 @@ namespace nova {
             if (frags[i]->server_ids[0] != NovaConfig::config->my_server_id) {
                 continue;
             }
-            leveldb::WriteBatch batch;
-            int bs = 0;
             // Insert cold keys first so that hot keys will be at the top level.
             std::vector<std::string *> pointers;
             leveldb::DB *db = dbs_[frags[i]->dbid];
-
-            RDMA_LOG(INFO) << "Insert " << frags[i]->key_start << " to "
-                           << frags[i]->key_end;
-
-            for (uint64_t j = frags[i]->key_end;
-                 j >= frags[i]->key_start; j--) {
+            RDMA_LOG(INFO) << fmt::format("DB-{} Insert {} {}", frags[i]->dbid,
+                                          frags[i]->key_start,
+                                          frags[i]->key_end);
+            for (uint64_t j = frags[i]->key_start; j < frags[i]->key_end; j++) {
                 auto v = static_cast<char>((j % 10) + 'a');
-                std::string *key = new std::string(std::to_string(j));
-                std::string *val = new std::string(
+                std::string key(std::to_string(j));
+                std::string val(
                         NovaConfig::config->load_default_value_size, v);
-                pointers.push_back(key);
-                pointers.push_back(val);
-                batch.Put(*key, *val);
-                bs += 1;
-
-                if (bs == 1) {
-                    leveldb::Status status = db->Write(option, &batch);
-                    RDMA_ASSERT(status.ok()) << status.ToString();
-                    batch.Clear();
-                    bs = 0;
-                    for (std::string *p : pointers) {
-                        delete p;
-                    }
-                    pointers.clear();
-                }
+                leveldb::Status status = db->Put(option, key, val);
+//                RDMA_LOG(INFO) << fmt::format("Insert {}", key);
+                RDMA_ASSERT(status.ok()) << status.ToString();
                 loaded_keys++;
                 if (loaded_keys % 100000 == 0) {
                     timeval now{};
@@ -65,20 +49,8 @@ namespace nova {
                     RDMA_LOG(INFO) << "Load " << loaded_keys << " entries took "
                                    << now.tv_sec - start.tv_sec;
                 }
-
-                if (j == frags[i]->key_start) {
-                    break;
-                }
-            }
-            if (bs > 0) {
-                leveldb::Status status = db->Write(option, &batch);
-                RDMA_ASSERT(status.ok()) << status.ToString();
-                for (std::string *p : pointers) {
-                    delete p;
-                }
             }
         }
-
         RDMA_LOG(INFO) << "Completed loading data " << loaded_keys;
         gettimeofday(&start, nullptr);
         loaded_keys = 0;
@@ -167,7 +139,8 @@ namespace nova {
                 dbs_[i]->GetProperty("leveldb.sstables", &value);
                 RDMA_LOG(INFO) << "\n" << value;
                 value.clear();
-                dbs_[i]->GetProperty("leveldb.approximate-memory-usage", &value);
+                dbs_[i]->GetProperty("leveldb.approximate-memory-usage",
+                                     &value);
                 RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
             }
             sleep(1);

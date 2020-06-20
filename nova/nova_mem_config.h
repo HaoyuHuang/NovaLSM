@@ -75,7 +75,6 @@ namespace nova {
                 return home;
             }
             assert(false);
-            return NULL;
         }
 
         int ParseNumberOfDatabases(uint32_t server_id) {
