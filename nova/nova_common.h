@@ -41,13 +41,14 @@ namespace nova {
     class Connection {
     public:
         int fd;
-        int req_ind;
         int req_size;
         int response_ind;
         uint32_t response_size;
-        char *request_buf;
+//        char *request_buf;
+//        int req_ind;
+//        char *buf; // buf used for responses.
+
         char *response_buf = nullptr; // A pointer points to the response buffer.
-        char *buf; // buf used for responses.
         ConnState state;
         void *worker;
         struct event event;

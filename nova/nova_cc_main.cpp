@@ -97,6 +97,7 @@ namespace {
             }
             return 0;
         }
+
         // Ignore the following methods for now:
         const char *Name() const { return "YCSBKeyComparator"; }
 
@@ -186,7 +187,7 @@ leveldb::DB *CreateDatabase(int sid, int db_index, leveldb::Cache *cache,
 }
 
 int main(int argc, char *argv[]) {
-    system("sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'");
+//    system("sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'");
     gflags::ParseCommandLineFlags(&argc, &argv, true);
     int i;
     const char **methods = event_get_supported_methods();
@@ -217,15 +218,15 @@ int main(int argc, char *argv[]) {
     string data_partition = FLAGS_data_partition_alg;
 
     // Index.
-    NovaConfig::config->index_size_mb = FLAGS_index_size_mb;
-    NovaConfig::config->nindex_entry_per_bucket = FLAGS_nindex_entry_per_bucket;
-    NovaConfig::config->main_bucket_mem_percent = FLAGS_main_bucket_mem_percent;
-    NovaConfig::config->ComputeNumberOfBuckets();
+//    NovaConfig::config->index_size_mb = FLAGS_index_size_mb;
+//    NovaConfig::config->nindex_entry_per_bucket = FLAGS_nindex_entry_per_bucket;
+//    NovaConfig::config->main_bucket_mem_percent = FLAGS_main_bucket_mem_percent;
+//    NovaConfig::config->ComputeNumberOfBuckets();
 
     // Location cache.
-    NovaConfig::config->lc_size_mb = FLAGS_lc_index_size_mb;
-    NovaConfig::config->lc_nindex_entry_per_bucket = FLAGS_lc_nindex_entry_per_bucket;
-    NovaConfig::config->lc_main_bucket_mem_percent = FLAGS_main_bucket_mem_percent;
+//    NovaConfig::config->lc_size_mb = FLAGS_lc_index_size_mb;
+//    NovaConfig::config->lc_nindex_entry_per_bucket = FLAGS_lc_nindex_entry_per_bucket;
+//    NovaConfig::config->lc_main_bucket_mem_percent = FLAGS_main_bucket_mem_percent;
 
     // RDMA
     NovaConfig::config->rdma_port = FLAGS_rdma_port;
@@ -240,7 +241,8 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->profiler_file_path = FLAGS_profiler_file_path;
     NovaConfig::config->log_buf_size = FLAGS_log_buf_size;
     NovaConfig::config->num_async_workers = FLAGS_num_async_workers;
-    NovaConfig::config->l0_start_compaction_bytes = FLAGS_cc_l0_start_compaction_mb;
+    NovaConfig::config->l0_start_compaction_bytes =
+            FLAGS_cc_l0_start_compaction_mb * 1024 * 1024;
 
     if (FLAGS_persist_log_records_mode == "disk") {
         NovaConfig::config->log_record_mode = leveldb::NovaLogRecordMode::LOG_DISK_SYNC;
@@ -272,16 +274,13 @@ int main(int argc, char *argv[]) {
     NovaConfig::rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
                                          NovaConfig::config->rdma_port);
     int port = NovaConfig::config->servers[NovaConfig::config->my_server_id].port;
-    uint64_t nrdmatotal = (NovaConfig::config->rdma_max_num_sends * 2) *
-                          NovaConfig::config->max_msg_size *
-                          NovaConfig::config->servers.size() *
-                          NovaConfig::config->num_conn_workers;
+    uint64_t nrdmatotal = 0;
     uint64_t ntotal = nrdmatotal;
-    NovaConfig::config->index_buf_offset = ntotal;
-    ntotal += NovaConfig::config->index_size_mb * 1024 * 1024;
-    NovaConfig::config->lc_buf_offset = ntotal;
-    ntotal += NovaConfig::config->lc_size_mb * 1024 * 1024;
-    NovaConfig::config->data_buf_offset = ntotal;
+//    NovaConfig::config->index_buf_offset = ntotal;
+//    ntotal += NovaConfig::/config->index_size_mb * 1024 * 1024;
+//    NovaConfig::config->lc_buf_offset = ntotal;
+//    ntotal += NovaConfig::config->lc_size_mb * 1024 * 1024;
+//    NovaConfig::config->data_buf_offset = ntotal;
     ntotal += NovaConfig::config->cache_size_gb * 1024 * 1024 * 1024;
     RDMA_LOG(INFO) << "Allocated buffer size in bytes: " << ntotal;
 

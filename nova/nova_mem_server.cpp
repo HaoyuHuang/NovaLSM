@@ -158,7 +158,6 @@ namespace nova {
             RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
             leveldb::Log(dbs_[i]->infoLog(), "%s", "Load complete");
         }
-        system("sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'");
     }
 
     NovaMemServer::NovaMemServer(const std::vector<leveldb::DB *> &dbs,

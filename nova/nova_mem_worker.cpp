@@ -173,9 +173,9 @@ namespace nova {
         }
         conn->UpdateEventFlags(EV_READ | EV_PERSIST);
         // processing complete.
-        conn->request_buf[0] = '~';
+        worker->request_buf[0] = '~';
         conn->state = READ;
-        conn->req_ind = 0;
+        worker->req_ind = 0;
         conn->response_ind = 0;
     }
 
@@ -189,7 +189,7 @@ namespace nova {
         leveldb::Status s = db->Get(
                 leveldb::ReadOptions(), key, &value);
         RDMA_ASSERT(s.ok());
-        conn->response_buf = conn->buf;
+        conn->response_buf = worker->buf;
         char *response_buf = conn->response_buf;
         conn->response_size =
                 nint_to_str(value.size()) + 1 + 1 + value.size();
@@ -206,7 +206,7 @@ namespace nova {
         // Stats.
         NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
         worker->stats.ngets++;
-        char *buf = conn->request_buf;
+        char *buf = worker->request_buf;
         RDMA_ASSERT(
                 buf[0] == RequestType::GET || buf[0] == RequestType::FORCE_GET)
             << buf;
@@ -235,7 +235,7 @@ namespace nova {
         // Stats.
         NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
         worker->stats.nranges++;
-        char *buf = conn->request_buf;
+        char *buf = worker->request_buf;
         RDMA_ASSERT(buf[0] == RequestType::REQ_SCAN) << buf;
         char *startkey;
         uint64_t key = 0;
@@ -254,7 +254,7 @@ namespace nova {
         std::vector<std::string> keys;
         std::vector<std::string> values;
 
-        conn->response_buf = conn->buf;
+        conn->response_buf = worker->buf;
         char *response_buf = conn->response_buf;
         uint64_t msg_size = 0;
         while (read_records < nrecords && pivot_db_id < worker->dbs_.size()) {
@@ -306,7 +306,7 @@ namespace nova {
         // Stats.
         NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
         worker->stats.nputs++;
-        char *buf = conn->request_buf;
+        char *buf = worker->request_buf;
         RDMA_ASSERT(buf[0] == RequestType::PUT) << buf;
         char *ckey;
         uint64_t key = 0;
@@ -344,24 +344,24 @@ namespace nova {
                             << ":" << dbkey.ToString();
             RDMA_ASSERT(status.ok()) << status.ToString();
 
-            char *response_buf = conn->buf;
+            char *response_buf = worker->buf;
             int nlen = 1;
             int len = int_to_str(response_buf, nlen);
-            conn->response_buf = conn->buf;
+            conn->response_buf = worker->buf;
             conn->response_size = len + nlen;
             return true;
         }
 
         // I'm the home.
-        NovaAsyncTask task = {
-                .type = RequestType::PUT,
-                .conn_worker_id = worker->thread_id_,
-                .key = dbkey.ToString(),
-                .value = dbval.ToString(),
-                .sock_fd = fd,
-                .conn = conn
-        };
-        worker->AddTask(task);
+//        NovaAsyncTask task = {
+//                .type = RequestType::PUT,
+//                .conn_worker_id = worker->thread_id_,
+//                .key = dbkey.ToString(),
+//                .value = dbval.ToString(),
+//                .sock_fd = fd,
+//                .conn = conn
+//        };
+//        worker->AddTask(task);
         return false;
     }
 
@@ -369,7 +369,7 @@ namespace nova {
         // Stats.
         NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
         worker->stats.nreplicate_log_records++;
-        char *buf = conn->request_buf;
+        char *buf = worker->request_buf;
         RDMA_ASSERT(buf[0] == RequestType::REPLICATE_LOG_RECORD) << buf;
         buf++;
         uint32_t logfilename_size = leveldb::DecodeFixed32(buf);
@@ -383,17 +383,17 @@ namespace nova {
                         << " replicate log record fd:"
                         << fd << ": log:" << logfile << " nlog:"
                         << logfilename_size << " nlogrecord:"
-                        << logrecord_size << " buf:" << conn->request_buf;
+                        << logrecord_size << " buf:" << worker->request_buf;
 
         worker->async_workers_[worker->current_async_worker_id_]->
                 nic_log_writer_->AddLocalRecord(logfile,
                                                 leveldb::Slice(buf,
                                                                logrecord_size));
-        char *response_buf = conn->buf;
+        char *response_buf = worker->buf;
         leveldb::EncodeFixed32(response_buf, 1);
         response_buf += 4;
         response_buf[0] = RequestType::REPLICATE_LOG_RECORD_SUCC;
-        conn->response_buf = conn->buf;
+        conn->response_buf = worker->buf;
         conn->response_size = 5;
         RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
         return true;
@@ -403,7 +403,7 @@ namespace nova {
         // Stats.
         NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
         worker->stats.nremove_log_records++;
-        char *buf = conn->request_buf;
+        char *buf = worker->request_buf;
         RDMA_ASSERT(buf[0] == RequestType::DELETE_LOG_FILE) << buf;
         buf++;
         uint32_t logfilename_size = leveldb::DecodeFixed32(buf);
@@ -412,21 +412,22 @@ namespace nova {
         RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
                         << " delete log file fd:"
                         << fd << ": log:" << logfile << " nlog:"
-                        << logfilename_size << " buf:" << conn->request_buf;
+                        << logfilename_size << " buf:" << worker->request_buf;
         worker->log_manager_->DeleteLogBuf(logfile);
 
-        char *response_buf = conn->buf;
+        char *response_buf = worker->buf;
         leveldb::EncodeFixed32(response_buf, 1);
         response_buf += 4;
         response_buf[0] = RequestType::DELETE_LOG_FILE_SUCC;
-        conn->response_buf = conn->buf;
+        conn->response_buf = worker->buf;
         conn->response_size = 5;
         RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
         return true;
     }
 
     bool process_socket_request_handler(int fd, Connection *conn) {
-        char *buf = conn->request_buf;
+        auto worker = (NovaConnWorker*) conn->worker;
+        char *buf = worker->request_buf;
         if (buf[0] == RequestType::GET) {
             return process_socket_get(fd, conn, /*no_redirect=*/false);
         }
@@ -451,11 +452,11 @@ namespace nova {
 
     SocketState socket_read_handler(int fd, short which, Connection *conn) {
         RDMA_ASSERT((which & EV_READ) > 0) << which;
-        char *buf = conn->request_buf + conn->req_ind;
+        auto worker = (NovaConnWorker*) conn->worker;
+        char *buf = worker->request_buf + worker->req_ind;
         bool complete = false;
-        NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
 
-        if (conn->req_ind == 0) {
+        if (worker->req_ind == 0) {
             int count = read(fd, buf, NovaConfig::config->max_msg_size);
             worker->stats.nreads++;
             if (count <= 0) {
@@ -469,7 +470,7 @@ namespace nova {
                 if (buf[count - 1] == MSG_TERMINATER_CHAR) {
                     complete = true;
                 }
-                conn->req_ind += count;
+                worker->req_ind += count;
                 buf += count;
             }
         }
@@ -487,9 +488,9 @@ namespace nova {
                 if (buf[0] == MSG_TERMINATER_CHAR) {
                     break;
                 }
-                conn->req_ind += 1;
+                worker->req_ind += 1;
                 buf += 1;
-                RDMA_ASSERT(conn->req_ind < NovaConfig::config->max_msg_size);
+                RDMA_ASSERT(worker->req_ind < NovaConfig::config->max_msg_size);
             }
         }
         return COMPLETE;
@@ -685,15 +686,7 @@ namespace nova {
     }
 
     void Connection::Init(int f, void *store) {
-        request_buf = (char *) malloc(NovaConfig::config->max_msg_size);
-        buf = (char *) malloc(NovaConfig::config->max_msg_size);
-        RDMA_ASSERT(request_buf != NULL);
-        RDMA_ASSERT(buf != NULL);
-
-        memset(request_buf, 0, NovaConfig::config->max_msg_size);
-        memset(buf, 0, NovaConfig::config->max_msg_size);
         fd = f;
-        req_ind = 0;
         req_size = -1;
         response_ind = 0;
         response_size = 0;

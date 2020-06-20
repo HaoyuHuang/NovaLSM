@@ -111,6 +111,15 @@ namespace nova {
             pipe(fd);
             async_cq_->read_fd = fd[0];
             async_cq_->write_fd = fd[1];
+
+            request_buf = (char *) malloc(NovaConfig::config->max_msg_size);
+            buf = (char *) malloc(NovaConfig::config->max_msg_size);
+            RDMA_ASSERT(request_buf != NULL);
+            RDMA_ASSERT(buf != NULL);
+
+            memset(request_buf, 0, NovaConfig::config->max_msg_size);
+            memset(buf, 0, NovaConfig::config->max_msg_size);
+            req_ind = 0;
         }
 
         void Start();
@@ -139,6 +148,10 @@ namespace nova {
         NovaAsyncCompleteQueue *async_cq_;
 
         int nconns = 0;
+
+        char *request_buf;
+        int req_ind;
+        char *buf; // buf used for responses.
 
         mutex conn_mu;
         vector<int> conn_queue;

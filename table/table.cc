@@ -260,7 +260,6 @@ namespace leveldb {
             };
             db_profiler_->Trace(access);
         }
-
         return NewTwoLevelIterator(
                 rep_->index_block->NewIterator(rep_->options.comparator),
                 context,

@@ -129,17 +129,18 @@ namespace nova {
         }
 
         uint32_t bucket_size() {
-            return IndexEntry::size() * nindex_entry_per_bucket;
+            return 0;
+//            return IndexEntry::size() * nindex_entry_per_bucket;
         }
 
         void ComputeNumberOfBuckets() {
-            uint64_t index_size =
-                    NovaConfig::config->index_size_mb * 1024 * 1024;
-            uint64_t main_bucket_mem_size =
-                    static_cast<uint64_t>(index_size / 100) *
-                    NovaConfig::config->main_bucket_mem_percent;
-            nbuckets = static_cast<uint32_t>(main_bucket_mem_size /
-                                             bucket_size());
+//            uint64_t index_size =
+//                    NovaConfig::config->index_size_mb * 1024 * 1024;
+//            uint64_t main_bucket_mem_size =
+//                    static_cast<uint64_t>(index_size / 100) *
+//                    NovaConfig::config->main_bucket_mem_percent;
+//            nbuckets = static_cast<uint32_t>(main_bucket_mem_size /
+//                                             bucket_size());
 
         }
 
@@ -151,14 +152,13 @@ namespace nova {
                     "doorbell_batch=[%d], my_server_id=[%d], recordcount=[%d], "
                     "partition_mode=[%d], "
                     "ingest_batch_size=[%d], value_size=[%lu], "
-                    "enable_load=[%d], enable_rdma=[%d], cache_size_gb=[%lu], index_size_mb=[%lu]",
+                    "enable_load=[%d], enable_rdma=[%d], cache_size_gb=[%lu], index_size_mb=[0]",
                     rdma_port, num_conn_workers, max_msg_size,
                     rdma_max_num_sends,
                     rdma_doorbell_batch_size,
                     my_server_id, recordcount, partition_mode,
                     rdma_pq_batch_size, load_default_value_size,
-                    enable_load_data, enable_rdma, cache_size_gb,
-                    index_size_mb);
+                    enable_load_data, enable_rdma, cache_size_gb);
             return string(output);
         }
 
@@ -183,21 +183,21 @@ namespace nova {
         int max_msg_size;
 
         // Index.
-        uint64_t index_buf_offset;
-        uint64_t index_size_mb;
-        uint32_t nindex_entry_per_bucket;
-        uint32_t main_bucket_mem_percent;
+//        uint64_t index_buf_offset;
+//        uint64_t index_size_mb;
+//        uint32_t nindex_entry_per_bucket;
+//        uint32_t main_bucket_mem_percent;
         // Computed.
-        uint64_t nbuckets;
+//        uint64_t nbuckets;
 
         // location_cache.
-        uint64_t lc_buf_offset;
-        uint64_t lc_size_mb;
-        uint32_t lc_nindex_entry_per_bucket;
-        uint32_t lc_main_bucket_mem_percent;
+//        uint64_t lc_buf_offset;
+//        uint64_t lc_size_mb;
+//        uint32_t lc_nindex_entry_per_bucket;
+//        uint32_t lc_main_bucket_mem_percent;
 
         // Data.
-        uint64_t data_buf_offset;
+//        uint64_t data_buf_offset;
 
         // LevelDB.
         std::string db_path;

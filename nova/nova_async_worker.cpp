@@ -30,87 +30,87 @@ namespace nova {
     }
 
     void NovaAsyncWorker::ProcessPut(const nova::NovaAsyncTask &task) {
-        uint64_t hv = NovaConfig::keyhash(task.key.data(),
-                                          task.key.size());
-        leveldb::WriteOptions option;
-        option.log_record_mode = NovaConfig::config->log_record_mode;
-        bool remote_write = false;
-        switch (option.log_record_mode) {
-            case leveldb::LOG_NIC:
-                remote_write = true;
-                option.writer = nic_log_writer_;
-                break;
-            case leveldb::LOG_RDMA:
-                remote_write = true;
-                option.writer = rdma_log_writer_;
-                break;
-        }
-
-        Fragment *frag = NovaConfig::home_fragment(hv);
-        leveldb::DB *db = dbs_[frag->dbid];
-        if (remote_write) {
-            leveldb::WriteBatch batch;
-            batch.Put(task.key, task.value);
-            db->GenerateLogRecords(option, &batch);
-        }
-        leveldb::Status status = db->Put(option, task.key, task.value);
-        RDMA_LOG(DEBUG) << "############### Async worker processed task "
-                        << task.sock_fd
-                        << ":" << task.key;
-        RDMA_ASSERT(status.ok()) << status.ToString();
-
-        char *response_buf = task.conn->buf;
-        int nlen = 1;
-        int len = int_to_str(response_buf, nlen);
-        task.conn->response_buf = task.conn->buf;
-        task.conn->response_size = len + nlen;
+//        uint64_t hv = NovaConfig::keyhash(task.key.data(),
+//                                          task.key.size());
+//        leveldb::WriteOptions option;
+//        option.log_record_mode = NovaConfig::config->log_record_mode;
+//        bool remote_write = false;
+//        switch (option.log_record_mode) {
+//            case leveldb::LOG_NIC:
+//                remote_write = true;
+//                option.writer = nic_log_writer_;
+//                break;
+//            case leveldb::LOG_RDMA:
+//                remote_write = true;
+//                option.writer = rdma_log_writer_;
+//                break;
+//        }
+//
+//        Fragment *frag = NovaConfig::home_fragment(hv);
+//        leveldb::DB *db = dbs_[frag->dbid];
+//        if (remote_write) {
+//            leveldb::WriteBatch batch;
+//            batch.Put(task.key, task.value);
+//            db->GenerateLogRecords(option, &batch);
+//        }
+//        leveldb::Status status = db->Put(option, task.key, task.value);
+//        RDMA_LOG(DEBUG) << "############### Async worker processed task "
+//                        << task.sock_fd
+//                        << ":" << task.key;
+//        RDMA_ASSERT(status.ok()) << status.ToString();
+//
+//        char *response_buf = task.conn->buf;
+//        int nlen = 1;
+//        int len = int_to_str(response_buf, nlen);
+//        task.conn->response_buf = task.conn->buf;
+//        task.conn->response_size = len + nlen;
     }
 
     void NovaAsyncWorker::ProcessGet(const nova::NovaAsyncTask &task) {
-        uint64_t hv = NovaConfig::keyhash(task.key.data(),
-                                          task.key.size());
-        Fragment *frag = NovaConfig::home_fragment(hv);
-        leveldb::DB *db = dbs_[frag->dbid];
-        std::string value;
-        leveldb::Status s = db->Get(
-                leveldb::ReadOptions(), task.key, &value);
-        RDMA_ASSERT(s.ok());
-        task.conn->response_buf = task.conn->buf;
-        char *response_buf = task.conn->response_buf;
-        task.conn->response_size =
-                nint_to_str(value.size()) + 1 + 1 + value.size();
-
-        response_buf += int_to_str(response_buf, value.size() + 1);
-        response_buf[0] = 'h';
-        response_buf += 1;
-        memcpy(response_buf, value.data(), value.size());
-        RDMA_ASSERT(
-                task.conn->response_size <
-                NovaConfig::config->max_msg_size);
+//        uint64_t hv = NovaConfig::keyhash(task.key.data(),
+//                                          task.key.size());
+//        Fragment *frag = NovaConfig::home_fragment(hv);
+//        leveldb::DB *db = dbs_[frag->dbid];
+//        std::string value;
+//        leveldb::Status s = db->Get(
+//                leveldb::ReadOptions(), task.key, &value);
+//        RDMA_ASSERT(s.ok());
+//        task.conn->response_buf = task.conn->buf;
+//        char *response_buf = task.conn->response_buf;
+//        task.conn->response_size =
+//                nint_to_str(value.size()) + 1 + 1 + value.size();
+//
+//        response_buf += int_to_str(response_buf, value.size() + 1);
+//        response_buf[0] = 'h';
+//        response_buf += 1;
+//        memcpy(response_buf, value.data(), value.size());
+//        RDMA_ASSERT(
+//                task.conn->response_size <
+//                NovaConfig::config->max_msg_size);
     }
 
     void NovaAsyncWorker::ProcessReplicateLogRecords(
             const nova::NovaAsyncTask &task) {
-        char *buf = task.conn->request_buf;
-        RDMA_ASSERT(buf[0] == RequestType::REPLICATE_LOG_RECORD) << buf;
-        buf++;
-        uint32_t logfilename_size = leveldb::DecodeFixed32(buf);
-        std::string logfile(buf + 4, logfilename_size);
-        buf += 4;
-        buf += logfilename_size;
-        uint32_t logrecord_size = leveldb::DecodeFixed32(buf);
-        buf += 4;
-
-        nic_log_writer_->AddLocalRecord(logfile,
-                                        leveldb::Slice(buf, logrecord_size));
-        char *response_buf = task.conn->buf;
-        leveldb::EncodeFixed32(response_buf, 1);
-        response_buf += 4;
-        response_buf[0] = RequestType::REPLICATE_LOG_RECORD_SUCC;
-        task.conn->response_buf = task.conn->buf;
-        task.conn->response_size = 5;
-        RDMA_ASSERT(
-                task.conn->response_size < NovaConfig::config->max_msg_size);
+//        char *buf = task.conn->request_buf;
+//        RDMA_ASSERT(buf[0] == RequestType::REPLICATE_LOG_RECORD) << buf;
+//        buf++;
+//        uint32_t logfilename_size = leveldb::DecodeFixed32(buf);
+//        std::string logfile(buf + 4, logfilename_size);
+//        buf += 4;
+//        buf += logfilename_size;
+//        uint32_t logrecord_size = leveldb::DecodeFixed32(buf);
+//        buf += 4;
+//
+//        nic_log_writer_->AddLocalRecord(logfile,
+//                                        leveldb::Slice(buf, logrecord_size));
+//        char *response_buf = task.conn->buf;
+//        leveldb::EncodeFixed32(response_buf, 1);
+//        response_buf += 4;
+//        response_buf[0] = RequestType::REPLICATE_LOG_RECORD_SUCC;
+//        task.conn->response_buf = task.conn->buf;
+//        task.conn->response_size = 5;
+//        RDMA_ASSERT(
+//                task.conn->response_size < NovaConfig::config->max_msg_size);
     }
 
     int NovaAsyncWorker::ProcessQueue() {
