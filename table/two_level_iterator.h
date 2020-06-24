@@ -26,11 +26,12 @@ namespace leveldb {
             Iterator *index_iter,
             BlockReadContext context,
             Iterator *(*block_function)(void *arg,
+                                        void *arg2,
                                         BlockReadContext context,
                                         const ReadOptions &options,
                                         const Slice &index_value,
                                         std::string* next_key),
-            void *arg, const ReadOptions &options,
+            void *arg, void *arg2, const ReadOptions &options,
             const Comparator *comparator = nullptr, bool merging = false);
 
 }  // namespace leveldb

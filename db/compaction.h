@@ -102,7 +102,8 @@ namespace leveldb {
 
         VersionFileMap *input_version_;
 
-        sem_t complete_signal_;
+        sem_t *complete_signal_ = nullptr;
+        std::atomic_bool is_completed_;
 
         // Each compaction reads inputs from "level_" and "level_+1"
         std::vector<FileMetaData *> inputs_[2];  // The two sets of inputs

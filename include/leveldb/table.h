@@ -95,7 +95,7 @@ namespace leveldb {
         friend class TableCache;
 
         static Iterator *
-        DataBlockReader(void *arg, BlockReadContext context,
+        DataBlockReader(void *arg, void *arg2, BlockReadContext context,
                         const ReadOptions &options,
                         const Slice &index_value, std::string *next_key);
 

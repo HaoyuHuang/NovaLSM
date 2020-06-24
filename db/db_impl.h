@@ -136,7 +136,14 @@ namespace leveldb {
         char *lsmtree_meta_buf_ = nullptr;
         bool is_ready_to_process_request = false;
 
-        void ComputeCompactions(Version *current,
+        void CleanupLSMCompaction(CompactionState *state,
+                                  VersionEdit &edit,
+                                  RangeIndexVersionEdit &range_edit,
+                                  std::unordered_map<uint32_t, MemTableL0FilesEdit> &edits,
+                                  CompactionRequest *compaction_req,
+                                  uint32_t compacting_version_id);
+
+        bool ComputeCompactions(Version *current,
                                 std::vector<Compaction *> *compactions,
                                 VersionEdit *edit,
                                 RangeIndexVersionEdit *range_edit,
@@ -179,7 +186,9 @@ namespace leveldb {
                 std::vector<uint32_t> *closed_memtable_log_files);
 
         friend class DB;
+
         friend class SourceMigration;
+
         friend class DestinationMigration;
 
         struct Writer;
@@ -205,7 +214,8 @@ namespace leveldb {
         void
         ObtainObsoleteFiles(EnvBGThread *bg_thread,
                             std::vector<std::string> *files_to_delete,
-                            std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> *server_pairs);
+                            std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> *server_pairs,
+                            uint32_t compacting_version_id);
 
         void DeleteFiles(EnvBGThread *bg_thread,
                          std::vector<std::string> &files_to_delete,

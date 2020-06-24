@@ -102,7 +102,7 @@ namespace leveldb {
               grandparent_index_(0),
               seen_key_(false),
               overlapped_bytes_(0) {
-        sem_init(&complete_signal_, 0, 0);
+        is_completed_ = false;
         level_ptrs_.resize(options->level);
         for (int i = 0; i < options->level; i++) {
             level_ptrs_[i] = 0;
@@ -518,7 +518,10 @@ namespace leveldb {
             }
         }
         if (compact->compaction) {
-            sem_post(&compact->compaction->complete_signal_);
+            compact->compaction->is_completed_ = true;
+            if (compact->compaction->complete_signal_) {
+                sem_post(compact->compaction->complete_signal_);
+            }
         }
         return status;
     }

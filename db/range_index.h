@@ -15,6 +15,8 @@
 #include "leveldb/slice.h"
 #include "version_set.h"
 
+#define MAX_LIVE_VERSIONS 100000
+
 namespace leveldb {
     struct RangeTables {
         std::set<uint32_t> memtable_ids;
@@ -27,20 +29,23 @@ namespace leveldb {
 
     class RangeIndex {
     public:
-        RangeIndex() = default;
+        RangeIndex(ScanStats *scan_stats);
 
-        RangeIndex(uint32_t version_id, uint32_t lsm_version_id);
-
-        RangeIndex(RangeIndex *current, uint32_t version_id,
+        RangeIndex(ScanStats *scan_stats, uint32_t version_id,
                    uint32_t lsm_version_id);
 
-        void Ref();
+        RangeIndex(ScanStats *scan_stats, RangeIndex *current,
+                   uint32_t version_id,
+                   uint32_t lsm_version_id);
+
+        bool Ref();
 
         void UnRef();
 
         std::vector<Range> ranges_;
         std::vector<RangeTables> range_tables_;
         uint32_t lsm_version_id_ = 0;
+        ScanStats *scan_stats_ = nullptr;
 
         std::string DebugString() const;
 
@@ -56,7 +61,8 @@ namespace leveldb {
     };
 
     Iterator *
-    GetRangeIndexFragmentIterator(void *arg, BlockReadContext context,
+    GetRangeIndexFragmentIterator(void *arg, void *arg2,
+                                  BlockReadContext context,
                                   const ReadOptions &options,
                                   const Slice &file_value,
                                   std::string *next_key);
@@ -109,27 +115,8 @@ namespace leveldb {
 
         Slice value() const override {
             assert(Valid());
-            const auto &range = range_index_->ranges_[index_];
-            const auto &range_table = range_index_->range_tables_[index_];
-            uint32_t msg_size = EncodeStr(value_buf_, range.lower);
-            for (uint32_t memtableid : range_table.memtable_ids) {
-                msg_size += EncodeFixed32(value_buf_ + msg_size,
-                                          memtableid);
-            }
-            msg_size += EncodeFixed32(value_buf_ + msg_size, 0);
-            for (uint64_t sstableid : range_table.l0_sstable_ids) {
-                msg_size += EncodeFixed64(value_buf_ + msg_size, sstableid);
-            }
-            if (stats_) {
-                stats_->number_of_scan_memtables_ += range_table.memtable_ids.size();
-                stats_->number_of_scan_l0_sstables_ += range_table.l0_sstable_ids.size();
-            }
-            NOVA_ASSERT(msg_size <= 1024) << msg_size;
-            NOVA_LOG(rdmaio::DEBUG)
-                << fmt::format("RangeIndexScan Encode: {} {} {} {}", index_,
-                               msg_size, range.DebugString(),
-                               range_table.DebugString());
-            return Slice(value_buf_, msg_size);
+            EncodeFixed32(value_buf_, index_);
+            return Slice(value_buf_, 4);
         }
 
         Status status() const override { return Status::OK(); }
@@ -140,7 +127,7 @@ namespace leveldb {
         ScanStats *stats_ = nullptr;
         int index_;
         // Backing store for value().  Holds the file number and size.
-        mutable char value_buf_[1024];
+        mutable char value_buf_[4];
     };
 
     struct RangeIndexVersionEdit {
@@ -148,7 +135,7 @@ namespace leveldb {
         uint32_t new_memtable_id = 0;
         bool add_new_memtable = false;
         std::unordered_map<uint32_t, uint64_t> replace_memtables;
-        std::unordered_map<uint32_t, std::vector<uint64_t>> replace_l0_sstables;
+        std::unordered_map<uint64_t, std::vector<uint64_t>> replace_l0_sstables;
         std::vector<uint64_t> removed_l0_sstables;
         std::set<uint32_t> removed_memtables;
         uint32_t lsm_version_id = 0;
@@ -156,12 +143,13 @@ namespace leveldb {
 
     class RangeIndexManager {
     public:
-        RangeIndexManager(VersionSet *versions,
+        RangeIndexManager(ScanStats *scan_stats, VersionSet *versions,
                           const Comparator *user_comparator);
 
         void Initialize(RangeIndex *init);
 
-        void AppendNewVersion(const RangeIndexVersionEdit &edit);
+        void AppendNewVersion(ScanStats *scan_stats,
+                              const RangeIndexVersionEdit &edit);
 
         void DeleteObsoleteVersions();
 
@@ -171,11 +159,10 @@ namespace leveldb {
         friend class RangeIndex;
 
         std::mutex mutex_;
-
-        uint32_t range_index_version_seq_id_ = 1;
+        uint32_t range_index_version_seq_id_ = 0;
         RangeIndex *first_ = nullptr;
         RangeIndex *last_ = nullptr;
-        RangeIndex * current_;
+        RangeIndex *current_;
         VersionSet *versions_ = nullptr;
         const Comparator *user_comparator_ = nullptr;
     };

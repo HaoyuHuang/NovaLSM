@@ -8,22 +8,23 @@
 #include "table/merger.h"
 
 namespace leveldb {
-//    namespace {
-//        static void UnrefEntry(void *arg1, void *arg2) {
-//            Iterator *it = reinterpret_cast<Iterator *>(arg1);
-//            NOVA_ASSERT(it);
-//            delete it;
-//        }
-//    }
-    RangeIndex::RangeIndex(uint32_t version_id, uint32_t lsm_vid)
-            : version_id_(version_id), lsm_version_id_(lsm_vid) {
+    RangeIndex::RangeIndex(ScanStats *scan_stats) : scan_stats_(scan_stats) {
+
+    }
+
+    RangeIndex::RangeIndex(ScanStats *scan_stats, uint32_t version_id,
+                           uint32_t lsm_vid)
+            : version_id_(version_id), lsm_version_id_(lsm_vid),
+              scan_stats_(scan_stats) {
         is_deleted_ = false;
     }
 
-    RangeIndex::RangeIndex(RangeIndex *current, uint32_t version_id,
+    RangeIndex::RangeIndex(ScanStats *scan_stats, RangeIndex *current,
+                           uint32_t version_id,
                            uint32_t lsm_vid) : ranges_(
             current->ranges_), range_tables_(current->range_tables_),
-                                               version_id_(version_id) {
+                                               version_id_(version_id),
+                                               scan_stats_(scan_stats) {
         if (lsm_vid == 0) {
             lsm_version_id_ = current->lsm_version_id_;
         } else {
@@ -80,65 +81,64 @@ namespace leveldb {
     }
 
     Iterator *
-    GetRangeIndexFragmentIterator(void *arg, BlockReadContext context,
+    GetRangeIndexFragmentIterator(void *arg, void *arg2,
+                                  BlockReadContext context,
                                   const ReadOptions &options,
                                   const Slice &file_value,
                                   std::string *flag) {
         Version *v = reinterpret_cast<Version *>(arg);
+        RangeIndex *range_index = reinterpret_cast<RangeIndex *>(arg2);
         NOVA_ASSERT(v);
-        Slice value = file_value;
-        std::string next_key;
-        NOVA_ASSERT(DecodeStr(&value, &next_key));
-        uint32_t memtableid = 0;
-        uint64_t sstableid = 0;
-        bool decode_memtables = true;
+        NOVA_ASSERT(range_index);
         std::vector<Iterator *> list;
-        RangeTables tables;
-
-        while (true) {
-            if (decode_memtables) {
-                NOVA_ASSERT(DecodeFixed32(&value, &memtableid));
-                if (memtableid == 0) {
-                    decode_memtables = false;
-                    continue;
-                }
-                tables.memtable_ids.insert(memtableid);
-                auto memtable = v->vset_->mid_table_mapping_[memtableid];
-                NOVA_ASSERT(memtable);
-                // this is a memtable id.
-                list.push_back(
-                        memtable->memtable_->NewIterator(TraceType::MEMTABLE,
-                                                         AccessCaller::kUserIterator));
-            } else {
-                if (!DecodeFixed64(&value, &sstableid)) {
-                    break;
-                }
-                tables.l0_sstable_ids.insert(sstableid);
-                // this is a new sstable id.
-                auto meta = v->fn_files_[sstableid];
-                NOVA_ASSERT(meta);
-                list.push_back(v->table_cache_->NewIterator(
-                        AccessCaller::kUserIterator,
-                        options, meta, sstableid, 0,
-                        meta->converted_file_size));
-            }
+        uint32_t index;
+        index = DecodeFixed32(file_value.data());
+        NOVA_ASSERT(index >= 0 && index < range_index->range_tables_.size());
+        const auto &range = range_index->ranges_[index];
+        const auto &range_table = range_index->range_tables_[index];
+        for (uint32_t memtableid : range_table.memtable_ids) {
+            list.push_back(
+                    v->vset_->mid_table_mapping_[memtableid]->memtable_->NewIterator(
+                            TraceType::MEMTABLE,
+                            AccessCaller::kUserIterator));
+        }
+        for (uint64_t sstableid : range_table.l0_sstable_ids) {
+            auto meta = v->fn_files_[sstableid];
+            NOVA_ASSERT(meta)
+                << fmt::format("v:{}, table:{} v:{} index:{}", v->version_id_,
+                               sstableid, v->DebugString(),
+                               range_index->DebugString());
+            list.push_back(v->table_cache_->NewIterator(
+                    AccessCaller::kUserIterator,
+                    options, meta, sstableid, 0,
+                    meta->converted_file_size));
+        }
+        if (range_index->scan_stats_) {
+            range_index->scan_stats_->number_of_scan_memtables_ += range_index->range_tables_[index].memtable_ids.size();
+            range_index->scan_stats_->number_of_scan_l0_sstables_ += range_index->range_tables_[index].l0_sstable_ids.size();
         }
         NOVA_LOG(rdmaio::DEBUG)
-            << fmt::format("RangeIndexScan Decode: {} {}", next_key,
-                           tables.DebugString());
+            << fmt::format("RangeIndexScan Decode: {}",
+                           index);
         auto it = NewMergingIterator(v->icmp_, &list[0], list.size());
         if (flag) {
-            it->Seek(InternalKey(next_key, 0, ValueType::kTypeValue).Encode());
+            it->Seek(InternalKey(range.lower, 0,
+                                 ValueType::kTypeValue).Encode());
         }
         return it;
     }
 
-    void RangeIndex::Ref() {
+    bool RangeIndex::Ref() {
         mutex_.lock();
         NOVA_ASSERT(refs_ >= 0);
+        if (is_deleted_) {
+            mutex_.unlock();
+            return false;
+        }
         NOVA_ASSERT(!is_deleted_);
         refs_ += 1;
         mutex_.unlock();
+        return true;
     }
 
     void RangeIndex::UnRef() {
@@ -151,12 +151,17 @@ namespace leveldb {
         mutex_.unlock();
     }
 
-    RangeIndexManager::RangeIndexManager(VersionSet *versions,
+    RangeIndexManager::RangeIndexManager(ScanStats *scan_stats,
+                                         VersionSet *versions,
                                          const Comparator *user_comparator)
             : versions_(versions),
               user_comparator_(user_comparator) {
-        first_ = new RangeIndex;
-        last_ = new RangeIndex;
+//        for (int i = 0; i < MAX_LIVE_VERSIONS; i++) {
+//            range_index_version_[i] = nullptr;
+//        }
+        range_index_version_seq_id_ = 0;
+        first_ = new RangeIndex(scan_stats);
+        last_ = new RangeIndex(scan_stats);
         first_->next_ = last_;
         first_->prev_ = nullptr;
         last_->prev_ = first_;
@@ -188,10 +193,12 @@ namespace leveldb {
             mutex_.lock();
             current = current_;
             NOVA_ASSERT(current);
-            if (versions_->versions_[current->lsm_version_id_]->Ref()) {
-                current->Ref();
-                mutex_.unlock();
-                break;
+            if (current->Ref()) {
+                if (versions_->versions_[current->lsm_version_id_]->Ref()) {
+                    mutex_.unlock();
+                    break;
+                }
+                current->UnRef();
             }
             mutex_.unlock();
         }
@@ -227,10 +234,11 @@ namespace leveldb {
     }
 
     void
-    RangeIndexManager::AppendNewVersion(const RangeIndexVersionEdit &edit) {
+    RangeIndexManager::AppendNewVersion(ScanStats *scan_stats,
+                                        const RangeIndexVersionEdit &edit) {
         mutex_.lock();
         range_index_version_seq_id_ += 1;
-        auto new_range_idx = new RangeIndex(current_,
+        auto new_range_idx = new RangeIndex(scan_stats, current_,
                                             range_index_version_seq_id_,
                                             edit.lsm_version_id);
         if (edit.add_new_memtable) {
@@ -255,25 +263,34 @@ namespace leveldb {
                 }
             }
         }
-        for (int i = 0; i < new_range_idx->range_tables_.size(); i++) {
-            auto &table = new_range_idx->range_tables_[i];
-            for (auto sstable : edit.removed_l0_sstables) {
-                table.l0_sstable_ids.erase(sstable);
-            }
-            for (auto memtable : edit.removed_memtables) {
-                table.memtable_ids.erase(memtable);
-            }
-            for (auto &replace_memtable : edit.replace_memtables) {
-                if (table.memtable_ids.erase(replace_memtable.first) == 1) {
-                    table.l0_sstable_ids.insert(replace_memtable.second);
+        if (edit.add_new_memtable && edit.removed_memtables.empty()) {
+
+        } else {
+            for (int i = 0; i < new_range_idx->range_tables_.size(); i++) {
+                auto &table = new_range_idx->range_tables_[i];
+                for (auto sstable : edit.removed_l0_sstables) {
+                    table.l0_sstable_ids.erase(sstable);
+                }
+                for (auto memtable : edit.removed_memtables) {
+                    table.memtable_ids.erase(memtable);
+                }
+                for (auto &replace_memtable : edit.replace_memtables) {
+                    if (table.memtable_ids.erase(replace_memtable.first) == 1) {
+                        table.l0_sstable_ids.insert(replace_memtable.second);
+                    }
+                }
+                for (auto &replace_sstable : edit.replace_l0_sstables) {
+                    if (table.l0_sstable_ids.erase(replace_sstable.first) ==
+                        1) {
+                        table.l0_sstable_ids.insert(
+                                replace_sstable.second.begin(),
+                                replace_sstable.second.end());
+                    }
                 }
             }
-            for (auto &replace_sstable : edit.replace_l0_sstables) {
-                if (table.l0_sstable_ids.erase(replace_sstable.first) == 1) {
-                    table.l0_sstable_ids.insert(replace_sstable.second.begin(),
-                                                replace_sstable.second.end());
-                }
-            }
+            NOVA_LOG(rdmaio::DEBUG)
+                << fmt::format("New version {} {}", new_range_idx->version_id_,
+                               new_range_idx->DebugString());
         }
         new_range_idx->refs_ = 1;
         new_range_idx->next_ = current_->next_;
@@ -282,6 +299,8 @@ namespace leveldb {
         current_->next_ = new_range_idx;
         current_->UnRef();
         current_ = new_range_idx;
+        // Ref memtables here so that a scan sees a consistent view. Also, a scan does not need to reference of the memtables anymore.
+        // Otherwise, a scan may fail to ref some memtables which may produce stale data.
         for (int i = 0; i < new_range_idx->range_tables_.size(); i++) {
             const auto &table = new_range_idx->range_tables_[i];
             for (auto memtableid : table.memtable_ids) {
@@ -290,8 +309,6 @@ namespace leveldb {
                 memtable->RefMemTable();
             }
         }
-        NOVA_LOG(rdmaio::DEBUG)
-            << fmt::format("New version {}", new_range_idx->version_id_);
         mutex_.unlock();
     }
 }

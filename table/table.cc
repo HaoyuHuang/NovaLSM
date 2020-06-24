@@ -193,7 +193,7 @@ namespace leveldb {
 
 // Convert an index iterator value (i.e., an encoded BlockHandle)
 // into an iterator over the contents of the corresponding block.
-    Iterator *Table::DataBlockReader(void *arg, BlockReadContext context,
+    Iterator *Table::DataBlockReader(void *arg, void *arg2, BlockReadContext context,
                                      const ReadOptions &options,
                                      const Slice &index_value,
                                      std::string *next_key) {
@@ -306,7 +306,7 @@ namespace leveldb {
         return NewTwoLevelIterator(
                 rep_->index_block->NewIterator(rep_->options.comparator),
                 context,
-                &Table::DataBlockReader, const_cast<Table *>(this), options);
+                &Table::DataBlockReader, const_cast<Table *>(this), nullptr, options);
     }
 
     uint64_t Table::TranslateToDataBlockOffset(
@@ -371,7 +371,7 @@ namespace leveldb {
                         .file_number = rep_->file_number,
                         .level = rep_->level
                 };
-                Iterator *block_iter = DataBlockReader(this, context,
+                Iterator *block_iter = DataBlockReader(this, nullptr, context,
                                                        options,
                                                        iiter->value(), nullptr);
                 block_iter->Seek(k);

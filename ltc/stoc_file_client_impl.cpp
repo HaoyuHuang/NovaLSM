@@ -590,7 +590,7 @@ namespace leveldb {
                 << fmt::format("t[{}]: CCRead req:{} complete db:{} fn:{} s:{}",
                                read_options.thread_id,
                                req_id, dbid_, file_number_, n);
-            NOVA_ASSERT(dc->IsDone(req_id, nullptr, nullptr));
+//            NOVA_ASSERT(dc->IsDone(req_id, nullptr, nullptr));
             NOVA_ASSERT(nova::IsRDMAWRITEComplete(backing_mem_block, n))
                 << fmt::format("t[{}]: {}", read_options.thread_id, req_id);
             ptr = backing_mem_block;
@@ -662,7 +662,7 @@ namespace leveldb {
         offset = 0;
         for (int i = 0; i < meta_->data_block_group_handles.size(); i++) {
             const StoCBlockHandle &handle = meta_->data_block_group_handles[i];
-            NOVA_ASSERT(dc->IsDone(reqs[i], nullptr, nullptr));
+//            NOVA_ASSERT(dc->IsDone(reqs[i], nullptr, nullptr));
             NOVA_ASSERT(nova::IsRDMAWRITEComplete(backing_mem_table_ + offset,
                                                   handle.size));
             offset += handle.size;

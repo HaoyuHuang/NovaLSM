@@ -216,6 +216,7 @@ namespace leveldb {
         uint32_t Encode(char *buf);
 
         void Decode(Slice *buf);
+        int refs_ = 0;          // Number of live refs to this version
 
     private:
         friend class Compaction;
@@ -269,7 +270,6 @@ namespace leveldb {
 
         Version *next_;     // Next version in linked list
         Version *prev_;     // Previous version in linked list
-        int refs_ = 0;          // Number of live refs to this version
 
 
         // Next file to compact based on seek stats.
@@ -294,9 +294,12 @@ namespace leveldb {
 
         void Unref(const std::string &dbname);
 
+        bool SetCompaction();
+
         std::mutex mutex;
         Version *version = nullptr;
         bool deleted = false;
+        bool is_compacting = false;
     };
 
     class VersionSet {
@@ -363,7 +366,8 @@ namespace leveldb {
 
         // Add all files listed in any live version to *live.
         // May also mutate some internal state.
-        void AddLiveFiles(std::set<uint64_t> *live);
+        void AddLiveFiles(std::set<uint64_t> *live,
+                          uint32_t compacting_version_id);
 
         void AppendVersion(Version *v);
 

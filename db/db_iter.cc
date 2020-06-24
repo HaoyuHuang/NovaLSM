@@ -78,7 +78,7 @@ namespace leveldb {
                 return (direction_ == kForward) ? iter_->value() : saved_value_;
             }
 
-            void SkipToNextUserKey(const Slice& userkey) override {
+            void SkipToNextUserKey(const Slice &userkey) override {
                 assert(false);
             }
 
@@ -102,6 +102,8 @@ namespace leveldb {
 
         private:
             void FindNextUserEntry(bool skipping, std::string *skip);
+
+            bool GoToNextEntry(std::string *current_key);
 
             void FindPrevUserEntry();
 
@@ -182,13 +184,49 @@ namespace leveldb {
 
                 // iter_ is pointing to current key. We can now safely move to the next to
                 // avoid checking current key.
-                iter_->SkipToNextUserKey(saved_ikey_);
+//                iter_->Next();
+                if (!GoToNextEntry(&saved_ikey_) && iter_->Valid()) {
+                    iter_->SkipToNextUserKey(saved_ikey_);
+                }
                 if (!iter_->Valid()) {
                     valid_ = false;
                     saved_ikey_.clear();
                     return;
                 }
             }
+//            FindNextUserEntry(true, &saved_ikey_);
+        }
+
+        bool DBIter::GoToNextEntry(std::string *current_key) {
+            // Loop until we hit an acceptable entry to yield
+            assert(iter_->Valid());
+            assert(direction_ == kForward);
+            // Go to the next entry.
+            iter_->Next();
+            if (iter_->Valid()) {
+                ParsedInternalKey ikey;
+                if (ParseKey(&ikey) && ikey.sequence <= sequence_) {
+                    switch (ikey.type) {
+                        case kTypeValue:
+                            if (user_comparator_->Compare(ikey.user_key,
+                                                          ExtractUserKey(
+                                                                  *current_key)) <=
+                                0) {
+                                // Entry hidden
+                            } else {
+                                // The next unique key. DONE. :)
+                                valid_ = true;
+                                saved_ikey_.clear();
+                                return true;
+                            }
+                            break;
+                    }
+                }
+            } else {
+                saved_ikey_.clear();
+                valid_ = false;
+            }
+            return false;
         }
 
         void DBIter::FindNextUserEntry(bool skipping, std::string *skip) {
@@ -208,7 +246,9 @@ namespace leveldb {
                         case kTypeValue:
                             if (skipping &&
                                 user_comparator_->Compare(ikey.user_key,
-                                                          ExtractUserKey(*skip)) <= 0) {
+                                                          ExtractUserKey(
+                                                                  *skip)) <=
+                                0) {
                                 // Entry hidden
                             } else {
                                 valid_ = true;
@@ -262,7 +302,9 @@ namespace leveldb {
                     if (ParseKey(&ikey) && ikey.sequence <= sequence_) {
                         if ((value_type != kTypeDeletion) &&
                             user_comparator_->Compare(ikey.user_key,
-                                                      ExtractUserKey(saved_ikey_)) < 0) {
+                                                      ExtractUserKey(
+                                                              saved_ikey_)) <
+                            0) {
                             // We encountered a non-deleted value in entries for previous keys,
                             break;
                         }

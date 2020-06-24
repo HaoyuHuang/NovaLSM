@@ -86,19 +86,6 @@ namespace leveldb {
     }
 
     bool
-    Range::IsSmallerThanLower(const Slice &key,
-                              const Comparator *comparator) const {
-        int comp = comparator->Compare(key, lower);
-        if (comp < 0) {
-            return true;
-        }
-        if (comp == 0 && !lower_inclusive) {
-            return true;
-        }
-        return false;
-    }
-
-    bool
     Range::IsGreaterThanLower(const Slice &key,
                               const Comparator *comparator) const {
         int comp = comparator->Compare(key, lower);
@@ -106,19 +93,6 @@ namespace leveldb {
             return true;
         }
         if (comp == 0 && !lower_inclusive) {
-            return true;
-        }
-        return false;
-    }
-
-    bool
-    Range::IsGreaterThanUpper(const Slice &key,
-                              const Comparator *comparator) const {
-        int comp = comparator->Compare(key, upper);
-        if (comp > 0) {
-            return true;
-        }
-        if (comp == 0 && !upper_inclusive) {
             return true;
         }
         return false;
@@ -245,26 +219,6 @@ namespace leveldb {
     int SubRange::keys() const {
         return tiny_ranges[tiny_ranges.size() - 1].upper_int() -
                tiny_ranges[0].lower_int();
-    }
-
-    bool
-    BinarySearch(const std::vector<Range> &ranges, const leveldb::Slice &key,
-                int *range_id, const Comparator *user_comparator) {
-        int l = 0, r = ranges.size() - 1;
-        while (l <= r) {
-            int m = l + (r - l) / 2;
-            const Range &range = ranges[m];
-            if (range.IsSmallerThanLower(key, user_comparator)) {
-                r = m - 1;
-            } else if (range.IsGreaterThanUpper(key, user_comparator)) {
-                l = m + 1;
-            } else {
-                *range_id = m;
-                return true;
-            }
-        }
-        *range_id = -1;
-        return false;
     }
 
     bool SubRange::Equals(const SubRange &other,

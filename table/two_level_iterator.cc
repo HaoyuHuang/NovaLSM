@@ -17,6 +17,7 @@ namespace leveldb {
     namespace {
 
         typedef Iterator *(*BlockFunction)(void *,
+                                           void *arg2,
                                            BlockReadContext context,
                                            const ReadOptions &,
                                            const Slice &,
@@ -30,7 +31,7 @@ namespace leveldb {
                     Iterator *index_iter,
                     BlockReadContext context,
                     BlockFunction block_function,
-                    void *arg, const ReadOptions &options,
+                    void *arg, void *arg2, const ReadOptions &options,
                     const Comparator *comparator,
                     bool merging);
 
@@ -94,6 +95,7 @@ namespace leveldb {
             const BlockReadContext context_;
             BlockFunction block_function_;
             void *arg_;
+            void *arg2_;
             const ReadOptions options_;
             Status status_;
             IteratorWrapper index_iter_;
@@ -109,12 +111,14 @@ namespace leveldb {
                                            BlockReadContext context,
                                            BlockFunction block_function,
                                            void *arg,
+                                           void *arg2,
                                            const ReadOptions &options,
                                            const Comparator *comparator,
                                            bool merging)
                 : comparator_(comparator),
                   block_function_(block_function),
                   arg_(arg),
+                  arg2_(arg2),
                   context_(context),
                   options_(options),
                   index_iter_(index_iter),
@@ -137,13 +141,13 @@ namespace leveldb {
         void TwoLevelIterator::SkipToNextUserKey(const Slice &target) {
 
             NOVA_LOG(rdmaio::DEBUG) << fmt::format("Two level skip index {}",
-                                                  ExtractUserKey(
-                                                          target).ToString());
+                                                   ExtractUserKey(
+                                                           target).ToString());
             index_iter_.SkipToNextUserKey(target);
             bool new_data_block = InitDataBlock(nullptr);
             NOVA_LOG(rdmaio::DEBUG) << fmt::format("Two level skip data {}",
-                                                  ExtractUserKey(
-                                                          target).ToString());
+                                                   ExtractUserKey(
+                                                           target).ToString());
             if (data_iter_.iter() != nullptr)
                 data_iter_.SkipToNextUserKey(target);
             if (merging_) {
@@ -231,7 +235,7 @@ namespace leveldb {
                     // no need to change anything
                     return false;
                 } else {
-                    Iterator *iter = (*block_function_)(arg_, context_,
+                    Iterator *iter = (*block_function_)(arg_, arg2_, context_,
                                                         options_, handle,
                                                         next_key);
                     data_block_handle_.assign(handle.data(), handle.size());
@@ -244,19 +248,19 @@ namespace leveldb {
         void TwoLevelIterator::MergingDataBlocksForward() {
             while (data_iter_.iter() == nullptr || !data_iter_.Valid()) {
                 // Move to next block
+                std::string next_key;
                 if (!index_iter_.Valid()) {
                     SetDataIterator(nullptr);
                     return;
                 }
                 index_iter_.Next();
-                InitDataBlock(nullptr);
+                InitDataBlock(&next_key);
             }
         }
 
         void TwoLevelIterator::MergingSeek(const Slice &target) {
-            std::string next_key;
             index_iter_.Seek(target);
-            InitDataBlock(&next_key);
+            InitDataBlock(nullptr);
             if (data_iter_.iter() != nullptr) data_iter_.Seek(target);
             MergingDataBlocksForward();
         }
@@ -271,12 +275,12 @@ namespace leveldb {
     Iterator *
     NewTwoLevelIterator(Iterator *index_iter,
                         BlockReadContext context,
-                        BlockFunction block_function, void *arg,
+                        BlockFunction block_function, void *arg, void *arg2,
                         const ReadOptions &options,
                         const Comparator *comparator, bool merging) {
         return new TwoLevelIterator(index_iter, context,
                                     block_function,
-                                    arg, options, comparator, merging);
+                                    arg, arg2, options, comparator, merging);
     }
 
 }  // namespace leveldb

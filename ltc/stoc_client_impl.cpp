@@ -69,7 +69,8 @@ namespace leveldb {
         task.type = RDMA_CLIENT_COMPACTION;
         task.server_id = remote_server_id;
         task.compaction_request = compaction_request;
-        task.sem = &sem_;
+        task.sem = compaction_request->completion_signal;
+        NOVA_ASSERT(task.sem);
 
         uint32_t reqid = req_id_;
         StoCResponse *response = new StoCResponse;
@@ -124,6 +125,7 @@ namespace leveldb {
             StoCResponse *response = new StoCResponse;
             req_response[reqid] = response;
             IncrementReqId();
+            response->is_complete = true;
             response->stoc_block_handles.push_back(rh);
             NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("Wake up local write");
@@ -157,6 +159,7 @@ namespace leveldb {
             uint32_t reqid = req_id_;
             StoCResponse *response = new StoCResponse;
             req_response[reqid] = response;
+            response->is_complete = true;
             response->stoc_queue_depth = nova::NovaGlobalVariables::global.stoc_queue_depth;
             response->stoc_pending_write_bytes = nova::NovaGlobalVariables::global.stoc_pending_disk_writes;
             response->stoc_pending_read_bytes = nova::NovaGlobalVariables::global.stoc_pending_disk_reads;
@@ -252,7 +255,17 @@ namespace leveldb {
             return true;
         }
         NOVA_ASSERT(response);
-        *response = *it->second;
+        auto stored_response = it->second;
+        if (!stored_response->is_complete) {
+            return false;
+        }
+        response->is_complete = true;
+        response->stoc_file_id = stored_response->stoc_file_id;
+        response->stoc_block_handles = stored_response->stoc_block_handles;
+        response->stoc_queue_depth = stored_response->stoc_queue_depth;
+        response->stoc_pending_read_bytes = stored_response->stoc_pending_read_bytes;
+        response->stoc_pending_write_bytes = stored_response->stoc_pending_write_bytes;
+        response->is_ready_to_process_requests = stored_response->is_ready_to_process_requests;
         delete it->second;
         req_response.erase(req_id);
         return true;
@@ -716,6 +729,9 @@ namespace leveldb {
                                 uint64_t *timeout) {
         if (req_id == 0) {
             // local bypass.
+            if (response) {
+                response->is_complete = true;
+            }
             return true;
         }
 
@@ -726,6 +742,7 @@ namespace leveldb {
 
         if (context_it->second.done) {
             if (response) {
+                response->is_complete = true;
                 response->stoc_file_id = context_it->second.stoc_file_id;
                 response->stoc_block_handles = context_it->second.stoc_block_handles;
                 response->stoc_queue_depth = context_it->second.stoc_queue_depth;

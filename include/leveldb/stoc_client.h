@@ -38,6 +38,7 @@ namespace leveldb {
         std::vector<SubRange> subranges;
         uint32_t source_level = 0;
         uint32_t target_level = 0;
+        sem_t *completion_signal = nullptr;
 
         std::vector<FileMetaData *> outputs;
 
@@ -108,7 +109,13 @@ namespace leveldb {
         bool is_ready_for_requests = false;
     };
 
-    struct StoCResponse {
+    class StoCResponse {
+    public:
+        StoCResponse() {
+            is_complete = false;
+        }
+
+        std::atomic_bool is_complete;
         uint32_t stoc_file_id = 0;
         std::vector<StoCBlockHandle> stoc_block_handles;
 

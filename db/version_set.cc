@@ -133,11 +133,9 @@ namespace leveldb {
     class Version::LevelFileNumIterator : public Iterator {
     public:
         LevelFileNumIterator(const InternalKeyComparator &icmp,
-                             const std::vector<FileMetaData *> *flist,
-                             ScanStats *scan_stats)
+                             const std::vector<FileMetaData *> *flist)
                 : icmp_(icmp), flist_(flist),
-                  index_(flist->size()),
-                  scan_stats_(scan_stats) {  // Marks as invalid
+                  index_(flist->size()) {  // Marks as invalid
         }
 
         bool Valid() const override { return index_ < flist_->size(); }
@@ -203,9 +201,6 @@ namespace leveldb {
             assert(Valid());
             FileMetaData &meta = *(*flist_)[index_];
             EncodeFixed64(value_buf_, meta.number);
-            if (scan_stats_) {
-                scan_stats_->number_of_scan_sstables_ += 1;
-            }
             return Slice(value_buf_, 8);
         }
 
@@ -215,7 +210,6 @@ namespace leveldb {
         const InternalKeyComparator icmp_;
         const std::vector<FileMetaData *> *const flist_;
         uint32_t index_;
-        ScanStats *scan_stats_ = nullptr;
         bool seeked_ = false;
 
         // Backing store for value().  Holds the file number and size.
@@ -223,11 +217,15 @@ namespace leveldb {
     };
 
     static Iterator *
-    GetFileIterator(void *arg, BlockReadContext context,
+    GetFileIterator(void *arg, void *arg2, BlockReadContext context,
                     const ReadOptions &options,
                     const Slice &file_value, std::string *next_key) {
         VersionFileMap *v = reinterpret_cast<VersionFileMap *>(arg);
         NOVA_ASSERT(v);
+        ScanStats *scan_stats = reinterpret_cast<ScanStats *>(arg2);
+        if (scan_stats) {
+            scan_stats->number_of_scan_sstables_ += 1;
+        }
         NOVA_ASSERT(file_value.size() == 8);
         uint64_t fn = DecodeFixed64(file_value.data());
         FileMetaData *meta = v->file_meta(fn);
@@ -248,10 +246,10 @@ namespace leveldb {
                 .level = level,
         };
         return NewTwoLevelIterator(
-                new LevelFileNumIterator(*icmp_, &files_[level], scan_stats),
+                new LevelFileNumIterator(*icmp_, &files_[level]),
                 context,
                 &GetFileIterator,
-                (void *) this, options);
+                (void *) this, scan_stats, options);
     }
 
     void Version::AddIterators(const ReadOptions &options,
@@ -268,7 +266,7 @@ namespace leveldb {
         iters->push_back(NewTwoLevelIterator(
                 new RangeIndexIterator(icmp_, range_index, stats),
                 context, &GetRangeIndexFragmentIterator,
-                (void *) this, options, icmp_, true));
+                (void *) this, (void *) range_index, options, icmp_, true));
         // For levels > 0, we can use a concatenating iterator that sequentially
         // walks through the non-overlapping files in the level, opening them
         // lazily.
@@ -521,7 +519,6 @@ namespace leveldb {
 
     uint32_t Version::Unref() {
         uint32_t refs = 0;
-//        assert(this != &vset_->dummy_versions_);
         assert(refs_ >= 1);
         --refs_;
         refs = refs_;
@@ -1251,9 +1248,15 @@ namespace leveldb {
 
     }
 
-    void VersionSet::AddLiveFiles(std::set<uint64_t> *live) {
+    void VersionSet::AddLiveFiles(std::set<uint64_t> *live,
+                                  uint32_t compacting_version_id) {
+        NOVA_LOG(rdmaio::DEBUG)
+            << fmt::format("Skipping {}", compacting_version_id);
         for (Version *v = dummy_versions_.next_; v != &dummy_versions_;
              v = v->next_) {
+            if (v->version_id_ == compacting_version_id) {
+                continue;
+            }
             for (int level = 0; level < options_->level; level++) {
                 const std::vector<FileMetaData *> &files = v->files_[level];
                 for (size_t i = 0; i < files.size(); i++) {
@@ -1401,10 +1404,9 @@ namespace leveldb {
                     };
                     list[num++] = NewTwoLevelIterator(
                             new Version::LevelFileNumIterator(*icmp_,
-                                                              &inputs_[which],
-                                                              nullptr),
+                                                              &inputs_[which]),
                             context,
-                            &GetFileIterator, input_version_, options);
+                            &GetFileIterator, input_version_, nullptr, options);
                 }
             }
         }
@@ -1894,10 +1896,27 @@ namespace leveldb {
         mutex.unlock();
     }
 
+    bool AtomicVersion::SetCompaction() {
+        bool success = false;
+        mutex.lock();
+        NOVA_ASSERT(version);
+        NOVA_ASSERT(!deleted);
+        NOVA_ASSERT(version->refs_ >= 1);
+        NOVA_LOG(rdmaio::DEBUG)
+            << fmt::format("comv {} {}", version->version_id_, version->refs_);
+        // Since we have installed a new version. If refcount == 1, it means only the compaction thread is referencing it.
+        if (version->refs_ == 1) {
+            success = true;
+        }
+        is_compacting = true;
+        mutex.unlock();
+        return success;
+    }
+
     Version *AtomicVersion::Ref() {
         Version *v = nullptr;
         mutex.lock();
-        if (version != nullptr && !deleted) {
+        if (version != nullptr && !deleted && !is_compacting) {
             v = version;
             v->Ref();
         }

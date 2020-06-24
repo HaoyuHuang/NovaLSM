@@ -11,12 +11,12 @@ namespace leveldb {
         struct StoCStatsStatus {
             uint32_t remote_stoc_id = 0;
             uint32_t req_id = 0;
-            StoCResponse response;
+            StoCResponse *response = nullptr;
         };
 
         bool stoc_stats_comparator(const StoCStatsStatus &s1,
                                    const StoCStatsStatus &s2) {
-            return s1.response.stoc_queue_depth < s2.response.stoc_queue_depth;
+            return s1.response->stoc_queue_depth < s2.response->stoc_queue_depth;
         }
     }
 
@@ -74,6 +74,7 @@ namespace leveldb {
                 StoCStatsStatus status;
                 status.remote_stoc_id = server_id;
                 status.req_id = req_id;
+                status.response = new StoCResponse;
                 storage_stats.push_back(status);
             }
             for (int i = 0; i < storage_stats.size(); i++) {
@@ -81,7 +82,7 @@ namespace leveldb {
             }
             for (int i = 0; i < storage_stats.size(); i++) {
                 NOVA_ASSERT(client_->IsDone(storage_stats[i].req_id,
-                                            &storage_stats[i].response,
+                                            storage_stats[i].response,
                                             nullptr));
             }
             // sort the dc stats.
@@ -89,6 +90,9 @@ namespace leveldb {
                       stoc_stats_comparator);
             for (int i = 0; i < num_storage_to_select; i++) {
                 (*selected_storage)[i] = storage_stats[i].remote_stoc_id;
+            }
+            for (int i = 0; i < storage_stats.size(); i++) {
+               delete storage_stats[i].response;
             }
         }
     }

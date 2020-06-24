@@ -260,17 +260,17 @@ namespace leveldb {
 
     void DBImpl::ObtainObsoleteFiles(EnvBGThread *bg_thread,
                                      std::vector<std::string> *files_to_delete,
-                                     std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> *server_pairs) {
+                                     std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> *server_pairs,
+                                     uint32_t compacting_version_id) {
         mutex_.AssertHeld();
         if (!bg_error_.ok()) {
             // After a background error, we don't know whether a new version may
             // or may not have been committed, so we cannot safely garbage collect.
             return;
         }
-
         // Make a set of all of the live files
         std::set<uint64_t> live;
-        versions_->AddLiveFiles(&live);
+        versions_->AddLiveFiles(&live, compacting_version_id);
         auto it = compacted_tables_.begin();
         uint32_t success = 0;
         while (it != compacted_tables_.end()) {
@@ -315,9 +315,11 @@ namespace leveldb {
             success += 1;
             it = compacted_tables_.erase(it);
         }
-        NOVA_LOG(rdmaio::INFO)
-            << fmt::format("Delete files. Success:{} Failed:{}", success,
-                           compacted_tables_.size());
+        if (success) {
+            NOVA_LOG(rdmaio::INFO)
+                << fmt::format("Delete files. Success:{} Failed:{}", success,
+                               compacted_tables_.size());
+        }
     }
 
     DBImpl::NovaCCRecoveryThread::NovaCCRecoveryThread(
@@ -508,9 +510,9 @@ namespace leveldb {
 
         if (options_.enable_range_index && options_.enable_subranges) {
             auto new_srs = subrange_manager_->latest_subranges_.load();
-            range_index_manager_ = new RangeIndexManager(versions_,
+            range_index_manager_ = new RangeIndexManager(&scan_stats, versions_,
                                                          user_comparator_);
-            RangeIndex *init = new RangeIndex(0,
+            RangeIndex *init = new RangeIndex(&scan_stats, 0,
                                               versions_->current_version_id());
             std::string last_key;
             int range_index_id = -1;
@@ -908,7 +910,7 @@ namespace leveldb {
             range_edit.removed_memtables = immids;
             range_edit.new_memtable_id = memtable_id;
             range_edit.add_new_memtable = true;
-            range_index_manager_->AppendNewVersion(range_edit);
+            range_index_manager_->AppendNewVersion(&scan_stats, range_edit);
         }
 
         // The table locator is updated before this so that new gets will reference the new memtable.
@@ -1179,13 +1181,13 @@ namespace leveldb {
             range_edit.lsm_version_id = v->version_id_;
             Status s = versions_->LogAndApply(&edit, v, true);
             if (range_index_manager_) {
-                range_index_manager_->AppendNewVersion(range_edit);
+                range_index_manager_->AppendNewVersion(&scan_stats, range_edit);
             }
             NOVA_ASSERT(s.ok());
             if (!compacted_tables_.empty()) {
                 DeleteObsoleteVersions(bg_thread);
                 ObtainObsoleteFiles(bg_thread,
-                                    &files_to_delete, &server_pairs);
+                                    &files_to_delete, &server_pairs, 0);
             }
             mutex_.Unlock();
 
@@ -1218,7 +1220,7 @@ namespace leveldb {
             if (!compacted_tables_.empty()) {
                 DeleteObsoleteVersions(bg_thread);
                 ObtainObsoleteFiles(bg_thread,
-                                    &files_to_delete, &server_pairs);
+                                    &files_to_delete, &server_pairs, 0);
             }
             if (!compacted_tables_.empty()) {
                 ScheduleFileDeletionTask(bg_thread->thread_id());
@@ -1253,11 +1255,12 @@ namespace leveldb {
         }
     }
 
-    void DBImpl::ComputeCompactions(leveldb::Version *current,
+    bool DBImpl::ComputeCompactions(leveldb::Version *current,
                                     std::vector<leveldb::Compaction *> *compactions,
                                     VersionEdit *edit,
                                     RangeIndexVersionEdit *range_edit,
                                     std::unordered_map<uint32_t, leveldb::MemTableL0FilesEdit> *memtableid_l0fns) {
+        bool moves = false;
         current->ComputeNonOverlappingSet(compactions);
         if (NOVA_LOG_LEVEL == rdmaio::DEBUG) {
             std::string debug = "Coordinated compaction picks compaction sets: ";
@@ -1275,7 +1278,7 @@ namespace leveldb {
             NOVA_ASSERT(valid) << fmt::format("assertion failed {}", reason);
         }
         if (compactions->empty()) {
-            return;
+            return false;
         }
         auto it = compactions->begin();
         while (it != compactions->end()) {
@@ -1317,9 +1320,11 @@ namespace leveldb {
                     }
                 }
             }
+            moves = true;
             delete c;
             it = compactions->erase(it);
         }
+        return moves;
     }
 
     void DBImpl::CoordinateMajorCompaction() {
@@ -1339,20 +1344,40 @@ namespace leveldb {
             }
             NOVA_ASSERT(versions_->versions_[current->version_id()]->Ref() ==
                         current);
+            NOVA_LOG(rdmaio::DEBUG)
+                << fmt::format("comv-init {} {}", current->version_id_,
+                               current->refs_);
             mutex_.Unlock();
 
             std::vector<Compaction *> compactions;
-            VersionEdit edit;
-            RangeIndexVersionEdit range_edit;
             std::vector<uint32_t> reqs;
             std::vector<CompactionRequest *> requests;
             SubRanges *subs = nullptr;
             std::vector<CompactionState *> states;
-            std::vector<std::string> files_to_delete;
-            std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> server_pairs;
-            std::unordered_map<uint32_t, MemTableL0FilesEdit> edits;
-            ComputeCompactions(current, &compactions, &edit, &range_edit,
-                               &edits);
+
+            sem_t completion_signal;
+            std::vector<bool> cleaned;
+            sem_init(&completion_signal, 0, 0);
+            {
+                VersionEdit edit;
+                RangeIndexVersionEdit range_edit;
+                std::unordered_map<uint32_t, MemTableL0FilesEdit> edits;
+                if (ComputeCompactions(current, &compactions, &edit,
+                                       &range_edit,
+                                       &edits)) {
+                    // Contain moves. Cleanup LSM immediately.
+                    CleanupLSMCompaction(nullptr, edit, range_edit, edits,
+                                         nullptr, current->version_id_);
+                }
+            }
+
+            cleaned.resize(compactions.size());
+
+            for (int i = 0; i < compactions.size(); i++) {
+                compactions[i]->complete_signal_ = &completion_signal;
+                cleaned[i] = false;
+            }
+
             if (!compactions.empty()) {
                 if (subrange_manager_) {
                     subs = subrange_manager_->latest_subranges_;
@@ -1364,7 +1389,7 @@ namespace leveldb {
                     states.push_back(state);
                 }
                 if (options_.major_compaction_type == kMajorCoordinated) {
-                    for (int i = 1; i < states.size(); i++) {
+                    for (int i = 0; i < states.size(); i++) {
                         int thread_id =
                                 EnvBGThread::bg_compaction_thread_id_seq.fetch_add(
                                         1, std::memory_order_relaxed) %
@@ -1374,23 +1399,27 @@ namespace leveldb {
                                     thread_id);
                         ScheduleCompactionTask(thread_id, states[i]);
                     }
-                    auto c = compactions[0];
-                    auto input = c->MakeInputIterator(table_cache_,
-                                                      compaction_coordinator_thread_);
-                    CompactionStats stats = states[0]->BuildStats();
-                    std::function<uint64_t(void)> fn_generator = std::bind(
-                            &VersionSet::NewFileNumber, versions_);
-                    CompactionJob job(fn_generator, env_, dbname_,
-                                      user_comparator_,
-                                      options_, compaction_coordinator_thread_,
-                                      table_cache_);
-                    Status status = job.CompactTables(states[0],
-                                                      input, &stats, true,
-                                                      kCompactInputSSTables,
-                                                      kCompactOutputSSTables);
                     // Wait for majors to complete.
-                    for (int i = 1; i < compactions.size(); i++) {
-                        sem_wait(&compactions[i]->complete_signal_);
+                    for (int i = 0; i < compactions.size(); i++) {
+                        sem_wait(&completion_signal);
+                        for (int j = 0; j < compactions.size(); j++) {
+                            if (cleaned[j]) {
+                                continue;
+                            }
+                            if (compactions[j]->is_completed_) {
+                                cleaned[j] = true;
+                                {
+                                    VersionEdit edit = {};
+                                    RangeIndexVersionEdit range_edit = {};
+                                    std::unordered_map<uint32_t, MemTableL0FilesEdit> edits;
+                                    CleanupLSMCompaction(states[j], edit,
+                                                         range_edit,
+                                                         edits,
+                                                         nullptr,
+                                                         current->version_id_);
+                                }
+                            }
+                        }
                     }
                 } else {
                     auto client = reinterpret_cast<StoCBlockClient *> (compaction_coordinator_thread_->stoc_client());
@@ -1406,6 +1435,7 @@ namespace leveldb {
                         selected_storages.push_back(sid);
                     }
                     NOVA_ASSERT(selected_storages.size() == compactions.size());
+
                     for (int i = 0; i < compactions.size(); i++) {
                         NOVA_LOG(rdmaio::INFO) << fmt::format(
                                     "Coordinator schedules compaction on StoC-{}",
@@ -1426,6 +1456,7 @@ namespace leveldb {
                         }
                         auto compaction = compactions[i];
                         auto req = new CompactionRequest;
+                        req->completion_signal = &completion_signal;
                         req->source_level = compaction->level();
                         req->target_level = compaction->target_level();
                         req->dbname = dbname_;
@@ -1444,32 +1475,46 @@ namespace leveldb {
                     }
                     // Wait for majors to complete.
                     for (int i = 0; i < compactions.size(); i++) {
-                        if (selected_storages[i] ==
-                            nova::NovaConfig::config->my_server_id) {
-                            sem_wait(&compactions[i]->complete_signal_);
-                        } else {
-                            client->Wait();
+                        sem_wait(&completion_signal);
+
+                        // Figure out which one completes.
+                        for (int j = 0; j < reqs.size(); j++) {
+                            if (cleaned[j]) {
+                                continue;
+                            }
+                            bool completed = false;
+                            CompactionRequest *compaction_req = nullptr;
+                            if (reqs[j] == 0) {
+                                NOVA_ASSERT(
+                                        selected_storages[j] ==
+                                        nova::NovaConfig::config->my_server_id);
+                                if (compactions[j]->is_completed_) {
+                                    completed = true;
+                                }
+                            } else {
+                                StoCResponse response;
+                                if (client->IsDone(reqs[j], &response,
+                                                   nullptr)) {
+                                    compaction_req = requests[j];
+                                    completed = true;
+                                }
+                            }
+                            if (!completed) {
+                                continue;
+                            }
+                            cleaned[j] = true;
+                            {
+                                VersionEdit edit = {};
+                                RangeIndexVersionEdit range_edit = {};
+                                std::unordered_map<uint32_t, MemTableL0FilesEdit> edits;
+                                CleanupLSMCompaction(states[j], edit,
+                                                     range_edit,
+                                                     edits,
+                                                     compaction_req,
+                                                     current->version_id_);
+                            }
                         }
                     }
-                    std::vector<const FileMetaData *> metafiles;
-                    for (int i = 0; i < reqs.size(); i++) {
-                        if (reqs[i] == 0) {
-                            NOVA_ASSERT(
-                                    selected_storages[i] ==
-                                    nova::NovaConfig::config->my_server_id);
-                            continue;
-                        }
-                        StoCResponse response;
-                        NOVA_ASSERT(
-                                client->IsDone(reqs[i], &response, nullptr));
-                        for (auto f : requests[i]->outputs) {
-                            states[i]->outputs.push_back(*f);
-                            metafiles.push_back(f);
-                        }
-                    }
-                    // Prefetch metadata files stored on other servers.
-                    FetchMetadataFilesInParallel(metafiles, dbname_, options_,
-                                                 client, env_);
                     uint64_t input_size = 0;
                     uint64_t output_size = 0;
                     uint32_t ninputs = 0;
@@ -1498,63 +1543,24 @@ namespace leveldb {
             }
             versions_->versions_[current->version_id()]->Unref(dbname_);
 
-            for (auto state : states) {
-                ObtainLookupIndexEdits(state, &edits);
+            for (int i = 0; i < cleaned.size(); i++) {
+                NOVA_ASSERT(cleaned[i]);
             }
-            for (auto state : states) {
-                InstallCompactionResults(state, &edit,
-                                         state->compaction->target_level());
-                if (state->compaction->level() == 0) {
-                    if (state->compaction->target_level() == 0) {
-                        std::vector<uint64_t> newids;
-                        for (int i = 0; i < state->outputs.size(); i++) {
-                            newids.push_back(state->outputs[i].number);
-                        }
-                        for (int i = 0;
-                             i < state->compaction->inputs_[0].size(); i++) {
-                            uint64_t oldid = state->compaction->inputs_[0][i]->number;
-                            range_edit.replace_l0_sstables[oldid] = newids;
-                        }
-                    } else {
-                        for (int i = 0;
-                             i < state->compaction->inputs_[0].size(); i++) {
-                            range_edit.removed_l0_sstables.push_back(
-                                    state->compaction->inputs_[0][i]->number);
-                        }
-                    }
-                }
-            }
-            NOVA_LOG(rdmaio::DEBUG) << edit.DebugString();
-            versions_->AppendChangesToManifest(&edit,
-                                               manifest_file_,
-                                               options_.manifest_stoc_id);
-            if (range_index_manager_) {
-                range_index_manager_->DeleteObsoleteVersions();
-            }
+            std::vector<std::string> files_to_delete;
+            std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> server_pairs;
             mutex_.Lock();
-            Version *v = new Version(&internal_comparator_, table_cache_,
-                                     &options_,
-                                     versions_->version_id_seq_.fetch_add(1),
-                                     versions_);
-            UpdateLookupIndex(v->version_id_, edits);
-            range_edit.lsm_version_id = v->version_id_;
-            for (auto state : states) {
-                versions_->AddCompactedInputs(state->compaction,
-                                              &compacted_tables_);
-            }
-            versions_->LogAndApply(&edit, v, true);
             DeleteObsoleteVersions(compaction_coordinator_thread_);
             ObtainObsoleteFiles(compaction_coordinator_thread_,
-                                &files_to_delete, &server_pairs);
+                                &files_to_delete, &server_pairs, 0);
             if (range_index_manager_) {
-                range_index_manager_->AppendNewVersion(range_edit);
+                range_index_manager_->DeleteObsoleteVersions();
             }
             if (!compacted_tables_.empty()) {
                 ScheduleFileDeletionTask(0);
             }
             mutex_.Unlock();
-            l0_stop_write_signal_.SignalAll();
-
+            DeleteFiles(compaction_coordinator_thread_, files_to_delete,
+                        server_pairs);
             for (auto c : compactions) {
                 delete c;
             }
@@ -1565,9 +1571,89 @@ namespace leveldb {
                 req->FreeMemoryLTC();
                 delete req;
             }
-            DeleteFiles(compaction_coordinator_thread_, files_to_delete,
-                        server_pairs);
         }
+    }
+
+    void DBImpl::CleanupLSMCompaction(CompactionState *state,
+                                      VersionEdit &edit,
+                                      RangeIndexVersionEdit &range_edit,
+                                      std::unordered_map<uint32_t, MemTableL0FilesEdit> &edits,
+                                      CompactionRequest *compaction_req,
+                                      uint32_t compacting_version_id) {
+        std::vector<std::string> files_to_delete;
+        std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair> > server_pairs;
+        if (compaction_req && state) {
+            auto client = reinterpret_cast<StoCBlockClient *> (compaction_coordinator_thread_->stoc_client());
+            std::vector<const FileMetaData *> metafiles;
+            for (auto f : compaction_req->outputs) {
+                state->outputs.push_back(*f);
+                metafiles.push_back(f);
+            }
+            // Prefetch metadata files stored on other servers.
+            FetchMetadataFilesInParallel(metafiles, dbname_, options_,
+                                         client, env_);
+        }
+        if (state) {
+            ObtainLookupIndexEdits(state, &edits);
+            InstallCompactionResults(state, &edit,
+                                     state->compaction->target_level());
+            if (state->compaction->level() == 0) {
+                if (state->compaction->target_level() == 0) {
+                    std::vector<uint64_t> newids;
+                    for (int i = 0; i < state->outputs.size(); i++) {
+                        newids.push_back(state->outputs[i].number);
+                    }
+                    for (int i = 0;
+                         i < state->compaction->inputs_[0].size(); i++) {
+                        uint64_t oldid = state->compaction->inputs_[0][i]->number;
+                        range_edit.replace_l0_sstables[oldid] = newids;
+                    }
+                } else {
+                    for (int i = 0;
+                         i < state->compaction->inputs_[0].size(); i++) {
+                        range_edit.removed_l0_sstables.push_back(
+                                state->compaction->inputs_[0][i]->number);
+                    }
+                }
+            }
+        }
+        NOVA_LOG(rdmaio::DEBUG) << edit.DebugString();
+        versions_->AppendChangesToManifest(&edit,
+                                           manifest_file_,
+                                           options_.manifest_stoc_id);
+        if (range_index_manager_) {
+            range_index_manager_->DeleteObsoleteVersions();
+        }
+        mutex_.Lock();
+        Version *v = new Version(&internal_comparator_,
+                                 table_cache_,
+                                 &options_,
+                                 versions_->version_id_seq_.fetch_add(1),
+                                 versions_);
+        UpdateLookupIndex(v->version_id_, edits);
+        range_edit.lsm_version_id = v->version_id_;
+        if (state) {
+            versions_->AddCompactedInputs(state->compaction,
+                                          &compacted_tables_);
+        }
+        versions_->LogAndApply(&edit, v, true);
+
+        uint32_t skip_compacting_version = compacting_version_id;
+        if (!versions_->versions_[compacting_version_id]->SetCompaction()) {
+            skip_compacting_version = 0;
+        }
+        DeleteObsoleteVersions(compaction_coordinator_thread_);
+        ObtainObsoleteFiles(compaction_coordinator_thread_,
+                            &files_to_delete, &server_pairs,
+                            compacting_version_id);
+        if (range_index_manager_) {
+            range_index_manager_->AppendNewVersion(&scan_stats, range_edit);
+            range_index_manager_->DeleteObsoleteVersions();
+        }
+        mutex_.Unlock();
+        DeleteFiles(compaction_coordinator_thread_, files_to_delete,
+                    server_pairs);
+        l0_stop_write_signal_.SignalAll();
     }
 
     Status DBImpl::InstallCompactionResults(CompactionState *compact,
@@ -2062,7 +2148,7 @@ namespace leveldb {
                     edit.sr = subrange;
                     edit.add_new_memtable = true;
                     edit.new_memtable_id = memtable_id;
-                    range_index_manager_->AppendNewVersion(edit);
+                    range_index_manager_->AppendNewVersion(&scan_stats, edit);
                 }
                 break;
             }
@@ -2167,7 +2253,8 @@ namespace leveldb {
                                  const leveldb::Slice &val) {
         uint64_t last_sequence = versions_->last_sequence_.fetch_add(1);
         if (processed_writes_ > SUBRANGE_WARMUP_NPUTS &&
-            processed_writes_ % SUBRANGE_REORG_INTERVAL == 0) {
+            processed_writes_ % SUBRANGE_REORG_INTERVAL == 0 &&
+            options_.enable_subrange_reorg) {
             // wake up reorg thread.
             EnvBGTask task = {};
             task.db = this;
