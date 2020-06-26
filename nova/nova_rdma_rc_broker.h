@@ -8,20 +8,20 @@
 #define RLIB_NOVA_RDMA_RC_STORE_H
 
 #include "rdma_ctrl.hpp"
-#include "nova_rdma_store.h"
-#include "nova_mem_config.h"
+#include "nova_rdma_broker.h"
+#include "nova_config.h"
 #include "nova_msg_callback.h"
 
 namespace nova {
 
     using namespace rdmaio;
 
-    // Thread local. One thread has one RDMA RC Store.
-    class NovaRDMARCStore : public NovaRDMAStore {
+    // Thread local. One thread has one RDMA RC broker.
+    class NovaRDMARCBroker : public NovaRDMABroker {
     public:
-        NovaRDMARCStore(char *buf, int thread_id,
-                        const std::vector<QPEndPoint> &end_points,
-                        NovaMsgCallback *callback) :
+        NovaRDMARCBroker(char *buf, int thread_id,
+                         const std::vector<QPEndPoint> &end_points,
+                         NovaMsgCallback *callback) :
                 rdma_buf_(buf),
                 thread_id_(thread_id),
                 end_points_(end_points),

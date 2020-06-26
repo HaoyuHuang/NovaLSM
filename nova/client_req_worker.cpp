@@ -4,11 +4,11 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
-#include "nova_mem_worker.h"
+#include "client_req_worker.h"
 
 #include "logging.hpp"
 #include "nova_common.h"
-#include "nova_mem_config.h"
+#include "nova_config.h"
 #include "nova_client_sock.h"
 
 #include <sys/types.h>

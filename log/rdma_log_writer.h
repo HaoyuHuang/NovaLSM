@@ -11,7 +11,7 @@
 #include "leveldb/status.h"
 #include "leveldb/slice.h"
 #include "leveldb/log_writer.h"
-#include "nova/nova_rdma_store.h"
+#include "nova/nova_rdma_broker.h"
 #include "log/nova_log.h"
 
 namespace leveldb {
@@ -25,7 +25,7 @@ namespace leveldb {
             // Create a writer that will append data to "*dest".
             // "*dest" must be initially empty.
             // "*dest" must remain live while this Writer is in use.
-            RDMALogWriter(nova::NovaRDMAStore *store,
+            RDMALogWriter(nova::NovaRDMABroker *store,
                           nova::NovaMemManager *mem_manager,
                           nova::LogFileManager *log_manager
             );
@@ -60,7 +60,7 @@ namespace leveldb {
 
             void Init(const std::string &log_file_name);
 
-            nova::NovaRDMAStore *store_;
+            nova::NovaRDMABroker *store_;
             nova::NovaMemManager *mem_manager_;
             nova::LogFileManager *log_manager_;
             std::map<std::string, LogFileBuf *> logfile_last_buf_;

@@ -8,7 +8,7 @@
 #include <netinet/tcp.h>
 #include <signal.h>
 #include <leveldb/write_batch.h>
-#include "nova_mem_server.h"
+#include "nic_server.h"
 
 namespace nova {
 
@@ -194,7 +194,7 @@ namespace nova {
         for (int worker_id = 0;
              worker_id < NovaConfig::config->num_async_workers; worker_id++) {
             async_workers[worker_id] = new NovaAsyncWorker(dbs, async_cq);
-            NovaRDMAStore *store = nullptr;
+            NovaRDMABroker *store = nullptr;
             std::vector<QPEndPoint> endpoints;
             for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
                 QPEndPoint qp;
@@ -203,8 +203,8 @@ namespace nova {
                 endpoints.push_back(qp);
             }
             if (NovaConfig::config->enable_rdma) {
-                store = new NovaRDMARCStore(buf, worker_id, endpoints,
-                                            async_workers[worker_id]);
+                store = new NovaRDMARCBroker(buf, worker_id, endpoints,
+                                             async_workers[worker_id]);
             } else {
                 store = new NovaRDMANoopStore();
             }

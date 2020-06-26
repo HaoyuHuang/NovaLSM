@@ -11,7 +11,7 @@ namespace leveldb {
         // Create a writer that will append data to "*dest".
 // "*dest" must be initially empty.
 // "*dest" must remain live while this Writer is in use.
-        RDMALogWriter::RDMALogWriter(nova::NovaRDMAStore *store,
+        RDMALogWriter::RDMALogWriter(nova::NovaRDMABroker *store,
                                      nova::NovaMemManager *mem_manager,
                                      nova::LogFileManager *log_manager)
                 : store_(store), mem_manager_(mem_manager),

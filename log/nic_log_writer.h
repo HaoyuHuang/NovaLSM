@@ -16,7 +16,7 @@
 #include "leveldb/status.h"
 #include "leveldb/slice.h"
 #include "leveldb/log_writer.h"
-#include "nova/nova_rdma_store.h"
+#include "nova/nova_rdma_broker.h"
 #include "log/nova_log.h"
 
 namespace leveldb {

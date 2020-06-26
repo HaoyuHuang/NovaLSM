@@ -6,7 +6,7 @@
 
 #include <leveldb/write_batch.h>
 #include "nova_async_worker.h"
-#include "nova_mem_config.h"
+#include "nova_config.h"
 #include "nova_common.h"
 
 namespace nova {

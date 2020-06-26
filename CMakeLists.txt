@@ -312,18 +312,18 @@ set(NOVA_SOURCES
         nova/rdma_ctrl.hpp
         nova/rdma_ctrl_impl.hpp
         nova/rnic.hpp
-        nova/nova_mem_config.h
+        nova/nova_config.h
         nova/nova_msg_parser.h
-        nova/nova_mem_server.cpp
-        nova/nova_mem_server.h
-        nova/nova_mem_worker.cpp
-        nova/nova_mem_worker.h
+        nova/nic_server.cpp
+        nova/nic_server.h
+        nova/client_req_worker.cpp
+        nova/client_req_worker.h
         nova/nova_common.cpp
         nova/nova_common.h
         nova/nova_msg_callback.h
-        nova/nova_rdma_rc_store.cpp
-        nova/nova_rdma_rc_store.h
-        nova/nova_rdma_store.h
+        nova/nova_rdma_rc_broker.cpp
+        nova/nova_rdma_rc_broker.h
+        nova/nova_rdma_broker.h
         mc/nova_mem_manager.h
         mc/nova_mem_manager.cpp
         nova/linked_list.h
@@ -346,10 +346,10 @@ add_library(libnova STATIC ${NOVA_SOURCES})
 set_target_properties(libnova PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(libnova -lpthread ibverbs event leveldb fmt)
 
-add_executable(nova_cc "nova/nova_cc_main.cpp")
+add_executable(leveldb_main "nova/leveldb_main.cpp")
 #add_executable(nova_test "mc/nova_test.cpp")
 #add_executable(nova_dc "nova/nova_dc_main.cpp")
 
-target_link_libraries(nova_cc libnova -lgflags leveldb fmt)
+target_link_libraries(leveldb_main libnova -lgflags leveldb fmt)
 #target_link_libraries(nova_test libnova -lgflags leveldb)
 #target_link_libraries(nova_dc libnova -lgflags leveldb)

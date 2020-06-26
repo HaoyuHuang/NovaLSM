@@ -11,7 +11,7 @@
 #include <leveldb/slice.h>
 #include "nova_chained_hashtable.h"
 #include "nova/linked_list.h"
-#include "nova/nova_mem_config.h"
+#include "nova/nova_config.h"
 
 #define NOVA_MEM_PARTITIONS 1
 

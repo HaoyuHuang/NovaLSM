@@ -10,7 +10,7 @@
 #include "rdma_ctrl.hpp"
 
 namespace nova {
-    class NovaRDMAStore {
+    class NovaRDMABroker {
     public:
         virtual void Init() = 0;
 
@@ -48,7 +48,7 @@ namespace nova {
     };
 
 
-    class NovaRDMANoopStore : public NovaRDMAStore {
+    class NovaRDMANoopStore : public NovaRDMABroker {
         void Init() {};
 
         void PostRead(char *localbuf, uint32_t size, int server_id,

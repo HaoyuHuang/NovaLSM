@@ -16,12 +16,12 @@
 #include <log/rdma_log_writer.h>
 #include <log/nic_log_writer.h>
 
-#include "nova_mem_server.h"
+#include "nic_server.h"
 #include "nova_msg_callback.h"
-#include "nova_rdma_store.h"
+#include "nova_rdma_broker.h"
 #include "nova_common.h"
 #include "linked_list.h"
-#include "nova_mem_config.h"
+#include "nova_config.h"
 #include "mc/nova_mem_manager.h"
 #include "leveldb/db.h"
 #include "nova_async_worker.h"

@@ -8,10 +8,10 @@
 #define RLIB_NOVA_MEM_SERVER_H
 
 #include "mc/nova_mem_manager.h"
-#include "nova_mem_worker.h"
-#include "nova_mem_config.h"
-#include "nova_rdma_store.h"
-#include "nova_rdma_rc_store.h"
+#include "client_req_worker.h"
+#include "nova_config.h"
+#include "nova_rdma_broker.h"
+#include "nova_rdma_rc_broker.h"
 #include "nova_async_worker.h"
 #include "leveldb/db.h"
 

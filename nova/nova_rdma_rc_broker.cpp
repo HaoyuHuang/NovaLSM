@@ -5,14 +5,14 @@
 //
 
 #include <malloc.h>
-#include "nova_rdma_rc_store.h"
+#include "nova_rdma_rc_broker.h"
 
 namespace nova {
     mutex open_device_mutex;
     bool is_device_opened = false;
     RNicHandler *device = nullptr;
 
-    void NovaRDMARCStore::Init() {
+    void NovaRDMARCBroker::Init() {
         RDMA_LOG(INFO) << "RDMA client thread " << thread_id_
                        << " initializing";
         RdmaCtrl::DevIdx idx{.dev_id = 0, .port_id = 1}; // using the first RNIC's first port
@@ -93,11 +93,11 @@ namespace nova {
         RDMA_LOG(INFO) << "RDMA client thread " << thread_id_ << " initialized";
     }
 
-    void NovaRDMARCStore::PostRDMASEND(char *localbuf, ibv_wr_opcode opcode,
-                                       uint32_t size,
-                                       int server_id,
-                                       uint64_t local_offset,
-                                       uint64_t remote_addr, bool is_offset) {
+    void NovaRDMARCBroker::PostRDMASEND(char *localbuf, ibv_wr_opcode opcode,
+                                        uint32_t size,
+                                        int server_id,
+                                        uint64_t local_offset,
+                                        uint64_t remote_addr, bool is_offset) {
         int max_msg_size_ = NovaConfig::config->max_msg_size;
         int doorbell_batch_size_ = NovaConfig::config->rdma_doorbell_batch_size;
         int max_num_sends = NovaConfig::config->rdma_max_num_sends;
@@ -163,19 +163,19 @@ namespace nova {
     }
 
     void
-    NovaRDMARCStore::PostRead(char *localbuf, uint32_t size, int server_id,
-                              uint64_t local_offset,
-                              uint64_t remote_addr, bool is_offset) {
+    NovaRDMARCBroker::PostRead(char *localbuf, uint32_t size, int server_id,
+                               uint64_t local_offset,
+                               uint64_t remote_addr, bool is_offset) {
         PostRDMASEND(localbuf, IBV_WR_RDMA_READ, size, server_id, local_offset,
                      remote_addr, is_offset);
     }
 
     void
-    NovaRDMARCStore::PostSend(char *localbuf, uint32_t size, int server_id) {
+    NovaRDMARCBroker::PostSend(char *localbuf, uint32_t size, int server_id) {
         PostRDMASEND(localbuf, IBV_WR_SEND, size, server_id, 0, 0, false);
     }
 
-    void NovaRDMARCStore::FlushPendingSends(int peer_sid) {
+    void NovaRDMARCBroker::FlushPendingSends(int peer_sid) {
         if (peer_sid == NovaConfig::config->my_server_id) {
             return;
         }
@@ -194,7 +194,7 @@ namespace nova {
     }
 
 
-    void NovaRDMARCStore::FlushPendingSends() {
+    void NovaRDMARCBroker::FlushPendingSends() {
         for (int peer_sid = 0;
              peer_sid < NovaConfig::config->servers.size(); peer_sid++) {
             FlushPendingSends(peer_sid);
@@ -202,13 +202,13 @@ namespace nova {
     }
 
     void
-    NovaRDMARCStore::PostWrite(char *localbuf, uint32_t size, int server_id,
-                               uint64_t remote_offset, bool is_remote_offset) {
+    NovaRDMARCBroker::PostWrite(char *localbuf, uint32_t size, int server_id,
+                                uint64_t remote_offset, bool is_remote_offset) {
         PostRDMASEND(localbuf, IBV_WR_RDMA_WRITE, size, server_id, 0,
                      remote_offset, is_remote_offset);
     }
 
-    void NovaRDMARCStore::PollSQ(int peer_sid) {
+    void NovaRDMARCBroker::PollSQ(int peer_sid) {
         if (peer_sid == NovaConfig::config->my_server_id) {
             return;
         }
@@ -243,7 +243,7 @@ namespace nova {
 //        }
     }
 
-    void NovaRDMARCStore::PollSQ() {
+    void NovaRDMARCBroker::PollSQ() {
         for (int peer_sid = 0;
              peer_sid < NovaConfig::config->servers.size(); peer_sid++) {
             if (peer_sid == NovaConfig::config->my_server_id) {
@@ -253,7 +253,7 @@ namespace nova {
         }
     }
 
-    void NovaRDMARCStore::PostRecv(int peer_sid, int recv_buf_index) {
+    void NovaRDMARCBroker::PostRecv(int peer_sid, int recv_buf_index) {
         int msg_size = NovaConfig::config->max_msg_size;
         auto ret = qp_[peer_sid]->post_recv(
                 rdma_recv_buf_[peer_sid] + msg_size * recv_buf_index, msg_size,
@@ -261,9 +261,9 @@ namespace nova {
         RDMA_ASSERT(ret == SUCC) << ret;
     }
 
-    void NovaRDMARCStore::FlushPendingRecvs() {}
+    void NovaRDMARCBroker::FlushPendingRecvs() {}
 
-    void NovaRDMARCStore::PollRQ(int peer_sid) {
+    void NovaRDMARCBroker::PollRQ(int peer_sid) {
         int max_msg_size_ = NovaConfig::config->max_msg_size;
         int max_num_wrs = NovaConfig::config->rdma_max_num_sends;
         int n = ibv_poll_cq(qp_[peer_sid]->recv_cq_, max_num_wrs, wcs_);
@@ -289,7 +289,7 @@ namespace nova {
         }
     }
 
-    void NovaRDMARCStore::PollRQ() {
+    void NovaRDMARCBroker::PollRQ() {
         for (int peer_sid = 0;
              peer_sid < NovaConfig::config->servers.size(); peer_sid++) {
             if (peer_sid == NovaConfig::config->my_server_id) {
@@ -299,11 +299,11 @@ namespace nova {
         }
     }
 
-    char *NovaRDMARCStore::GetSendBuf() {
+    char *NovaRDMARCBroker::GetSendBuf() {
         return NULL;
     }
 
-    char *NovaRDMARCStore::GetSendBuf(int server_id) {
+    char *NovaRDMARCBroker::GetSendBuf(int server_id) {
         int max_msg_size_ = NovaConfig::config->max_msg_size;
         return rdma_send_buf_[server_id] +
                psend_index_[server_id] * max_msg_size_;

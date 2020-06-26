@@ -7,9 +7,9 @@
 
 #include "rdma_ctrl.hpp"
 #include "nova_common.h"
-#include "nova_mem_config.h"
-#include "nova_rdma_rc_store.h"
-#include "nova_mem_server.h"
+#include "nova_config.h"
+#include "nova_rdma_rc_broker.h"
+#include "nic_server.h"
 #include "leveldb/db.h"
 #include "leveldb/cache.h"
 #include "leveldb/filter_policy.h"
@@ -52,16 +52,7 @@ DEFINE_string(data_partition_alg, "hash",
 DEFINE_uint64(num_conn_workers, 0, "Number of connection threads.");
 DEFINE_uint64(cache_size_gb, 0, " Cache size in GB.");
 DEFINE_uint64(use_fixed_value_size, 0, "Fixed value size.");
-DEFINE_uint64(index_size_mb, 0, "Index size in MB.");
-DEFINE_uint64(nindex_entry_per_bucket, 0,
-              "Number of index entries per bucket.");
-DEFINE_uint64(main_bucket_mem_percent, 0,
-              "The percentage of memory dedicated to main buckets.");
-DEFINE_uint64(lc_index_size_mb, 0, "Location cache: Index size in MB.");
-DEFINE_uint64(lc_nindex_entry_per_bucket, 0,
-              "Location cache: Number of index entries per bucket.");
-DEFINE_uint64(lc_main_bucket_mem_percent, 0,
-              "Location cache: The percentage of memory dedicated to main buckets.");
+
 DEFINE_uint64(rdma_port, 0, "The port used by RDMA.");
 DEFINE_uint64(rdma_max_msg_size, 0, "The maximum message size used by RDMA.");
 DEFINE_uint64(rdma_max_num_sends, 0,
@@ -74,8 +65,8 @@ DEFINE_bool(enable_load_data, false, "Enable loading data.");
 DEFINE_uint64(rdma_number_of_get_retries, 3, "Number of RDMA retries for get.");
 DEFINE_string(config_path, "/tmp/uniform-3-32-10000000-frags.txt",
               "The path that stores fragment configuration.");
-DEFINE_uint32(cc_l0_start_compaction_mb, 0, "");
-DEFINE_uint32(cc_l0_stop_write_mb, 0, "");
+DEFINE_uint32(l0_start_compaction_mb, 0, "");
+DEFINE_uint32(l0_stop_write_mb, 0, "");
 DEFINE_int32(level, 0, "");
 
 namespace {
@@ -156,9 +147,9 @@ leveldb::DB *CreateDatabase(int sid, int db_index, leveldb::Cache *cache,
     options.bg_threads = bg_threads;
     options.max_file_size = 1024 * 1024 * FLAGS_sstable_size_mb;
     options.l0bytes_start_compaction_trigger =
-            FLAGS_cc_l0_start_compaction_mb * 1024 * 1024;
+            FLAGS_l0_start_compaction_mb * 1024 * 1024;
     options.l0bytes_stop_writes_trigger =
-            FLAGS_cc_l0_stop_write_mb * 1024 * 1024;
+            FLAGS_l0_stop_write_mb * 1024 * 1024;
     options.level = FLAGS_level;
     if (NovaConfig::config->profiler_file_path.empty()) {
         options.enable_tracing = false;
@@ -242,7 +233,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->log_buf_size = FLAGS_log_buf_size;
     NovaConfig::config->num_async_workers = FLAGS_num_async_workers;
     NovaConfig::config->l0_start_compaction_bytes =
-            FLAGS_cc_l0_start_compaction_mb * 1024 * 1024;
+            FLAGS_l0_start_compaction_mb * 1024 * 1024;
 
     if (FLAGS_persist_log_records_mode == "disk") {
         NovaConfig::config->log_record_mode = leveldb::NovaLogRecordMode::LOG_DISK_SYNC;

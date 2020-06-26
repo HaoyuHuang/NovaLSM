@@ -13,7 +13,7 @@
 #include "leveldb/options.h"
 #include "nova_common.h"
 #include "nova_msg_callback.h"
-#include "nova_rdma_store.h"
+#include "nova_rdma_broker.h"
 #include <semaphore.h>
 #include <list>
 #include "log/nova_log.h"
@@ -66,7 +66,7 @@ namespace nova {
 
         int size();
 
-        void set_rdma_store(NovaRDMAStore *rdma_store) {
+        void set_rdma_store(NovaRDMABroker *rdma_store) {
             rdma_store_ = rdma_store;
         };
 
@@ -98,7 +98,7 @@ namespace nova {
 //                                int home_server,
 //                                uint64_t remote_addr);
 
-        NovaRDMAStore *rdma_store_ = nullptr;
+        NovaRDMABroker *rdma_store_ = nullptr;
 
         bool is_running_ = false;
 
