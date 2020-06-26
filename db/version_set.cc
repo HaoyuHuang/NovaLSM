@@ -133,9 +133,11 @@ namespace leveldb {
     class Version::LevelFileNumIterator : public Iterator {
     public:
         LevelFileNumIterator(const InternalKeyComparator &icmp,
-                             const std::vector<FileMetaData *> *flist)
+                             const std::vector<FileMetaData *> *flist,
+                             ScanStats *scan_stats)
                 : icmp_(icmp), flist_(flist),
-                  index_(flist->size()) {  // Marks as invalid
+                  index_(flist->size()),
+                  scan_stats_(scan_stats) {  // Marks as invalid
         }
 
         bool Valid() const override { return index_ < flist_->size(); }
@@ -201,6 +203,9 @@ namespace leveldb {
             assert(Valid());
             FileMetaData &meta = *(*flist_)[index_];
             EncodeFixed64(value_buf_, meta.number);
+            if (scan_stats_) {
+                scan_stats_->number_of_scan_sstables_ += 1;
+            }
             return Slice(value_buf_, 8);
         }
 
@@ -210,6 +215,7 @@ namespace leveldb {
         const InternalKeyComparator icmp_;
         const std::vector<FileMetaData *> *const flist_;
         uint32_t index_;
+        ScanStats *scan_stats_ = nullptr;
         bool seeked_ = false;
 
         // Backing store for value().  Holds the file number and size.
@@ -246,7 +252,7 @@ namespace leveldb {
                 .level = level,
         };
         return NewTwoLevelIterator(
-                new LevelFileNumIterator(*icmp_, &files_[level]),
+                new LevelFileNumIterator(*icmp_, &files_[level], scan_stats),
                 context,
                 &GetFileIterator,
                 (void *) this, scan_stats, options);
@@ -1404,7 +1410,8 @@ namespace leveldb {
                     };
                     list[num++] = NewTwoLevelIterator(
                             new Version::LevelFileNumIterator(*icmp_,
-                                                              &inputs_[which]),
+                                                              &inputs_[which],
+                                                              nullptr),
                             context,
                             &GetFileIterator, input_version_, nullptr, options);
                 }

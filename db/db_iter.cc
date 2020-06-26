@@ -184,7 +184,6 @@ namespace leveldb {
 
                 // iter_ is pointing to current key. We can now safely move to the next to
                 // avoid checking current key.
-//                iter_->Next();
                 if (!GoToNextEntry(&saved_ikey_) && iter_->Valid()) {
                     iter_->SkipToNextUserKey(saved_ikey_);
                 }
@@ -194,7 +193,6 @@ namespace leveldb {
                     return;
                 }
             }
-//            FindNextUserEntry(true, &saved_ikey_);
         }
 
         bool DBIter::GoToNextEntry(std::string *current_key) {

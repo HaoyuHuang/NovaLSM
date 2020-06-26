@@ -1377,7 +1377,6 @@ namespace leveldb {
                 compactions[i]->complete_signal_ = &completion_signal;
                 cleaned[i] = false;
             }
-
             if (!compactions.empty()) {
                 if (subrange_manager_) {
                     subs = subrange_manager_->latest_subranges_;

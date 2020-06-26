@@ -46,7 +46,6 @@ namespace leveldb {
         std::vector<RangeTables> range_tables_;
         uint32_t lsm_version_id_ = 0;
         ScanStats *scan_stats_ = nullptr;
-
         std::string DebugString() const;
 
     private:

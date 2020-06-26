@@ -254,13 +254,14 @@ namespace leveldb {
                     return;
                 }
                 index_iter_.Next();
-                InitDataBlock(&next_key);
+                InitDataBlock(nullptr);
             }
         }
 
         void TwoLevelIterator::MergingSeek(const Slice &target) {
+            std::string next_key;
             index_iter_.Seek(target);
-            InitDataBlock(nullptr);
+            InitDataBlock(&next_key);
             if (data_iter_.iter() != nullptr) data_iter_.Seek(target);
             MergingDataBlocksForward();
         }

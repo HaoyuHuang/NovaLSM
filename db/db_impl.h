@@ -20,6 +20,8 @@
 #include "leveldb/db_profiler.h"
 #include "leveldb/cache.h"
 #include "ltc/stoc_file_client_impl.h"
+//#include "ltc/source_migration.h"
+//#include "ltc/destination_migration.h"
 
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -186,11 +188,8 @@ namespace leveldb {
                 std::vector<uint32_t> *closed_memtable_log_files);
 
         friend class DB;
-
-        friend class SourceMigration;
-
-        friend class DestinationMigration;
-
+//        friend class SourceMigration;
+//        friend class DestinationMigration;
         struct Writer;
 
         DBProfiler *db_profiler_ = nullptr;
