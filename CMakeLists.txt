@@ -225,11 +225,11 @@ target_sources(leveldb
         rdma/nova_msg_parser.h
         novalsm/nic_server.cpp
         novalsm/nic_server.h
-        novalsm/conn_worker.cpp
-        novalsm/conn_worker.h
+        novalsm/client_req_worker.cpp
+        novalsm/client_req_worker.h
         common/nova_common.cpp
         common/nova_common.h
-        rdma/nova_msg_callback.h
+        rdma/rdma_msg_callback.h
         rdma/nova_rdma_rc_broker.cpp
         rdma/nova_rdma_rc_broker.h
         rdma/nova_rdma_broker.h

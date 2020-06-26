@@ -15,6 +15,7 @@ namespace leveldb {
         std::string logfile;
     };
 
+    // TODO: For refactoring.
     class LogRecovery {
     public:
         void Recover(std::vector<MemTableLogFilePair> memtables_to_recover);

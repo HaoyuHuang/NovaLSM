@@ -14,6 +14,7 @@
 #include "leveldb/log_writer.h"
 
 namespace nova {
+    // Manage in-memory log files to provide high availability.
     class StoCInMemoryLogFileManager {
     public:
         StoCInMemoryLogFileManager(NovaMemManager *mem_manager);

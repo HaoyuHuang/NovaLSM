@@ -9,7 +9,7 @@
 
 #include "leveldb/db_types.h"
 #include "common/nova_mem_manager.h"
-#include "conn_worker.h"
+#include "client_req_worker.h"
 #include "common/nova_config.h"
 #include "rdma/nova_rdma_broker.h"
 #include "rdma/nova_rdma_rc_broker.h"
@@ -20,7 +20,7 @@
 #include "ltc/stat_thread.h"
 
 namespace nova {
-    class NICConnWorker;
+    class NICClientReqWorker;
 
     class LoadThread {
     public:
@@ -63,7 +63,7 @@ namespace nova {
         NovaMemManager *mem_manager;
         StoCInMemoryLogFileManager *log_manager;
 
-        std::vector<NICConnWorker *> conn_workers;
+        std::vector<NICClientReqWorker *> conn_workers;
         std::vector<RDMAMsgHandler *> fg_rdma_msg_handlers;
         std::vector<RDMAMsgHandler *> bg_rdma_msg_handlers;
 

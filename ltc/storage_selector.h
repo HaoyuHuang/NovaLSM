@@ -2,7 +2,7 @@
 //
 // Created by Haoyu Huang on 5/13/20.
 // Copyright (c) 2020 University of Southern California. All rights reserved.
-//
+// Select StoCs to store data based on scatter policy.
 
 #ifndef LEVELDB_STORAGE_SELECTOR_H
 #define LEVELDB_STORAGE_SELECTOR_H

@@ -16,6 +16,7 @@
 
 namespace leveldb {
 
+    // Persistent StoC file.
     class StoCPersistentFile {
     public:
         StoCPersistentFile(uint32_t file_id, Env *env, std::string filename,

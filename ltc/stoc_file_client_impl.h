@@ -16,6 +16,8 @@
 
 namespace leveldb {
 
+    // A stoc writable file client is implemented based on memfile.
+    // It first writes data to its memory and then RDMA WRITEs to StoCs.
     class StoCWritableFileClient : public MemFile {
     public:
         StoCWritableFileClient(Env *env,

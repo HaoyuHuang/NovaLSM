@@ -2,7 +2,6 @@
 //
 // Created by Haoyu Huang on 5/15/20.
 // Copyright (c) 2020 University of Southern California. All rights reserved.
-//
 
 #ifndef LEVELDB_RDMA_ADMISSION_CTRL_H
 #define LEVELDB_RDMA_ADMISSION_CTRL_H
@@ -10,6 +9,7 @@
 #include "common/nova_config.h"
 
 namespace nova {
+    // We maintain RDMA buffer as a circular buffer. This ensures we don't send too many requests that overflow the buffer.
     class RDMAAdmissionCtrl {
     public:
         RDMAAdmissionCtrl() : max_pending_rdma_requests_per_endpoint_(
@@ -22,7 +22,7 @@ namespace nova {
 
         bool CanIssueRequest(int server_id);
 
-        bool CanIssueRequest(const std::vector<int>& server_ids);
+        bool CanIssueRequest(const std::vector<int> &server_ids);
 
         void RemoveRequests(int server_id, int requests);
 

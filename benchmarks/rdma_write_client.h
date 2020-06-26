@@ -7,12 +7,12 @@
 #ifndef LEVELDB_RDMA_WRITE_CLIENT_H
 #define LEVELDB_RDMA_WRITE_CLIENT_H
 
-#include "rdma/nova_msg_callback.h"
+#include "rdma/rdma_msg_callback.h"
 #include "rdma/nova_rdma_broker.h"
 #include "common/nova_mem_manager.h"
 
 namespace nova {
-    class RDMAWRITEClient : public NovaMsgCallback {
+    class RDMAWRITEClient : public RDMAMsgCallback {
     public:
         RDMAWRITEClient(uint32_t write_size_kb,
                         uint32_t my_server_id);

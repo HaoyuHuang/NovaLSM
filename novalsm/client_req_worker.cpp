@@ -4,7 +4,7 @@
 // Copyright (c) 2019 University of Southern California. All rights reserved.
 //
 
-#include "conn_worker.h"
+#include "client_req_worker.h"
 
 #include "common/nova_console_logging.h"
 #include "common/nova_common.h"
@@ -41,7 +41,7 @@ namespace nova {
 
     SocketState socket_write_handler(int fd, Connection *conn) {
         NOVA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
-        NICConnWorker *store = (NICConnWorker *) conn->worker;
+        NICClientReqWorker *store = (NICClientReqWorker *) conn->worker;
         struct iovec iovec_array[1];
         iovec_array[0].iov_base = conn->response_buf + conn->response_ind;
         iovec_array[0].iov_len = conn->response_size - conn->response_ind;
@@ -85,7 +85,7 @@ namespace nova {
         NOVA_ASSERT(fd == conn->fd) << fd << ":" << conn->fd;
         SocketState state;
 
-        NICConnWorker *worker = (NICConnWorker *) conn->worker;
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
 
         if (conn->state == ConnState::READ) {
             if (worker->stats.nreqs % 100 == 0) {
@@ -133,7 +133,7 @@ namespace nova {
     }
 
     void write_socket_complete(int fd, Connection *conn) {
-        NICConnWorker *worker = (NICConnWorker *) conn->worker;
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
 
         if (worker->stats.nreqs % 99 == 0 &&
             worker->stats.nreqs > 0) {
@@ -160,7 +160,7 @@ namespace nova {
     bool
     process_socket_get(int fd, Connection *conn, bool no_redirect) {
         // Stats.
-        NICConnWorker *worker = (NICConnWorker *) conn->worker;
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         worker->stats.ngets++;
         char *buf = worker->request_buf;
         NOVA_ASSERT(
@@ -207,7 +207,7 @@ namespace nova {
     bool
     process_reintialize_qps(int fd, Connection *conn) {
         NOVA_LOG(rdmaio::INFO) << "Reinitialize QPs";
-        NICConnWorker *worker = (NICConnWorker *) conn->worker;
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         for (int i = 0; i < worker->rdma_threads.size(); i++) {
             auto *thread = reinterpret_cast<RDMAMsgHandler *>(worker->rdma_threads[i]);
             thread->should_pause = true;
@@ -245,7 +245,7 @@ namespace nova {
     bool
     process_socket_stats_request(int fd, Connection *conn) {
         NOVA_LOG(rdmaio::INFO) << "Obtain stats";
-        NICConnWorker *worker = (NICConnWorker *) conn->worker;
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         int num_l0_sstables = 0;
         bool needs_compaction = false;
         for (auto db : worker->dbs_) {
@@ -274,7 +274,7 @@ namespace nova {
     bool
     process_close_stoc_files(int fd, Connection *conn) {
         NOVA_LOG(rdmaio::INFO) << "Close StoC files";
-        NICConnWorker *worker = (NICConnWorker *) conn->worker;
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
 
         for (int i = 0; i < worker->rdma_threads.size(); i++) {
             auto *thread = reinterpret_cast<RDMAMsgHandler *>(worker->rdma_threads[i]);
@@ -311,7 +311,7 @@ namespace nova {
 
     bool
     process_socket_scan(int fd, Connection *conn) {
-        NICConnWorker *worker = (NICConnWorker *) conn->worker;
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         worker->stats.nscans++;
         char *buf = worker->request_buf;
         NOVA_ASSERT(buf[0] == RequestType::REQ_SCAN) << buf;
@@ -381,7 +381,7 @@ namespace nova {
 
     bool process_socket_put(int fd, Connection *conn) {
         // Stats.
-        NICConnWorker *worker = (NICConnWorker *) conn->worker;
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         worker->stats.nputs++;
         char *buf = worker->request_buf;
         NOVA_ASSERT(buf[0] == RequestType::PUT) << buf;
@@ -458,7 +458,7 @@ namespace nova {
     }
 
     bool process_socket_request_handler(int fd, Connection *conn) {
-        auto worker = (NICConnWorker*) conn->worker;
+        auto worker = (NICClientReqWorker*) conn->worker;
         char *buf = worker->request_buf;
         if (buf[0] == RequestType::GET) {
             return process_socket_get(fd, conn, /*no_redirect=*/false);
@@ -490,7 +490,7 @@ namespace nova {
 
     SocketState socket_read_handler(int fd, short which, Connection *conn) {
         NOVA_ASSERT((which & EV_READ) > 0) << which;
-        NICConnWorker *worker = (NICConnWorker *) conn->worker;
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         char *buf = worker->request_buf + worker->req_ind;
         bool complete = false;
 
@@ -535,7 +535,7 @@ namespace nova {
     }
 
     void stats_handler(int fd, short which, void *arg) {
-        NICConnWorker *store = (NICConnWorker *) arg;
+        NICClientReqWorker *store = (NICClientReqWorker *) arg;
         Stats diff = store->stats.diff(store->prev_stats);
         uint64_t service_time = 0;
         uint64_t read_service_time = 0;
@@ -597,7 +597,7 @@ namespace nova {
     }
 
     void new_conn_handler(int fd, short which, void *arg) {
-        NICConnWorker *store = (NICConnWorker *) arg;
+        NICClientReqWorker *store = (NICClientReqWorker *) arg;
         new_conn_mutex.lock();
         store->conn_mu.lock();
         store->nconns += store->conn_queue.size();
@@ -630,7 +630,7 @@ namespace nova {
         new_conn_mutex.unlock();
     }
 
-    void NICConnWorker::Start() {
+    void NICClientReqWorker::Start() {
         NOVA_LOG(DEBUG) << "memstore[" << thread_id_ << "]: "
                         << "starting mem worker";
 
@@ -723,7 +723,7 @@ namespace nova {
         event_flags = new_flags;
         NOVA_ASSERT(event_del(&event) == 0) << fd;
         NOVA_ASSERT(
-                event_assign(&event, ((NICConnWorker *) worker)->base, fd,
+                event_assign(&event, ((NICClientReqWorker *) worker)->base, fd,
                              new_flags,
                              event_handler,
                              this) ==

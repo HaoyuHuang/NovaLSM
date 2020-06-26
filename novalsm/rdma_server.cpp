@@ -240,7 +240,7 @@ namespace nova {
                         mem_manager_->FreeItem(thread_id_, allocated_buf, scid);
                         processed = true;
                         NOVA_LOG(DEBUG) << fmt::format(
-                                    "dc[{}]: imm:{} type:{} allocated buf:{} size:{} wr:{}.",
+                                    "rdma-server[{}]: imm:{} type:{} allocated buf:{} size:{} wr:{}.",
                                     thread_id_,
                                     imm_data,
                                     buf[0], allocated_buf_int, size, wr_id);
@@ -267,7 +267,7 @@ namespace nova {
                                     context.stoc_file_id,
                                     context.stoc_file_buf_offset))
                                 << fmt::format(
-                                        "dc[{}]: Write StoC file failed id:{} offset:{} creq_id:{} req_id:{}",
+                                        "rdma-server[{}]: Write StoC file failed id:{} offset:{} creq_id:{} req_id:{}",
                                         thread_id_, context.stoc_file_id,
                                         context.stoc_file_buf_offset,
                                         stoc_req_id,
@@ -275,7 +275,7 @@ namespace nova {
                             processed = true;
 
                             NOVA_LOG(DEBUG) << fmt::format(
-                                        "dc[{}]: Write StoC file complete id:{} offset:{} creq_id:{} req_id:{}",
+                                        "rdma-server[{}]: Write StoC file complete id:{} offset:{} creq_id:{} req_id:{}",
                                         thread_id_, context.stoc_file_id,
                                         context.stoc_file_buf_offset,
                                         stoc_req_id,
@@ -333,7 +333,7 @@ namespace nova {
                         }
                     }
                     NOVA_LOG(DEBUG) << fmt::format(
-                                "dc[{}]: Delete SSTables. nsstables:{}",
+                                "rdma-server[{}]: Delete SSTables. nsstables:{}",
                                 thread_id_, nfiles);
                     processed = true;
                 } else if (buf[0] ==
@@ -357,7 +357,7 @@ namespace nova {
                     std::string filename;
                     leveldb::DecodeStr(buf + msg_size, &filename);
                     NOVA_LOG(DEBUG) << fmt::format(
-                                "dc{}: Read blocks of StoC file {} offset:{} size:{} ltc_mr_offset:{} file:{}",
+                                "rdma-server{}: Read blocks of StoC file {} offset:{} size:{} ltc_mr_offset:{} file:{}",
                                 thread_id_, stoc_file_id, offset, size,
                                 ltc_mr_offset,
                                 filename);
@@ -428,10 +428,10 @@ namespace nova {
                     uint64_t stoc_file_off = stoc_file->AllocateBuf(
                             filename, size, is_meta_blocks);
                     NOVA_ASSERT(stoc_file_off != UINT64_MAX)
-                        << fmt::format("dc{}: {} {}", thread_id_, filename,
+                        << fmt::format("rdma-server{}: {} {}", thread_id_, filename,
                                        size);
                     NOVA_ASSERT(stoc_file->stoc_file_name_ == filename)
-                        << fmt::format("dc{}: {} {}", thread_id_,
+                        << fmt::format("rdma-server{}: {} {}", thread_id_,
                                        stoc_file->stoc_file_name_, filename);
 
 
@@ -453,7 +453,7 @@ namespace nova {
                     request_context_map_[req_id] = context;
 
                     NOVA_LOG(DEBUG) << fmt::format(
-                                "dc{}: Allocate buf for StoC file Write db:{} fn:{} size:{} file_id:{} file_off:{} fname:{}",
+                                "rdma-server{}: Allocate buf for StoC file Write db:{} fn:{} size:{} file_id:{} file_off:{} fname:{}",
                                 thread_id_, dbname, file_number, size,
                                 stoc_file->file_id(), stoc_file_off, filename);
                     processed = true;
@@ -476,7 +476,7 @@ namespace nova {
                     private_cq_.push_back(task);
 
                     NOVA_LOG(DEBUG) << fmt::format(
-                                "dc[{}]: Allocate log buffer for file {}.",
+                                "rdma-server{}]: Allocate log buffer for file {}.",
                                 thread_id_, log_file);
                     processed = true;
                 } else if (buf[0] ==
@@ -502,7 +502,7 @@ namespace nova {
                     context.size = size;
                     request_context_map_[req_id] = context;
                     NOVA_LOG(DEBUG) << fmt::format(
-                                "dc[{}]: Allocate buffer for RDMA WRITE.",
+                                "rdma-server{}]: Allocate buffer for RDMA WRITE.",
                                 thread_id_);
                     processed = true;
                 } else if (buf[0] ==
@@ -540,7 +540,7 @@ namespace nova {
                     }
                     log_manager_->DeleteLogBuf(logfiles);
                     NOVA_LOG(DEBUG) << fmt::format(
-                                "dc[{}]: Delete log buffer for file {}.",
+                                "rdma-server{}]: Delete log buffer for file {}.",
                                 thread_id_, logfiles.size());
                     processed = true;
                 } else if (buf[0] ==
@@ -565,7 +565,7 @@ namespace nova {
                     task.stoc_req_id = stoc_req_id;
                     private_cq_.push_back(task);
                     NOVA_LOG(DEBUG) << fmt::format(
-                                "dc[{}]: Filename stoc file mapping {}.",
+                                "rdma-server{}]: Filename stoc file mapping {}.",
                                 thread_id_, fn_stocfile.size());
                     processed = true;
                 } else if (buf[0] ==

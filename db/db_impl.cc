@@ -2634,15 +2634,15 @@ namespace leveldb {
                                    uint32_t memtable_id) {
         if (nova::NovaConfig::config->log_record_mode ==
             nova::NovaLogRecordMode::LOG_RDMA && !options.local_write) {
-            auto dc = reinterpret_cast<leveldb::StoCBlockClient *>(options.stoc_client);
-            NOVA_ASSERT(dc);
-            dc->set_dbid(dbid_);
+            auto stoc = reinterpret_cast<leveldb::StoCBlockClient *>(options.stoc_client);
+            NOVA_ASSERT(stoc);
+            stoc->set_dbid(dbid_);
             options.stoc_client->InitiateReplicateLogRecords(
                     nova::LogFileName(server_id_, dbid_, memtable_id),
                     options.thread_id, dbid_, memtable_id,
                     options.rdma_backing_mem, log_records,
                     options.replicate_log_record_states);
-            dc->Wait();
+            stoc->Wait();
         }
     }
 
@@ -2652,9 +2652,9 @@ namespace leveldb {
                                    uint32_t memtable_id) {
         if (nova::NovaConfig::config->log_record_mode ==
             nova::NovaLogRecordMode::LOG_RDMA && !options.local_write) {
-            auto dc = reinterpret_cast<leveldb::StoCBlockClient *>(options.stoc_client);
-            NOVA_ASSERT(dc);
-            dc->set_dbid(dbid_);
+            auto stoc = reinterpret_cast<leveldb::StoCBlockClient *>(options.stoc_client);
+            NOVA_ASSERT(stoc);
+            stoc->set_dbid(dbid_);
             LevelDBLogRecord log_record = {};
             log_record.sequence_number = last_sequence;
             log_record.key = key;
@@ -2666,7 +2666,7 @@ namespace leveldb {
                     options.thread_id, dbid_, memtable_id,
                     options.rdma_backing_mem, {log_record},
                     options.replicate_log_record_states);
-            dc->Wait();
+            stoc->Wait();
         }
     }
 

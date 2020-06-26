@@ -2,7 +2,8 @@
 //
 // Created by Haoyu Huang on 5/19/20.
 // Copyright (c) 2020 University of Southern California. All rights reserved.
-//
+// It assumes a fixed size lookup index. One may swap it with any implementation of concurrent hash map.
+// TODO: Support cleaning up the lookup index to remove entries that point to obsolete memtable ids.
 
 #ifndef LEVELDB_LOOKUP_INDEX_H
 #define LEVELDB_LOOKUP_INDEX_H
@@ -29,12 +30,12 @@ namespace leveldb {
         uint32_t Encode(char *buf);
 
         void Decode(Slice *buf);
+
     private:
         uint32_t size_ = 0;
         TableLocation *table_locator_ = nullptr;
     };
 }
-
 
 
 #endif //LEVELDB_LOOKUP_INDEX_H

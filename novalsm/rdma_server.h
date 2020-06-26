@@ -2,10 +2,9 @@
 //
 // Created by Haoyu Huang on 1/8/20.
 // Copyright (c) 2020 University of Southern California. All rights reserved.
-//
 
-#ifndef LEVELDB_RDMA_SERVER_H
-#define LEVELDB_RDMA_SERVER_H
+#ifndef RDMA_SERVER_H
+#define RDMA_SERVER_H
 
 #include <semaphore.h>
 #include <unordered_map>
@@ -79,7 +78,8 @@ namespace nova {
         bool is_meta_blocks;
     };
 
-    class RDMAServerImpl : public NovaMsgCallback, public leveldb::RDMAServer {
+    // RDMA server class that handles RDMA client requests.
+    class RDMAServerImpl : public RDMAMsgCallback, public leveldb::RDMAServer {
     public:
         RDMAServerImpl(rdmaio::RdmaCtrl *rdma_ctrl,
                        NovaMemManager *mem_manager,
@@ -135,4 +135,4 @@ namespace nova {
 }
 
 
-#endif //LEVELDB_RDMA_SERVER_H
+#endif //RDMA_SERVER_H

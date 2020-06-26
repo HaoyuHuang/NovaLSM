@@ -46,7 +46,7 @@ namespace nova {
 
         virtual char *GetSendBuf(int server_id) = 0;
 
-        virtual uint32_t store_id() = 0;
+        virtual uint32_t broker_id() = 0;
 
         virtual const std::vector<QPEndPoint> &end_points() = 0;
     };
@@ -82,7 +82,7 @@ namespace nova {
 
         char *GetSendBuf(int server_id) { return NULL; }
 
-        uint32_t store_id() { return 0; }
+        uint32_t broker_id() { return 0; }
 
         const std::vector<QPEndPoint> &end_points() { return dummy_; }
         std::vector<QPEndPoint> dummy_;

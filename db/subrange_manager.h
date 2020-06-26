@@ -2,6 +2,7 @@
 //
 // Created by Haoyu Huang on 5/4/20.
 // Copyright (c) 2020 University of Southern California. All rights reserved.
+// It assumes keys are integers.
 //
 
 #ifndef LEVELDB_SUBRANGE_MANAGER_H

@@ -23,6 +23,7 @@ namespace nova {
     class StorageTask;
     class ServerCompleteTask;
 
+    // A storage worker that handles storage related requests.
     class StorageWorker : public leveldb::EnvBGThread {
     public:
         StorageWorker(leveldb::StocPersistentFileManager *stoc_file_manager,

@@ -85,7 +85,7 @@ namespace leveldb {
                                             storage_stats[i].response,
                                             nullptr));
             }
-            // sort the dc stats.
+            // sort the stoc stats.
             std::sort(storage_stats.begin(), storage_stats.end(),
                       stoc_stats_comparator);
             for (int i = 0; i < num_storage_to_select; i++) {

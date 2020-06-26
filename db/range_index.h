@@ -15,8 +15,6 @@
 #include "leveldb/slice.h"
 #include "version_set.h"
 
-#define MAX_LIVE_VERSIONS 100000
-
 namespace leveldb {
     struct RangeTables {
         std::set<uint32_t> memtable_ids;

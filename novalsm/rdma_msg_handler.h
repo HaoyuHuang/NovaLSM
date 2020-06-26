@@ -2,17 +2,17 @@
 //
 // Created by Haoyu Huang on 12/25/19.
 // Copyright (c) 2019 University of Southern California. All rights reserved.
-//
+// RDMA request handler.
 
-#ifndef LEVELDB_RDMA_MSG_HANDLER_H
-#define LEVELDB_RDMA_MSG_HANDLER_H
+#ifndef RDMA_MSG_HANDLER_H
+#define RDMA_MSG_HANDLER_H
 
 #include <string>
 #include <port/port_stdcxx.h>
 #include <leveldb/db.h>
 #include "leveldb/options.h"
 #include "common/nova_common.h"
-#include "rdma/nova_msg_callback.h"
+#include "rdma/rdma_msg_callback.h"
 #include "rdma/nova_rdma_broker.h"
 #include <semaphore.h>
 #include <list>
@@ -31,7 +31,7 @@ namespace nova {
 
     class RDMAServerImpl;
 
-    class RDMAMsgHandler : public NovaMsgCallback {
+    class RDMAMsgHandler : public RDMAMsgCallback {
     public:
         RDMAMsgHandler(RdmaCtrl *rdma_ctrl,
                        NovaMemManager *mem_manager,
@@ -99,4 +99,4 @@ namespace nova {
 }
 
 
-#endif //LEVELDB_RDMA_MSG_HANDLER_H
+#endif //RDMA_MSG_HANDLER_H

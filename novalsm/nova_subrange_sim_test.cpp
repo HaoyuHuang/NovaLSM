@@ -179,9 +179,9 @@ void TestSubRanges() {
     NOVA_ASSERT(buf != NULL) << "Not enough memory";
     system(fmt::format("exec rm -rf {}/*", NovaConfig::config->db_path).data());
     system(fmt::format("exec rm -rf {}/*",
-                       NovaConfig::config->stoc_file_path).data());
+                       NovaConfig::config->stoc_files_path).data());
 
-    mkdirs(NovaConfig::config->stoc_file_path.data());
+    mkdirs(NovaConfig::config->stoc_files_path.data());
     mkdirs(NovaConfig::config->db_path.data());
 
     std::vector<leveldb::EnvBGThread *> bgs;
@@ -276,7 +276,7 @@ void Read(uint32_t id) {
 int main(int argc, char *argv[]) {
 
     NovaConfig::config = new NovaConfig;
-    NovaConfig::config->stoc_file_path = "/tmp/rtables";
+    NovaConfig::config->stoc_files_path = "/tmp/rtables";
 
     NovaConfig::config->mem_pool_size_gb = 1;
 
@@ -288,7 +288,6 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->rdma_doorbell_batch_size = 8;
 
     NovaConfig::config->block_cache_mb = 0;
-    NovaConfig::config->row_cache_mb = 0;
     NovaConfig::config->memtable_size_mb = 16;
 
     NovaConfig::config->db_path = "/tmp/db";

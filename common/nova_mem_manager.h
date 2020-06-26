@@ -2,7 +2,7 @@
 //
 // Created by Haoyu Huang on 4/8/19.
 // Copyright (c) 2019 University of Southern California. All rights reserved.
-//
+// A slabclass memory manager.
 
 #ifndef NOVA_MEM_MANAGER_H
 #define NOVA_MEM_MANAGER_H

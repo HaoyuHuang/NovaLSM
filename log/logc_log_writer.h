@@ -16,6 +16,7 @@
 #include "novalsm/rdma_admission_ctrl.h"
 
 namespace leveldb {
+    // Replicate log records across StoCs.
     class LogCLogWriter {
     public:
         LogCLogWriter(nova::NovaRDMABroker *rdma_broker,

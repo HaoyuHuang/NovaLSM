@@ -11,7 +11,7 @@
 
 #include "rdma_ctrl.hpp"
 #include "nova_rdma_broker.h"
-#include "nova_msg_callback.h"
+#include "rdma_msg_callback.h"
 #include "common/nova_common.h"
 
 
@@ -19,7 +19,8 @@ namespace nova {
 
     using namespace rdmaio;
 
-    // Thread local. One thread has one RDMA RC Store.
+    // Thread local. One thread has one RDMA RC Broker.
+    // It maintains a circular buffer to issue RDMA SENDs.
     class NovaRDMARCBroker : public NovaRDMABroker {
     public:
         NovaRDMARCBroker(char *buf, int thread_id,
@@ -32,7 +33,7 @@ namespace nova {
                          char *mr_buf,
                          uint64_t mr_size,
                          uint64_t rdma_port,
-                         NovaMsgCallback *callback) :
+                         RDMAMsgCallback *callback) :
                 rdma_buf_(buf),
                 thread_id_(thread_id),
                 end_points_(end_points),
@@ -133,7 +134,7 @@ namespace nova {
 
         char *GetSendBuf(int server_id);
 
-        uint32_t store_id() { return thread_id_; }
+        uint32_t broker_id() { return thread_id_; }
 
         void ReinitializeQPs(rdmaio::RdmaCtrl *rdma_ctrl);
 
@@ -179,7 +180,7 @@ namespace nova {
         int *send_sge_index_ = nullptr;
         int *npending_send_ = nullptr;
         int *psend_index_ = nullptr;
-        NovaMsgCallback *callback_ = nullptr;
+        RDMAMsgCallback *callback_ = nullptr;
 
         void InitializeQPs(RdmaCtrl *rdma_ctrl);
 

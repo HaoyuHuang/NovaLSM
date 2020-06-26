@@ -205,30 +205,30 @@ namespace nova {
 /* Initial power multiplier for the hash table */
 #define HASHPOWER_DEFAULT 16
 
-    class Semaphore {
-    public:
-        Semaphore(int count_ = 0)
-                : count(count_) {}
-
-        inline void notify() {
-            std::unique_lock<std::mutex> lock(mtx);
-            count++;
-            cv.notify_all();
-        }
-
-        inline void wait() {
-            std::unique_lock<std::mutex> lock(mtx);
-            while (count == 0) {
-                cv.wait(lock);
-            }
-            count--;
-        }
-
-    private:
-        std::mutex mtx;
-        std::condition_variable cv;
-        int count = 0;
-    };
+//    class Semaphore {
+//    public:
+//        Semaphore(int count_ = 0)
+//                : count(count_) {}
+//
+//        inline void notify() {
+//            std::unique_lock<std::mutex> lock(mtx);
+//            count++;
+//            cv.notify_all();
+//        }
+//
+//        inline void wait() {
+//            std::unique_lock<std::mutex> lock(mtx);
+//            while (count == 0) {
+//                cv.wait(lock);
+//            }
+//            count--;
+//        }
+//
+//    private:
+//        std::mutex mtx;
+//        std::condition_variable cv;
+//        int count = 0;
+//    };
 
 
     uint32_t fastrand();
@@ -431,47 +431,6 @@ namespace nova {
         }
     };
 
-    enum LeaseType : uint8_t {
-        ILEASE = 1,
-        QLEASE = 2
-    };
-
-    struct LeaseEntry {
-        uint8_t type = 0;
-        // worker_id | lease_id.
-        uint64_t lease_id = 0;
-        // client_id | session_id.
-        uint64_t session_id = 0;
-
-        bool empty() {
-            return lease_id == 0;
-        }
-
-        static uint64_t size() {
-            return sizeof(uint8_t) + sizeof(uint64_t) + sizeof(uint64_t);
-        }
-
-        static LeaseEntry chars_to_leaseitem(char *buf) {
-            LeaseEntry it{};
-            char *tmp = buf;
-            memcpy(&it.type, tmp, sizeof(uint8_t));
-            tmp += sizeof(uint8_t);
-            memcpy(&it.lease_id, tmp, sizeof(uint64_t));
-            tmp += sizeof(uint64_t);
-            memcpy(&it.session_id, tmp, sizeof(uint64_t));
-            return it;
-        }
-
-        static void leaseitem_to_chars(char *_base, const LeaseEntry &entry) {
-            char *buf = _base;
-            memcpy(buf, &entry.type, sizeof(uint8_t));
-            buf += sizeof(uint8_t);
-            memcpy(buf, &entry.lease_id, sizeof(uint64_t));
-            buf += sizeof(uint64_t);
-            memcpy(buf, &entry.session_id, sizeof(uint64_t));
-        }
-    };
-
 // Memory layout:
 // stale, refs, nkey, key, nval (string representation + 1), 'h', val, checksum.
 // data points to the beginning of the backing array.
@@ -626,19 +585,6 @@ namespace nova {
             return nkey == 0;
         }
     };
-
-//    inline uint32_t
-//    LogRecordsSize(const leveldb::LevelDBLogRecord &log_record);
-//
-//    inline uint32_t
-//    LogRecordsSize(const std::vector<leveldb::LevelDBLogRecord> &log_records);
-//
-//    inline uint32_t
-//    EncodeLogRecord(char *buf,
-//                    const leveldb::LevelDBLogRecord &log_record);
-//
-//    inline uint32_t DecodeLogRecord(char *buf,
-//                             leveldb::LevelDBLogRecord *log_record);
 
     inline uint32_t
     LogRecordSize(const leveldb::LevelDBLogRecord &record) {

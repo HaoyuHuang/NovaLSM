@@ -20,7 +20,7 @@
 #include "ltc/db_helper.h"
 
 namespace nova {
-    void start(NICConnWorker *store) {
+    void start(NICClientReqWorker *store) {
         store->Start();
     }
 
@@ -342,12 +342,6 @@ namespace nova {
                                block_cache->TotalCapacity(),
                                NovaConfig::config->block_cache_mb);
         }
-        if (NovaConfig::config->row_cache_mb > 0) {
-            uint64_t row_cache_size =
-                    (uint64_t) (NovaConfig::config->row_cache_mb) * 1024 *
-                    1024;
-            row_cache = leveldb::NewLRUCache(row_cache_size);
-        }
         leveldb::MemTablePool *pool = new leveldb::MemTablePool;
         pool->num_available_memtables_ =
                 NovaConfig::config->num_memtables;
@@ -362,13 +356,13 @@ namespace nova {
                            NovaConfig::config->ltc_servers.size();
 
         leveldb::StocPersistentFileManager *stoc_file_manager = new leveldb::StocPersistentFileManager(
-                env, mem_manager, NovaConfig::config->stoc_file_path,
+                env, mem_manager, NovaConfig::config->stoc_files_path,
                 NovaConfig::config->max_stoc_file_size,
                 NovaConfig::config->servers.size(),
                 NovaConfig::config->my_server_id,
                 nranges);
 
-        std::vector<nova::NovaMsgCallback *> rdma_threads;
+        std::vector<nova::RDMAMsgCallback *> rdma_threads;
         std::vector<leveldb::StoCBlockClient *> db_clients;
         for (int db_index = 0; db_index < ndbs; db_index++) {
             auto reorg = new leveldb::LTCCompactionThread(mem_manager);
@@ -398,6 +392,7 @@ namespace nova {
         for (auto &dbname : dbnames) {
             mkdirs(dbname.c_str());
         }
+        // Assign request id space so that they won't conflict.
         int worker_id = 0;
         uint32_t max_req_id = UINT32_MAX - 1;
         uint32_t range_per_server =
@@ -555,7 +550,7 @@ namespace nova {
         for (int i = 0;
              i <
              NovaConfig::config->num_conn_workers; i++) {
-            conn_workers.push_back(new NICConnWorker(i));
+            conn_workers.push_back(new NICClientReqWorker(i));
             conn_workers[i]->set_dbs(dbs_);
             conn_workers[i]->mem_manager_ = mem_manager;
 
@@ -853,7 +848,7 @@ namespace nova {
         make_socket_non_blocking(client_fd);
         NOVA_LOG(DEBUG) << "register " << client_fd;
 
-        NICConnWorker *store = server->conn_workers[server->current_conn_worker_id_];
+        NICClientReqWorker *store = server->conn_workers[server->current_conn_worker_id_];
         if (NovaConfig::config->num_conn_workers == 1) {
             server->current_conn_worker_id_ = 0;
         } else {

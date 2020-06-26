@@ -9,7 +9,7 @@
 
 #include <semaphore.h>
 
-#include "rdma/nova_msg_callback.h"
+#include "rdma/rdma_msg_callback.h"
 #include "rdma/nova_rdma_broker.h"
 #include "stoc/persistent_stoc_file.h"
 #include "common/nova_mem_manager.h"
@@ -34,7 +34,7 @@ namespace nova {
 
     class RDMAWRITEDiskWorker;
 
-    class RDMAWRITEServerWorker : public NovaMsgCallback {
+    class RDMAWRITEServerWorker : public RDMAMsgCallback {
     public:
         RDMAWRITEServerWorker(uint32_t max_run_time, uint32_t write_size_kb,
                               bool is_local_disk_bench, bool eval_disk_horizontal_scalability, uint32_t server_id);

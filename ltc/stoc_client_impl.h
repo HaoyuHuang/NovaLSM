@@ -2,7 +2,8 @@
 //
 // Created by Haoyu Huang on 1/8/20.
 // Copyright (c) 2020 University of Southern California. All rights reserved.
-//
+// StoCBlockingClient uses a semaphore to wait for the response after issuing a request.
+// StoCRDMAClient is based on RDMA.
 
 #ifndef LEVELDB_STOC_CLIENT_IMPL_H
 #define LEVELDB_STOC_CLIENT_IMPL_H
@@ -133,12 +134,13 @@ namespace leveldb {
 
     class StoCRDMAClient : public StoCClient {
     public:
-        StoCRDMAClient(uint32_t dc_client_id, nova::NovaRDMABroker *rdma_broker,
+        StoCRDMAClient(uint32_t stoc_client_id,
+                       nova::NovaRDMABroker *rdma_broker,
                        nova::NovaMemManager *mem_manager,
                        leveldb::LogCLogWriter *rdma_log_writer,
                        uint32_t lower_req_id, uint32_t upper_req_id,
                        RDMAServer *rdma_server)
-                : stoc_client_id_(dc_client_id), rdma_broker_(rdma_broker),
+                : stoc_client_id_(stoc_client_id), rdma_broker_(rdma_broker),
                   mem_manager_(mem_manager),
                   rdma_log_writer_(rdma_log_writer),
                   lower_req_id_(lower_req_id), upper_req_id_(upper_req_id),

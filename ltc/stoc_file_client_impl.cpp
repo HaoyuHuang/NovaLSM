@@ -577,20 +577,19 @@ namespace leveldb {
                 backing_mem_block = scratch;
             }
             NOVA_ASSERT(backing_mem_block);
-            auto dc = reinterpret_cast<leveldb::StoCBlockClient *>(read_options.stoc_client);
-            dc->set_dbid(dbid_);
-            uint32_t req_id = dc->InitiateReadDataBlock(
+            auto stoc_client = reinterpret_cast<leveldb::StoCBlockClient *>(read_options.stoc_client);
+            stoc_client->set_dbid(dbid_);
+            uint32_t req_id = stoc_client->InitiateReadDataBlock(
                     block_handle, offset, n, backing_mem_block, n, "", true);
             NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("t[{}]: CCRead req:{} start db:{} fn:{} s:{}",
                                read_options.thread_id,
                                req_id, dbid_, file_number_, n);
-            dc->Wait();
+            stoc_client->Wait();
             NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("t[{}]: CCRead req:{} complete db:{} fn:{} s:{}",
                                read_options.thread_id,
                                req_id, dbid_, file_number_, n);
-//            NOVA_ASSERT(dc->IsDone(req_id, nullptr, nullptr));
             NOVA_ASSERT(nova::IsRDMAWRITEComplete(backing_mem_block, n))
                 << fmt::format("t[{}]: {}", read_options.thread_id, req_id);
             ptr = backing_mem_block;
@@ -634,14 +633,14 @@ namespace leveldb {
         NOVA_ASSERT(backing_mem_table_) << "Running out of memory";
         uint64_t offset = 0;
         uint32_t reqs[meta_->data_block_group_handles.size()];
-        auto dc = reinterpret_cast<leveldb::StoCBlockClient *>(stoc_client);
-        dc->set_dbid(dbid_);
+        auto stoc_block_client = reinterpret_cast<leveldb::StoCBlockClient *>(stoc_client);
+        stoc_block_client->set_dbid(dbid_);
         for (int i = 0; i < meta_->data_block_group_handles.size(); i++) {
             const StoCBlockHandle &handle = meta_->data_block_group_handles[i];
             NOVA_ASSERT(offset + handle.size <= meta_->file_size);
             uint64_t id =
                     (((uint64_t) handle.server_id) << 32) | handle.stoc_file_id;
-            reqs[i] = dc->InitiateReadDataBlock(handle,
+            reqs[i] = stoc_block_client->InitiateReadDataBlock(handle,
                                                 handle.offset,
                                                 handle.size,
                                                 backing_mem_table_ +
@@ -657,12 +656,11 @@ namespace leveldb {
         }
         // Wait for all reads to complete.
         for (int i = 0; i < meta_->data_block_group_handles.size(); i++) {
-            dc->Wait();
+            stoc_block_client->Wait();
         }
         offset = 0;
         for (int i = 0; i < meta_->data_block_group_handles.size(); i++) {
             const StoCBlockHandle &handle = meta_->data_block_group_handles[i];
-//            NOVA_ASSERT(dc->IsDone(reqs[i], nullptr, nullptr));
             NOVA_ASSERT(nova::IsRDMAWRITEComplete(backing_mem_table_ + offset,
                                                   handle.size));
             offset += handle.size;

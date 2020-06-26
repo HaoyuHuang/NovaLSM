@@ -222,7 +222,7 @@ namespace leveldb {
         IncrementReqId();
         NOVA_LOG(DEBUG)
             << fmt::format(
-                    "dcclient[{}]: Read log file: dc:{} off:{} size:{} req:{}",
+                    "stoc-client[{}]: Read log file: stoc:{} off:{} size:{} req:{}",
                     stoc_client_id_, stoc_id, remote_offset, size,
                     req_id);
         return req_id;

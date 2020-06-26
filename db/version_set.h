@@ -29,6 +29,8 @@
 #include "table_cache.h"
 #include "range_index.h"
 
+// Maintain this many live memtables.
+// The program exits when the number of memtables exceeds this threshold.
 #define MAX_LIVE_MEMTABLES 100000
 
 namespace leveldb {
@@ -216,6 +218,7 @@ namespace leveldb {
         uint32_t Encode(char *buf);
 
         void Decode(Slice *buf);
+
         int refs_ = 0;          // Number of live refs to this version
 
     private:

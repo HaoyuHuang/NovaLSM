@@ -146,7 +146,7 @@ namespace nova {
         uint64_t log_buf_size;
         uint64_t max_stoc_file_size;
         uint64_t sstable_size;
-        std::string stoc_file_path;
+        std::string stoc_files_path;
 
         bool use_local_disk;
         bool enable_subrange;
@@ -185,7 +185,6 @@ namespace nova {
         int level;
 
         int block_cache_mb;
-        int row_cache_mb;
         bool enable_lookup_index;
         bool enable_range_index;
         uint32_t num_memtables;

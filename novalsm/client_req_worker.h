@@ -2,10 +2,10 @@
 //
 // Created by Haoyu Huang on 3/28/19.
 // Copyright (c) 2019 University of Southern California. All rights reserved.
-//
+// Client request worker based on libevent.
 
-#ifndef RLIB_NOVA_MEM_STORE_H
-#define RLIB_NOVA_MEM_STORE_H
+#ifndef CLIENT_REQ_WORKER_H
+#define CLIENT_REQ_WORKER_H
 
 
 #include <event.h>
@@ -14,7 +14,7 @@
 #include <atomic>
 #include <chrono>
 
-#include "rdma/nova_msg_callback.h"
+#include "rdma/rdma_msg_callback.h"
 #include "rdma/nova_rdma_broker.h"
 #include "common/nova_common.h"
 #include "common/nova_config.h"
@@ -95,9 +95,9 @@ namespace nova {
         std::vector<RDMAMsgHandler *> workers;
     };
 
-    class NICConnWorker {
+    class NICClientReqWorker {
     public:
-        NICConnWorker(int thread_id)
+        NICClientReqWorker(int thread_id)
                 :
                 thread_id_(thread_id) {
             NOVA_LOG(INFO) << "memstore[" << thread_id << "]: "
@@ -140,7 +140,7 @@ namespace nova {
         std::vector<leveldb::DB *> dbs_;
         struct event_base *base = nullptr;
         rdmaio::RdmaCtrl *ctrl_;
-        std::vector<nova::NovaMsgCallback *> rdma_threads;
+        std::vector<nova::RDMAMsgCallback *> rdma_threads;
         leveldb::StocPersistentFileManager *stoc_file_manager_;
 
         leveldb::StoCBlockClient *stoc_client_;
@@ -164,4 +164,4 @@ namespace nova {
     };
 }
 
-#endif //RLIB_NOVA_MEM_STORE_H
+#endif //CLIENT_REQ_WORKER_H
