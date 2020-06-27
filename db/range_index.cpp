@@ -242,24 +242,30 @@ namespace leveldb {
                                             range_index_version_seq_id_,
                                             edit.lsm_version_id);
         if (edit.add_new_memtable) {
-            NOVA_ASSERT(edit.sr);
-            int start_id = 0;
-            BinarySearch(new_range_idx->ranges_, edit.sr->tiny_ranges[0].lower,
-                         &start_id, user_comparator_);
-            NOVA_ASSERT(start_id != -1);
-            const std::string &upper = edit.sr->tiny_ranges[
-                    edit.sr->tiny_ranges.size() - 1].upper;
-            while (true) {
-                new_range_idx->range_tables_[start_id].memtable_ids.insert(
-                        edit.new_memtable_id);
-                start_id++;
-                if (start_id == new_range_idx->ranges_.size()) {
-                    break;
+            if (edit.sr) {
+                int start_id = 0;
+                BinarySearch(new_range_idx->ranges_, edit.sr->tiny_ranges[0].lower,
+                             &start_id, user_comparator_);
+                NOVA_ASSERT(start_id != -1);
+                const std::string &upper = edit.sr->tiny_ranges[
+                        edit.sr->tiny_ranges.size() - 1].upper;
+                while (true) {
+                    new_range_idx->range_tables_[start_id].memtable_ids.insert(
+                            edit.new_memtable_id);
+                    start_id++;
+                    if (start_id == new_range_idx->ranges_.size()) {
+                        break;
+                    }
+                    if (new_range_idx->ranges_[start_id].lower == upper ||
+                        new_range_idx->ranges_[start_id].IsSmallerThanLower(
+                                upper, user_comparator_)) {
+                        break;
+                    }
                 }
-                if (new_range_idx->ranges_[start_id].lower == upper ||
-                    new_range_idx->ranges_[start_id].IsSmallerThanLower(
-                            upper, user_comparator_)) {
-                    break;
+            } else {
+                for (int i = 0; i < new_range_idx->range_tables_.size(); i++) {
+                    auto &table = new_range_idx->range_tables_[i];
+                    table.memtable_ids.insert(edit.new_memtable_id);
                 }
             }
         }
