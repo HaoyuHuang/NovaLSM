@@ -23,6 +23,8 @@ https://github.com/HaoyuHuang/NovaLSM-YCSB-Client
 https://github.com/HaoyuHuang/NovaLSMSim
 
 # Setup on Cloudlab
+Cloudlab profile: https://github.com/HaoyuHuang/NovaLSM/blob/master/scripts/bootstrap/cloud_lab_profile.py
+
 1. Setup SSH between cloudlab nodes. 
 ```
 bash scripts/bootstrap/env/setup-apt-ssh.sh $number_of_nodes
@@ -32,7 +34,9 @@ bash scripts/bootstrap/env/setup-apt-ssh.sh $number_of_nodes
 ```
 bash scripts/bootstrap/env/init.sh $number_of_nodes
 ```
-4. Scripts to reproduce numbers shown in the paper.
+
+# Experiments
+We conducted all of our experiments using cloudlab r6220 nodes. Below are the scripts to reproduce numbers shown in the paper. You need to modify the directory in these scripts to point to your directory that stores the server binaries. 
 ```
 bash scripts/exp/nova_lsm_exps.sh
 ```
