@@ -36,7 +36,7 @@ bash scripts/bootstrap/env/init.sh $number_of_nodes
 ```
 
 # Experiments
-We conducted all of our experiments using cloudlab r6220 nodes. Below are the scripts to reproduce numbers shown in the paper. You need to modify the directory in these scripts to point to your directory that stores the server binaries. All experiments take a total of 2-3 days to complete. 
+We conducted all of our experiments using cloudlab r6220 nodes. Below are the scripts to reproduce numbers shown in the paper. You need to modify the directory in these scripts to point to your directory that stores the server binaries. It takes a total of 2-3 days to complete all experiments. 
 ```
 bash scripts/exp/nova_lsm_exps.sh
 ```
