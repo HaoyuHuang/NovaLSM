@@ -231,7 +231,7 @@ namespace leveldb {
                               const std::unordered_map<uint32_t, MemTableL0FilesEdit> &edits) {
         for (const auto &it : edits) {
             NOVA_LOG(rdmaio::DEBUG)
-                << fmt::format("update table locator mid:{} {}", it.first,
+                << fmt::format("update lookup index mid:{} {}", it.first,
                                it.second.DebugString());
             versions_->mid_table_mapping_[it.first]->UpdateL0Files(version_id,
                                                                    it.second);
@@ -466,7 +466,7 @@ namespace leveldb {
                            meta_files.size());
         FetchMetadataFilesInParallel(meta_files, dbname_, options_, client,
                                      env_);
-        // Rebuild table locator.
+        // Rebuild lookup index.
         ReadOptions ro;
         ro.mem_manager = options_.mem_manager;
         ro.stoc_client = options_.stoc_client;
@@ -874,7 +874,7 @@ namespace leveldb {
                                       const Slice &value) {
             output_memtable->Add(ikey.sequence, ValueType::kTypeValue,
                                  ikey.user_key, value);
-            // Update table locator.
+            // Update lookup index.
             uint64_t key;
             nova::str_to_int(ikey.user_key.data(), &key,
                              ikey.user_key.size());
@@ -926,7 +926,7 @@ namespace leveldb {
             range_index_manager_->AppendNewVersion(&scan_stats, range_edit);
         }
 
-        // The table locator is updated before this so that new gets will reference the new memtable.
+        // The lookup index is updated before this so that new gets will reference the new memtable.
         for (auto &task : tasks) {
             MemTable *imm = reinterpret_cast<MemTable *>(task.memtable);
             auto atomic_imm = versions_->mid_table_mapping_[imm->memtableid()];

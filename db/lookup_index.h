@@ -4,6 +4,7 @@
 // Copyright (c) 2020 University of Southern California. All rights reserved.
 // It assumes a fixed size lookup index. One may swap it with any implementation of concurrent hash map.
 // TODO: Support cleaning up the lookup index to remove entries that point to obsolete memtable ids.
+// TODO: Support repairing lookup index upon recovery from a crash.
 
 #ifndef LEVELDB_LOOKUP_INDEX_H
 #define LEVELDB_LOOKUP_INDEX_H
