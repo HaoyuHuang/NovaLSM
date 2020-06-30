@@ -508,31 +508,44 @@ namespace leveldb {
                                new_srs->DebugString());
         }
 
-        if (options_.enable_range_index && options_.enable_subranges) {
-            auto new_srs = subrange_manager_->latest_subranges_.load();
+        if (options_.enable_range_index) {
             range_index_manager_ = new RangeIndexManager(&scan_stats, versions_,
                                                          user_comparator_);
             RangeIndex *init = new RangeIndex(&scan_stats, 0,
                                               versions_->current_version_id());
-            std::string last_key;
-            int range_index_id = -1;
-            for (int i = 0; i < new_srs->subranges.size(); i++) {
-                const auto &sr = new_srs->subranges[i];
-                if (last_key == sr.tiny_ranges[0].lower) {
-                    init->range_tables_[range_index_id].memtable_ids.insert(
+            if (options_.enable_subranges) {
+                auto new_srs = subrange_manager_->latest_subranges_.load();
+                std::string last_key;
+                int range_index_id = -1;
+                for (int i = 0; i < new_srs->subranges.size(); i++) {
+                    const auto &sr = new_srs->subranges[i];
+                    if (last_key == sr.tiny_ranges[0].lower) {
+                        init->range_tables_[range_index_id].memtable_ids.insert(
+                                partitioned_active_memtables_[i]->memtable->memtableid());
+                        continue;
+                    }
+                    Range r = {};
+                    r.lower = sr.tiny_ranges[0].lower;
+                    r.upper = sr.tiny_ranges[sr.tiny_ranges.size() - 1].upper;
+                    init->ranges_.push_back(r);
+                    RangeTables tables = {};
+                    tables.memtable_ids.insert(
                             partitioned_active_memtables_[i]->memtable->memtableid());
-                    continue;
+                    init->range_tables_.push_back(tables);
+                    last_key = sr.tiny_ranges[0].lower;
+                    range_index_id += 1;
                 }
+            } else {
                 Range r = {};
-                r.lower = sr.tiny_ranges[0].lower;
-                r.upper = sr.tiny_ranges[sr.tiny_ranges.size() - 1].upper;
+                r.lower = std::to_string(options_.lower_key);
+                r.upper = std::to_string(options_.upper_key);
                 init->ranges_.push_back(r);
                 RangeTables tables = {};
-                tables.memtable_ids.insert(
-                        partitioned_active_memtables_[i]->memtable->memtableid());
+                for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
+                    tables.memtable_ids.insert(
+                            partitioned_active_memtables_[i]->memtable->memtableid());
+                }
                 init->range_tables_.push_back(tables);
-                last_key = sr.tiny_ranges[0].lower;
-                range_index_id += 1;
             }
             range_index_manager_->Initialize(init);
             NOVA_LOG(rdmaio::INFO) << init->DebugString();
@@ -1644,7 +1657,7 @@ namespace leveldb {
         DeleteObsoleteVersions(compaction_coordinator_thread_);
         ObtainObsoleteFiles(compaction_coordinator_thread_,
                             &files_to_delete, &server_pairs,
-                            compacting_version_id);
+                            skip_compacting_version);
         if (range_index_manager_) {
             range_index_manager_->AppendNewVersion(&scan_stats, range_edit);
             range_index_manager_->DeleteObsoleteVersions();

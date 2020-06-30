@@ -244,7 +244,8 @@ namespace leveldb {
         if (edit.add_new_memtable) {
             if (edit.sr) {
                 int start_id = 0;
-                BinarySearch(new_range_idx->ranges_, edit.sr->tiny_ranges[0].lower,
+                BinarySearch(new_range_idx->ranges_,
+                             edit.sr->tiny_ranges[0].lower,
                              &start_id, user_comparator_);
                 NOVA_ASSERT(start_id != -1);
                 const std::string &upper = edit.sr->tiny_ranges[
