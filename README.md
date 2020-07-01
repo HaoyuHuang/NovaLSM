@@ -1,5 +1,5 @@
 # NovaLSM
-Nova-LSM is a component-based design of the LSM-tree using fast and high bandwidth networks such as RDMA. These components implement the following novel concepts.  First, they use RDMA to enable nodes of a shared-nothing architecture to share their disk bandwidth and space. Second, they construct ranges dynamically at runtime to boost performance and parallelize compaction. Third, they scatter blocks of a file (SSTable) across an arbitrary number of disks to scale. Fourth, the logging component separates availability of log records from their durability.  These designs provide for alternative implementations of a component with different configuration settings.  NovaLSM is built on top of [LevelDB](https://github.com/google/leveldb). 
+Nova-LSM is a component-based design of the LSM-tree using fast and high bandwidth networks such as RDMA. Its components implement the following novel concepts. First, they use RDMA to enable nodes of a shared-nothing architecture to share their disk bandwidth and storage. Second, they construct ranges dynamically at runtime to parallelize compaction and boost performance. Third, they scatter blocks of a file (SSTable) across an arbitrary number of disks and use power-of-d to scale. Fourth, the logging component separates availability of log records from their durability. These design decisions provide for an elastic system with well-defined knobs that control its performance and scalability characteristics. We present an implementation of these designs using LevelDB as a starting point. Our evaluation shows Nova-LSM scales and outperforms its monolithic counter-part by several orders of magnitude. This is especially true with workloads that exhibit a skewed pattern of access to data. NovaLSM is built on top of [LevelDB](https://github.com/google/leveldb). 
 
 # Platform
 Linux. We have tested it on [CloudLab R320 and R6220](https://docs.cloudlab.us/hardware.html) instances. 
@@ -36,7 +36,7 @@ bash scripts/bootstrap/env/init.sh $number_of_nodes
 ```
 
 # Experiments
-We conducted all of our experiments using cloudlab r6220 nodes. Below are the scripts to reproduce numbers shown in the paper. You need to modify the directory in these scripts to point to your directory that stores the server binaries. It takes a total of 2-3 days to complete all experiments. 
+We conducted all of our experiments using cloudlab r6220 nodes. Below are the scripts to reproduce numbers shown in the paper. You need to modify the directory in these scripts to point to your directory that stores the server binaries. It takes a total of ~3 days to complete all experiments. 
 ```
 bash scripts/exp/nova_lsm_exps.sh
 ```
