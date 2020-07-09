@@ -277,6 +277,20 @@ namespace leveldb {
         delete it;
     }
 
+    std::vector<leveldb::FileReplicaMetaData>
+    StoCWritableFileClient::replicas() {
+        std::vector<leveldb::FileReplicaMetaData> replicas;
+        std::vector<StoCBlockHandle> rhs;
+        for (int i = 0; i < status_.size(); i++) {
+            rhs.push_back(status_[i].result_handle);
+        }
+        leveldb::FileReplicaMetaData replica;
+        replica.meta_block_handle = meta_block_handle_;
+        replica.data_block_group_handles = rhs;
+        replicas.push_back(std::move(replica));
+        return replicas;
+    }
+
     void StoCWritableFileClient::WaitForPersistingDataBlocks() {
         auto client = reinterpret_cast<StoCBlockClient *> (stoc_client_);
         for (int i = 0; i < nblocks_in_group_.size(); i++) {
@@ -633,11 +647,12 @@ namespace leveldb {
         backing_mem_table_ = mem_manager_->ItemAlloc(thread_id_, scid);
         NOVA_ASSERT(backing_mem_table_) << "Running out of memory";
         uint64_t offset = 0;
-        uint32_t reqs[meta_->data_block_group_handles.size()];
+        uint32_t reqs[meta_->block_replica_handles[0].data_block_group_handles.size()];
         auto stoc_block_client = reinterpret_cast<leveldb::StoCBlockClient *>(stoc_client);
         stoc_block_client->set_dbid(dbid_);
-        for (int i = 0; i < meta_->data_block_group_handles.size(); i++) {
-            const StoCBlockHandle &handle = meta_->data_block_group_handles[i];
+        for (int i = 0; i <
+                        meta_->block_replica_handles[0].data_block_group_handles.size(); i++) {
+            const StoCBlockHandle &handle = meta_->block_replica_handles[0].data_block_group_handles[i];
             NOVA_ASSERT(offset + handle.size <= meta_->file_size);
             uint64_t id =
                     (((uint64_t) handle.server_id) << 32) | handle.stoc_file_id;
@@ -656,12 +671,14 @@ namespace leveldb {
             offset += handle.size;
         }
         // Wait for all reads to complete.
-        for (int i = 0; i < meta_->data_block_group_handles.size(); i++) {
+        for (int i = 0; i <
+                        meta_->block_replica_handles[0].data_block_group_handles.size(); i++) {
             stoc_block_client->Wait();
         }
         offset = 0;
-        for (int i = 0; i < meta_->data_block_group_handles.size(); i++) {
-            const StoCBlockHandle &handle = meta_->data_block_group_handles[i];
+        for (int i = 0; i <
+                        meta_->block_replica_handles[0].data_block_group_handles.size(); i++) {
+            const StoCBlockHandle &handle = meta_->block_replica_handles[0].data_block_group_handles[i];
             NOVA_ASSERT(nova::IsRDMAWRITEComplete(backing_mem_table_ + offset,
                                                   handle.size));
             offset += handle.size;

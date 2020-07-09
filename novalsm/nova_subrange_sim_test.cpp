@@ -406,10 +406,24 @@ int main(int argc, char *argv[]) {
     data_handle2.stoc_file_id = 4;
     data_handle2.offset = 5555;
     data_handle2.size = 111;
-    edit.AddFile(0, {4}, 333, 102400, 10240, 99999, smallest, largest,
-                 meta_handle, {data_handle});
-    edit.AddFile(0, {5}, 444, 232323, 45464, 32341, smallest, largest,
-                 meta_handle, {data_handle2});
+    {
+        std::vector<leveldb::FileReplicaMetaData> replicas;
+        leveldb::FileReplicaMetaData replica;
+        replica.meta_block_handle = meta_handle;
+        replica.data_block_group_handles.push_back(data_handle);
+        replicas.push_back(replica);
+        edit.AddFile(0, {4}, 333, 102400, 10240, 99999, smallest, largest,
+                     replicas);
+    }
+    {
+        std::vector<leveldb::FileReplicaMetaData> replicas;
+        leveldb::FileReplicaMetaData replica;
+        replica.meta_block_handle = meta_handle;
+        replica.data_block_group_handles.push_back(data_handle2);
+        replicas.push_back(replica);
+        edit.AddFile(0, {5}, 444, 232323, 45464, 32341, smallest, largest,
+                     replicas);
+    }
     edit.SetNextFile(45555);
     edit.SetLastSequence(9999999);
     uint32_t size = edit.EncodeTo(edit_memory);

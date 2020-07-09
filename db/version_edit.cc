@@ -154,7 +154,7 @@ namespace leveldb {
                 case kNewFile:
                     if (GetLevel(&input, &level) && f.Decode(&input, false)) {
                         new_files_.emplace_back(std::make_pair(level, f));
-                        f.data_block_group_handles.clear();
+                        f.block_replica_handles.clear();
                     } else {
                         msg = "new-file entry";
                     }

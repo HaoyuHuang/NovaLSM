@@ -283,10 +283,11 @@ namespace leveldb {
             }
             table_cache_->Evict(meta.number, false);
             // Delete data files.
-            auto handles = meta.data_block_group_handles;
+            auto handles = meta.block_replica_handles[0].data_block_group_handles;
             for (int i = 0; i < handles.size(); i++) {
                 SSTableStoCFilePair pair = {};
-                pair.sstable_name = TableFileName(dbname_, meta.number, false, 0);
+                pair.sstable_name = TableFileName(dbname_, meta.number, false,
+                                                  0);
                 pair.stoc_file_id = handles[i].stoc_file_id;
                 (*server_pairs)[handles[i].server_id].push_back(pair);
             }
@@ -294,12 +295,13 @@ namespace leveldb {
                     TableFileName(dbname_, meta.number, false, 0));
             // Delete metadata file.
             {
-                auto &it = (*server_pairs)[meta.meta_block_handle.server_id];
+                auto &it = (*server_pairs)[meta.block_replica_handles[0].meta_block_handle.server_id];
                 bool found = false;
                 for (auto &stoc_block_handle : it) {
                     if (stoc_block_handle.stoc_file_id ==
-                        meta.meta_block_handle.stoc_file_id ||
-                        meta.meta_block_handle.stoc_file_id == 0) {
+                        meta.block_replica_handles[0].meta_block_handle.stoc_file_id ||
+                        meta.block_replica_handles[0].meta_block_handle.stoc_file_id ==
+                        0) {
                         found = true;
                         break;
                     }
@@ -308,7 +310,7 @@ namespace leveldb {
                     SSTableStoCFilePair pair = {};
                     pair.sstable_name = TableFileName(dbname_, meta.number,
                                                       true, 0);
-                    pair.stoc_file_id = meta.meta_block_handle.stoc_file_id;
+                    pair.stoc_file_id = meta.block_replica_handles[0].meta_block_handle.stoc_file_id;
                     it.push_back(pair);
                 }
             }
@@ -433,9 +435,9 @@ namespace leveldb {
                                                          true, 0);
                 std::string filename = TableFileName(dbname_, meta->number,
                                                      false, 0);
-                auto meta_handle = meta->meta_block_handle;
+                auto meta_handle = meta->block_replica_handles[0].meta_block_handle;
                 stoc_fn_stocfileid[meta_handle.server_id][metafilename] = meta_handle.stoc_file_id;
-                for (auto &data_block : meta->data_block_group_handles) {
+                for (auto &data_block : meta->block_replica_handles[0].data_block_group_handles) {
                     stoc_fn_stocfileid[data_block.server_id][filename] = data_block.stoc_file_id;
                 }
             }
@@ -754,8 +756,7 @@ namespace leveldb {
                              meta.flush_timestamp,
                              meta.smallest,
                              meta.largest,
-                             meta.meta_block_handle,
-                             meta.data_block_group_handles);
+                             meta.block_replica_handles);
             }
         }
         versions_->AppendChangesToManifest(&edit, manifest_file_,
@@ -826,8 +827,7 @@ namespace leveldb {
                           meta.flush_timestamp,
                           meta.smallest,
                           meta.largest,
-                          meta.meta_block_handle,
-                          meta.data_block_group_handles);
+                          meta.block_replica_handles);
             nova::NovaGlobalVariables::global.written_memtable_sizes += meta.file_size;
         }
     }
@@ -1002,8 +1002,7 @@ namespace leveldb {
                              meta.flush_timestamp,
                              meta.smallest,
                              meta.largest,
-                             meta.meta_block_handle,
-                             meta.data_block_group_handles);
+                             meta.block_replica_handles);
             }
             NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format(
@@ -1312,8 +1311,7 @@ namespace leveldb {
                           f->flush_timestamp,
                           f->smallest,
                           f->largest,
-                          f->meta_block_handle,
-                          f->data_block_group_handles);
+                          f->block_replica_handles);
             std::string output = fmt::format(
                     "Moved #{}@{} to level-{} {} bytes\n",
                     f->number, c->level(), c->target_level(), f->file_size);
@@ -1684,8 +1682,7 @@ namespace leveldb {
                           out.converted_file_size,
                           versions_->last_sequence_,
                           out.smallest, out.largest,
-                          out.meta_block_handle,
-                          out.data_block_group_handles);
+                          out.block_replica_handles);
         }
         return Status::OK();
     }

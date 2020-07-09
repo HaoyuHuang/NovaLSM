@@ -71,18 +71,7 @@ namespace leveldb {
             num_data_blocks_ = num_data_blocks;
         }
 
-        StoCBlockHandle meta_block_handle() {
-            return meta_block_handle_;
-        }
-
-        std::vector<StoCBlockHandle> rhs() {
-            std::vector<StoCBlockHandle> rhs;
-            for (int i = 0; i < status_.size(); i++) {
-                rhs.push_back(status_[i].result_handle);
-            }
-            return rhs;
-        }
-
+        std::vector<leveldb::FileReplicaMetaData> replicas();
     private:
         struct PersistStatus {
             uint32_t remote_server_id = 0;

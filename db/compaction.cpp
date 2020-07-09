@@ -42,15 +42,19 @@ namespace leveldb {
             auto meta = files[i];
             std::string filename = TableFileName(dbname, meta->number, true, 0);
             uint32_t backing_scid = options.mem_manager->slabclassid(0,
-                                                                     meta->meta_block_handle.size);
+                                                                     meta->block_replica_handles[0].meta_block_handle.size);
             char *backing_buf = options.mem_manager->ItemAlloc(0, backing_scid);
             NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("Fetch metadata blocks {} handle:{}",
                                filename, meta->DebugString());
-            backing_buf[meta->meta_block_handle.size - 1] = 0;
+            backing_buf[meta->block_replica_handles[0].meta_block_handle.size -
+                        1] = 0;
             uint32_t req_id = client->InitiateReadDataBlock(
-                    meta->meta_block_handle, 0, meta->meta_block_handle.size,
-                    backing_buf, meta->meta_block_handle.size, filename, false);
+                    meta->block_replica_handles[0].meta_block_handle, 0,
+                    meta->block_replica_handles[0].meta_block_handle.size,
+                    backing_buf,
+                    meta->block_replica_handles[0].meta_block_handle.size,
+                    filename, false);
             backing_mems[i] = backing_buf;
         }
 
@@ -62,7 +66,7 @@ namespace leveldb {
             auto meta = files[i];
             char *backing_buf = backing_mems[i];
             uint32_t backing_scid = options.mem_manager->slabclassid(0,
-                                                                     meta->meta_block_handle.size);
+                                                                     meta->block_replica_handles[0].meta_block_handle.size);
             WritableFile *writable_file;
             EnvFileMetadata env_meta = {};
             auto sstablename = TableFileName(dbname, meta->number, false, 0);
@@ -75,7 +79,7 @@ namespace leveldb {
                                             &writable_file);
             NOVA_ASSERT(s.ok());
             Slice sstable_meta(backing_buf,
-                               meta->meta_block_handle.size);
+                               meta->block_replica_handles[0].meta_block_handle.size);
             s = writable_file->Append(sstable_meta);
             NOVA_ASSERT(s.ok());
             s = writable_file->Flush();
@@ -294,8 +298,7 @@ namespace leveldb {
         {
             FileMetaData *output = compact->current_output();
             output->converted_file_size = mem_file->Finalize();
-            output->meta_block_handle = mem_file->meta_block_handle();
-            output->data_block_group_handles = mem_file->rhs();
+            output->block_replica_handles = mem_file->replicas();
             delete mem_file;
             mem_file = nullptr;
             delete compact->outfile;

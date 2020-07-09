@@ -104,14 +104,18 @@ namespace leveldb {
                               largest.Encode().ToString());
         msg_size += EncodeFixed64(dst + msg_size, flush_timestamp);
         msg_size += EncodeFixed32(dst + msg_size, level);
-        meta_block_handle.EncodeHandle(dst + msg_size);
-        msg_size += StoCBlockHandle::HandleSize();
 
-        msg_size += EncodeFixed32(dst + msg_size,
-                                  data_block_group_handles.size());
-        for (auto &handle : data_block_group_handles) {
-            handle.EncodeHandle(dst + msg_size);
+        msg_size += EncodeFixed32(dst + msg_size, block_replica_handles.size());
+        for (int i = 0; i < block_replica_handles.size(); i++) {
+            block_replica_handles[i].meta_block_handle.EncodeHandle(
+                    dst + msg_size);
             msg_size += StoCBlockHandle::HandleSize();
+            msg_size += EncodeFixed32(dst + msg_size,
+                                      block_replica_handles[i].data_block_group_handles.size());
+            for (auto &handle : block_replica_handles[i].data_block_group_handles) {
+                handle.EncodeHandle(dst + msg_size);
+                msg_size += StoCBlockHandle::HandleSize();
+            }
         }
         return msg_size;
     }
@@ -125,6 +129,26 @@ namespace leveldb {
         }
     }
 
+    bool FileMetaData::DecodeReplicas(Slice *ptr) {
+        uint32_t num_replicas;
+        if (!DecodeFixed32(ptr, &num_replicas)) {
+            return false;
+        }
+        for (int i = 0; i < num_replicas; i++) {
+            FileReplicaMetaData replica = {};
+            if (!StoCBlockHandle::DecodeHandle(ptr,
+                                               &replica.meta_block_handle)) {
+                return false;
+            }
+            if (!StoCBlockHandle::DecodeHandles(ptr,
+                                                &replica.data_block_group_handles)) {
+                return false;
+            }
+            block_replica_handles.push_back(std::move(replica));
+        }
+        return true;
+    }
+
     bool FileMetaData::Decode(leveldb::Slice *input, bool copy) {
         return DecodeFixed64(input, &number) &&
                DecodeFixed64(input, &file_size) &&
@@ -132,11 +156,7 @@ namespace leveldb {
                GetInternalKey(input, &smallest, copy) &&
                GetInternalKey(input, &largest, copy) &&
                DecodeFixed64(input, &flush_timestamp) &&
-               DecodeFixed32(input, &level) &&
-                StoCBlockHandle::DecodeHandle(input,
-                                              &meta_block_handle) &&
-                StoCBlockHandle::DecodeHandles(input,
-                                               &data_block_group_handles);
+               DecodeFixed32(input, &level) && DecodeReplicas(input);
     }
 
     std::string FileMetaData::ShortDebugString() const {
@@ -178,12 +198,14 @@ namespace leveldb {
         AppendNumberTo(&r, flush_timestamp);
         r.append(" level:");
         AppendNumberTo(&r, level);
-        r.append(" meta:");
-        r.append(meta_block_handle.DebugString());
-        r.append(" data:");
-        for (auto &data : data_block_group_handles) {
-            r.append(data.DebugString());
-            r.append(" ");
+        r.append(" replicas:");
+        for (int i = 0; i < block_replica_handles.size(); i++) {
+            r.append(fmt::format("r[{}]: m-{} d-", i,
+                                 block_replica_handles[i].meta_block_handle.DebugString()));
+            for (auto &data : block_replica_handles[i].data_block_group_handles) {
+                r.append(data.DebugString());
+                r.append(" ");
+            }
         }
         return r;
     }

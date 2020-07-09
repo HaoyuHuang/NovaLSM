@@ -65,8 +65,7 @@ namespace leveldb {
                 uint64_t flush_timestamp,
                 const InternalKey &smallest,
                 const InternalKey &largest,
-                StoCBlockHandle meta_block_handle,
-                const std::vector<StoCBlockHandle> &data_block_group_handles) {
+                const std::vector<FileReplicaMetaData>& replicas) {
             FileMetaData f;
             f.level = level;
             f.memtable_ids = memtable_ids;
@@ -76,8 +75,7 @@ namespace leveldb {
             f.flush_timestamp = flush_timestamp;
             f.smallest = smallest;
             f.largest = largest;
-            f.meta_block_handle = meta_block_handle;
-            f.data_block_group_handles = data_block_group_handles;
+            f.block_replica_handles = replicas;
             new_files_.emplace_back(std::make_pair(level, f));
         }
 

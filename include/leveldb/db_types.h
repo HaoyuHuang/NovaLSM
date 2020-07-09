@@ -124,6 +124,11 @@ namespace leveldb {
         uint64_t fnumber = 0;
     };
 
+    struct FileReplicaMetaData {
+        StoCBlockHandle meta_block_handle;
+        std::vector<StoCBlockHandle> data_block_group_handles;
+    };
+
     struct FileMetaData {
         FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0),
                          converted_file_size(0),
@@ -132,6 +137,8 @@ namespace leveldb {
         uint32_t Encode(char *buf) const;
 
         bool Decode(Slice *ptr, bool copy);
+
+        bool DecodeReplicas(Slice *ptr);
 
         std::string DebugString() const;
 
@@ -149,8 +156,7 @@ namespace leveldb {
         InternalKey smallest;  // Smallest internal key served by table
         InternalKey largest;   // Largest internal key served by table
         FileCompactionStatus compaction_status;
-        StoCBlockHandle meta_block_handle;
-        std::vector<StoCBlockHandle> data_block_group_handles;
+        std::vector<FileReplicaMetaData> block_replica_handles = {};
     };
 
     class LEVELDB_EXPORT MemManager {
