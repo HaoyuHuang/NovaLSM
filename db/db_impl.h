@@ -60,6 +60,8 @@ namespace leveldb {
 
         Iterator *NewIterator(const ReadOptions &) override;
 
+        void QueryDBStats(DBStats* stats) override;
+
         const Snapshot *GetSnapshot() override;
 
         void StartTracing() override;

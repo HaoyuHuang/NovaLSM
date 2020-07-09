@@ -42,6 +42,11 @@ namespace leveldb {
         Slice limit;  // Not included in the range
     };
 
+    struct DBStats {
+        uint32_t num_l0_sstables;
+        bool needs_compaction;
+    };
+
 // A DB is a persistent ordered map from keys to values.
 // A DB is safe for concurrent access from multiple threads without
 // any external synchronization.
@@ -72,6 +77,8 @@ namespace leveldb {
         virtual Status
         GenerateLogRecords(const WriteOptions &options,
                            WriteBatch *updates) = 0;
+
+        virtual void QueryDBStats(DBStats* stats) = 0;
 
         // Remove the database entry (if any) for "key".  Returns OK on
         // success, and a non-OK status on error.  It is not an error if "key"

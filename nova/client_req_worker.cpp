@@ -425,8 +425,85 @@ namespace nova {
         return true;
     }
 
+    bool
+    process_socket_drain_l0_sstable_request(int fd, Connection *conn) {
+        RDMA_LOG(rdmaio::INFO) << "Drain SSTables";
+        NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
+        for (auto &db : worker->dbs_) {
+            db->SetL0StartCompactionBytes(0);
+            db->FlushMemTable(NovaConfig::config->log_record_mode);
+        }
+        while (true) {
+            bool stop = true;
+            for (auto &db : worker->dbs_) {
+                uint64_t bytes = db->L0CurrentBytes();
+                if (bytes > 0) {
+                    RDMA_LOG(INFO)
+                        << fmt::format("Waiting for {} bytes at L0", bytes);
+                    stop = false;
+                    db->ScheduleCompaction();
+                }
+            }
+            if (stop) {
+                break;
+            }
+            for (int i = 0; i < worker->dbs_.size(); i++) {
+                RDMA_LOG(INFO) << "Database " << i;
+                std::string value;
+                worker->dbs_[i]->GetProperty("leveldb.sstables", &value);
+                RDMA_LOG(INFO) << "\n" << value;
+                value.clear();
+                worker->dbs_[i]->GetProperty("leveldb.approximate-memory-usage",
+                                             &value);
+                RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
+            }
+            sleep(1);
+        }
+        for (int i = 0; i < worker->dbs_.size(); i++) {
+            worker->dbs_[i]->SetL0StartCompactionBytes(
+                    NovaConfig::config->l0_start_compaction_bytes);
+            RDMA_LOG(INFO) << "Database " << i;
+            std::string value;
+            worker->dbs_[i]->GetProperty("leveldb.sstables", &value);
+            RDMA_LOG(INFO) << "\n" << value;
+            value.clear();
+            worker->dbs_[i]->GetProperty("leveldb.approximate-memory-usage",
+                                         &value);
+            RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
+            leveldb::Log(worker->dbs_[i]->infoLog(), "%s", "Load complete");
+        }
+        return false;
+    }
+
+    bool
+    process_socket_stats_request(int fd, Connection *conn) {
+        RDMA_LOG(rdmaio::INFO) << "Obtain stats";
+        NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
+        int num_l0_sstables = 0;
+        bool needs_compaction = false;
+        for (auto db : worker->dbs_) {
+            leveldb::DBStats stats;
+            db->QueryDBStats(&stats);
+            if (!needs_compaction) {
+                needs_compaction = stats.needs_compaction;
+            }
+            num_l0_sstables += stats.num_l0_sstables;
+        }
+
+        if (num_l0_sstables == 0 && needs_compaction) {
+            num_l0_sstables = 10000;
+        }
+
+        char *response_buf = worker->buf;
+        int nlen = 0;
+        int len = int_to_str(response_buf, num_l0_sstables);
+        conn->response_buf = worker->buf;
+        conn->response_size = len;
+        return true;
+    }
+
     bool process_socket_request_handler(int fd, Connection *conn) {
-        auto worker = (NovaConnWorker*) conn->worker;
+        auto worker = (NovaConnWorker *) conn->worker;
         char *buf = worker->request_buf;
         if (buf[0] == RequestType::GET) {
             return process_socket_get(fd, conn, /*no_redirect=*/false);
@@ -446,13 +523,19 @@ namespace nova {
         if (buf[0] == RequestType::DELETE_LOG_FILE) {
             return process_socket_delete_log_file(fd, conn);
         }
+        if (buf[0] == RequestType::STATS) {
+            return process_socket_stats_request(fd, conn);
+        }
+        if (buf[0] == RequestType::DRAIN) {
+            return process_socket_drain_l0_sstable_request(fd, conn);
+        }
         RDMA_ASSERT(false) << buf[0];
         return false;
     }
 
     SocketState socket_read_handler(int fd, short which, Connection *conn) {
         RDMA_ASSERT((which & EV_READ) > 0) << which;
-        auto worker = (NovaConnWorker*) conn->worker;
+        auto worker = (NovaConnWorker *) conn->worker;
         char *buf = worker->request_buf + worker->req_ind;
         bool complete = false;
 

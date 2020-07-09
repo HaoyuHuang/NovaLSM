@@ -88,7 +88,9 @@ namespace nova {
         GET_INDEX = 'i',
         EXISTS = 'h',
         MISS = 'm',
-        FORCE_GET = 'G'
+        FORCE_GET = 'G',
+        STATS = 's',
+        DRAIN = 'S',
     };
 
     static RequestType char_to_req_type(char c) {

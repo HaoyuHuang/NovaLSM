@@ -1649,6 +1649,12 @@ namespace leveldb {
         return s;
     }
 
+    void DBImpl::QueryDBStats(DBStats *stats) {
+        MutexLock l(&mutex_);
+        stats->needs_compaction = versions_->NeedsCompaction();
+        stats->num_l0_sstables = versions_->NumLevelFiles(0);
+    }
+
     bool DBImpl::GetProperty(const Slice &property, std::string *value) {
         value->clear();
 
