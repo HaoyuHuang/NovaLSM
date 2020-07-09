@@ -25,7 +25,7 @@ namespace leveldb {
         Status s;
         meta->file_size = 0;
         iter->SeekToFirst();
-        std::string fname = TableFileName(dbname, meta->number);
+        std::string fname = TableFileName(dbname, meta->number, false, 0);
         if (iter->Valid()) {
             MemManager *mem_manager = bg_thread->mem_manager();
             uint64_t key = bg_thread->thread_id();
@@ -85,12 +85,12 @@ namespace leveldb {
         Status s;
         meta->file_size = 0;
         iter->SeekToFirst();
-        std::string fname = TableFileName(dbname, meta->number);
+        std::string fname = TableFileName(dbname, meta->number, false, 0);
         if (iter->Valid()) {
             const Comparator *user_comp = reinterpret_cast<const InternalKeyComparator *>(options.comparator)->user_comparator();
             MemManager *mem_manager = bg_thread->mem_manager();
             std::string filename = TableFileName(dbname,
-                                                 meta->number);
+                                                 meta->number, false, 0);
             StoCWritableFileClient *stoc_writable_file = new StoCWritableFileClient(
                     env,
                     options,

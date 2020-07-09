@@ -286,12 +286,12 @@ namespace leveldb {
             auto handles = meta.data_block_group_handles;
             for (int i = 0; i < handles.size(); i++) {
                 SSTableStoCFilePair pair = {};
-                pair.sstable_name = TableFileName(dbname_, meta.number, false);
+                pair.sstable_name = TableFileName(dbname_, meta.number, false, 0);
                 pair.stoc_file_id = handles[i].stoc_file_id;
                 (*server_pairs)[handles[i].server_id].push_back(pair);
             }
             files_to_delete->push_back(
-                    TableFileName(dbname_, meta.number, false));
+                    TableFileName(dbname_, meta.number, false, 0));
             // Delete metadata file.
             {
                 auto &it = (*server_pairs)[meta.meta_block_handle.server_id];
@@ -307,7 +307,7 @@ namespace leveldb {
                 if (!found) {
                     SSTableStoCFilePair pair = {};
                     pair.sstable_name = TableFileName(dbname_, meta.number,
-                                                      true);
+                                                      true, 0);
                     pair.stoc_file_id = meta.meta_block_handle.stoc_file_id;
                     it.push_back(pair);
                 }
@@ -430,9 +430,9 @@ namespace leveldb {
             for (int i = 0; i < files[level].size(); i++) {
                 auto meta = files[level][i];
                 std::string metafilename = TableFileName(dbname_, meta->number,
-                                                         true);
+                                                         true, 0);
                 std::string filename = TableFileName(dbname_, meta->number,
-                                                     false);
+                                                     false, 0);
                 auto meta_handle = meta->meta_block_handle;
                 stoc_fn_stocfileid[meta_handle.server_id][metafilename] = meta_handle.stoc_file_id;
                 for (auto &data_block : meta->data_block_group_handles) {

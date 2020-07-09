@@ -312,6 +312,17 @@ int main(int argc, char *argv[]) {
     nova::StorageWorker::storage_file_number_seq = 0;
     nova::RDMAServerImpl::compaction_storage_worker_seq_id_ = 0;
     nova::NovaGlobalVariables::global.Initialize();
+
+    NOVA_ASSERT(FLAGS_ltc_num_stocs_scatter_data_blocks <
+                NovaConfig::config->stoc_servers.size()) << fmt::format(
+                "Not enough stoc to scatter. Scatter width: {} Num StoCs: {}",
+                FLAGS_ltc_num_stocs_scatter_data_blocks,
+                NovaConfig::config->stoc_servers.size());
+    NOVA_ASSERT(FLAGS_num_sstable_replicas <
+                NovaConfig::config->stoc_servers.size()) << fmt::format(
+                "Not enough stoc to replicate sstables. Replication factor: {} Num StoCs: {}",
+                FLAGS_num_sstable_replicas,
+                NovaConfig::config->stoc_servers.size());
     StartServer();
     return 0;
 }

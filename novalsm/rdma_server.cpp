@@ -420,7 +420,7 @@ namespace nova {
                     } else {
                         filename = leveldb::TableFileName(dbname,
                                                           file_number,
-                                                          is_meta_blocks);
+                                                          is_meta_blocks, 0);
                     }
 
                     leveldb::StoCPersistentFile *stoc_file = stoc_file_manager_->OpenStoCFile(

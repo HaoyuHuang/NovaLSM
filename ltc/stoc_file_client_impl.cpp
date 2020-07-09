@@ -42,7 +42,6 @@ namespace leveldb {
         uint32_t scid = mem_manager->slabclassid(thread_id, file_size);
         backing_mem_ = mem_manager->ItemAlloc(thread_id, scid);
         NOVA_ASSERT(backing_mem_) << "Running out of memory " << file_size;
-
         NOVA_LOG(rdmaio::DEBUG) << fmt::format(
                     "Create remote memory file tid:{} fname:{} size:{}",
                     thread_id, fname_, file_size);
@@ -531,14 +530,16 @@ namespace leveldb {
         NOVA_ASSERT(stoc_block_client);
         stoc_block_client->set_dbid(dbid_);
         {
-            auto metafile = TableFileName(dbname, file_number);
+            auto metafile = TableFileName(dbname, file_number, false, 0);
             if (!env_->FileExists(metafile)) {
-                std::vector<const FileMetaData*> files;
+                std::vector<const FileMetaData *> files;
                 files.push_back(meta);
-                FetchMetadataFiles(files, dbname, options, stoc_block_client, env_);
+                FetchMetadataFiles(files, dbname, options, stoc_block_client,
+                                   env_);
             }
-            s = env_->NewRandomAccessFile(TableFileName(dbname, file_number),
-                                          &local_ra_file_);
+            s = env_->NewRandomAccessFile(
+                    TableFileName(dbname, file_number, false, 0),
+                    &local_ra_file_);
         }
         if (prefetch_all_) {
             NOVA_ASSERT(ReadAll(stoc_client).ok());
@@ -641,12 +642,12 @@ namespace leveldb {
             uint64_t id =
                     (((uint64_t) handle.server_id) << 32) | handle.stoc_file_id;
             reqs[i] = stoc_block_client->InitiateReadDataBlock(handle,
-                                                handle.offset,
-                                                handle.size,
-                                                backing_mem_table_ +
-                                                offset,
-                                                handle.size,
-                                                "", false);
+                                                               handle.offset,
+                                                               handle.size,
+                                                               backing_mem_table_ +
+                                                               offset,
+                                                               handle.size,
+                                                               "", false);
             DataBlockStoCFileLocalBuf buf = {};
             buf.offset = handle.offset;
             buf.size = handle.size;

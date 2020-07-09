@@ -18,35 +18,27 @@ namespace leveldb {
                                  const std::string &fname);
 
     static std::string MakeFileName(const std::string &dbname, uint64_t number,
+                                    uint32_t replica_id,
                                     const char *suffix) {
         char buf[100];
-        snprintf(buf, sizeof(buf), "/%06llu.%s",
-                 static_cast<unsigned long long>(number), suffix);
+        snprintf(buf, sizeof(buf), "/%06llu-%06llu.%s",
+                 static_cast<unsigned long long>(number),
+                 static_cast<unsigned long long>(replica_id), suffix);
         return dbname + buf;
     }
 
     std::string LogFileName(const std::string &dbname, uint64_t number) {
         assert(number > 0);
-        return MakeFileName(dbname, number, "log");
-    }
-
-    std::string TableFileName(const std::string &dbname, uint64_t number) {
-//        assert(number > 0);
-        return MakeFileName(dbname, number, "ldb");
+        return MakeFileName(dbname, number, 0, "log");
     }
 
     std::string TableFileName(const std::string &dbname, uint64_t number,
-                              bool is_metadata) {
+                              bool is_metadata, uint32_t replica_id) {
         assert(number > 0);
         if (is_metadata) {
-            return MakeFileName(dbname, number, "ldb-meta");
+            return MakeFileName(dbname, number, replica_id, "ldb-meta");
         }
-        return MakeFileName(dbname, number, "ldb");
-    }
-
-    std::string SSTTableFileName(const std::string &dbname, uint64_t number) {
-        assert(number > 0);
-        return MakeFileName(dbname, number, "sst");
+        return MakeFileName(dbname, number, replica_id, "ldb");
     }
 
     std::string DescriptorFileName(const std::string &dbname, uint64_t number) {
@@ -66,7 +58,7 @@ namespace leveldb {
 
     std::string TempFileName(const std::string &dbname, uint64_t number) {
         assert(number > 0);
-        return MakeFileName(dbname, number, "dbtmp");
+        return MakeFileName(dbname, number, 0, "dbtmp");
     }
 
     std::string InfoLogFileName(const std::string &dbname) {
@@ -112,13 +104,18 @@ namespace leveldb {
             // Avoid strtoull() to keep filename format independent of the
             // current locale
             uint64_t num;
+            uint64_t replica_id;
             if (!ConsumeDecimalNumber(&rest, &num)) {
+                return false;
+            }
+            if (!ConsumeDecimalNumber(&rest, &replica_id)) {
                 return false;
             }
             Slice suffix = rest;
             if (suffix == Slice(".log")) {
                 *type = kLogFile;
-            } else if (suffix == Slice(".sst") || suffix == Slice(".ldb")|| suffix == Slice(".ldb-meta") ) {
+            } else if (suffix == Slice(".sst") || suffix == Slice(".ldb") ||
+                       suffix == Slice(".ldb-meta")) {
                 *type = kTableFile;
             } else if (suffix == Slice(".dbtmp")) {
                 *type = kTempFile;

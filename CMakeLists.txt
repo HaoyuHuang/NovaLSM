@@ -125,7 +125,6 @@ target_sources(leveldb
         "include/leveldb/log_writer.h"
         "db/memtable.cc"
         "db/memtable.h"
-        "db/repair.cc"
         "db/skiplist.h"
         "db/snapshot.h"
         "db/table_cache.cc"

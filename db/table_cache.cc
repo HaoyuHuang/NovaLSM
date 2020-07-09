@@ -97,7 +97,7 @@ namespace leveldb {
             if (caller == AccessCaller::kCompaction) {
                 prefetch_all = true;
             }
-            std::string filename = TableFileName(dbname_, file_number);
+            std::string filename = TableFileName(dbname_, file_number, false, 0);
             file = new StoCRandomAccessFileClientImpl(env_, options_, dbname_,
                                                       file_number, meta,
                                                       options.stoc_client,

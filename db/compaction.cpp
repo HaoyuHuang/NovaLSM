@@ -40,7 +40,7 @@ namespace leveldb {
         char *backing_mems[files.size()];
         for (int i = 0; i < files.size(); i++) {
             auto meta = files[i];
-            std::string filename = TableFileName(dbname, meta->number, true);
+            std::string filename = TableFileName(dbname, meta->number, true, 0);
             uint32_t backing_scid = options.mem_manager->slabclassid(0,
                                                                      meta->meta_block_handle.size);
             char *backing_buf = options.mem_manager->ItemAlloc(0, backing_scid);
@@ -65,7 +65,7 @@ namespace leveldb {
                                                                      meta->meta_block_handle.size);
             WritableFile *writable_file;
             EnvFileMetadata env_meta = {};
-            auto sstablename = TableFileName(dbname, meta->number);
+            auto sstablename = TableFileName(dbname, meta->number, false, 0);
 //            RDMA_ASSERT(backing_buf[meta->meta_block_handle.size - 1] != 0)
 //                << fmt::format("Fetch metadata blocks handle:{} sstable:{}",
 //                               meta->meta_block_handle.DebugString(),
@@ -229,7 +229,7 @@ namespace leveldb {
         }
         // Make the output file
         MemManager *mem_manager = bg_thread_->mem_manager();
-        std::string filename = TableFileName(dbname_, file_number);
+        std::string filename = TableFileName(dbname_, file_number, false, 0);
         StoCWritableFileClient *stoc_writable_file = new StoCWritableFileClient(
                 options_.env,
                 options_,
