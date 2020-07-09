@@ -180,15 +180,22 @@ function run_bench() {
 	sleep 30
 	# cli_nrecords=$((recordcount))
 
-	# c=${clis[0]}
-	# i="1"
-	# echo "creating client on $c-$i"
-	# cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_all_servers $debug $partition $recordcount 180 $dist $value_size workloadw $ltc_config_path $cardinality $operationcount $zipfianconstant 0"
-	# echo "$cmd"
-	# ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
+	c=${clis[0]}
+	i="1"
+	echo "creating client on $c-$i"
+	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_servers $debug $partition $recordcount $maxexecutiontime $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
+	echo "$cmd"
+	ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
 
-	# sleep 60
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers "drain"
+	sleep 10
 
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	sleep 10
 
 	for c in ${clis[@]}
 	do

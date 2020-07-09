@@ -25,7 +25,7 @@ workload="workloadc"
 nthreads="16"
 debug="false"
 dist="zipfian"
-cardinality="0"
+cardinality="10"
 
 # Server
 nconn_workers="8"
