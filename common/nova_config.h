@@ -166,6 +166,7 @@ namespace nova {
         NovaLogRecordMode log_record_mode;
         bool recover_dbs;
         uint32_t number_of_recovery_threads;
+        uint32_t number_of_sstable_replicas;
 
         double subrange_sampling_ratio;
         std::string zipfian_dist_file_path;

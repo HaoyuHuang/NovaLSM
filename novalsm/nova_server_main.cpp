@@ -110,6 +110,7 @@ DEFINE_uint32(major_compaction_max_parallism, 1,
               "The maximum compaction parallelism.");
 DEFINE_uint32(major_compaction_max_tables_in_a_set, 15,
               "The maximum number of SSTables in a compaction job.");
+DEFINE_uint32(num_sstable_replicas, 1, "Number of replicas for SSTables.");
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq;
@@ -193,6 +194,7 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config->number_of_recovery_threads = FLAGS_num_recovery_threads;
     NovaConfig::config->recover_dbs = FLAGS_recover_dbs;
+    NovaConfig::config->number_of_sstable_replicas = FLAGS_num_sstable_replicas;
 
     NovaConfig::config->servers = convert_hosts(FLAGS_all_servers);
     if (FLAGS_use_local_disk) {
@@ -222,7 +224,8 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < NovaConfig::config->stoc_servers.size(); i++) {
         Host host = NovaConfig::config->stoc_servers[i];
         NOVA_LOG(INFO)
-            << fmt::format("stoc: {}:{}:{}", host.server_id, host.ip, host.port);
+            << fmt::format("stoc: {}:{}:{}", host.server_id, host.ip,
+                           host.port);
     }
     NOVA_ASSERT(FLAGS_num_log_replicas <=
                 NovaConfig::config->stoc_servers.size());
