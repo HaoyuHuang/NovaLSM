@@ -2685,6 +2685,74 @@ namespace leveldb {
         }
     }
 
+    void DBImpl::QueryReReplication(uint32_t failed_stoc_id,
+                                    std::unordered_map<uint32_t, std::vector<ReplicationPair> > *stoc_rerepl_pairs) {
+        Version *current = nullptr;
+        uint32_t vid = 0;
+        while (current == nullptr) {
+            vid = versions_->current_version_id();
+            NOVA_ASSERT(vid < MAX_LIVE_MEMTABLES) << vid;
+            current = versions_->versions_[vid]->Ref();
+        }
+        NOVA_ASSERT(current->version_id() == vid);
+
+        for (auto it : current->fn_files_) {
+            int replica_id = 0;
+            int available_replica_id = 0;
+
+            // find an available replica to re-replicate to data fragment.
+            for (; replica_id <
+                   it.second->block_replica_handles.size(); replica_id++) {
+                const auto &replica = it.second->block_replica_handles[replica_id];
+                if (replica.meta_block_handle.server_id == failed_stoc_id) {
+                    // meta replica.
+                    available_replica_id = (replica_id + 1) %
+                                           it.second->block_replica_handles.size();
+                    const auto &available_replica = it.second->block_replica_handles[available_replica_id];
+                    ReplicationPair pair;
+                    pair.source_file = TableFileName(dbname_, it.second->number,
+                                                     true,
+                                                     available_replica_id);
+                    pair.stoc_file_id = it.second->number;
+                    pair.replica_id = it.second->block_replica_handles.size();
+                    pair.dest_stoc_id =
+                            (replica.meta_block_handle.server_id + 1) %
+                            nova::NovaConfig::config->stoc_servers.size();
+                    pair.dest_stoc_id = nova::NovaConfig::config->stoc_servers[pair.dest_stoc_id].server_id;
+
+                    (*stoc_rerepl_pairs)[available_replica.meta_block_handle.server_id].push_back(
+                            pair);
+                }
+                for (int i = 0;
+                     i < replica.data_block_group_handles.size(); i++) {
+                    const auto &data_fragment = replica.data_block_group_handles[i];
+                    if (data_fragment.server_id == failed_stoc_id) {
+                        // data fragment replica.
+                        available_replica_id = (replica_id + 1) %
+                                               it.second->block_replica_handles.size();
+                        const auto &available_replica = it.second->block_replica_handles[available_replica_id];
+                        ReplicationPair pair;
+                        pair.source_file = TableFileName(dbname_,
+                                                         it.second->number,
+                                                         false,
+                                                         available_replica_id);
+                        pair.stoc_file_id = it.second->number;
+                        pair.replica_id = it.second->block_replica_handles.size();
+                        pair.dest_stoc_id =
+                                (replica.meta_block_handle.server_id + 1) %
+                                nova::NovaConfig::config->stoc_servers.size();
+                        pair.dest_stoc_id = nova::NovaConfig::config->stoc_servers[pair.dest_stoc_id].server_id;
+                        (*stoc_rerepl_pairs)[available_replica.meta_block_handle.server_id].push_back(
+                                pair);
+
+                    }
+                }
+            }
+
+        }
+        versions_->versions_[vid]->Unref(dbname_);
+    }
+
     void DBImpl::QueryDBStats(leveldb::DBStats *db_stats) {
         Version *current = nullptr;
         uint32_t vid = 0;

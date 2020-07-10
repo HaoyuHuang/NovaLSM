@@ -124,6 +124,13 @@ namespace leveldb {
         uint64_t fnumber = 0;
     };
 
+    struct ReplicationPair {
+        std::string source_file;
+        uint32_t dest_stoc_id;
+        uint64_t stoc_file_id;
+        uint32_t replica_id;
+    };
+
     struct FileReplicaMetaData {
         StoCBlockHandle meta_block_handle;
         std::vector<StoCBlockHandle> data_block_group_handles;

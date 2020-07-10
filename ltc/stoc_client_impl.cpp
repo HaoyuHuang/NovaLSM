@@ -21,6 +21,13 @@ namespace leveldb {
         }
     }
 
+    uint32_t
+    StoCBlockClient::InitiateReReplicateSSTable(uint32_t stoc_server_id,
+                                                const std::vector<leveldb::ReplicationPair>& pairs) {
+        // TODO
+        return 0;
+    }
+
     StoCBlockClient::StoCBlockClient(uint32_t client_id,
                                      StocPersistentFileManager *stoc_file_manager)
             : stoc_file_manager_(stoc_file_manager) {
@@ -318,6 +325,11 @@ namespace leveldb {
         uint32_t reqid = req_id_;
         IncrementReqId();
         return reqid;
+    }
+
+    uint32_t StoCRDMAClient::InitiateReReplicateSSTable(uint32_t stoc_server_id,
+                                                        const std::vector<leveldb::ReplicationPair>& pairs) {
+        // TODO
     }
 
     uint32_t

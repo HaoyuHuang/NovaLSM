@@ -34,6 +34,9 @@ namespace leveldb {
         StoCBlockClient(uint32_t client_id,
                         StocPersistentFileManager *stoc_file_manager);
 
+        uint32_t InitiateReReplicateSSTable(uint32_t stoc_server_id,
+                                            const std::vector<leveldb::ReplicationPair> &pairs) override;
+
         uint32_t
         InitiateIsReadyForProcessingRequests(
                 uint32_t remote_server_id) override;
@@ -149,6 +152,9 @@ namespace leveldb {
                   lower_req_id_(lower_req_id), upper_req_id_(upper_req_id),
                   current_req_id_(lower_req_id), rdma_server_(rdma_server) {
         }
+
+        uint32_t InitiateReReplicateSSTable(uint32_t stoc_server_id,
+                                            const std::vector<leveldb::ReplicationPair> &pairs) override;
 
         uint32_t
         InitiateRDMAWRITE(uint32_t remote_server_id, char *data,

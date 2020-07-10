@@ -194,6 +194,9 @@ namespace leveldb {
         virtual uint32_t InitiateCompaction(uint32_t remote_server_id,
                                             CompactionRequest *compaction_request) = 0;
 
+        virtual uint32_t InitiateReReplicateSSTable(uint32_t stoc_server_id,
+                                                    const std::vector<leveldb::ReplicationPair>& pairs) = 0;
+
         virtual uint32_t
         InitiateRDMAWRITE(uint32_t remote_server_id, char *data,
                           uint32_t size) = 0;

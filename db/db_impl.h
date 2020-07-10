@@ -59,6 +59,9 @@ namespace leveldb {
 
         ~DBImpl() override;
 
+        void QueryReReplication(uint32_t failed_stoc_id,
+                                std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_rerepl_pairs);
+
         // Implementations of the DB interface
         Status Put(const WriteOptions &, const Slice &key,
                    const Slice &value) override;
@@ -188,6 +191,7 @@ namespace leveldb {
                 std::vector<uint32_t> *closed_memtable_log_files);
 
         friend class DB;
+
 //        friend class SourceMigration;
 //        friend class DestinationMigration;
         struct Writer;
