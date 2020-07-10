@@ -71,11 +71,14 @@ namespace leveldb {
                                     uint64_t remote_offset,
                                     uint64_t size) override;
 
+        // file_number = 0 means manifest file.
         uint32_t
-        InitiateAppendBlock(uint32_t stoc_id, uint32_t thread_id,
+        InitiateAppendBlock(uint32_t stoc_id,
+                            uint32_t thread_id,
                             uint32_t *stoc_file_id, char *buf,
                             const std::string &dbname,
                             uint64_t file_number,
+                            uint32_t replica_id,
                             uint32_t size,
                             bool is_meta_blocks) override;
 
@@ -189,6 +192,7 @@ namespace leveldb {
                             uint32_t *stoc_file_id, char *buf,
                             const std::string &dbname,
                             uint64_t file_number,
+                            uint32_t replica_id,
                             uint32_t size,
                             bool is_meta_blocks) override;
 

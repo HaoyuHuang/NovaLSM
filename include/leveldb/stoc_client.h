@@ -177,6 +177,7 @@ namespace leveldb {
         char *write_buf = nullptr;
         std::string dbname;
         uint64_t file_number = 0;
+        uint32_t replica_id = 0;
         uint32_t write_size = 0;
         bool is_meta_blocks = false;
 
@@ -219,11 +220,14 @@ namespace leveldb {
                 std::unordered_map<std::string, uint64_t> *logfile_offset) = 0;
 
         virtual uint32_t
-        InitiateAppendBlock(uint32_t stoc_id, uint32_t thread_id,
+        InitiateAppendBlock(uint32_t stoc_id,
+                            uint32_t thread_id,
                             uint32_t *stoc_file_id,
                             char *buf,
                             const std::string &dbname,
-                            uint64_t file_number, uint32_t size,
+                            uint64_t file_number,
+                            uint32_t replica_id,
+                            uint32_t size,
                             bool is_meta_blocks) = 0;
 
         virtual uint32_t

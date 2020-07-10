@@ -239,6 +239,7 @@ namespace leveldb {
         return v->table_cache()->NewIterator(context.caller, options,
                                              meta,
                                              meta->number,
+                                             meta->SelectReplica(),
                                              context.level,
                                              meta->converted_file_size);
     }
@@ -412,6 +413,7 @@ namespace leveldb {
             Status s = table_cache_->Get(options,
                                          file,
                                          file->number,
+                                         file->SelectReplica(),
                                          file->converted_file_size,
                                          0,
                                          key.internal_key(),
@@ -467,6 +469,7 @@ namespace leveldb {
                 state->s = state->table_cache->Get(*state->options,
                                                    f,
                                                    f->number,
+                                                   f->SelectReplica(),
                                                    f->converted_file_size,
                                                    level,
                                                    state->ikey,
@@ -1398,6 +1401,7 @@ namespace leveldb {
                                 caller, options,
                                 files[i],
                                 files[i]->number,
+                                files[i]->SelectReplica(),
                                 level_ + which,
                                 files[i]->converted_file_size);
                     }

@@ -74,7 +74,7 @@ namespace nova {
         uint32_t stoc_file_id;
         uint64_t stoc_file_buf_offset;
         uint32_t size;
-        std::string sstable_id;
+        std::string sstable_name;
         bool is_meta_blocks;
     };
 

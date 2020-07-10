@@ -84,15 +84,16 @@ namespace leveldb {
     uint32_t StoCBlockClient::InitiateAppendBlock(
             uint32_t stoc_id, uint32_t thread_id, uint32_t *stoc_file_id,
             char *buf, const std::string &dbname, uint64_t file_number,
+            uint32_t replica_id,
             uint32_t size, bool is_meta_blocks) {
         if (stoc_id == nova::NovaConfig::config->my_server_id) {
             std::string filename;
             if (file_number == 0) {
-                filename = leveldb::DescriptorFileName(dbname, 0);
+                filename = leveldb::DescriptorFileName(dbname, 0, replica_id);
             } else {
                 filename = leveldb::TableFileName(dbname,
                                                   file_number,
-                                                  is_meta_blocks, 0);
+                                                  is_meta_blocks, replica_id);
             }
             leveldb::StoCPersistentFile *stoc_file = stoc_file_manager_->OpenStoCFile(
                     thread_id, filename);
@@ -141,6 +142,7 @@ namespace leveldb {
         task.write_buf = buf;
         task.dbname = dbname;
         task.file_number = file_number;
+        task.replica_id = replica_id;
         task.write_size = size;
         task.sem = &sem_;
         task.is_meta_blocks = is_meta_blocks;
@@ -644,6 +646,7 @@ namespace leveldb {
                                                  char *buf,
                                                  const std::string &dbname,
                                                  uint64_t file_number,
+                                                 uint32_t replica_id,
                                                  uint32_t size,
                                                  bool is_meta_blocks) {
         NOVA_ASSERT(stoc_id != nova::NovaConfig::config->my_server_id);
@@ -663,6 +666,8 @@ namespace leveldb {
         msg_size += EncodeStr(send_buf + msg_size, dbname);
         EncodeFixed64(send_buf + msg_size, file_number);
         msg_size += 8;
+        EncodeFixed32(send_buf + msg_size, replica_id);
+        msg_size += 4;
         EncodeFixed32(send_buf + msg_size, size);
         msg_size += 4;
         rdma_broker_->PostSend(send_buf, msg_size, stoc_id, req_id);

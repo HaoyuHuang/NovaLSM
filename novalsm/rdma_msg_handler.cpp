@@ -154,7 +154,7 @@ namespace nova {
                     ctx.req_id = stoc_client_->InitiateAppendBlock(
                             task.server_id, task.thread_id,
                             nullptr, task.write_buf, task.dbname,
-                            task.file_number, task.write_size,
+                            task.file_number, task.replica_id, task.write_size,
                             task.is_meta_blocks);
                     break;
                 case leveldb::RDMA_CLIENT_REQ_DELETE_TABLES:

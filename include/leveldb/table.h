@@ -57,7 +57,7 @@ namespace leveldb {
              const FileMetaData *meta,
              RandomAccessFile *file,
              uint64_t file_size, int level,
-             uint64_t file_number, Table **table,
+             uint64_t file_number, uint32_t replica_id, Table **table,
              DBProfiler *db_profiler);
 
         Table(const Table &) = delete;

@@ -40,42 +40,42 @@ namespace leveldb {
 
     TableCache::~TableCache() { delete cache_; }
 
-    bool
-    TableCache::IsTableCached(AccessCaller caller, const FileMetaData *meta) {
-        Status s;
-        char buf[1 + sizeof(meta->number)];
-
-        if (caller == AccessCaller::kCompaction) {
-            buf[0] = 'c';
-        } else {
-            buf[0] = 'u';
-        }
-        EncodeFixed64(buf + 1, meta->number);
-        Slice key(buf, 1 + sizeof(meta->number));
-        auto *handle = cache_->Lookup(key);
-        if (handle) {
-            cache_->Release(handle);
-            return true;
-        }
-        return false;
-    }
+//    bool
+//    TableCache::IsTableCached(AccessCaller caller, const FileMetaData *meta) {
+//        Status s;
+//        char buf[1 + sizeof(meta->number)];
+//
+//        if (caller == AccessCaller::kCompaction) {
+//            buf[0] = 'c';
+//        } else {
+//            buf[0] = 'u';
+//        }
+//        EncodeFixed64(buf + 1, meta->number);
+//        Slice key(buf, 1 + sizeof(meta->number));
+//        auto *handle = cache_->Lookup(key);
+//        if (handle) {
+//            cache_->Release(handle);
+//            return true;
+//        }
+//        return false;
+//    }
 
     Status
     TableCache::FindTable(AccessCaller caller, const ReadOptions &options,
                           const FileMetaData *meta,
-                          uint64_t file_number,
+                          uint64_t file_number, uint32_t replica_id,
                           uint64_t file_size, int level,
                           Cache::Handle **handle) {
         Status s;
-        char buf[1 + sizeof(file_number)];
-
+        char buf[1 + 8 + 4];
         if (caller == AccessCaller::kCompaction) {
             buf[0] = 'c';
         } else {
             buf[0] = 'u';
         }
         EncodeFixed64(buf + 1, file_number);
-        Slice key(buf, 1 + sizeof(file_number));
+        EncodeFixed32(buf + 9, replica_id);
+        Slice key(buf, 1 + 8 + 4);
         *handle = cache_->Lookup(key);
 
         bool cache_hit = true;
@@ -97,7 +97,8 @@ namespace leveldb {
             if (caller == AccessCaller::kCompaction) {
                 prefetch_all = true;
             }
-            std::string filename = TableFileName(dbname_, file_number, false, 0);
+            std::string filename = TableFileName(dbname_, file_number, false,
+                                                 replica_id);
             file = new StoCRandomAccessFileClientImpl(env_, options_, dbname_,
                                                       file_number, meta,
                                                       options.stoc_client,
@@ -106,7 +107,7 @@ namespace leveldb {
                                                       prefetch_all,
                                                       filename);
             s = Table::Open(options_, options, meta, file, file_size, level,
-                            file_number, &table, db_profiler_);
+                            file_number, replica_id, &table, db_profiler_);
             NOVA_ASSERT(s.ok())
                 << fmt::format("file:{} status:{}", meta->DebugString(),
                                s.ToString());
@@ -133,14 +134,13 @@ namespace leveldb {
     Iterator *
     TableCache::NewIterator(AccessCaller caller, const ReadOptions &options,
                             const FileMetaData *meta,
-                            uint64_t file_number, int level,
-                            uint64_t file_size,
-                            Table **tableptr) {
+                            uint64_t file_number, uint32_t replica_id,
+                            int level, uint64_t file_size, Table **tableptr) {
         if (tableptr != nullptr) {
             *tableptr = nullptr;
         }
         Cache::Handle *handle = nullptr;
-        Status s = FindTable(caller, options, meta, file_number,
+        Status s = FindTable(caller, options, meta, file_number, replica_id,
                              file_size, level, &handle);
         if (!s.ok()) {
             return NewErrorIterator(s);
@@ -157,13 +157,14 @@ namespace leveldb {
     }
 
     Status TableCache::Get(const ReadOptions &options, const FileMetaData *meta,
-                           uint64_t file_number, uint64_t file_size, int level,
+                           uint64_t file_number, uint32_t replica_id,
+                           uint64_t file_size, int level,
                            const Slice &k, void *arg,
                            void (*handle_result)(void *, const Slice &,
                                                  const Slice &)) {
         Cache::Handle *handle = nullptr;
         Status s = FindTable(AccessCaller::kUserGet, options, meta, file_number,
-                             file_size, level, &handle);
+                             replica_id, file_size, level, &handle);
         if (s.ok()) {
             TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache_->Value(
                     handle));
@@ -174,32 +175,27 @@ namespace leveldb {
         return s;
     }
 
-    Status TableCache::OpenTable(leveldb::AccessCaller caller,
-                                 const leveldb::ReadOptions &options,
-                                 const leveldb::FileMetaData *meta,
-                                 uint64_t file_number, uint64_t file_size,
-                                 int level) {
-        Cache::Handle *handle = nullptr;
-        Status s = FindTable(caller, options, meta, file_number,
-                             file_size, level, &handle);
-        NOVA_ASSERT(s.ok());
-        cache_->Release(handle);
-        return s;
-    }
-
     void TableCache::Evict(uint64_t file_number, bool compaction_file_only) {
-        char buf[1 + sizeof(file_number)];
+        char buf[1 + 8 + 4];
         buf[0] = 'c';
-        EncodeFixed64(buf + 1, file_number);
-        cache_->Erase(Slice(buf, 1 + sizeof(file_number)));
+        for (int replica_id = 0; replica_id <
+                                 nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
+            EncodeFixed64(buf + 1, file_number);
+            EncodeFixed32(buf + 9, replica_id);
+            cache_->Erase(Slice(buf, 1 + 8 + 4));
+        }
 
         if (compaction_file_only) {
             return;
         }
 
         buf[0] = 'u';
-        EncodeFixed64(buf + 1, file_number);
-        cache_->Erase(Slice(buf, 1 + sizeof(file_number)));
+        for (int replica_id = 0; replica_id <
+                                 nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
+            EncodeFixed64(buf + 1, file_number);
+            EncodeFixed32(buf + 9, replica_id);
+            cache_->Erase(Slice(buf, 1 + 8 + 4));
+        }
     }
 
 }  // namespace leveldb

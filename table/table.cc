@@ -36,6 +36,7 @@ namespace leveldb {
         const FileMetaData *meta;
         RandomAccessFile *file;
         uint64_t cache_id;
+        uint32_t replica_id;
         FilterBlockReader *filter;
         const char *filter_data;
         int level;
@@ -51,7 +52,7 @@ namespace leveldb {
                        const FileMetaData *meta,
                        RandomAccessFile *file,
                        uint64_t size, int level,
-                       uint64_t file_number, Table **table,
+                       uint64_t file_number, uint32_t replica_id, Table **table,
                        DBProfiler *db_profiler) {
         *table = nullptr;
         if (size < Footer::kEncodedLength) {
@@ -100,6 +101,7 @@ namespace leveldb {
             rep->meta = meta;
             rep->metaindex_handle = footer.metaindex_handle();
             rep->index_block = index_block;
+            rep->replica_id = replica_id;
             rep->cache_id = (options.block_cache ? options.block_cache->NewId()
                                                  : 0);
             rep->filter_data = nullptr;
@@ -110,7 +112,7 @@ namespace leveldb {
             (*table)->ReadMeta(footer);
             (*table)->db_profiler_ = db_profiler;
             uint64_t offset = 0;
-            for (const auto &handle : meta->block_replica_handles[0].data_block_group_handles) {
+            for (const auto &handle : meta->block_replica_handles[replica_id].data_block_group_handles) {
                 auto sid = static_cast<uint64_t>(handle.server_id);
                 uint64_t id = (sid << 32) | handle.stoc_file_id;
                 NOVA_ASSERT(rep->stoc_file_data_relative_offset.find(id) ==

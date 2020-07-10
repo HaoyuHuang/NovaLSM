@@ -37,13 +37,13 @@ namespace leveldb {
         Iterator *
         NewIterator(AccessCaller caller, const ReadOptions &options,
                     const FileMetaData *meta,
-                    uint64_t file_number, int level,
+                    uint64_t file_number, uint32_t replica_id, int level,
                     uint64_t file_size, Table **tableptr = nullptr);
 
         // If a seek to internal key "k" in specified file finds an entry,
         // call (*handle_result)(arg, found_key, found_value).
         Status Get(const ReadOptions &options, const FileMetaData *meta,
-                   uint64_t file_number,
+                   uint64_t file_number,uint32_t replica_id,
                    uint64_t file_size, int level, const Slice &k, void *arg,
                    void (*handle_result)(void *, const Slice &, const Slice &));
 
@@ -55,19 +55,9 @@ namespace leveldb {
         FindTable(AccessCaller caller, const ReadOptions &options,
                   const FileMetaData *meta,
                   uint64_t file_number,
+                  uint32_t replica_id,
                   uint64_t file_size,
                   int level, Cache::Handle **);
-
-        bool
-        IsTableCached(AccessCaller caller,
-                  const FileMetaData *meta);
-
-        Status
-        OpenTable(AccessCaller caller, const ReadOptions &options,
-                  const FileMetaData *meta,
-                  uint64_t file_number,
-                  uint64_t file_size,
-                  int level);
 
     private:
         Env *const env_;

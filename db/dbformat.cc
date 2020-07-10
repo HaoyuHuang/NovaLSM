@@ -159,6 +159,10 @@ namespace leveldb {
                DecodeFixed32(input, &level) && DecodeReplicas(input);
     }
 
+    int FileMetaData::SelectReplica() const {
+        return 0;
+    }
+
     std::string FileMetaData::ShortDebugString() const {
         std::string r;
         r.append("fn:");

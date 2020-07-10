@@ -110,7 +110,7 @@ namespace leveldb {
                                range_index->DebugString());
             list.push_back(v->table_cache_->NewIterator(
                     AccessCaller::kUserIterator,
-                    options, meta, sstableid, 0,
+                    options, meta, sstableid, meta->SelectReplica(), 0,
                     meta->converted_file_size));
         }
         if (range_index->scan_stats_) {

@@ -144,6 +144,8 @@ namespace leveldb {
 
         std::string ShortDebugString() const;
 
+        int SelectReplica() const;
+
         int refs = 0;
         int allowed_seeks = 0;  // Seeks allowed until compaction
         //

@@ -289,7 +289,7 @@ namespace nova {
                             task.is_meta_blocks = context.is_meta_blocks;
                             leveldb::SSTableStoCFilePair pair = {};
                             pair.stoc_file_id = context.stoc_file_id;
-                            pair.sstable_name = context.sstable_id;
+                            pair.sstable_name = context.sstable_name;
                             task.persist_pairs.push_back(pair);
                             AddBGStorageTask(task);
                             request_context_map_.erase(req_id);
@@ -398,6 +398,7 @@ namespace nova {
                     uint32_t msg_size = 2;
                     std::string dbname;
                     uint64_t file_number;
+                    uint32_t replica_id;
                     uint32_t size;
                     bool is_meta_blocks = false;
 
@@ -411,16 +412,18 @@ namespace nova {
                     msg_size += leveldb::DecodeStr(buf + msg_size, &dbname);
                     file_number = leveldb::DecodeFixed64(buf + msg_size);
                     msg_size += 8;
+                    replica_id = leveldb::DecodeFixed32(buf + msg_size);
+                    msg_size += 4;
                     size = leveldb::DecodeFixed32(buf + msg_size);
                     msg_size += 4;
 
                     std::string filename;
                     if (file_number == 0) {
-                        filename = leveldb::DescriptorFileName(dbname, 0);
+                        filename = leveldb::DescriptorFileName(dbname, 0, replica_id);
                     } else {
                         filename = leveldb::TableFileName(dbname,
                                                           file_number,
-                                                          is_meta_blocks, 0);
+                                                          is_meta_blocks, replica_id);
                     }
 
                     leveldb::StoCPersistentFile *stoc_file = stoc_file_manager_->OpenStoCFile(
@@ -447,7 +450,7 @@ namespace nova {
                     context.request_type = leveldb::StoCRequestType::STOC_WRITE_SSTABLE;
                     context.stoc_file_id = stoc_file->file_id();
                     context.stoc_file_buf_offset = stoc_file_off;
-                    context.sstable_id = filename;
+                    context.sstable_name = filename;
                     context.is_meta_blocks = is_meta_blocks;
                     context.size = size;
                     request_context_map_[req_id] = context;

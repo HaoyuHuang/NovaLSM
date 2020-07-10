@@ -88,7 +88,7 @@ namespace leveldb {
         Env *mem_env_ = nullptr;
         unsigned int *rand_seed_ = nullptr;
         uint64_t file_number_ = 0;
-        const std::string fname_;
+        const std::string fname_debug_only_;
         MemManager *mem_manager_ = nullptr;
         StoCClient *stoc_client_ = nullptr;
         const std::string &dbname_;
@@ -103,8 +103,15 @@ namespace leveldb {
         uint64_t allocated_size_ = 0;
         uint64_t used_size_ = 0;
         std::vector<int> nblocks_in_group_;
-        std::vector<PersistStatus> status_;
-        StoCBlockHandle meta_block_handle_;
+
+        struct FileReplicaPersistStatus {
+            std::vector<PersistStatus> persist_statuses;
+            StoCBlockHandle meta_block_handle;
+        };
+
+        std::vector<FileReplicaPersistStatus> replica_status_;
+
+        uint64_t WriteMetaDataBlock(uint32_t replica_id);
     };
 
     class StoCRandomAccessFileClientImpl : public StoCRandomAccessFileClient {

@@ -37,60 +37,72 @@ namespace leveldb {
                        const std::string &dbname, const Options &options,
                        StoCBlockClient *client, Env *env) {
         // Fetch all metadata files in parallel.
-        char *backing_mems[files.size()];
+        char *backing_mems[files.size() *
+                           nova::NovaConfig::config->number_of_sstable_replicas];
+        int index = 0;
         for (int i = 0; i < files.size(); i++) {
             auto meta = files[i];
-            std::string filename = TableFileName(dbname, meta->number, true, 0);
-            uint32_t backing_scid = options.mem_manager->slabclassid(0,
-                                                                     meta->block_replica_handles[0].meta_block_handle.size);
-            char *backing_buf = options.mem_manager->ItemAlloc(0, backing_scid);
-            NOVA_LOG(rdmaio::DEBUG)
-                << fmt::format("Fetch metadata blocks {} handle:{}",
-                               filename, meta->DebugString());
-            backing_buf[meta->block_replica_handles[0].meta_block_handle.size -
+
+            for (int replica_id = 0; replica_id <
+                                     nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
+                std::string filename = TableFileName(dbname, meta->number, true,
+                                                     replica_id);
+                uint32_t backing_scid = options.mem_manager->slabclassid(0,
+                                                                         meta->block_replica_handles[replica_id].meta_block_handle.size);
+                char *backing_buf = options.mem_manager->ItemAlloc(0,
+                                                                   backing_scid);
+                NOVA_LOG(rdmaio::DEBUG)
+                    << fmt::format("Fetch metadata blocks {} handle:{}",
+                                   filename, meta->DebugString());
+                backing_buf[
+                        meta->block_replica_handles[replica_id].meta_block_handle.size -
                         1] = 0;
-            uint32_t req_id = client->InitiateReadDataBlock(
-                    meta->block_replica_handles[0].meta_block_handle, 0,
-                    meta->block_replica_handles[0].meta_block_handle.size,
-                    backing_buf,
-                    meta->block_replica_handles[0].meta_block_handle.size,
-                    filename, false);
-            backing_mems[i] = backing_buf;
+                uint32_t req_id = client->InitiateReadDataBlock(
+                        meta->block_replica_handles[replica_id].meta_block_handle,
+                        0,
+                        meta->block_replica_handles[replica_id].meta_block_handle.size,
+                        backing_buf,
+                        meta->block_replica_handles[replica_id].meta_block_handle.size,
+                        filename, false);
+                backing_mems[index] = backing_buf;
+                index++;
+            }
         }
 
         for (int i = 0; i < files.size(); i++) {
             client->Wait();
         }
-
+        index = 0;
         for (int i = 0; i < files.size(); i++) {
             auto meta = files[i];
-            char *backing_buf = backing_mems[i];
-            uint32_t backing_scid = options.mem_manager->slabclassid(0,
-                                                                     meta->block_replica_handles[0].meta_block_handle.size);
-            WritableFile *writable_file;
-            EnvFileMetadata env_meta = {};
-            auto sstablename = TableFileName(dbname, meta->number, false, 0);
-//            RDMA_ASSERT(backing_buf[meta->meta_block_handle.size - 1] != 0)
-//                << fmt::format("Fetch metadata blocks handle:{} sstable:{}",
-//                               meta->meta_block_handle.DebugString(),
-//                               sstablename);
 
-            Status s = env->NewWritableFile(sstablename, env_meta,
-                                            &writable_file);
-            NOVA_ASSERT(s.ok());
-            Slice sstable_meta(backing_buf,
-                               meta->block_replica_handles[0].meta_block_handle.size);
-            s = writable_file->Append(sstable_meta);
-            NOVA_ASSERT(s.ok());
-            s = writable_file->Flush();
-            NOVA_ASSERT(s.ok());
-            s = writable_file->Sync();
-            NOVA_ASSERT(s.ok());
-            s = writable_file->Close();
-            NOVA_ASSERT(s.ok());
-            delete writable_file;
-            writable_file = nullptr;
-            options.mem_manager->FreeItem(0, backing_buf, backing_scid);
+            for (int replica_id = 0; replica_id <
+                                     nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
+                char *backing_buf = backing_mems[index];
+                uint32_t backing_scid = options.mem_manager->slabclassid(0,
+                                                                         meta->block_replica_handles[replica_id].meta_block_handle.size);
+                WritableFile *writable_file;
+                EnvFileMetadata env_meta = {};
+                auto sstablename = TableFileName(dbname, meta->number, false,
+                                                 replica_id);
+                Status s = env->NewWritableFile(sstablename, env_meta,
+                                                &writable_file);
+                NOVA_ASSERT(s.ok());
+                Slice sstable_meta(backing_buf,
+                                   meta->block_replica_handles[replica_id].meta_block_handle.size);
+                s = writable_file->Append(sstable_meta);
+                NOVA_ASSERT(s.ok());
+                s = writable_file->Flush();
+                NOVA_ASSERT(s.ok());
+                s = writable_file->Sync();
+                NOVA_ASSERT(s.ok());
+                s = writable_file->Close();
+                NOVA_ASSERT(s.ok());
+                delete writable_file;
+                writable_file = nullptr;
+                options.mem_manager->FreeItem(0, backing_buf, backing_scid);
+                index++;
+            }
         }
     }
 

@@ -41,10 +41,12 @@ namespace leveldb {
         return MakeFileName(dbname, number, replica_id, "ldb");
     }
 
-    std::string DescriptorFileName(const std::string &dbname, uint64_t number) {
+    std::string DescriptorFileName(const std::string &dbname, uint64_t number,
+                                   uint32_t replica_id) {
         char buf[100];
-        snprintf(buf, sizeof(buf), "/MANIFEST-%06llu",
-                 static_cast<unsigned long long>(number));
+        snprintf(buf, sizeof(buf), "/MANIFEST-%06llu-%06llu",
+                 static_cast<unsigned long long>(number),
+                 static_cast<unsigned long long>(replica_id));
         return dbname + buf;
     }
 
@@ -92,7 +94,11 @@ namespace leveldb {
         } else if (rest.starts_with("MANIFEST-")) {
             rest.remove_prefix(strlen("MANIFEST-"));
             uint64_t num;
+            uint64_t replica_id;
             if (!ConsumeDecimalNumber(&rest, &num)) {
+                return false;
+            }
+            if (!ConsumeDecimalNumber(&rest, &replica_id)) {
                 return false;
             }
             if (!rest.empty()) {
@@ -151,22 +157,22 @@ namespace leveldb {
         return true;
     }
 
-    Status SetCurrentFile(Env *env, const std::string &dbname,
-                          uint64_t descriptor_number) {
-        // Remove leading "dbname/" and add newline to manifest file name
-        std::string manifest = DescriptorFileName(dbname, descriptor_number);
-        Slice contents = manifest;
-        assert(contents.starts_with(dbname + "/"));
-        contents.remove_prefix(dbname.size() + 1);
-        std::string tmp = TempFileName(dbname, descriptor_number);
-        Status s = WriteStringToFileSync(env, contents.ToString() + "\n", tmp);
-        if (s.ok()) {
-            s = env->RenameFile(tmp, CurrentFileName(dbname));
-        }
-        if (!s.ok()) {
-            env->DeleteFile(tmp);
-        }
-        return s;
-    }
+//    Status SetCurrentFile(Env *env, const std::string &dbname,
+//                          uint64_t descriptor_number) {
+//        // Remove leading "dbname/" and add newline to manifest file name
+//        std::string manifest = DescriptorFileName(dbname, descriptor_number);
+//        Slice contents = manifest;
+//        assert(contents.starts_with(dbname + "/"));
+//        contents.remove_prefix(dbname.size() + 1);
+//        std::string tmp = TempFileName(dbname, descriptor_number);
+//        Status s = WriteStringToFileSync(env, contents.ToString() + "\n", tmp);
+//        if (s.ok()) {
+//            s = env->RenameFile(tmp, CurrentFileName(dbname));
+//        }
+//        if (!s.ok()) {
+//            env->DeleteFile(tmp);
+//        }
+//        return s;
+//    }
 
 }  // namespace leveldb

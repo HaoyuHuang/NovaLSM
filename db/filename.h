@@ -44,7 +44,8 @@ namespace leveldb {
 // Return the name of the descriptor file for the db named by
 // "dbname" and the specified incarnation number.  The result will be
 // prefixed with "dbname".
-    std::string DescriptorFileName(const std::string &dbname, uint64_t number);
+    std::string DescriptorFileName(const std::string &dbname, uint64_t number,
+                                   uint32_t replica_id);
 
 // Return the name of the current file.  This file contains the name
 // of the current manifest file.  The result will be prefixed with
@@ -76,8 +77,8 @@ namespace leveldb {
 
 // Make the CURRENT file point to the descriptor file with the
 // specified number.
-    Status SetCurrentFile(Env *env, const std::string &dbname,
-                          uint64_t descriptor_number);
+//    Status SetCurrentFile(Env *env, const std::string &dbname,
+//                          uint64_t descriptor_number);
 
 }  // namespace leveldb
 

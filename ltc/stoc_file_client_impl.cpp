@@ -27,7 +27,7 @@ namespace leveldb {
                                                    unsigned int *rand_seed,
                                                    std::string &filename)
             : mem_env_(env), options_(options), file_number_(file_number),
-              fname_(filename),
+              fname_debug_only_(filename),
               mem_manager_(mem_manager),
               stoc_client_(stoc_client),
               dbname_(dbname), thread_id_(thread_id),
@@ -36,6 +36,8 @@ namespace leveldb {
         NOVA_ASSERT(mem_manager);
         NOVA_ASSERT(stoc_client);
 
+        replica_status_.resize(
+                nova::NovaConfig::config->number_of_sstable_replicas);
         // Only used for flushing SSTables.
         // Policy.
         NOVA_LOG(rdmaio::DEBUG) << fmt::format("create file w {}", filename);
@@ -44,19 +46,19 @@ namespace leveldb {
         NOVA_ASSERT(backing_mem_) << "Running out of memory " << file_size;
         NOVA_LOG(rdmaio::DEBUG) << fmt::format(
                     "Create remote memory file tid:{} fname:{} size:{}",
-                    thread_id, fname_, file_size);
+                    thread_id, fname_debug_only_, file_size);
     }
 
     StoCWritableFileClient::~StoCWritableFileClient() {
         if (backing_mem_) {
-            NOVA_LOG(rdmaio::DEBUG) << fmt::format("close file w {}", fname_);
+            NOVA_LOG(rdmaio::DEBUG) << fmt::format("close file w {}", fname_debug_only_);
             uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                       allocated_size_);
             mem_manager_->FreeItem(thread_id_, backing_mem_, scid);
 
             NOVA_LOG(rdmaio::DEBUG) << fmt::format(
                         "Free remote memory file tid:{} fn:{} size:{}",
-                        thread_id_, fname_, allocated_size_);
+                        thread_id_, fname_debug_only_, allocated_size_);
         }
         if (index_block_) {
             delete index_block_;
@@ -93,7 +95,7 @@ namespace leveldb {
         NOVA_ASSERT(used_size_ + size < allocated_size_)
             << fmt::format(
                     "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{} data size:{}",
-                    thread_id_, fname_, dbname_, allocated_size_, used_size_,
+                    thread_id_, fname_debug_only_, dbname_, allocated_size_, used_size_,
                     size);
         used_size_ += size;
         return Status::OK();
@@ -106,19 +108,31 @@ namespace leveldb {
         NOVA_ASSERT(used_size_ + data.size() < allocated_size_)
             << fmt::format(
                     "writablefile[{}]: fn:{} db:{} alloc_size:{} used_size:{} data size:{}",
-                    thread_id_, fname_, dbname_, allocated_size_, used_size_,
+                    thread_id_, fname_debug_only_, dbname_, allocated_size_, used_size_,
                     data.size());
-
         uint32_t stoc_file_id;
         auto client = reinterpret_cast<StoCBlockClient *> (stoc_client_);
-        uint32_t req_id = client->InitiateAppendBlock(stoc_id, 0,
-                                                      &stoc_file_id, buf,
-                                                      dbname_, 0,
-                                                      data.size(),
-                                                      false);
-        client->Wait();
-        StoCResponse response;
-        NOVA_ASSERT(client->IsDone(req_id, &response, nullptr));
+        std::vector<uint32_t> reqs;
+        for (int replica_id = 0;
+             replica_id < replica_status_.size(); replica_id++) {
+            uint32_t req_id = client->InitiateAppendBlock(stoc_id, 0,
+                                                          &stoc_file_id, buf,
+                                                          dbname_, 0,
+                                                          replica_id,
+                                                          data.size(), false);
+            reqs.push_back(req_id);
+        }
+
+        for (int replica_id = 0;
+             replica_id < replica_status_.size(); replica_id++) {
+            client->Wait();
+        }
+
+        for (int replica_id = 0;
+             replica_id < replica_status_.size(); replica_id++) {
+            StoCResponse response;
+            NOVA_ASSERT(client->IsDone(reqs[replica_id], &response, nullptr));
+        }
         used_size_ += data.size();
         return Status::OK();
     }
@@ -128,7 +142,7 @@ namespace leveldb {
         NOVA_ASSERT(used_size_ + data.size() < allocated_size_)
             << fmt::format(
                     "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{} data size:{}",
-                    thread_id_, fname_, dbname_, allocated_size_, used_size_,
+                    thread_id_, fname_debug_only_, dbname_, allocated_size_, used_size_,
                     data.size());
         memcpy(buf, data.data(), data.size());
         used_size_ += data.size();
@@ -148,7 +162,7 @@ namespace leveldb {
     Status StoCWritableFileClient::Fsync() {
         NOVA_ASSERT(used_size_ == meta_.file_size) << fmt::format(
                     "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{}",
-                    thread_id_, fname_, dbname_, allocated_size_, used_size_);
+                    thread_id_, fname_debug_only_, dbname_, allocated_size_, used_size_);
         Format();
         return Status::OK();
     }
@@ -241,24 +255,28 @@ namespace leveldb {
             it->Next();
 
             if (n == nblocks_in_group_[group_id]) {
-                uint32_t stoc_file_id = 0;
-                client->set_dbid(dbid);
-                uint32_t req_id = client->InitiateAppendBlock(
-                        scatter_stocs[group_id], thread_id_, &stoc_file_id,
-                        backing_mem_ + offset,
-                        dbname_, file_number_,
-                        size, false);
-                NOVA_LOG(rdmaio::DEBUG)
-                    << fmt::format(
-                            "t[{}]: Initiated WRITE data blocks {} s:{} req:{} db:{} fn:{}",
-                            thread_id_, n, scatter_stocs[group_id], req_id,
-                            dbname_, file_number_);
+                for (int replica_id = 0; replica_id <
+                                         nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
+                    uint32_t stoc_file_id = 0;
+                    client->set_dbid(dbid);
+                    uint32_t req_id = client->InitiateAppendBlock(
+                            scatter_stocs[group_id], thread_id_, &stoc_file_id,
+                            backing_mem_ + offset,
+                            dbname_, file_number_, replica_id,
+                            size, false);
+                    NOVA_LOG(rdmaio::DEBUG)
+                        << fmt::format(
+                                "t[{}]: Initiated WRITE data blocks {} s:{} req:{} db:{} fn:{} replica:{}",
+                                thread_id_, n, scatter_stocs[group_id], req_id,
+                                dbname_, file_number_, replica_id);
 
-                PersistStatus status = {};
-                status.remote_server_id = scatter_stocs[group_id];
-                status.WRITE_req_id = req_id;
-                status.result_handle = {};
-                status_.push_back(status);
+                    PersistStatus status = {};
+                    status.remote_server_id = scatter_stocs[group_id];
+                    status.WRITE_req_id = req_id;
+                    status.result_handle = {};
+                    replica_status_[replica_id].persist_statuses.push_back(
+                            status);
+                }
                 n = 0;
                 offset = 0;
                 size = 0;
@@ -280,20 +298,22 @@ namespace leveldb {
     std::vector<leveldb::FileReplicaMetaData>
     StoCWritableFileClient::replicas() {
         std::vector<leveldb::FileReplicaMetaData> replicas;
-        std::vector<StoCBlockHandle> rhs;
-        for (int i = 0; i < status_.size(); i++) {
-            rhs.push_back(status_[i].result_handle);
+        for (int i = 0; i < replica_status_.size(); i++) {
+            leveldb::FileReplicaMetaData replica;
+            for (int j = 0; j < replica_status_.size(); j++) {
+                replica.data_block_group_handles.push_back(
+                        replica_status_[i].persist_statuses[j].result_handle);
+            }
+            replica.meta_block_handle = replica_status_[i].meta_block_handle;
+            replicas.push_back(std::move(replica));
         }
-        leveldb::FileReplicaMetaData replica;
-        replica.meta_block_handle = meta_block_handle_;
-        replica.data_block_group_handles = rhs;
-        replicas.push_back(std::move(replica));
         return replicas;
     }
 
     void StoCWritableFileClient::WaitForPersistingDataBlocks() {
         auto client = reinterpret_cast<StoCBlockClient *> (stoc_client_);
-        for (int i = 0; i < nblocks_in_group_.size(); i++) {
+        for (int i = 0;
+             i < nblocks_in_group_.size() * replica_status_.size(); i++) {
             client->Wait();
         }
     }
@@ -302,15 +322,31 @@ namespace leveldb {
     StoCWritableFileClient::Finalize() {
         auto client = reinterpret_cast<StoCBlockClient *> (stoc_client_);
         // Wait for all writes to complete.
-        for (int i = 0; i < status_.size(); i++) {
-            uint32_t req_id = status_[i].WRITE_req_id;
-            StoCResponse response = {};
-            NOVA_ASSERT(client->IsDone(req_id, &response, nullptr));
-            NOVA_ASSERT(response.stoc_block_handles.size() == 1)
-                << fmt::format("{} {}", req_id,
-                               response.stoc_block_handles.size());
-            status_[i].result_handle = response.stoc_block_handles[0];
+        for (int replica_id = 0;
+             replica_id < replica_status_.size(); replica_id++) {
+            FileReplicaPersistStatus &status = replica_status_[replica_id];
+            for (int i = 0; i < status.persist_statuses.size(); i++) {
+                uint32_t req_id = status.persist_statuses[i].WRITE_req_id;
+                StoCResponse response = {};
+                NOVA_ASSERT(client->IsDone(req_id, &response, nullptr));
+                NOVA_ASSERT(response.stoc_block_handles.size() == 1)
+                    << fmt::format("{} {}", req_id,
+                                   response.stoc_block_handles.size());
+                status.persist_statuses[i].result_handle = response.stoc_block_handles[0];
+            }
         }
+        uint64_t new_file_size = 0;
+        for (int replica_id = 0;
+             replica_id < replica_status_.size(); replica_id++) {
+            new_file_size = WriteMetaDataBlock(replica_id);
+        }
+        NOVA_ASSERT(new_file_size != 0);
+        return new_file_size;
+    }
+
+    uint64_t
+    StoCWritableFileClient::WriteMetaDataBlock(uint32_t replica_id) {
+        auto client = reinterpret_cast<StoCBlockClient *> (stoc_client_);
         Status s;
         int file_size = used_size_;
         Slice footer_input(backing_mem_ + file_size - Footer::kEncodedLength,
@@ -322,7 +358,7 @@ namespace leveldb {
         BlockBuilder index_block_builder(&opt);
         Iterator *it = index_block_->NewIterator(options_.comparator);
         it->SeekToFirst();
-        StoCBlockHandle current_block_handle = status_[0].result_handle;
+        StoCBlockHandle current_block_handle = replica_status_[replica_id].persist_statuses[0].result_handle;
         StoCBlockHandle index_handle = current_block_handle;
         uint64_t relative_offset = 0;
         int group_id = 0;
@@ -359,18 +395,19 @@ namespace leveldb {
                 group_id++;
                 n = 0;
                 relative_offset = 0;
-                if (group_id == status_.size()) {
+                if (group_id ==
+                    replica_status_[replica_id].persist_statuses.size()) {
                     NOVA_ASSERT(!it->Valid());
                     break;
                 }
-                current_block_handle = status_[group_id].result_handle;
+                current_block_handle = replica_status_[replica_id].persist_statuses[group_id].result_handle;
                 index_handle = current_block_handle;
             }
         }
         NOVA_ASSERT(n == 0)
             << fmt::format("Contain {} data blocks. Read {} data blocks",
                            num_data_blocks_, n);
-        // Rewrite index handle for filter block.
+        // Rewrite index handle after filter block.
         uint32_t filter_block_size =
                 footer.metaindex_handle().offset() - filter_block_start_offset -
                 kBlockTrailerSize;
@@ -417,13 +454,15 @@ namespace leveldb {
         NOVA_ASSERT(rewrite_start_offset + new_file_size < allocated_size_);
         NOVA_LOG(rdmaio::DEBUG) << fmt::format(
                     "New SSTable {} size:{} old-start-offset:{} filter-block-size:{} meta_index_block:{}:{}. index_handle:{}:{}",
-                    fname_, new_file_size, rewrite_start_offset,
+                    fname_debug_only_, new_file_size, rewrite_start_offset,
                     filter_block_size,
                     new_metaindex_handle.offset(), new_metaindex_handle.size(),
                     new_idx_handle.offset(), new_idx_handle.size());
         WritableFile *writable_file;
         EnvFileMetadata meta = {};
-        s = mem_env_->NewWritableFile(fname_, meta, &writable_file);
+        s = mem_env_->NewWritableFile(
+                TableFileName(dbname_, file_number_, false, replica_id), meta,
+                &writable_file);
         NOVA_ASSERT(s.ok());
         Slice meta_sstable(backing_mem_ + rewrite_start_offset,
                            new_file_size);
@@ -448,20 +487,21 @@ namespace leveldb {
                                                           rewrite_start_offset,
                                                           dbname_,
                                                           file_number_,
+                                                          replica_id,
                                                           new_file_size, /*is_meta_blocks=*/
                                                           true);
             NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format(
-                        "t[{}]: Initiated WRITE meta blocks s:{} req:{} db:{} fn:{}",
-                        thread_id_, stoc_id, req_id,
-                        dbname_, file_number_);
+                        "t[{}]: Initiated WRITE meta blocks s:{} req:{} db:{} fn:{} replica:{}",
+                        thread_id_, stoc_id, req_id, dbname_, file_number_,
+                        replica_id);
             client->Wait();
             StoCResponse response = {};
             NOVA_ASSERT(client->IsDone(req_id, &response, nullptr));
             NOVA_ASSERT(response.stoc_block_handles.size() == 1)
                 << fmt::format("{} {}", req_id,
                                response.stoc_block_handles.size());
-            meta_block_handle_ = response.stoc_block_handles[0];
+            replica_status_[replica_id].meta_block_handle = response.stoc_block_handles[0];
         }
         return new_file_size;
     }
