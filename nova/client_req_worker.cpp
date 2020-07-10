@@ -447,16 +447,16 @@ namespace nova {
             if (stop) {
                 break;
             }
-            for (int i = 0; i < worker->dbs_.size(); i++) {
-                RDMA_LOG(INFO) << "Database " << i;
-                std::string value;
-                worker->dbs_[i]->GetProperty("leveldb.sstables", &value);
-                RDMA_LOG(INFO) << "\n" << value;
-                value.clear();
-                worker->dbs_[i]->GetProperty("leveldb.approximate-memory-usage",
-                                             &value);
-                RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
-            }
+//            for (int i = 0; i < worker->dbs_.size(); i++) {
+//                RDMA_LOG(INFO) << "Database " << i;
+//                std::string value;
+//                worker->dbs_[i]->GetProperty("leveldb.sstables", &value);
+//                RDMA_LOG(INFO) << "\n" << value;
+//                value.clear();
+//                worker->dbs_[i]->GetProperty("leveldb.approximate-memory-usage",
+//                                             &value);
+//                RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
+//            }
             sleep(1);
         }
         for (int i = 0; i < worker->dbs_.size(); i++) {
