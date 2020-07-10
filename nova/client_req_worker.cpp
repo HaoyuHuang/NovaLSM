@@ -429,50 +429,17 @@ namespace nova {
     process_socket_drain_l0_sstable_request(int fd, Connection *conn) {
         RDMA_LOG(rdmaio::INFO) << "Drain SSTables";
         NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
-        for (auto &db : worker->dbs_) {
-            db->SetL0StartCompactionBytes(0);
-            db->FlushMemTable(NovaConfig::config->log_record_mode);
-        }
-        while (true) {
-            bool stop = true;
-            for (auto &db : worker->dbs_) {
-                uint64_t bytes = db->L0CurrentBytes();
-                if (bytes > 0) {
-                    RDMA_LOG(INFO)
-                        << fmt::format("Waiting for {} bytes at L0", bytes);
-                    stop = false;
-                    db->ScheduleCompaction();
-                }
-            }
-            if (stop) {
-                break;
-            }
-//            for (int i = 0; i < worker->dbs_.size(); i++) {
-//                RDMA_LOG(INFO) << "Database " << i;
-//                std::string value;
-//                worker->dbs_[i]->GetProperty("leveldb.sstables", &value);
-//                RDMA_LOG(INFO) << "\n" << value;
-//                value.clear();
-//                worker->dbs_[i]->GetProperty("leveldb.approximate-memory-usage",
-//                                             &value);
-//                RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
-//            }
-            sleep(1);
-        }
-        for (int i = 0; i < worker->dbs_.size(); i++) {
-            worker->dbs_[i]->SetL0StartCompactionBytes(
-                    NovaConfig::config->l0_start_compaction_bytes);
-            RDMA_LOG(INFO) << "Database " << i;
-            std::string value;
-            worker->dbs_[i]->GetProperty("leveldb.sstables", &value);
-            RDMA_LOG(INFO) << "\n" << value;
-            value.clear();
-            worker->dbs_[i]->GetProperty("leveldb.approximate-memory-usage",
-                                         &value);
-            RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
-            leveldb::Log(worker->dbs_[i]->infoLog(), "%s", "Load complete");
-        }
-        return false;
+        NovaAsyncTask task;
+        task.type = RequestType::DRAIN;
+        task.dbs = worker->dbs_;
+        worker->AddTask(task);
+
+        char *response_buf = worker->buf;
+        int nlen = 0;
+        int len = int_to_str(response_buf, 0);
+        conn->response_buf = worker->buf;
+        conn->response_size = len;
+        return true;
     }
 
     bool
@@ -527,6 +494,7 @@ namespace nova {
             return process_socket_stats_request(fd, conn);
         }
         if (buf[0] == RequestType::DRAIN) {
+            buf[0] = '~';
             return process_socket_drain_l0_sstable_request(fd, conn);
         }
         RDMA_ASSERT(false) << buf[0];
@@ -671,11 +639,11 @@ namespace nova {
     }
 
     void NovaConnWorker::AddTask(const nova::NovaAsyncTask &task) {
-        uint64_t hv = NovaConfig::keyhash(task.key.data(),
-                                          task.key.size());
-        Fragment *frag = NovaConfig::home_fragment(hv);
-        uint32_t dbid = frag->dbid;
-        async_workers_[dbid % async_workers_.size()]->AddTask(task);
+//        uint64_t hv = NovaConfig::keyhash(task.key.data(),
+//                                          task.key.size());
+//        Fragment *frag = NovaConfig::home_fragment(hv);
+//        uint32_t dbid = frag->dbid;
+        async_workers_[0]->AddTask(task);
     }
 
     void NovaConnWorker::Start() {

@@ -32,6 +32,7 @@ namespace nova {
         std::string value;
         int sock_fd;
         Connection *conn;
+        std::vector<leveldb::DB*> dbs;
     };
 
     struct NovaAsyncCompleteTask {
@@ -81,6 +82,8 @@ namespace nova {
         void ProcessPut(const NovaAsyncTask &task);
 
         void ProcessReplicateLogRecords(const NovaAsyncTask &task);
+
+        void Drain(const NovaAsyncTask &task);
 
         int ProcessQueue();
 

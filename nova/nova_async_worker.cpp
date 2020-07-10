@@ -5,6 +5,8 @@
 //
 
 #include <leveldb/write_batch.h>
+#include <fmt/core.h>
+
 #include "nova_async_worker.h"
 #include "nova_config.h"
 #include "nova_common.h"
@@ -89,6 +91,42 @@ namespace nova {
 //                NovaConfig::config->max_msg_size);
     }
 
+    void NovaAsyncWorker::Drain(const NovaAsyncTask &task) {
+        for (const auto &db : task.dbs) {
+            db->SetL0StartCompactionBytes(0);
+            db->FlushMemTable(NovaConfig::config->log_record_mode);
+        }
+        while (true) {
+            bool stop = true;
+            for (auto &db : task.dbs) {
+                uint64_t bytes = db->L0CurrentBytes();
+                if (bytes > 0) {
+                    RDMA_LOG(INFO)
+                        << fmt::format("Waiting for {} bytes at L0", bytes);
+                    stop = false;
+                    db->ScheduleCompaction();
+                }
+            }
+            if (stop) {
+                break;
+            }
+            sleep(1);
+        }
+        for (int i = 0; i < task.dbs.size(); i++) {
+            task.dbs[i]->SetL0StartCompactionBytes(
+                    NovaConfig::config->l0_start_compaction_bytes);
+            RDMA_LOG(INFO) << "Database " << i;
+            std::string value;
+            task.dbs[i]->GetProperty("leveldb.sstables", &value);
+            RDMA_LOG(INFO) << "\n" << value;
+            value.clear();
+            task.dbs[i]->GetProperty("leveldb.approximate-memory-usage",
+                                     &value);
+            RDMA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
+            leveldb::Log(task.dbs[i]->infoLog(), "%s", "Load complete");
+        }
+    }
+
     void NovaAsyncWorker::ProcessReplicateLogRecords(
             const nova::NovaAsyncTask &task) {
 //        char *buf = task.conn->request_buf;
@@ -122,7 +160,6 @@ namespace nova {
         std::list<NovaAsyncTask> queue(queue_.begin(), queue_.end());
         mutex_.Unlock();
 
-
         for (const NovaAsyncTask &task : queue) {
             switch (task.type) {
                 case RequestType::PUT:
@@ -134,8 +171,11 @@ namespace nova {
                 case RequestType::REPLICATE_LOG_RECORD:
                     ProcessReplicateLogRecords(task);
                     break;
+                case RequestType::DRAIN:
+                    Drain(task);
+                    break;
             }
-            conn_workers_[task.conn_worker_id] = true;
+//            conn_workers_[task.conn_worker_id] = true;
         }
 
         mutex_.Lock();
@@ -144,29 +184,28 @@ namespace nova {
         std::advance(end, queue.size());
         queue_.erase(begin, end);
         mutex_.Unlock();
-
-        for (int i = 0; i < NovaConfig::config->num_conn_workers; i++) {
-            if (!conn_workers_[i]) {
-                continue;
-            }
-            conn_workers_[i] = false;
-            cqs_[i]->mutex.Lock();
-            for (const NovaAsyncTask &task : queue) {
-                if (task.conn_worker_id != i) {
-                    continue;
-                }
-                NovaAsyncCompleteTask t = {
-                        .sock_fd = task.sock_fd,
-                        .conn = task.conn
-                };
-                cqs_[i]->queue.push_back(t);
-            }
-            cqs_[i]->mutex.Unlock();
-
-            char buf[1];
-            buf[0] = 'a';
-            RDMA_ASSERT(write(cqs_[i]->write_fd, buf, 1) == 1);
-        }
+//        for (int i = 0; i < NovaConfig::config->num_conn_workers; i++) {
+//            if (!conn_workers_[i]) {
+//                continue;
+//            }
+//            conn_workers_[i] = false;
+//            cqs_[i]->mutex.Lock();
+//            for (const NovaAsyncTask &task : queue) {
+//                if (task.conn_worker_id != i) {
+//                    continue;
+//                }
+//                NovaAsyncCompleteTask t = {
+//                        .sock_fd = task.sock_fd,
+//                        .conn = task.conn
+//                };
+//                cqs_[i]->queue.push_back(t);
+//            }
+//            cqs_[i]->mutex.Unlock();
+//
+//            char buf[1];
+//            buf[0] = 'a';
+//            RDMA_ASSERT(write(cqs_[i]->write_fd, buf, 1) == 1);
+//        }
         return queue.size();
     }
 
