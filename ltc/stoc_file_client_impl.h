@@ -109,9 +109,11 @@ namespace leveldb {
             StoCBlockHandle meta_block_handle;
         };
 
+        // 1 replica: scatter across.
+        // > 1 replicas: all replicas of a sstable is stored on the same stoc.
+        std::vector<uint32_t> stocs_to_store_fragments_;
         std::vector<FileReplicaPersistStatus> replica_status_;
-
-        uint64_t WriteMetaDataBlock(uint32_t replica_id);
+        uint64_t WriteMetaDataBlock(uint32_t stoc_id, uint32_t replica_id);
     };
 
     class StoCRandomAccessFileClientImpl : public StoCRandomAccessFileClient {

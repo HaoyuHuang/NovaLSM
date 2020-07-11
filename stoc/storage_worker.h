@@ -20,7 +20,9 @@
 
 namespace nova {
     class RDMAServerImpl;
+
     class StorageTask;
+
     class ServerCompleteTask;
 
     // A storage worker that handles storage related requests.
@@ -66,6 +68,10 @@ namespace nova {
         unsigned int *rand_seed() override {
             return &rand_seed_;
         };
+
+        void ReplicateSSTables(
+                const std::string& dbname,
+                const std::vector<leveldb::ReplicationPair> &replication_pairs);
 
         static std::atomic_int_fast32_t storage_file_number_seq;
 

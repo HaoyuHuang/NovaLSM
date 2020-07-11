@@ -489,6 +489,7 @@ namespace leveldb {
             uint32_t size, char *scratch, Slice *result) {
         StoCPersistentFile *stoc_file = FindStoCFile(
                 stoc_block_handle.stoc_file_id);
+        NOVA_ASSERT(stoc_file) << stoc_block_handle.stoc_file_id;
         if (!block_cache_) {
             leveldb::FileType type;
             NOVA_ASSERT(ParseFileName(stoc_file->stoc_file_name_, &type));
@@ -504,9 +505,10 @@ namespace leveldb {
                                    size,
                                    result->size());
                 NOVA_ASSERT(scratch[size - 1] != 0)
-                    << fmt::format("Read {} from stoc file {} offset:{} size:{}",
-                                   stoc_block_handle.DebugString(),
-                                   stoc_file->file_id(), offset, size);
+                    << fmt::format(
+                            "Read {} from stoc file {} offset:{} size:{}",
+                            stoc_block_handle.DebugString(),
+                            stoc_file->file_id(), offset, size);
             }
             return;
         }
@@ -616,9 +618,11 @@ namespace leveldb {
     StocPersistentFileManager::FindStoCFile(uint32_t stoc_file_id) {
         mutex_.lock();
         StoCPersistentFile *stoc_file = stoc_files_[stoc_file_id];
-        NOVA_ASSERT(stoc_file) << fmt::format("stoc file {} is null.", stoc_file_id);
+        NOVA_ASSERT(stoc_file)
+            << fmt::format("stoc file {} is null.", stoc_file_id);
         NOVA_ASSERT(stoc_file->file_id() == stoc_file_id)
-            << fmt::format("stoc file {} {}.", stoc_file->file_id(), stoc_file_id);
+            << fmt::format("stoc file {} {}.", stoc_file->file_id(),
+                           stoc_file_id);
         mutex_.unlock();
         return stoc_file;
     }

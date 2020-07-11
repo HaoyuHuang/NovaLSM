@@ -20,6 +20,7 @@
 
 #include "db/dbformat.h"
 #include "db/memtable.h"
+#include "ltc/storage_selector.h"
 #include "memtable_worker.h"
 
 using namespace std;
@@ -34,6 +35,7 @@ DEFINE_uint32(npartitions, 0, "");
 DEFINE_uint64(max_ops, 0, "");
 
 NovaGlobalVariables NovaGlobalVariables::global;
+std::atomic<nova::Servers *> leveldb::StorageSelector::available_stoc_servers;
 
 int main(int argc, char *argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);

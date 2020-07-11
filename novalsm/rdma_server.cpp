@@ -205,6 +205,14 @@ namespace nova {
                                                 NovaGlobalVariables::global.is_ready_to_process_requests);
                 rdma_broker_->PostSend(sendbuf, msg_size, task.remote_server_id,
                                        task.stoc_req_id);
+            } else if (task.request_type ==
+                       leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES) {
+                char *sendbuf = rdma_broker_->GetSendBuf(task.remote_server_id);
+                uint32_t msg_size = 1;
+                sendbuf[0] =
+                        leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES_RESPONSE;
+                rdma_broker_->PostSend(sendbuf, msg_size, task.remote_server_id,
+                                       task.stoc_req_id);
             } else {
                 NOVA_ASSERT(false) << task.request_type;
             }
@@ -419,11 +427,13 @@ namespace nova {
 
                     std::string filename;
                     if (file_number == 0) {
-                        filename = leveldb::DescriptorFileName(dbname, 0, replica_id);
+                        filename = leveldb::DescriptorFileName(dbname, 0,
+                                                               replica_id);
                     } else {
                         filename = leveldb::TableFileName(dbname,
                                                           file_number,
-                                                          is_meta_blocks, replica_id);
+                                                          is_meta_blocks,
+                                                          replica_id);
                     }
 
                     leveldb::StoCPersistentFile *stoc_file = stoc_file_manager_->OpenStoCFile(
@@ -431,7 +441,8 @@ namespace nova {
                     uint64_t stoc_file_off = stoc_file->AllocateBuf(
                             filename, size, is_meta_blocks);
                     NOVA_ASSERT(stoc_file_off != UINT64_MAX)
-                        << fmt::format("rdma-server{}: {} {}", thread_id_, filename,
+                        << fmt::format("rdma-server{}: {} {}", thread_id_,
+                                       filename,
                                        size);
                     NOVA_ASSERT(stoc_file->stoc_file_name_ == filename)
                         << fmt::format("rdma-server{}: {} {}", thread_id_,
@@ -488,7 +499,7 @@ namespace nova {
                     uint32_t slabclassid = mem_manager_->slabclassid(thread_id_,
                                                                      size);
                     char *rdmabuf = mem_manager_->ItemAlloc(thread_id_,
-                                                             slabclassid);
+                                                            slabclassid);
                     NOVA_ASSERT(rdmabuf) << "Running out of memory";
 
                     ServerCompleteTask task = {};
@@ -592,6 +603,25 @@ namespace nova {
                     ct.request_type = leveldb::StoCRequestType::STOC_IS_READY_FOR_REQUESTS;
                     ct.stoc_req_id = stoc_req_id;
                     private_cq_.push_back(ct);
+                } else if (buf[0] ==
+                           leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES) {
+                    StorageTask task = {};
+                    task.stoc_req_id = stoc_req_id;
+                    task.remote_server_id = remote_server_id;
+                    task.request_type = leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES;
+
+                    uint32_t num_pairs = 0;
+                    leveldb::Slice input(buf + 1,
+                                         nova::NovaConfig::config->max_msg_size);
+                    NOVA_ASSERT(leveldb::DecodeStr(&input, &task.dbname));
+                    NOVA_ASSERT(leveldb::DecodeFixed32(&input, &num_pairs));
+                    for (int i = 0; i < num_pairs; i++) {
+                        leveldb::ReplicationPair pair;
+                        NOVA_ASSERT(pair.Decode(&input));
+                        task.replication_pairs.push_back(pair);
+                    }
+                    AddCompactionStorageTask(task);
+                    processed = true;
                 }
                 break;
         }

@@ -59,8 +59,8 @@ namespace leveldb {
 
         ~DBImpl() override;
 
-        void QueryReReplication(uint32_t failed_stoc_id,
-                                std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_rerepl_pairs);
+        void QueryFailedReplicas(uint32_t failed_stoc_id,
+                                 std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_repl_pairs) override;
 
         // Implementations of the DB interface
         Status Put(const WriteOptions &, const Slice &key,
@@ -134,6 +134,8 @@ namespace leveldb {
         uint32_t EncodeMemTablePartitions(char *buf);
 
         void DecodeMemTablePartitions(Slice *buf);
+
+        const std::string& dbname() override ;
 
     private:
         std::atomic_bool start_compaction_;

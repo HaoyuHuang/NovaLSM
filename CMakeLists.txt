@@ -83,7 +83,7 @@ endif (BUILD_SHARED_LIBS)
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
 
-add_library(leveldb "" novalsm/sim_stoc_failure.cpp novalsm/sim_stoc_failure.h)
+add_library(leveldb "")
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
@@ -246,6 +246,9 @@ target_sources(leveldb
         novalsm/rdma_msg_handler.h
         ltc/stoc_file_client_impl.cpp
         ltc/stoc_file_client_impl.h
+
+        novalsm/stoc_health_monitor.cpp
+        novalsm/stoc_health_monitor.h
 
         benchmarks/bench_common.h
         benchmarks/mock_rtable.h

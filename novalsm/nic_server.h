@@ -18,6 +18,7 @@
 #include "ltc/stoc_file_client_impl.h"
 #include "ltc/compaction_thread.h"
 #include "ltc/stat_thread.h"
+#include "novalsm/stoc_health_monitor.h"
 
 namespace nova {
     class NICClientReqWorker;
@@ -76,8 +77,9 @@ namespace nova {
         std::vector<leveldb::EnvBGThread *> compaction_coord_bgs;
 
         NovaStatThread *stat_thread_;
-        vector<std::thread> stats_t_;
+        nova::StoCHealthMonitor *monitor_ = nullptr;
 
+        vector<std::thread> stats_t_;
         struct event_base *base;
         int current_conn_worker_id_;
         vector<thread> conn_worker_threads;

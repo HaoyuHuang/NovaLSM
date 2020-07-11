@@ -51,7 +51,8 @@ namespace leveldb {
 
     StoCWritableFileClient::~StoCWritableFileClient() {
         if (backing_mem_) {
-            NOVA_LOG(rdmaio::DEBUG) << fmt::format("close file w {}", fname_debug_only_);
+            NOVA_LOG(rdmaio::DEBUG)
+                << fmt::format("close file w {}", fname_debug_only_);
             uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                       allocated_size_);
             mem_manager_->FreeItem(thread_id_, backing_mem_, scid);
@@ -95,7 +96,8 @@ namespace leveldb {
         NOVA_ASSERT(used_size_ + size < allocated_size_)
             << fmt::format(
                     "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{} data size:{}",
-                    thread_id_, fname_debug_only_, dbname_, allocated_size_, used_size_,
+                    thread_id_, fname_debug_only_, dbname_, allocated_size_,
+                    used_size_,
                     size);
         used_size_ += size;
         return Status::OK();
@@ -108,31 +110,19 @@ namespace leveldb {
         NOVA_ASSERT(used_size_ + data.size() < allocated_size_)
             << fmt::format(
                     "writablefile[{}]: fn:{} db:{} alloc_size:{} used_size:{} data size:{}",
-                    thread_id_, fname_debug_only_, dbname_, allocated_size_, used_size_,
+                    thread_id_, fname_debug_only_, dbname_, allocated_size_,
+                    used_size_,
                     data.size());
         uint32_t stoc_file_id;
         auto client = reinterpret_cast<StoCBlockClient *> (stoc_client_);
-        std::vector<uint32_t> reqs;
-        for (int replica_id = 0;
-             replica_id < replica_status_.size(); replica_id++) {
-            uint32_t req_id = client->InitiateAppendBlock(stoc_id, 0,
-                                                          &stoc_file_id, buf,
-                                                          dbname_, 0,
-                                                          replica_id,
-                                                          data.size(), false);
-            reqs.push_back(req_id);
-        }
-
-        for (int replica_id = 0;
-             replica_id < replica_status_.size(); replica_id++) {
-            client->Wait();
-        }
-
-        for (int replica_id = 0;
-             replica_id < replica_status_.size(); replica_id++) {
-            StoCResponse response;
-            NOVA_ASSERT(client->IsDone(reqs[replica_id], &response, nullptr));
-        }
+        uint32_t req_id = client->InitiateAppendBlock(stoc_id, 0,
+                                                      &stoc_file_id, buf,
+                                                      dbname_, 0,
+                                                      0,
+                                                      data.size(), false);
+        client->Wait();
+        StoCResponse response;
+        NOVA_ASSERT(client->IsDone(req_id, &response, nullptr));
         used_size_ += data.size();
         return Status::OK();
     }
@@ -142,7 +132,8 @@ namespace leveldb {
         NOVA_ASSERT(used_size_ + data.size() < allocated_size_)
             << fmt::format(
                     "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{} data size:{}",
-                    thread_id_, fname_debug_only_, dbname_, allocated_size_, used_size_,
+                    thread_id_, fname_debug_only_, dbname_, allocated_size_,
+                    used_size_,
                     data.size());
         memcpy(buf, data.data(), data.size());
         used_size_ += data.size();
@@ -162,7 +153,8 @@ namespace leveldb {
     Status StoCWritableFileClient::Fsync() {
         NOVA_ASSERT(used_size_ == meta_.file_size) << fmt::format(
                     "ccremotememfile[{}]: fn:{} db:{} alloc_size:{} used_size:{}",
-                    thread_id_, fname_debug_only_, dbname_, allocated_size_, used_size_);
+                    thread_id_, fname_debug_only_, dbname_, allocated_size_,
+                    used_size_);
         Format();
         return Status::OK();
     }
@@ -229,10 +221,21 @@ namespace leveldb {
         int size = 0;
         int group_id = 0;
         auto client = reinterpret_cast<StoCBlockClient *> (stoc_client_);
-        std::vector<uint32_t> scatter_stocs;
-        StorageSelector selector(client, rand_seed_);
-        selector.SelectStorageServers(nova::NovaConfig::config->scatter_policy,
-                                      nblocks_in_group_.size(), &scatter_stocs);
+
+        uint32_t num_stocs_to_select = 0;
+        if (nova::NovaConfig::config->number_of_sstable_replicas > 1) {
+            nblocks_in_group_.clear();
+            nblocks_in_group_.push_back(num_data_blocks_);
+            num_stocs_to_select = nova::NovaConfig::config->number_of_sstable_replicas;
+        } else {
+            num_stocs_to_select = nblocks_in_group_.size();
+        }
+
+        StorageSelector selector(rand_seed_);
+        selector.SelectStorageServers(client,
+                                      nova::NovaConfig::config->scatter_policy,
+                                      num_stocs_to_select,
+                                      &stocs_to_store_fragments_);
         uint32_t sid = 0;
         uint32_t dbid = 0;
         nova::ParseDBIndexFromDBName(dbname_, &sid, &dbid);
@@ -257,21 +260,29 @@ namespace leveldb {
             if (n == nblocks_in_group_[group_id]) {
                 for (int replica_id = 0; replica_id <
                                          nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
+                    uint32_t remote_stoc_id = 0;
+                    if (nova::NovaConfig::config->number_of_sstable_replicas >
+                        1) {
+                        remote_stoc_id = stocs_to_store_fragments_[replica_id];
+                    } else {
+                        remote_stoc_id = stocs_to_store_fragments_[group_id];
+                    }
+
                     uint32_t stoc_file_id = 0;
                     client->set_dbid(dbid);
                     uint32_t req_id = client->InitiateAppendBlock(
-                            scatter_stocs[group_id], thread_id_, &stoc_file_id,
+                            remote_stoc_id, thread_id_, &stoc_file_id,
                             backing_mem_ + offset,
                             dbname_, file_number_, replica_id,
                             size, false);
                     NOVA_LOG(rdmaio::DEBUG)
                         << fmt::format(
                                 "t[{}]: Initiated WRITE data blocks {} s:{} req:{} db:{} fn:{} replica:{}",
-                                thread_id_, n, scatter_stocs[group_id], req_id,
+                                thread_id_, n, remote_stoc_id, req_id,
                                 dbname_, file_number_, replica_id);
 
                     PersistStatus status = {};
-                    status.remote_server_id = scatter_stocs[group_id];
+                    status.remote_server_id = remote_stoc_id;
                     status.WRITE_req_id = req_id;
                     status.result_handle = {};
                     replica_status_[replica_id].persist_statuses.push_back(
@@ -307,6 +318,8 @@ namespace leveldb {
             replica.meta_block_handle = replica_status_[i].meta_block_handle;
             replicas.push_back(std::move(replica));
         }
+        StorageSelector selector(rand_seed_);
+        selector.ValidateReplicas(replicas);
         return replicas;
     }
 
@@ -335,17 +348,26 @@ namespace leveldb {
                 status.persist_statuses[i].result_handle = response.stoc_block_handles[0];
             }
         }
+
+        std::vector<uint32_t> stocs;
+        if (replica_status_.size() > 1) {
+            stocs = stocs_to_store_fragments_;
+        } else {
+            StorageSelector selector(rand_seed_);
+            selector.SelectAvailableStoCs(&stocs, 1);
+        }
         uint64_t new_file_size = 0;
         for (int replica_id = 0;
              replica_id < replica_status_.size(); replica_id++) {
-            new_file_size = WriteMetaDataBlock(replica_id);
+            new_file_size = WriteMetaDataBlock(stocs[replica_id], replica_id);
         }
         NOVA_ASSERT(new_file_size != 0);
         return new_file_size;
     }
 
     uint64_t
-    StoCWritableFileClient::WriteMetaDataBlock(uint32_t replica_id) {
+    StoCWritableFileClient::WriteMetaDataBlock(uint32_t stoc_id,
+                                               uint32_t replica_id) {
         auto client = reinterpret_cast<StoCBlockClient *> (stoc_client_);
         Status s;
         int file_size = used_size_;
@@ -477,9 +499,6 @@ namespace leveldb {
         delete writable_file;
         writable_file = nullptr;
         {
-            uint32_t stoc_id = rand_r(rand_seed_) %
-                               nova::NovaConfig::config->stoc_servers.size();
-            stoc_id = nova::NovaConfig::config->stoc_servers[stoc_id].server_id;
             uint32_t req_id = client->InitiateAppendBlock(stoc_id,
                                                           thread_id_,
                                                           nullptr,

@@ -569,7 +569,8 @@ namespace nova {
              i <
              NovaConfig::config->num_compaction_workers; i++) {
             auto bg = static_cast<leveldb::LTCCompactionThread *>(bg_flush_memtable_threads[i]);
-            bg->stoc_client_ = new leveldb::StoCBlockClient(i, stoc_file_manager);
+            bg->stoc_client_ = new leveldb::StoCBlockClient(i,
+                                                            stoc_file_manager);
             bg->stoc_client_->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             bg->thread_id_ = i;
         }
@@ -577,7 +578,8 @@ namespace nova {
              i <
              NovaConfig::config->num_compaction_workers; i++) {
             auto bg = static_cast<leveldb::LTCCompactionThread *>(bg_compaction_threads[i]);
-            bg->stoc_client_ = new leveldb::StoCBlockClient(i, stoc_file_manager);
+            bg->stoc_client_ = new leveldb::StoCBlockClient(i,
+                                                            stoc_file_manager);
             bg->stoc_client_->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             bg->thread_id_ = i;
         }
@@ -652,7 +654,8 @@ namespace nova {
         for (int i = 0; i < compaction_coord_bgs.size(); i++) {
             auto bg = reinterpret_cast<leveldb::LTCCompactionThread *>(compaction_coord_bgs[i]);
             bg->db_ = dbs_[i];
-            bg->stoc_client_ = new leveldb::StoCBlockClient(i, stoc_file_manager);
+            bg->stoc_client_ = new leveldb::StoCBlockClient(i,
+                                                            stoc_file_manager);
             bg->stoc_client_->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             bg->thread_id_ = i;
             compaction_coord_workers.emplace_back(
@@ -815,6 +818,20 @@ namespace nova {
                 }
             }
         }
+
+        if (NovaConfig::config->fail_stoc_id != -1) {
+            auto stoc_client = new leveldb::StoCBlockClient(100,
+                                                            stoc_file_manager);
+            stoc_client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
+            monitor_ = new StoCHealthMonitor(
+                    NovaConfig::config->fail_stoc_id,
+                    NovaConfig::config->exp_seconds_to_fail_stoc, stoc_client,
+                    dbs_);
+            stats_t_.emplace_back(
+                    std::thread(&StoCHealthMonitor::Start, monitor_));
+        }
+
+
         // Start connection threads in the end after we have loaded all data.
         for (int i = 0;
              i <

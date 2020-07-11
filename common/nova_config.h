@@ -197,6 +197,9 @@ namespace nova {
         std::vector<LTCFragment *> db_fragment;
         int num_stocs_scatter_data_blocks;
 
+        int fail_stoc_id = 0;
+        int exp_seconds_to_fail_stoc = 0;
+
         void ReadZipfianDist() {
             if (zipfian_dist_file_path.empty()) {
                 return;

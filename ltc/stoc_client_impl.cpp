@@ -21,18 +21,29 @@ namespace leveldb {
         }
     }
 
-    uint32_t
-    StoCBlockClient::InitiateReReplicateSSTable(uint32_t stoc_server_id,
-                                                const std::vector<leveldb::ReplicationPair>& pairs) {
-        // TODO
-        return 0;
-    }
-
     StoCBlockClient::StoCBlockClient(uint32_t client_id,
                                      StocPersistentFileManager *stoc_file_manager)
             : stoc_file_manager_(stoc_file_manager) {
         sem_init(&sem_, 0, 0);
         current_rdma_msg_handler_id_ = client_id;
+    }
+
+    uint32_t
+    StoCBlockClient::InitiateReplicateSSTables(uint32_t stoc_server_id,
+                                               const std::string &dbname,
+                                               const std::vector<leveldb::ReplicationPair> &pairs) {
+        NOVA_ASSERT(stoc_server_id != nova::NovaConfig::config->my_server_id);
+        RDMARequestTask task = {};
+        task.type = RDMA_CLIENT_RECONSTRUCT_MISSING_REPLICA;
+        task.server_id = stoc_server_id;
+        task.missing_replicas = pairs;
+        task.dbname = dbname;
+        task.sem = &sem_;
+
+        uint32_t reqid = req_id_;
+        AddAsyncTask(task);
+        IncrementReqId();
+        return reqid;
     }
 
     uint32_t
@@ -327,9 +338,31 @@ namespace leveldb {
         return reqid;
     }
 
-    uint32_t StoCRDMAClient::InitiateReReplicateSSTable(uint32_t stoc_server_id,
-                                                        const std::vector<leveldb::ReplicationPair>& pairs) {
-        // TODO
+    uint32_t StoCRDMAClient::InitiateReplicateSSTables(uint32_t stoc_server_id,
+                                                       const std::string &dbname,
+                                                       const std::vector<leveldb::ReplicationPair> &pairs) {
+        uint32_t req_id = current_req_id_;
+        StoCRequestContext context = {};
+        context.done = false;
+        context.req_type = StoCRequestType::STOC_REPLICATE_SSTABLES;
+
+        char *send_buf = rdma_broker_->GetSendBuf(stoc_server_id);
+        uint32_t msg_size = 1;
+        send_buf[0] = StoCRequestType::STOC_REPLICATE_SSTABLES;
+        msg_size += EncodeStr(send_buf + msg_size, dbname);
+        msg_size += EncodeFixed32(send_buf + msg_size, pairs.size());
+
+        for (const auto &it : pairs) {
+            msg_size += it.Encode(send_buf + msg_size);
+        }
+        rdma_broker_->PostSend(send_buf, msg_size, stoc_server_id, req_id);
+        request_context_[req_id] = context;
+        IncrementReqId();
+        NOVA_LOG(DEBUG)
+            << fmt::format(
+                    "stocclient[{}]: Reconstruct replicas stoc:{} size:{} req:{}",
+                    stoc_client_id_, stoc_server_id, pairs.size(), req_id);
+        return req_id;
     }
 
     uint32_t
@@ -1010,6 +1043,10 @@ namespace leveldb {
                                StoCRequestType::STOC_IS_READY_FOR_REQUESTS_RESPONSE) {
                         bool is_ready = leveldb::DecodeBool(buf + 1);
                         context.is_ready_for_requests = is_ready;
+                        context.done = true;
+                        processed = true;
+                    } else if (buf[0] ==
+                               StoCRequestType::STOC_REPLICATE_SSTABLES_RESPONSE) {
                         context.done = true;
                         processed = true;
                     }

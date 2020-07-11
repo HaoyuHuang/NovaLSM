@@ -12,6 +12,7 @@
 #include "leveldb/db.h"
 #include "leveldb/comparator.h"
 #include "leveldb/env.h"
+#include "ltc/storage_selector.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -111,6 +112,9 @@ DEFINE_uint32(major_compaction_max_parallism, 1,
 DEFINE_uint32(major_compaction_max_tables_in_a_set, 15,
               "The maximum number of SSTables in a compaction job.");
 DEFINE_uint32(num_sstable_replicas, 1, "Number of replicas for SSTables.");
+DEFINE_int32(fail_stoc_id, -1, "The StoC to fail.");
+DEFINE_int32(exp_seconds_to_fail_stoc, 0,
+             "Number of seconds elapsed to fail the stoc.");
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq;
@@ -122,6 +126,7 @@ std::atomic_int_fast32_t nova::RDMAServerImpl::fg_storage_worker_seq_id_;
 std::atomic_int_fast32_t nova::RDMAServerImpl::bg_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::StoCBlockClient::rdma_worker_seq_id_;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
+std::atomic<nova::Servers *> leveldb::StorageSelector::available_stoc_servers;
 NovaGlobalVariables NovaGlobalVariables::global;
 
 void StartServer() {
@@ -305,6 +310,9 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->l0_start_compaction_mb = FLAGS_l0_start_compaction_mb;
     NovaConfig::config->level = FLAGS_level;
     NovaConfig::config->enable_subrange_reorg = FLAGS_enable_subrange_reorg;
+    NovaConfig::config->fail_stoc_id = FLAGS_fail_stoc_id;
+    NovaConfig::config->exp_seconds_to_fail_stoc = FLAGS_exp_seconds_to_fail_stoc;
+
     leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq = 0;
     leveldb::EnvBGThread::bg_compaction_thread_id_seq = 0;
     nova::RDMAServerImpl::bg_storage_worker_seq_id_ = 0;
@@ -312,6 +320,14 @@ int main(int argc, char *argv[]) {
     nova::StorageWorker::storage_file_number_seq = 0;
     nova::RDMAServerImpl::compaction_storage_worker_seq_id_ = 0;
     nova::NovaGlobalVariables::global.Initialize();
+    auto available_stoc_servers = new Servers;
+    available_stoc_servers->servers = NovaConfig::config->stoc_servers;
+    for (int i = 0; i < available_stoc_servers->servers.size(); i++) {
+        available_stoc_servers->server_ids.insert(
+                available_stoc_servers->servers[i].server_id);
+    }
+    leveldb::StorageSelector::available_stoc_servers.store(
+            available_stoc_servers);
 
     NOVA_ASSERT(FLAGS_ltc_num_stocs_scatter_data_blocks <
                 NovaConfig::config->stoc_servers.size()) << fmt::format(

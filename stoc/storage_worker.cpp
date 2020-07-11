@@ -47,6 +47,51 @@ namespace nova {
         sem_post(&sem_);
     }
 
+    void StorageWorker::ReplicateSSTables(
+            const std::string &dbname,
+            const std::vector<leveldb::ReplicationPair> &replication_pairs) {
+        std::vector<char *> bufs;
+        std::vector<uint32_t> reqs;
+        auto client = reinterpret_cast<leveldb::StoCBlockClient *>(client_);
+        for (int i = 0; i < replication_pairs.size(); i++) {
+            auto &pair = replication_pairs[i];
+            uint32_t scid = mem_manager_->slabclassid(0, pair.source_file_size);
+            char *buf = mem_manager_->ItemAlloc(0, scid);
+
+            leveldb::StoCBlockHandle handle;
+            handle.server_id = nova::NovaConfig::config->my_server_id;
+            handle.stoc_file_id = pair.source_stoc_file_id;
+            handle.offset = 0;
+            handle.size = pair.source_file_size;
+
+            leveldb::Slice result;
+            stoc_file_manager_->ReadDataBlock(handle, 0, pair.source_file_size,
+                                              buf, &result);
+            stat_read_bytes_ += pair.source_file_size;
+            NOVA_ASSERT(result.size() == pair.source_file_size)
+                << fmt::format("{} {} {}", pair.source_stoc_file_id,
+                               pair.source_file_size, result.size());
+            bufs.push_back(buf);
+            uint32_t place_holder;
+            uint32_t req_id = client_->InitiateAppendBlock(pair.dest_stoc_id, 0,
+                                                           &place_holder,
+                                                           buf,
+                                                           dbname,
+                                                           pair.sstable_file_number,
+                                                           pair.replica_id,
+                                                           pair.source_file_size,
+                                                           pair.is_meta_blocks);
+            reqs.push_back(req_id);
+        }
+        for (int i = 0; i < replication_pairs.size(); i++) {
+            client->Wait();
+        }
+        for (int i = 0; i < replication_pairs.size(); i++) {
+            leveldb::StoCResponse response;
+            NOVA_ASSERT(client->IsDone(reqs[i], &response, nullptr));
+        }
+    }
+
     void StorageWorker::Start() {
         NOVA_LOG(DEBUG) << "CC server worker started";
 
@@ -121,6 +166,9 @@ namespace nova {
                             stoc_file->ForceSeal();
                         }
                     }
+                } else if (task.request_type ==
+                           leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES) {
+                    ReplicateSSTables(task.dbname, task.replication_pairs);
                 } else if (task.request_type ==
                            leveldb::StoCRequestType::STOC_COMPACTION) {
                     leveldb::TableCache table_cache(

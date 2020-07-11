@@ -76,6 +76,8 @@ namespace leveldb {
         RDMA_WRITE_REQUEST = 'D',
         RDMA_WRITE_REMOTE_BUF_ALLOCATED = 'E',
         LTC_MIGRATION = 'F',
+        STOC_REPLICATE_SSTABLES = 'G',
+        STOC_REPLICATE_SSTABLES_RESPONSE = 'H',
     };
 
     struct StoCRequestContext {
@@ -141,6 +143,7 @@ namespace leveldb {
         RDMA_CLIENT_IS_READY_FOR_REQUESTS = 'm',
         RDMA_CLIENT_RDMA_WRITE_REQUEST = 'n',
         RDMA_CLIENT_RDMA_WRITE_REMOTE_BUF_ALLOCATED = 'o',
+        RDMA_CLIENT_RECONSTRUCT_MISSING_REPLICA = 'p',
     };
 
     struct LevelDBLogRecord {
@@ -181,6 +184,8 @@ namespace leveldb {
         uint32_t write_size = 0;
         bool is_meta_blocks = false;
 
+        std::vector<leveldb::ReplicationPair> missing_replicas;
+
         CompactionRequest *compaction_request = nullptr;
 
         StoCReplicateLogRecordState *replicate_log_record_states = nullptr;
@@ -194,8 +199,9 @@ namespace leveldb {
         virtual uint32_t InitiateCompaction(uint32_t remote_server_id,
                                             CompactionRequest *compaction_request) = 0;
 
-        virtual uint32_t InitiateReReplicateSSTable(uint32_t stoc_server_id,
-                                                    const std::vector<leveldb::ReplicationPair>& pairs) = 0;
+        virtual uint32_t InitiateReplicateSSTables(uint32_t stoc_server_id,
+                                                   const std::string& dbname,
+                                                   const std::vector<leveldb::ReplicationPair>& pairs) = 0;
 
         virtual uint32_t
         InitiateRDMAWRITE(uint32_t remote_server_id, char *data,

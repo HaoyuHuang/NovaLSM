@@ -6,6 +6,7 @@
 #include "util/logging.h"
 #include "util/testharness.h"
 #include "util/testutil.h"
+#include "ltc/storage_selector.h"
 
 
 #include <stdlib.h>
@@ -599,5 +600,6 @@ std::atomic_int_fast32_t nova::RDMAServerImpl::bg_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::StoCBlockClient::rdma_worker_seq_id_;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 nova::NovaGlobalVariables nova::NovaGlobalVariables::global;
+std::atomic<nova::Servers *> leveldb::StorageSelector::available_stoc_servers;
 
 int main(int argc, char **argv) { return leveldb::test::RunAllTests(); }

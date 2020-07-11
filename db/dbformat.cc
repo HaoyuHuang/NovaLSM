@@ -8,6 +8,7 @@
 
 #include <sstream>
 #include "common/nova_console_logging.h"
+#include "ltc/storage_selector.h"
 
 #include "port/port.h"
 #include "util/coding.h"
@@ -159,8 +160,38 @@ namespace leveldb {
                DecodeFixed32(input, &level) && DecodeReplicas(input);
     }
 
+    uint32_t ReplicationPair::Encode(char *buf) const {
+        uint32_t msg_size = 0;
+        msg_size += EncodeFixed32(buf, source_stoc_file_id);
+        msg_size += EncodeBool(buf + msg_size, is_meta_blocks);
+        msg_size += EncodeFixed32(buf + msg_size, source_file_size);
+        msg_size += EncodeFixed32(buf + msg_size, dest_stoc_id);
+        msg_size += EncodeFixed64(buf + msg_size, sstable_file_number);
+        msg_size += EncodeFixed32(buf + msg_size, replica_id);
+        return msg_size;
+    }
+
+    bool ReplicationPair::Decode(Slice *ptr) {
+        return DecodeFixed32(ptr, &source_stoc_file_id) &&
+               DecodeBool(ptr, &is_meta_blocks) &&
+               DecodeFixed32(ptr, &source_file_size) &&
+               DecodeFixed32(ptr, &dest_stoc_id) &&
+               DecodeFixed64(ptr, &sstable_file_number) &&
+               DecodeFixed32(ptr, &replica_id);
+    }
+
     int FileMetaData::SelectReplica() const {
-        return 0;
+        int replica_id = -1;
+        auto servers = leveldb::StorageSelector::available_stoc_servers.load();
+        for (int i = 0; i < block_replica_handles.size(); i++) {
+            if (servers->server_ids.find(
+                    block_replica_handles[i].meta_block_handle.server_id) ==
+                servers->server_ids.end()) {
+                replica_id = i;
+                break;
+            }
+        }
+        return replica_id;
     }
 
     std::string FileMetaData::ShortDebugString() const {

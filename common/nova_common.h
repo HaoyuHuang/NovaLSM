@@ -336,6 +336,11 @@ namespace nova {
         int port;
     };
 
+    struct Servers {
+        std::vector<Host> servers;
+        std::set<uint32_t> server_ids;
+    };
+
     struct QPEndPoint {
         Host host;
         uint32_t server_id;

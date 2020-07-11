@@ -44,6 +44,10 @@ namespace nova {
 
         // Compaction request
         leveldb::CompactionRequest *compaction_request = nullptr;
+
+        // Replication request
+        std::string dbname;
+        std::vector<leveldb::ReplicationPair> replication_pairs;
     };
 
     struct ServerCompleteTask {

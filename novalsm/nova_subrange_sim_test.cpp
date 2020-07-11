@@ -16,6 +16,7 @@
 #include "db/filename.h"
 #include "util/env_posix.h"
 #include "db/version_set.h"
+#include "ltc/storage_selector.h"
 
 #include "util/generator.h"
 #include "util/uniform_generator.h"
@@ -160,6 +161,7 @@ std::atomic_int_fast32_t nova::RDMAServerImpl::compaction_storage_worker_seq_id_
 std::atomic_int_fast32_t leveldb::StoCBlockClient::rdma_worker_seq_id_;
 std::atomic_int_fast32_t nova::StorageWorker::storage_file_number_seq;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
+std::atomic<nova::Servers *> leveldb::StorageSelector::available_stoc_servers;
 NovaGlobalVariables NovaGlobalVariables::global;
 
 void start(NICServer *server) {
