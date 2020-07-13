@@ -79,7 +79,7 @@ namespace leveldb {
 
         StoCClient *stoc_client = nullptr;
 
-        uint32_t manifest_stoc_id = 0;
+        std::vector<uint32_t> manifest_stoc_ids;
 
         uint32_t num_tiny_ranges_per_subrange = 10;
 

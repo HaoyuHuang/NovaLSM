@@ -51,6 +51,16 @@ namespace leveldb {
 
     const int kNumNonTableCacheFiles = 10;
 
+    std::string ReconstructReplicasStats::DebugString() const {
+        return fmt::format("{},{},{},{},{},{},{},{}",
+                           total_failed_metafiles_bytes,
+                           total_failed_datafiles_bytes,
+                           total_num_failed_metafiles,
+                           total_num_failed_datafiles, recover_metafiles_bytes,
+                           recover_datafiles_bytes, recover_num_metafiles,
+                           recover_num_datafiles);
+    }
+
 // Information kept for every waiting writer
     struct DBImpl::Writer {
         explicit Writer(port::Mutex *mu)
@@ -380,7 +390,7 @@ namespace leveldb {
     Status DBImpl::Recover() {
         timeval start = {};
         gettimeofday(&start, nullptr);
-        uint32_t stoc_id = options_.manifest_stoc_id;
+        uint32_t stoc_id = options_.manifest_stoc_ids[0];
         std::string manifest = DescriptorFileName(dbname_, 0, 0);
         auto client = reinterpret_cast<StoCBlockClient *> (options_.stoc_client);
         uint32_t scid = options_.mem_manager->slabclassid(0,
@@ -769,7 +779,7 @@ namespace leveldb {
             }
         }
         versions_->AppendChangesToManifest(&edit, manifest_file_,
-                                           options_.manifest_stoc_id);
+                                           options_.manifest_stoc_ids);
         Version *v = new Version(&internal_comparator_, table_cache_, &options_,
                                  versions_->version_id_seq_.fetch_add(1),
                                  versions_);
@@ -1020,7 +1030,7 @@ namespace leveldb {
         }
 
         versions_->AppendChangesToManifest(&edit, manifest_file_,
-                                           options_.manifest_stoc_id);
+                                           options_.manifest_stoc_ids);
         Version *v = new Version(&internal_comparator_, table_cache_, &options_,
                                  versions_->version_id_seq_.fetch_add(1),
                                  versions_);
@@ -1174,7 +1184,7 @@ namespace leveldb {
                                            options_.enable_flush_multiple_memtables);
             // Include the latest version.
             versions_->AppendChangesToManifest(&edit, manifest_file_,
-                                               options_.manifest_stoc_id);
+                                               options_.manifest_stoc_ids);
             std::unordered_map<uint32_t, std::vector<EnvBGTask>> pid_tasks;
             RangeIndexVersionEdit range_edit;
             if (range_index_manager_) {
@@ -1656,7 +1666,7 @@ namespace leveldb {
         NOVA_LOG(rdmaio::DEBUG) << edit.DebugString();
         versions_->AppendChangesToManifest(&edit,
                                            manifest_file_,
-                                           options_.manifest_stoc_id);
+                                           options_.manifest_stoc_ids);
         if (range_index_manager_) {
             range_index_manager_->DeleteObsoleteVersions();
         }
@@ -2712,7 +2722,8 @@ namespace leveldb {
 
     void DBImpl::QueryFailedReplicas(uint32_t failed_stoc_id,
                                      std::unordered_map<uint32_t, std::vector<ReplicationPair> > *stoc_repl_pairs,
-                                     int level) {
+                                     int level,
+                                     ReconstructReplicasStats *stats) {
         Version *current = nullptr;
         uint32_t vid = 0;
         while (current == nullptr) {
@@ -2724,17 +2735,27 @@ namespace leveldb {
         StorageSelector selector(&rand_seed_);
         mutex_compacting_tables.Lock();
         for (const auto &it : current->files_[level]) {
-            if (compacting_tables_.find(it->number) !=
-                compacting_tables_.end()) {
-                // Skip replicating this table since it going to be deleted soon.
-//                NOVA_LOG(rdmaio::INFO) << fmt::format("Skip table {} since it is compacting");
-                continue;
-            }
             // find an available replica to replicate the sstable.
             for (int replica_id = 0;
                  replica_id < it->block_replica_handles.size(); replica_id++) {
                 const auto &replica = it->block_replica_handles[replica_id];
                 if (replica.meta_block_handle.server_id == failed_stoc_id) {
+                    stats->total_num_failed_datafiles += 1;
+                    stats->total_num_failed_metafiles += 1;
+                    stats->total_failed_metafiles_bytes += replica.meta_block_handle.size;
+                    stats->total_failed_datafiles_bytes += replica.data_block_group_handles[0].size;
+
+                    if (compacting_tables_.find(it->number) !=
+                        compacting_tables_.end()) {
+                        // Skip replicating this table since it going to be deleted soon.
+                        continue;
+                    }
+
+                    stats->recover_num_datafiles += 1;
+                    stats->recover_num_metafiles += 1;
+                    stats->recover_metafiles_bytes += replica.meta_block_handle.size;
+                    stats->recover_datafiles_bytes += replica.data_block_group_handles[0].size;
+
                     NOVA_ASSERT(replica.data_block_group_handles.size() == 1);
                     // meta replica.
                     uint32_t available_replica_id = 0;

@@ -109,11 +109,21 @@ namespace leveldb {
         options.lower_key = nova::NovaConfig::config->db_fragment[db_index]->range.key_start;
         options.upper_key = nova::NovaConfig::config->db_fragment[db_index]->range.key_end;
         if (nova::NovaConfig::config->use_local_disk) {
-            options.manifest_stoc_id = nova::NovaConfig::config->my_server_id;
+            options.manifest_stoc_ids.push_back(
+                    nova::NovaConfig::config->my_server_id);
         } else {
             uint32_t stocid = nova::NovaConfig::config->my_server_id %
                               nova::NovaConfig::config->stoc_servers.size();
-            options.manifest_stoc_id = nova::NovaConfig::config->stoc_servers[stocid].server_id;
+            for (int i = 0;
+                 i <
+                 nova::NovaConfig::config->number_of_sstable_replicas; i++) {
+                stocid = (stocid + i) %
+                         nova::NovaConfig::config->stoc_servers.size();
+                NOVA_LOG(rdmaio::INFO) << fmt::format("Manifest stoc id: {}",
+                                                      nova::NovaConfig::config->stoc_servers[stocid].server_id);
+                options.manifest_stoc_ids.push_back(
+                        nova::NovaConfig::config->stoc_servers[stocid].server_id);
+            }
         }
         options.num_tiny_ranges_per_subrange = nova::NovaConfig::config->num_tinyranges_per_subrange;
         return options;
@@ -188,8 +198,8 @@ namespace leveldb {
                                                   env);
         leveldb::Logger *log = nullptr;
         std::string db_path = nova::DBName(nova::NovaConfig::config->db_path,
-                                     nova::NovaConfig::config->my_server_id,
-                                     db_index);
+                                           nova::NovaConfig::config->my_server_id,
+                                           db_index);
         nova::mkdirs(db_path.c_str());
         NOVA_ASSERT(env->NewLogger(
                 db_path + "/LOG-" + std::to_string(db_index), &log).ok());

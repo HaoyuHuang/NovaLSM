@@ -326,7 +326,7 @@ namespace leveldb {
 
         void AppendChangesToManifest(VersionEdit *edit,
                                      StoCWritableFileClient *manifest_file,
-                                     uint32_t stoc_id);
+                                     const std::vector<uint32_t>& stoc_id);
 
         // Recover the last saved descriptor from persistent storage.
         Status Recover(Slice manifest_file,

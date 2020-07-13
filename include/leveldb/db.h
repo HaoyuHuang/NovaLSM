@@ -77,6 +77,20 @@ namespace leveldb {
         uint32_t *sstable_size_dist = nullptr;
     };
 
+    struct ReconstructReplicasStats {
+        uint32_t total_num_failed_metafiles = 0;
+        uint32_t total_num_failed_datafiles = 0;
+        uint32_t total_failed_metafiles_bytes = 0;
+        uint32_t total_failed_datafiles_bytes = 0;
+
+        uint32_t recover_num_metafiles = 0;
+        uint32_t recover_num_datafiles = 0;
+        uint64_t recover_metafiles_bytes = 0;
+        uint64_t recover_datafiles_bytes = 0;
+
+        std::string DebugString() const;
+    };
+
 // A DB is a persistent ordered map from keys to values.
 // A DB is safe for concurrent access from multiple threads without
 // any external synchronization.
@@ -94,7 +108,7 @@ namespace leveldb {
 
         virtual void QueryFailedReplicas(uint32_t failed_stoc_id,
                                          std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_repl_pairs,
-                                         int level) = 0;
+                                         int level, ReconstructReplicasStats* stats) = 0;
 
         virtual Status Recover() = 0;
 

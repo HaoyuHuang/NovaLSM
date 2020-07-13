@@ -105,7 +105,7 @@ namespace leveldb {
 
     Status
     StoCWritableFileClient::SyncAppend(const leveldb::Slice &data,
-                                       uint32_t stoc_id) {
+                                       const std::vector<uint32_t> &stoc_ids) {
         char *buf = backing_mem_ + used_size_;
         NOVA_ASSERT(used_size_ + data.size() < allocated_size_)
             << fmt::format(
@@ -115,14 +115,24 @@ namespace leveldb {
                     data.size());
         uint32_t stoc_file_id;
         auto client = reinterpret_cast<StoCBlockClient *> (stoc_client_);
-        uint32_t req_id = client->InitiateAppendBlock(stoc_id, 0,
-                                                      &stoc_file_id, buf,
-                                                      dbname_, 0,
-                                                      0,
-                                                      data.size(), false);
-        client->Wait();
-        StoCResponse response;
-        NOVA_ASSERT(client->IsDone(req_id, &response, nullptr));
+        std::vector<uint32_t> reqs;
+        for (int replica_id = 0; replica_id < stoc_ids.size(); replica_id++) {
+            uint32_t stoc_id = stoc_ids[replica_id];
+            uint32_t req_id = client->InitiateAppendBlock(stoc_id, 0,
+                                                          &stoc_file_id, buf,
+                                                          dbname_, 0,
+                                                          replica_id,
+                                                          data.size(), false);
+            reqs.push_back(req_id);
+        }
+        for (auto reqid : reqs) {
+            client->Wait();
+        }
+
+        for (auto reqid : reqs) {
+            StoCResponse response;
+            NOVA_ASSERT(client->IsDone(reqid, &response, nullptr));
+        }
         used_size_ += data.size();
         return Status::OK();
     }

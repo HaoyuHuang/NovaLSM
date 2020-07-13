@@ -784,38 +784,40 @@ namespace nova {
 
         NovaGlobalVariables::global.is_ready_to_process_requests = true;
         {
-            if (NovaConfig::config->use_local_disk &&
-                NovaConfig::config->ltc_servers.size() > 1) {
-                leveldb::StoCBlockClient client(0, stoc_file_manager);
-                client.rdma_msg_handlers_ = bg_rdma_msg_handlers;
-                std::set<int> ready_ltcs;
+            // Wait for LTC to be ready for processing requests.
+            leveldb::StoCBlockClient client(0, stoc_file_manager);
+            client.rdma_msg_handlers_ = bg_rdma_msg_handlers;
+            std::set<int> ready_ltcs;
+            if (NovaConfig::config->use_local_disk ||
+                NovaConfig::config->my_server_id <
+                NovaConfig::config->ltc_servers.size()) {
                 ready_ltcs.insert(NovaConfig::config->my_server_id);
-                while (true) {
-                    for (auto &ltc : NovaConfig::config->ltc_servers) {
-                        if (ready_ltcs.find(ltc.server_id) !=
-                            ready_ltcs.end()) {
-                            continue;
-                        }
-                        leveldb::StoCResponse response;
-                        uint32_t req_id = client.InitiateIsReadyForProcessingRequests(
-                                ltc.server_id);
-                        client.Wait();
-                        NOVA_ASSERT(client.IsDone(req_id, &response, nullptr));
-                        NOVA_LOG(INFO)
-                            << fmt::format("LTC-{} is ready? {}", ltc.server_id,
-                                           response.is_ready_to_process_requests);
-                        if (response.is_ready_to_process_requests) {
-                            ready_ltcs.insert(ltc.server_id);
-                        } else {
-                            break;
-                        }
+            }
+            while (true) {
+                for (auto &ltc : NovaConfig::config->ltc_servers) {
+                    if (ready_ltcs.find(ltc.server_id) !=
+                        ready_ltcs.end()) {
+                        continue;
                     }
-                    if (ready_ltcs.size() ==
-                        NovaConfig::config->ltc_servers.size()) {
+                    leveldb::StoCResponse response;
+                    uint32_t req_id = client.InitiateIsReadyForProcessingRequests(
+                            ltc.server_id);
+                    client.Wait();
+                    NOVA_ASSERT(client.IsDone(req_id, &response, nullptr));
+                    NOVA_LOG(INFO)
+                        << fmt::format("LTC-{} is ready? {}", ltc.server_id,
+                                       response.is_ready_to_process_requests);
+                    if (response.is_ready_to_process_requests) {
+                        ready_ltcs.insert(ltc.server_id);
+                    } else {
                         break;
                     }
-                    sleep(1);
                 }
+                if (ready_ltcs.size() ==
+                    NovaConfig::config->ltc_servers.size()) {
+                    break;
+                }
+                sleep(1);
             }
         }
 

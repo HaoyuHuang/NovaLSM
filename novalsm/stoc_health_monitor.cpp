@@ -25,11 +25,6 @@ namespace nova {
         if (exp_seconds_to_fail_ == -1 || fail_stoc_id_ == -1) {
             return;
         }
-        if (nova::NovaConfig::config->my_server_id
-            >= nova::NovaConfig::config->ltc_servers.size()) {
-            // Not a LTC.
-            return;
-        }
         if (nova::NovaConfig::config->number_of_sstable_replicas <= 1) {
             // no replication.
             return;
@@ -49,7 +44,8 @@ namespace nova {
         nova::Servers *new_available_stocs = new nova::Servers;
         for (int i = 0;
              i < nova::NovaConfig::config->stoc_servers.size(); i++) {
-            if (i == fail_stoc_id_) {
+            if (nova::NovaConfig::config->stoc_servers[i].server_id ==
+                fail_stoc_id_) {
                 continue;
             }
             NOVA_LOG(rdmaio::INFO) << fmt::format("new server {}",
@@ -61,6 +57,12 @@ namespace nova {
         }
         leveldb::StorageSelector::available_stoc_servers.store(
                 new_available_stocs);
+
+        if (nova::NovaConfig::config->my_server_id
+            >= nova::NovaConfig::config->ltc_servers.size()) {
+            // Not a LTC.
+            return;
+        }
 
         now = 1;
         while (true) {
@@ -85,14 +87,12 @@ namespace nova {
              level >= 0; level--) {
             for (int dbid = 0; dbid < dbs_.size(); dbid++) {
                 stoc_repl_pairs.clear();
-
+                leveldb::ReconstructReplicasStats stats = {};
                 timeval start{};
                 gettimeofday(&start, nullptr);
-
                 auto db = dbs_[dbid];
                 db->QueryFailedReplicas(failed_stoc_server_id, &stoc_repl_pairs,
-                                        level);
-
+                                        level, &stats);
                 if (stoc_repl_pairs.empty()) {
                     continue;
                 }
@@ -134,6 +134,9 @@ namespace nova {
                 total_replicated += stoc_repl_pairs.size();
                 timeval end{};
                 gettimeofday(&end, nullptr);
+                NOVA_LOG(rdmaio::INFO)
+                    << fmt::format("Restore replication factor stats,{}",
+                                   stats.DebugString());
                 NOVA_LOG(rdmaio::INFO) << fmt::format(
                             "Restore replication factor for db-{} level-{} pairs:{} took {}",
                             dbid, level, stoc_repl_pairs.size(),

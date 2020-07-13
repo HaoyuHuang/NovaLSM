@@ -1149,7 +1149,7 @@ namespace leveldb {
                                      latest_->subranges[i].num_duplicates);
             }
             versions_->AppendChangesToManifest(&edit_, manifest_file_,
-                                               options_.manifest_stoc_id);
+                                               options_.manifest_stoc_ids);
         }
         if (update_latest_subrange) {
             range_lock_.Lock();

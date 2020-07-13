@@ -1074,7 +1074,7 @@ namespace leveldb {
 
     void VersionSet::AppendChangesToManifest(leveldb::VersionEdit *edit,
                                              StoCWritableFileClient *manifest_file,
-                                             uint32_t stoc_id) {
+                                             const std::vector<uint32_t>& stoc_id) {
         if (!manifest_file) {
             return;
         }

@@ -49,7 +49,7 @@ namespace leveldb {
 
         Status Fsync() override;
 
-        Status SyncAppend(const Slice &data, uint32_t stoc_id);
+        Status SyncAppend(const Slice &data, const std::vector<uint32_t>& stoc_id);
 
         void Format();
 
