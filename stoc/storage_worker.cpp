@@ -54,9 +54,10 @@ namespace nova {
         std::vector<uint32_t> reqs;
         auto client = reinterpret_cast<leveldb::StoCBlockClient *>(client_);
         for (int i = 0; i < replication_pairs.size(); i++) {
-            auto &pair = replication_pairs[i];
+            const auto &pair = replication_pairs[i];
             uint32_t scid = mem_manager_->slabclassid(0, pair.source_file_size);
             char *buf = mem_manager_->ItemAlloc(0, scid);
+            bufs.push_back(buf);
 
             leveldb::StoCBlockHandle handle;
             handle.server_id = nova::NovaConfig::config->my_server_id;
@@ -65,31 +66,42 @@ namespace nova {
             handle.size = pair.source_file_size;
 
             leveldb::Slice result;
-            stoc_file_manager_->ReadDataBlock(handle, 0, pair.source_file_size,
-                                              buf, &result);
-            stat_read_bytes_ += pair.source_file_size;
-            NOVA_ASSERT(result.size() == pair.source_file_size)
-                << fmt::format("{} {} {}", pair.source_stoc_file_id,
-                               pair.source_file_size, result.size());
-            bufs.push_back(buf);
-            uint32_t place_holder;
-            uint32_t req_id = client_->InitiateAppendBlock(pair.dest_stoc_id, 0,
-                                                           &place_holder,
-                                                           buf,
-                                                           dbname,
-                                                           pair.sstable_file_number,
-                                                           pair.replica_id,
-                                                           pair.source_file_size,
-                                                           pair.is_meta_blocks);
-            reqs.push_back(req_id);
+            if (stoc_file_manager_->ReadDataBlockForReplication(handle, 0,
+                                                                pair.source_file_size,
+                                                                buf, &result)) {
+                NOVA_LOG(DEBUG)
+                    << fmt::format("Initiate replicate {}", pair.DebugString());
+                stat_read_bytes_ += pair.source_file_size;
+                NOVA_ASSERT(result.size() == pair.source_file_size)
+                    << fmt::format("{} {} {}", pair.source_stoc_file_id,
+                                   pair.source_file_size, result.size());
+                uint32_t place_holder;
+                uint32_t req_id = client->InitiateAppendBlock(
+                        pair.dest_stoc_id, 0,
+                        &place_holder,
+                        buf,
+                        dbname,
+                        pair.sstable_file_number,
+                        pair.replica_id,
+                        pair.source_file_size,
+                        pair.is_meta_blocks);
+                reqs.push_back(req_id);
+            }
         }
-        for (int i = 0; i < replication_pairs.size(); i++) {
+        for (int i = 0; i < reqs.size(); i++) {
             client->Wait();
         }
-        for (int i = 0; i < replication_pairs.size(); i++) {
+        for (int i = 0; i < reqs.size(); i++) {
             leveldb::StoCResponse response;
             NOVA_ASSERT(client->IsDone(reqs[i], &response, nullptr));
         }
+
+        for (int i = 0; i < replication_pairs.size(); i++) {
+            const auto &pair = replication_pairs[i];
+            uint32_t scid = mem_manager_->slabclassid(0, pair.source_file_size);
+            mem_manager_->FreeItem(0, bufs[i], scid);
+        }
+        NOVA_LOG(DEBUG) << "All replications complete";
     }
 
     void StorageWorker::Start() {

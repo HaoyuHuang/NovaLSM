@@ -125,14 +125,16 @@ namespace leveldb {
     };
 
     struct ReplicationPair {
-        uint32_t source_stoc_file_id;
-        uint32_t source_file_size;
-        uint32_t dest_stoc_id;
-        uint64_t sstable_file_number;
-        uint32_t replica_id;
-        bool is_meta_blocks;
+        uint32_t source_stoc_file_id = 0;
+        uint32_t source_file_size = 0;
+        uint32_t dest_stoc_id = 0;
+        uint64_t sstable_file_number = 0;
+        uint32_t replica_id = 0;
+        bool is_meta_blocks = false;
 
         uint32_t Encode(char *buf) const;
+
+        std::string DebugString() const;
 
         bool Decode(Slice *ptr);
     };

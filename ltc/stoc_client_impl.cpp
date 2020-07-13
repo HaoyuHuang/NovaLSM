@@ -358,7 +358,7 @@ namespace leveldb {
         rdma_broker_->PostSend(send_buf, msg_size, stoc_server_id, req_id);
         request_context_[req_id] = context;
         IncrementReqId();
-        NOVA_LOG(DEBUG)
+        NOVA_LOG(INFO)
             << fmt::format(
                     "stocclient[{}]: Reconstruct replicas stoc:{} size:{} req:{}",
                     stoc_client_id_, stoc_server_id, pairs.size(), req_id);

@@ -26,6 +26,9 @@ namespace leveldb {
         Status
         Read(uint64_t offset, uint32_t size, char *scratch, Slice *result);
 
+        Status
+        ReadForReplication(uint64_t offset, uint32_t size, char *scratch, Slice *result);
+
         uint64_t Persist(uint32_t given_file_id_for_assertion);
 
         uint64_t AllocateBuf(const std::string &filename,
@@ -90,6 +93,9 @@ namespace leveldb {
         uint32_t thread_id_ = 0;
         uint32_t file_id_ = 0;
         uint32_t persisting_cnt = 0;
+        uint32_t reading_cnt = 0;
+
+        bool waiting_to_be_deleted = false;
         bool deleted_ = false;
         std::mutex mutex_;
 
@@ -112,6 +118,12 @@ namespace leveldb {
         void
         ReadDataBlock(const StoCBlockHandle &stoc_block_handle, uint64_t offset,
                       uint32_t size, char *scratch, Slice *result);
+
+        bool
+        ReadDataBlockForReplication(const StoCBlockHandle &stoc_block_handle,
+                                    uint64_t offset,
+                                    uint32_t size, char *scratch,
+                                    Slice *result);
 
         StoCPersistentFile *
         OpenStoCFile(uint32_t thread_id, std::string &filename);

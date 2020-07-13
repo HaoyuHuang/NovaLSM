@@ -7,6 +7,8 @@
 #ifndef LEVELDB_STOC_FILE_CLIENT_IMPL_H
 #define LEVELDB_STOC_FILE_CLIENT_IMPL_H
 
+#define METABLOCK_SIZE_PADDING 1024 * 1024
+
 #include <semaphore.h>
 
 #include "util/env_mem.h"
@@ -72,6 +74,7 @@ namespace leveldb {
         }
 
         std::vector<leveldb::FileReplicaMetaData> replicas();
+
     private:
         struct PersistStatus {
             uint32_t remote_server_id = 0;
@@ -79,11 +82,22 @@ namespace leveldb {
             StoCBlockHandle result_handle;
         };
 
-        uint32_t WriteBlock(BlockBuilder *block, uint64_t offset);
+        uint64_t WriteMetaDataBlock(uint32_t stoc_id, uint32_t replica_id,
+                                    char **allocated_buf, uint32_t *scid, uint32_t *req_id);
+
+        Status Write(char *backing_mem, uint64_t offset, const Slice &data,
+                     uint64_t allocated_size, uint64_t *used_size);
+
+        uint32_t WriteBlock(BlockBuilder *block, uint64_t offset,
+                            char *backing_mem,
+                            uint64_t allocated_size, uint64_t *used_size);
 
         uint32_t WriteRawBlock(const Slice &block_contents,
                                CompressionType type,
-                               uint64_t offset);
+                               uint64_t offset,
+                               char *backing_mem,
+                               uint64_t allocated_size,
+                               uint64_t *used_size);
 
         Env *mem_env_ = nullptr;
         unsigned int *rand_seed_ = nullptr;
@@ -113,7 +127,6 @@ namespace leveldb {
         // > 1 replicas: all replicas of a sstable is stored on the same stoc.
         std::vector<uint32_t> stocs_to_store_fragments_;
         std::vector<FileReplicaPersistStatus> replica_status_;
-        uint64_t WriteMetaDataBlock(uint32_t stoc_id, uint32_t replica_id);
     };
 
     class StoCRandomAccessFileClientImpl : public StoCRandomAccessFileClient {
@@ -121,6 +134,7 @@ namespace leveldb {
         StoCRandomAccessFileClientImpl(Env *env, const Options &options,
                                        const std::string &dbname,
                                        uint64_t file_number,
+                                       uint32_t replica_id,
                                        const FileMetaData *meta,
                                        StoCClient *stoc_client,
                                        MemManager *mem_manager,

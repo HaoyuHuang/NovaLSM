@@ -213,6 +213,7 @@ namespace nova {
                         leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES_RESPONSE;
                 rdma_broker_->PostSend(sendbuf, msg_size, task.remote_server_id,
                                        task.stoc_req_id);
+                NOVA_LOG(rdmaio::DEBUG) << "rdma replication complete";
             } else {
                 NOVA_ASSERT(false) << task.request_type;
             }
@@ -607,6 +608,7 @@ namespace nova {
                            leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES) {
                     StorageTask task = {};
                     task.stoc_req_id = stoc_req_id;
+                    task.rdma_server_thread_id = thread_id_;
                     task.remote_server_id = remote_server_id;
                     task.request_type = leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES;
 
@@ -618,6 +620,7 @@ namespace nova {
                     for (int i = 0; i < num_pairs; i++) {
                         leveldb::ReplicationPair pair;
                         NOVA_ASSERT(pair.Decode(&input));
+                        NOVA_LOG(DEBUG) << pair.DebugString();
                         task.replication_pairs.push_back(pair);
                     }
                     AddCompactionStorageTask(task);

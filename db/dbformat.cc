@@ -171,6 +171,13 @@ namespace leveldb {
         return msg_size;
     }
 
+    std::string ReplicationPair::DebugString() const {
+        return fmt::format("stocfid:{}-meta:{}-fs:{}-dest:{}-fn:{}-rid:{}",
+                           source_stoc_file_id, is_meta_blocks,
+                           source_file_size, dest_stoc_id, sstable_file_number,
+                           replica_id);
+    }
+
     bool ReplicationPair::Decode(Slice *ptr) {
         return DecodeFixed32(ptr, &source_stoc_file_id) &&
                DecodeBool(ptr, &is_meta_blocks) &&
@@ -181,16 +188,20 @@ namespace leveldb {
     }
 
     int FileMetaData::SelectReplica() const {
+        if (block_replica_handles.size() == 1) {
+            return 0;
+        }
         int replica_id = -1;
         auto servers = leveldb::StorageSelector::available_stoc_servers.load();
         for (int i = 0; i < block_replica_handles.size(); i++) {
             if (servers->server_ids.find(
-                    block_replica_handles[i].meta_block_handle.server_id) ==
+                    block_replica_handles[i].meta_block_handle.server_id) !=
                 servers->server_ids.end()) {
                 replica_id = i;
                 break;
             }
         }
+        NOVA_ASSERT(replica_id != -1);
         return replica_id;
     }
 

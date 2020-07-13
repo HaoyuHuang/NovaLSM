@@ -1386,8 +1386,19 @@ namespace leveldb {
                                          nullptr, current->version_id_);
                 }
             }
-
             cleaned.resize(compactions.size());
+
+            mutex_compacting_tables.Lock();
+            for (int i = 0; i < compactions.size(); i++) {
+                for (int which = 0; which < 2; which++) {
+                    for (int j = 0;
+                         j < compactions[i]->inputs_[which].size(); j++) {
+                        compacting_tables_.insert(
+                                compactions[i]->inputs_[which][j]->number);
+                    }
+                }
+            }
+            mutex_compacting_tables.Unlock();
 
             for (int i = 0; i < compactions.size(); i++) {
                 compactions[i]->complete_signal_ = &completion_signal;
@@ -1569,6 +1580,19 @@ namespace leveldb {
             mutex_.Unlock();
             DeleteFiles(compaction_coordinator_thread_, files_to_delete,
                         server_pairs);
+
+            mutex_compacting_tables.Lock();
+            for (int i = 0; i < compactions.size(); i++) {
+                for (int which = 0; which < 2; which++) {
+                    for (int j = 0;
+                         j < compactions[i]->inputs_[which].size(); j++) {
+                        compacting_tables_.erase(
+                                compactions[i]->inputs_[which][j]->number);
+                    }
+                }
+            }
+            mutex_compacting_tables.Unlock();
+
             for (auto c : compactions) {
                 delete c;
             }
@@ -2683,7 +2707,8 @@ namespace leveldb {
     }
 
     void DBImpl::QueryFailedReplicas(uint32_t failed_stoc_id,
-                                     std::unordered_map<uint32_t, std::vector<ReplicationPair> > *stoc_repl_pairs) {
+                                     std::unordered_map<uint32_t, std::vector<ReplicationPair> > *stoc_repl_pairs,
+                                     int level) {
         Version *current = nullptr;
         uint32_t vid = 0;
         while (current == nullptr) {
@@ -2693,49 +2718,52 @@ namespace leveldb {
         }
         NOVA_ASSERT(current->version_id() == vid);
         StorageSelector selector(&rand_seed_);
-
-        for (auto it : current->fn_files_) {
-            int replica_id = 0;
-            // find an available replica to re-replicate to data fragment.
-            for (; replica_id <
-                   it.second->block_replica_handles.size(); replica_id++) {
-                const auto &replica = it.second->block_replica_handles[replica_id];
+        mutex_compacting_tables.Lock();
+        for (const auto &it : current->files_[level]) {
+            if (compacting_tables_.find(it->number) !=
+                compacting_tables_.end()) {
+                // Skip replicating this table since it going to be deleted soon.
+//                NOVA_LOG(rdmaio::INFO) << fmt::format("Skip table {} since it is compacting");
+                continue;
+            }
+            // find an available replica to replicate the sstable.
+            for (int replica_id = 0;
+                 replica_id < it->block_replica_handles.size(); replica_id++) {
+                const auto &replica = it->block_replica_handles[replica_id];
                 if (replica.meta_block_handle.server_id == failed_stoc_id) {
+                    NOVA_ASSERT(replica.data_block_group_handles.size() == 1);
                     // meta replica.
-                    ReplicationPair pair;
                     uint32_t available_replica_id = 0;
-                    pair.dest_stoc_id = selector.SelectAvailableStoCForFailedMetaBlock(
-                            it.second->block_replica_handles, replica_id,
+                    uint32_t dest_stoc_id = selector.SelectAvailableStoCForFailedMetaBlock(
+                            it->block_replica_handles, replica_id,
                             &available_replica_id);
-                    const auto &available_replica = it.second->block_replica_handles[available_replica_id];
+                    ReplicationPair pair = {};
+                    pair.dest_stoc_id = dest_stoc_id;
+                    const auto &available_replica = it->block_replica_handles[available_replica_id];
                     pair.source_stoc_file_id = available_replica.meta_block_handle.stoc_file_id;
                     pair.is_meta_blocks = true;
-                    pair.sstable_file_number = it.second->number;
-                    pair.replica_id = it.second->block_replica_handles.size();
+                    pair.sstable_file_number = it->number;
+                    pair.replica_id = it->block_replica_handles.size();
+                    pair.source_file_size = available_replica.meta_block_handle.size;
                     (*stoc_repl_pairs)[available_replica.meta_block_handle.server_id].push_back(
                             pair);
-                }
-                for (int i = 0;
-                     i < replica.data_block_group_handles.size(); i++) {
-                    const auto &data_fragment = replica.data_block_group_handles[i];
-                    if (data_fragment.server_id == failed_stoc_id) {
-                        // data fragment replica.
-                        ReplicationPair pair;
-                        uint32_t available_replica_id = 0;
-                        pair.dest_stoc_id = selector.SelectAvailableStoCForFailedDataBlock(
-                                it.second->block_replica_handles, replica_id, i,
-                                &available_replica_id);
-                        const auto &available_replica = it.second->block_replica_handles[available_replica_id];
-                        pair.source_stoc_file_id = available_replica.data_block_group_handles[i].stoc_file_id;
+                    // data fragment replica.
+                    {
+                        ReplicationPair pair = {};
+                        pair.dest_stoc_id = dest_stoc_id;
+                        pair.source_stoc_file_id = available_replica.data_block_group_handles[0].stoc_file_id;
                         pair.is_meta_blocks = false;
-                        pair.sstable_file_number = it.second->number;
-                        pair.replica_id = it.second->block_replica_handles.size();
-                        (*stoc_repl_pairs)[available_replica.data_block_group_handles[i].server_id].push_back(
+                        pair.sstable_file_number = it->number;
+                        pair.replica_id = it->block_replica_handles.size();
+                        pair.source_file_size = available_replica.data_block_group_handles[0].size;
+                        (*stoc_repl_pairs)[available_replica.data_block_group_handles[0].server_id].push_back(
                                 pair);
                     }
+                    break;
                 }
             }
         }
+        mutex_compacting_tables.Unlock();
         versions_->versions_[vid]->Unref(dbname_);
     }
 

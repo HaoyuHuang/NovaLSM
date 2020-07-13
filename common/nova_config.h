@@ -199,6 +199,7 @@ namespace nova {
 
         int fail_stoc_id = 0;
         int exp_seconds_to_fail_stoc = 0;
+        int failure_duration = 0;
 
         void ReadZipfianDist() {
             if (zipfian_dist_file_path.empty()) {

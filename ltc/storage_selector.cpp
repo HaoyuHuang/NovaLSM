@@ -31,6 +31,7 @@ namespace leveldb {
         {
             // Validate metadata blocks.
             std::set<uint32_t> used_replicas;
+            uint64_t size = 0;
             for (int replica_id = 0;
                  replica_id < replicas.size(); replica_id++) {
                 NOVA_ASSERT(used_replicas.find(
@@ -39,6 +40,16 @@ namespace leveldb {
                     << ReplicaDebugString(replicas);
                 used_replicas.insert(
                         replicas[replica_id].meta_block_handle.server_id);
+
+                // Validate offset.
+                NOVA_ASSERT(replicas[replica_id].meta_block_handle.offset == 0)
+                    << ReplicaDebugString(replicas);
+                // Validate size.
+                if (size == 0) {
+                    size = replicas[replica_id].meta_block_handle.size;
+                }
+                NOVA_ASSERT(size == replicas[replica_id].meta_block_handle.size)
+                    << ReplicaDebugString(replicas);
             }
         }
 
@@ -51,6 +62,9 @@ namespace leveldb {
         }
         for (int frag_id = 0; frag_id < ndata_fragments; frag_id++) {
             std::set<uint32_t> used_replicas;
+            uint64_t offset = 0;
+            uint64_t size = 0;
+
             for (int replica_id = 0;
                  replica_id < replicas.size(); replica_id++) {
                 NOVA_ASSERT(used_replicas.find(
@@ -59,6 +73,17 @@ namespace leveldb {
                     << ReplicaDebugString(replicas);
                 used_replicas.insert(
                         replicas[replica_id].data_block_group_handles[frag_id].server_id);
+
+                if (replica_id == 0) {
+                    offset = replicas[replica_id].data_block_group_handles[frag_id].offset;
+                    size = replicas[replica_id].data_block_group_handles[frag_id].size;
+                }
+                NOVA_ASSERT(
+                        replicas[replica_id].data_block_group_handles[frag_id].offset ==
+                        offset) << ReplicaDebugString(replicas);
+                NOVA_ASSERT(
+                        replicas[replica_id].data_block_group_handles[frag_id].size ==
+                        size) << ReplicaDebugString(replicas);
             }
         }
 
@@ -95,24 +120,27 @@ namespace leveldb {
     uint32_t StorageSelector::SelectAvailableStoCForFailedMetaBlock(
             const std::vector<FileReplicaMetaData> &block_replica_handles,
             uint32_t failed_replica_id, uint32_t *available_replica_id) {
-        int new_stoc_id = 0;
         *available_replica_id =
                 (failed_replica_id + 1) % block_replica_handles.size();
+        nova::Servers *available_stocs = available_stoc_servers;
         std::set<uint32_t> used_replicas;
         for (int i = 0; i < block_replica_handles.size(); i++) {
             used_replicas.insert(
                     block_replica_handles[i].meta_block_handle.server_id);
         }
-        nova::Servers *available_stocs = available_stoc_servers;
+        std::vector<uint32_t> candidate_stocs;
         for (int i = 0; i < available_stocs->servers.size(); i++) {
             if (used_replicas.find(available_stocs->servers[i].server_id) ==
                 used_replicas.end()) {
-                new_stoc_id = available_stocs->servers[i].server_id;
-                break;
+                candidate_stocs.push_back(
+                        available_stocs->servers[i].server_id);
             }
         }
-        NOVA_ASSERT(new_stoc_id != -1);
-        return new_stoc_id;
+        NOVA_ASSERT(!candidate_stocs.empty())
+            << fmt::format("{}-{}", available_stocs->servers.size(),
+                           used_replicas.size());
+        uint32_t index = rand_r(rand_seed_) % candidate_stocs.size();
+        return candidate_stocs[index];
     }
 
     uint32_t StorageSelector::SelectAvailableStoCForFailedDataBlock(
@@ -127,12 +155,13 @@ namespace leveldb {
             used_replicas.insert(
                     block_replica_handles[i].data_block_group_handles[failed_frag_id].server_id);
         }
+        std::vector<uint32_t> candidate_stocs;
         nova::Servers *available_stocs = available_stoc_servers;
         for (int i = 0; i < available_stocs->servers.size(); i++) {
             if (used_replicas.find(available_stocs->servers[i].server_id) ==
                 used_replicas.end()) {
-                new_stoc_id = available_stocs->servers[i].server_id;
-                break;
+                candidate_stocs.push_back(
+                        available_stocs->servers[i].server_id);
             }
         }
         NOVA_ASSERT(new_stoc_id != -1);

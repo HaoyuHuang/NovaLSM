@@ -60,7 +60,8 @@ namespace leveldb {
         ~DBImpl() override;
 
         void QueryFailedReplicas(uint32_t failed_stoc_id,
-                                 std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_repl_pairs) override;
+                                 std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_repl_pairs,
+                                 int level) override;
 
         // Implementations of the DB interface
         Status Put(const WriteOptions &, const Slice &key,
@@ -135,7 +136,7 @@ namespace leveldb {
 
         void DecodeMemTablePartitions(Slice *buf);
 
-        const std::string& dbname() override ;
+        const std::string &dbname() override;
 
     private:
         std::atomic_bool start_compaction_;
@@ -326,6 +327,9 @@ namespace leveldb {
         ManualCompaction *manual_compaction_ GUARDED_BY(mutex_);
 
         VersionSet *const versions_ GUARDED_BY(mutex_);
+
+        port::Mutex mutex_compacting_tables;
+        std::set<uint64_t> compacting_tables_;
 
         // Have we encountered a background error in paranoid mode?
         Status bg_error_ GUARDED_BY(mutex_);

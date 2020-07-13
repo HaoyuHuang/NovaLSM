@@ -318,7 +318,8 @@ namespace leveldb {
         uint64_t sid = handle.server_id;
         uint64_t id = (sid << 32) | handle.stoc_file_id;
         auto it = rep_->stoc_file_data_relative_offset.find(id);
-        NOVA_ASSERT(it != rep_->stoc_file_data_relative_offset.end());
+        NOVA_ASSERT(it != rep_->stoc_file_data_relative_offset.end())
+            << rep_->meta->DebugString();
         return it->second + handle.offset;
     }
 

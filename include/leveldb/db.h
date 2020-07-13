@@ -90,10 +90,11 @@ namespace leveldb {
         static Status Open(const Options &options, const std::string &name,
                            DB **dbptr);
 
-        virtual const std::string& dbname() = 0;
+        virtual const std::string &dbname() = 0;
 
         virtual void QueryFailedReplicas(uint32_t failed_stoc_id,
-                                         std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_rerepl_pairs) = 0;
+                                         std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_repl_pairs,
+                                         int level) = 0;
 
         virtual Status Recover() = 0;
 

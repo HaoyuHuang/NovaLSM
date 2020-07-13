@@ -89,6 +89,48 @@ namespace leveldb {
     }
 
     Status
+    StoCPersistentFile::ReadForReplication(uint64_t offset, uint32_t size,
+                                           char *scratch, Slice *result) {
+        mutex_.lock();
+        if (deleted_) {
+            mutex_.unlock();
+            return Status::NotFound("");
+        }
+        reading_cnt++;
+        mutex_.unlock();
+
+        StoCBlockHandle h = {};
+        nova::NovaGlobalVariables::global.stoc_queue_depth += 1;
+        nova::NovaGlobalVariables::global.stoc_pending_disk_reads += size;
+        nova::NovaGlobalVariables::global.total_disk_reads += size;
+        Status status = file_->Read(h, offset, size, result, scratch);
+        nova::NovaGlobalVariables::global.stoc_queue_depth -= 1;
+        nova::NovaGlobalVariables::global.stoc_pending_disk_reads -= size;
+
+        mutex_.lock();
+        reading_cnt--;
+        if (reading_cnt == 0 && waiting_to_be_deleted && !deleted_) {
+            waiting_to_be_deleted = false;
+            deleted_ = true;
+            NOVA_LOG(rdmaio::DEBUG) << fmt::format(
+                        "Delete  Stoc File {}.", stoc_file_name_);
+            NOVA_ASSERT(file_);
+            Status s = file_->Close();
+            NOVA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
+            delete file_;
+            file_ = nullptr;
+            s = env_->DeleteFile(stoc_file_name_);
+            NOVA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
+        }
+        if (deleted_) {
+            mutex_.unlock();
+            return Status::NotFound("");
+        }
+        mutex_.unlock();
+        return status;
+    }
+
+    Status
     StoCPersistentFile::Read(uint64_t offset, uint32_t size, char *scratch,
                              Slice *result) {
         StoCBlockHandle h = {};
@@ -367,9 +409,13 @@ namespace leveldb {
             file_meta_block_offset_.empty() && is_full_ &&
             allocated_bufs_.empty() &&
             persisting_cnt == 0 && sealed_) {
-            if (!deleted_) {
-                deleted_ = true;
-                delete_file = true;
+
+            waiting_to_be_deleted = true;
+            if (reading_cnt == 0) {
+                if (!deleted_) {
+                    deleted_ = true;
+                    delete_file = true;
+                }
             }
         }
         if (delete_file) {
@@ -482,6 +528,62 @@ namespace leveldb {
     static void DeleteCachedBlock(const Slice &key, void *value) {
         char *block = reinterpret_cast<char *>(value);
         delete block;
+    }
+
+    bool StocPersistentFileManager::ReadDataBlockForReplication(
+            const StoCBlockHandle &stoc_block_handle, uint64_t offset,
+            uint32_t size, char *scratch, Slice *result) {
+        StoCPersistentFile *stoc_file = FindStoCFile(
+                stoc_block_handle.stoc_file_id);
+        if (!stoc_file) {
+            return false;
+        }
+
+        if (!block_cache_) {
+            leveldb::FileType type;
+            NOVA_ASSERT(ParseFileName(stoc_file->stoc_file_name_, &type));
+            NOVA_LOG(rdmaio::DEBUG)
+                << fmt::format("Read {} from stoc file {} offset:{} size:{}",
+                               stoc_block_handle.DebugString(),
+                               stoc_file->file_id(), offset, size);
+            auto status = stoc_file->ReadForReplication(offset, size, scratch,
+                                                        result);
+            if (status.IsNotFound()) {
+                return false;
+            }
+            NOVA_ASSERT(status.ok()) << status.ToString();
+            NOVA_ASSERT(type == leveldb::FileType::kTableFile);
+            NOVA_ASSERT(result->size() == size)
+                << fmt::format("fn:{} given size:{} read size:{}",
+                               stoc_file->stoc_file_name_,
+                               size,
+                               result->size());
+            NOVA_ASSERT(scratch[size - 1] != 0)
+                << fmt::format(
+                        "Read {} from stoc file {} offset:{} size:{}",
+                        stoc_block_handle.DebugString(),
+                        stoc_file->file_id(), offset, size);
+            return true;
+        }
+
+        char cache_key_buffer[StoCBlockHandle::HandleSize()];
+        stoc_block_handle.EncodeHandle(cache_key_buffer);
+        Slice key(cache_key_buffer, sizeof(cache_key_buffer));
+        auto cache_handle = block_cache_->Lookup(key);
+        if (cache_handle != nullptr) {
+            auto block = reinterpret_cast<char *>(block_cache_->Value(
+                    cache_handle));
+            memcpy(scratch, block, stoc_block_handle.size);
+        } else {
+            stoc_file->Read(offset, size, scratch, result);
+            char *block = new char[size];
+            memcpy(block, scratch, size);
+            cache_handle = block_cache_->Insert(key, block,
+                                                size,
+                                                &DeleteCachedBlock);
+        }
+        block_cache_->Release(cache_handle);
+        return true;
     }
 
     void StocPersistentFileManager::ReadDataBlock(

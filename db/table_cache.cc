@@ -100,7 +100,9 @@ namespace leveldb {
             std::string filename = TableFileName(dbname_, file_number, false,
                                                  replica_id);
             file = new StoCRandomAccessFileClientImpl(env_, options_, dbname_,
-                                                      file_number, meta,
+                                                      file_number,
+                                                      replica_id,
+                                                      meta,
                                                       options.stoc_client,
                                                       options.mem_manager,
                                                       options.thread_id,

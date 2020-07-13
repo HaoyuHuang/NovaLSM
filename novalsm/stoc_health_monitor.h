@@ -23,7 +23,7 @@ namespace nova {
     private:
         uint32_t fail_stoc_id_ = 0;
         int exp_seconds_to_fail_ = 0;
-        leveldb::StoCBlockClient *stoc_client_;
+        leveldb::StoCBlockClient *stoc_client_ = nullptr;
         std::vector<leveldb::DB *> dbs_;
     };
 
