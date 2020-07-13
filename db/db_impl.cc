@@ -436,14 +436,18 @@ namespace leveldb {
         for (int level = 0; level < options_.level; level++) {
             for (int i = 0; i < files[level].size(); i++) {
                 auto meta = files[level][i];
-                std::string metafilename = TableFileName(dbname_, meta->number,
-                                                         true, 0);
-                std::string filename = TableFileName(dbname_, meta->number,
-                                                     false, 0);
-                auto meta_handle = meta->block_replica_handles[0].meta_block_handle;
-                stoc_fn_stocfileid[meta_handle.server_id][metafilename] = meta_handle.stoc_file_id;
-                for (auto &data_block : meta->block_replica_handles[0].data_block_group_handles) {
-                    stoc_fn_stocfileid[data_block.server_id][filename] = data_block.stoc_file_id;
+                for (int replica_id = 0; replica_id <
+                                         meta->block_replica_handles.size(); replica_id++) {
+                    std::string metafilename = TableFileName(dbname_,
+                                                             meta->number,
+                                                             true, replica_id);
+                    std::string filename = TableFileName(dbname_, meta->number,
+                                                         false, replica_id);
+                    auto meta_handle = meta->block_replica_handles[replica_id].meta_block_handle;
+                    stoc_fn_stocfileid[meta_handle.server_id][metafilename] = meta_handle.stoc_file_id;
+                    for (auto &data_block : meta->block_replica_handles[replica_id].data_block_group_handles) {
+                        stoc_fn_stocfileid[data_block.server_id][filename] = data_block.stoc_file_id;
+                    }
                 }
             }
         }

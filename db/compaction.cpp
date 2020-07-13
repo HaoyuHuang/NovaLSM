@@ -42,9 +42,8 @@ namespace leveldb {
         int index = 0;
         for (int i = 0; i < files.size(); i++) {
             auto meta = files[i];
-
             for (int replica_id = 0; replica_id <
-                                     nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
+                                     meta->block_replica_handles.size(); replica_id++) {
                 std::string filename = TableFileName(dbname, meta->number, true,
                                                      replica_id);
                 uint32_t backing_scid = options.mem_manager->slabclassid(0,
@@ -70,14 +69,17 @@ namespace leveldb {
         }
 
         for (int i = 0; i < files.size(); i++) {
-            client->Wait();
+            auto meta = files[i];
+            for (int replica_id = 0; replica_id <
+                                     meta->block_replica_handles.size(); replica_id++) {
+                client->Wait();
+            }
         }
         index = 0;
         for (int i = 0; i < files.size(); i++) {
             auto meta = files[i];
-
             for (int replica_id = 0; replica_id <
-                                     nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
+                                     meta->block_replica_handles.size(); replica_id++) {
                 char *backing_buf = backing_mems[index];
                 uint32_t backing_scid = options.mem_manager->slabclassid(0,
                                                                          meta->block_replica_handles[replica_id].meta_block_handle.size);
