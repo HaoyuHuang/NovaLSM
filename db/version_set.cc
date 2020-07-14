@@ -326,10 +326,8 @@ namespace leveldb {
                                 bool (*func)(void *, int, FileMetaData *),
                                 GetSearchScope search_scope) {
         const Comparator *ucmp = icmp_->user_comparator();
-
-        // Search level-0 in order from newest to oldest.
-        if (search_scope == GetSearchScope::kAllLevels ||
-            search_scope == GetSearchScope::kAllL0AndAllLevels) {
+        // Search level-0 first.
+        if (search_scope == GetSearchScope::kAllLevels) {
             std::vector<FileMetaData *> tmp;
             tmp.reserve(files_[0].size());
             for (uint32_t i = 0; i < files_[0].size(); i++) {
@@ -339,20 +337,10 @@ namespace leveldb {
                     tmp.push_back(f);
                 }
             }
-            bool found_in_l0 = false;
-            if (!tmp.empty()) {
-                std::sort(tmp.begin(), tmp.end(), NewestFirst);
-                for (uint32_t i = 0; i < tmp.size(); i++) {
-                    if (!(*func)(arg, 0, tmp[i])) {
-                        found_in_l0 = true;
-                        if (search_scope == GetSearchScope::kAllLevels) {
-                            return;
-                        }
-                    }
+            for (uint32_t i = 0; i < tmp.size(); i++) {
+                if (!(*func)(arg, 0, tmp[i])) {
+
                 }
-            }
-            if (found_in_l0) {
-                return;
             }
         }
 
@@ -1074,7 +1062,7 @@ namespace leveldb {
 
     void VersionSet::AppendChangesToManifest(leveldb::VersionEdit *edit,
                                              StoCWritableFileClient *manifest_file,
-                                             const std::vector<uint32_t>& stoc_id) {
+                                             const std::vector<uint32_t> &stoc_id) {
         if (!manifest_file) {
             return;
         }

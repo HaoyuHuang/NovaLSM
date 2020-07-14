@@ -506,7 +506,9 @@ namespace leveldb {
                 uint64_t hash;
                 Slice user_key = ExtractUserKey(it->key());
                 nova::str_to_int(user_key.data(), &hash, user_key.size());
-                lookup_index_->Insert(user_key, hash, memtableid);
+                if (lookup_index_) {
+                    lookup_index_->Insert(user_key, hash, memtableid);
+                }
 
                 AtomicMemTable *mem = versions_->mid_table_mapping_[memtableid];
                 mem->l0_file_numbers_.insert(meta->number);
@@ -893,16 +895,20 @@ namespace leveldb {
                                       const Slice &value) {
             output_memtable->Add(ikey.sequence, ValueType::kTypeValue,
                                  ikey.user_key, value);
-            // Update lookup index.
-            uint64_t key;
-            nova::str_to_int(ikey.user_key.data(), &key,
-                             ikey.user_key.size());
-            uint32_t current_mid = lookup_index_->Lookup(ikey.user_key,
-                                                         key);
-            if (immids.find(current_mid) != immids.end()) {
-                lookup_index_->CAS(ikey.user_key, key, current_mid,
-                                   memtable_id);
+
+            if (lookup_index_) {
+                // Update lookup index.
+                uint64_t key;
+                nova::str_to_int(ikey.user_key.data(), &key,
+                                 ikey.user_key.size());
+                uint32_t current_mid = lookup_index_->Lookup(ikey.user_key,
+                                                             key);
+                if (immids.find(current_mid) != immids.end()) {
+                    lookup_index_->CAS(ikey.user_key, key, current_mid,
+                                       memtable_id);
+                }
             }
+
             LevelDBLogRecord log_record = {};
             log_record.sequence_number = ikey.sequence;
             log_record.key = ikey.user_key;
@@ -1765,6 +1771,57 @@ namespace leveldb {
     Status DBImpl::Get(const ReadOptions &options, const Slice &key,
                        std::string *value) {
         number_of_gets_ += 1;
+        if (lookup_index_) {
+            return GetWithLookupIndex(options, key, value);
+        }
+        return GetWithRangeIndex(options, key, value);
+    }
+
+    Status
+    DBImpl::GetWithRangeIndex(const ReadOptions &options, const Slice &key,
+                              std::string *value) {
+        SequenceNumber snapshot = kMaxSequenceNumber;
+        LookupKey lkey(key, snapshot);
+        Status s;
+        NOVA_ASSERT(range_index_manager_);
+        std::vector<Iterator *> list;
+        RangeIndex *range_index = range_index_manager_->current();
+        NOVA_ASSERT(range_index);
+        auto atomic_version = versions_->versions_[range_index->lsm_version_id_];
+        NOVA_ASSERT(atomic_version) << range_index->lsm_version_id_;
+        int index = 0;
+        NOVA_ASSERT(BinarySearch(range_index->ranges_, key, &index,
+                                 user_comparator_));
+        const RangeTables &range_table = range_index->range_tables_[index];
+        // Search memtables.
+        for (uint32_t memtableid : range_table.memtable_ids) {
+            versions_->mid_table_mapping_[memtableid]->memtable_->Get(lkey,
+                                                                      value,
+                                                                      &s);
+        }
+        std::vector<uint64_t> l0fns;
+        l0fns.insert(l0fns.begin(), range_table.l0_sstable_ids.begin(),
+                     range_table.l0_sstable_ids.end());
+        // Search SSTables.
+        SequenceNumber latest_seq = 0;
+        atomic_version->version->Get(options, l0fns, lkey, &latest_seq,
+                                     value,
+                                     &number_of_files_to_search_for_get_);
+        Version::GetStats stats = {};
+        atomic_version->version->Get(options, lkey, &latest_seq, value,
+                                     &stats, GetSearchScope::kL1AndAbove,
+                                     &number_of_files_to_search_for_get_);
+        range_index->UnRef();
+        versions_->versions_[range_index->lsm_version_id_]->Unref(dbname_);
+        if (!value->empty()) {
+            return Status::OK();
+        }
+        return Status::NotFound("");
+    }
+
+    Status
+    DBImpl::GetWithLookupIndex(const ReadOptions &options, const Slice &key,
+                               std::string *value) {
         Status s = Status::NotFound(Slice());
         std::string tmp;
         SequenceNumber snapshot = kMaxSequenceNumber;
@@ -2630,7 +2687,7 @@ namespace leveldb {
         atomic_memtable->memtable_->Add(last_sequence, ValueType::kTypeValue,
                                         key, val);
         atomic_memtable->nentries_ += 1;
-        if (lookup_index_ != nullptr) {
+        if (lookup_index_) {
             lookup_index_->Insert(key, options.hash,
                                   atomic_memtable->memtable_->memtableid());
         }

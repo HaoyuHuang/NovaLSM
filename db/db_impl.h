@@ -61,7 +61,8 @@ namespace leveldb {
 
         void QueryFailedReplicas(uint32_t failed_stoc_id,
                                  std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_repl_pairs,
-                                 int level, ReconstructReplicasStats* stats) override;
+                                 int level,
+                                 ReconstructReplicasStats *stats) override;
 
         // Implementations of the DB interface
         Status Put(const WriteOptions &, const Slice &key,
@@ -139,6 +140,13 @@ namespace leveldb {
         const std::string &dbname() override;
 
     private:
+
+        Status GetWithLookupIndex(const ReadOptions &options, const Slice &key,
+                                  std::string *value);
+
+        Status GetWithRangeIndex(const ReadOptions &options, const Slice &key,
+                                 std::string *value);
+
         std::atomic_bool start_compaction_;
         sem_t init_lsmtree_meta_signal_;
         char *lsmtree_meta_buf_ = nullptr;
