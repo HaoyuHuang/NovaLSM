@@ -72,10 +72,10 @@ function run_bench() {
 	n=0
 	while [ $n -lt $nservers ]
 	do
-		if [[ $i == "8" ]]; then
-			i=$((i+1))
-			continue	
-		fi
+		# if [[ $i == "8" ]]; then
+		# 	i=$((i+1))
+		# 	continue	
+		# fi
 		servers+=("node-$i")
 		i=$((i+1))
 		n=$((n+1))

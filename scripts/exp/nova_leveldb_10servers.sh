@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/scan-large-nova-leveldb-10servers-ranges-$recordcount"
+exp_results_dir="$home_dir/latest-scan-large-nova-leveldb-10servers-ranges-$recordcount"
 dryrun="$2"
 
 
@@ -69,10 +69,10 @@ function run_bench() {
 	n=0
 	while [ $n -lt $nservers ]
 	do
-		if [[ $i == "2" ]]; then
-			i=$((i+1))
-			continue
-		fi
+		# if [[ $i == "2" ]]; then
+		# 	i=$((i+1))
+		# 	continue
+		# fi
 		servers+=("node-$i")
 		i=$((i+1))
 		n=$((n+1))
@@ -81,10 +81,10 @@ function run_bench() {
 	i=$((nmachines-1))
 	while [ $n -lt $nclients ]
 	do
-		if [[ $i == "2" ]]; then
-			i=$((i-1))
-			continue
-		fi
+		# if [[ $i == "2" ]]; then
+		# 	i=$((i-1))
+		# 	continue
+		# fi
 		clis+=("node-$i")
 		i=$((i-1))
 		n=$((n+1))
@@ -169,7 +169,7 @@ function run_bench() {
 	do
 		echo "creating servers on $s"
 		nova_rdma_port=$((rdma_port))
-		cmd="stdbuf --output=0 --error=0 ./leveldb_main --level=$level --l0_start_compaction_mb=$l0_start_compaction_mb --l0_stop_write_mb=$l0_stop_write_mb --sstable_mode=$sstable_mode --block_cache_mb=$block_cache_mb --db_path=$db_path --write_buffer_size_mb=$write_buffer_size_mb --persist_log_records_mode=$persist_log_record --log_buf_size=$log_buf_size --servers=$nova_servers --server_id=$server_id --recordcount=$recordcount --data_partition_alg=$partition --num_conn_workers=$nconn_workers --num_async_workers=$nasync_workers --num_compaction_workers=$ncompaction_workers --cache_size_gb=$cache_size_gb --use_fixed_value_size=$value_size --index_size_mb=$index_size_mb --nindex_entry_per_bucket=4 --main_bucket_mem_percent=90 --lc_index_size_mb=$lc_index_size_mb --lc_nindex_entry_per_bucket=4 --lc_main_bucket_mem_percent=90 --rdma_port=$nova_rdma_port --rdma_max_msg_size=$rdma_max_msg_size --rdma_max_num_sends=$rdma_max_num_sends --rdma_doorbell_batch_size=8 --rdma_pq_batch_size=8 --enable_rdma=$enable_rdma --config_path=$config_path --enable_load_data=true --profiler_file_path=$profiler_file_path --sstable_size_mb=$sstable_size_mb"
+		cmd="stdbuf --output=0 --error=0 ./leveldb_main --level=$level --l0_start_compaction_mb=$l0_start_compaction_mb --l0_stop_write_mb=$l0_stop_write_mb --sstable_mode=$sstable_mode --block_cache_mb=$block_cache_mb --db_path=$db_path --write_buffer_size_mb=$write_buffer_size_mb --persist_log_records_mode=$persist_log_record --log_buf_size=$log_buf_size --servers=$nova_servers --server_id=$server_id --recordcount=$recordcount --data_partition_alg=$partition --num_conn_workers=$nconn_workers --num_async_workers=$nasync_workers --num_compaction_workers=$ncompaction_workers --cache_size_gb=$cache_size_gb --use_fixed_value_size=$value_size --rdma_port=$nova_rdma_port --rdma_max_msg_size=$rdma_max_msg_size --rdma_max_num_sends=$rdma_max_num_sends --rdma_doorbell_batch_size=8 --rdma_pq_batch_size=8 --enable_rdma=$enable_rdma --config_path=$config_path --enable_load_data=true --profiler_file_path=$profiler_file_path --sstable_size_mb=$sstable_size_mb"
 		echo "$cmd"
 		ssh -oStrictHostKeyChecking=no $s "rm -rf $db_path && mkdir -p $db_path && cd $cache_bin_dir && $cmd >& $results/server-$s-out &" &
 		server_id=$((server_id+1))
@@ -180,13 +180,15 @@ function run_bench() {
 	sleep 30
 	# cli_nrecords=$((recordcount))
 
+	echo "warmup..."
 	c=${clis[0]}
 	i="1"
 	echo "creating client on $c-$i"
-	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_servers $debug $partition $recordcount $maxexecutiontime $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
+	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_servers $debug $partition $recordcount 300 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
 	echo "$cmd"
 	ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
 
+	echo "warmup complete..."
 	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers "drain"
 	sleep 10
 
@@ -302,9 +304,9 @@ sstable_size_mb="$write_buffer_size_mb"
 nconn_workers="512"
 nclients_per_server="5"
 persist_log_record="none"
-nservers="10"
-nmachines="25"
-nclients="14"
+nservers="1"
+nmachines="5"
+nclients="4"
 level="6"
 
 cache_size_gb="26"
@@ -321,7 +323,7 @@ l0_stop_write_mb=$((l0_stop_write_mb/nranges_per_server))
 
 for dist in "uniform" "zipfian"
 do
-for workload in "workloada" #"workloadw"  "workloade"
+for workload in "workloade" #"workloadw"  "workloade"
 do
 run_bench
 done

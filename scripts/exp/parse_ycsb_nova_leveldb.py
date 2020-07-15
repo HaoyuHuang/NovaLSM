@@ -615,10 +615,10 @@ def parse_performance(result_dir):
 					try:
 						duration = float(othp[2])
 						ops = float(othp[4])
-						if duration == 1:
+						if duration == 600:
 							basethpt = ops
 						if duration == 1200:
-							overall_thpt = (ops-basethpt) / 1200
+							overall_thpt = (ops-basethpt) / 600
 					except:
 						print line
 						continue
@@ -725,7 +725,11 @@ def parse_exp(exp_dir):
 	exps={}
 	median_exps={}
 	for expdirname in os.listdir(exp_dir):
-		# if "nova-d-uniform-w-workloadw-" not in expdirname:
+		# if "-stoc-10-" not in expdirname:
+		# 	continue
+		# if "-el-" not in expdirname:
+		# 	continue
+		# if "-f-0" not in expdirname:
 		# 	continue
 		# num_wait = 0
 		result_dir = exp_dir + "/" + expdirname
@@ -770,7 +774,7 @@ def parse_exp(exp_dir):
 				for client_id in sorted(performance[node_id]):
 					exp_time = max(exp_time, len(performance[node_id][client_id][metric]))
 
-			for i in range(min(exp_time, 1200)):
+			for i in range(min(exp_time, 7200)):
 				t = 0
 				for node_id in sorted(performance):
 					for client_id in sorted(performance[node_id]):
@@ -992,22 +996,25 @@ param_dict["sp"]="Scatter policy"
 param_dict["p"]="Scatter factor"
 param_dict["nc"]="Number of clients"
 param_dict["c"]="Cardinality"
+param_dict["sr"]="SSTable replicas"
+param_dict["f"]="failure duration"
+param_dict["el"]="Enable Lookup index"
 
 ncores = 32
 disk_metric="bandwidth"
 # disk_metric="read"
 # print_resource_servers=[0, 1, 2, 4]
-# print_resource_servers=[0, 1, 3, 4, 5, 6, 7, 8, 9, 10]
+print_resource_servers=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 # print_resource_servers=[0, 1, 2, 3, 4, 5]
 # print_resource_servers=[0]
 # print_resources=["cpu", "net", "disk", "rdma"]
 print_resources=["disk"]
-print_resources=[]
-print_resource_servers=[]
+# print_resources=[]
+# print_resource_servers=[]
 
-read_resources_stats=False
+read_resources_stats=True
 print_thpt_timeline=False
-print_resources_stats=False
+print_resources_stats=True
 print_db_stats=False
 
 num_nodes=int(sys.argv[1])

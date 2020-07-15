@@ -75,10 +75,10 @@ function run_bench() {
 	n=0
 	while [ $n -lt $nservers ]
 	do
-		if [[ $i == "2" ]]; then
-			i=$((i+1))
-			continue
-		fi
+		# if [[ $i == "2" ]]; then
+		# 	i=$((i+1))
+		# 	continue
+		# fi
 		servers+=("node-$i")
 		i=$((i+1))
 		n=$((n+1))
@@ -87,10 +87,10 @@ function run_bench() {
 	i=$((nmachines-1))
 	while [ $n -lt $nclients ]
 	do
-		if [[ $i == "2" ]]; then
-			i=$((i-1))
-			continue
-		fi
+		# if [[ $i == "2" ]]; then
+		# 	i=$((i-1))
+		# 	continue
+		# fi
 		clis+=("node-$i")
 		i=$((i-1))
 		n=$((n+1))
