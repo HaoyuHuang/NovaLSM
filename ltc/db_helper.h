@@ -42,25 +42,26 @@ namespace leveldb {
         void FindShortSuccessor(std::string *) const {}
     };
 
-    leveldb::Options BuildDBOptions(int db_index, leveldb::Cache *cache,
-                                    leveldb::MemTablePool *memtable_pool,
-                                    leveldb::MemManager *mem_manager,
-                                    leveldb::StoCClient *stoc_client,
-                                    std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
-                                    std::vector<leveldb::EnvBGThread *> &bg_flush_memtable_threads,
-                                    leveldb::EnvBGThread *reorg_thread,
-                                    leveldb::EnvBGThread *compaction_coord_thread,
-                                    leveldb::Env *env);
+    leveldb::Options
+    BuildDBOptions(int cfg_id, int db_index, leveldb::Cache *cache,
+                   leveldb::MemTablePool *memtable_pool,
+                   leveldb::MemManager *mem_manager,
+                   leveldb::StoCClient *stoc_client,
+                   const std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
+                   const std::vector<leveldb::EnvBGThread *> &bg_flush_memtable_threads,
+                   leveldb::EnvBGThread *reorg_thread,
+                   leveldb::EnvBGThread *compaction_coord_thread,
+                   leveldb::Env *env);
 
     leveldb::Options BuildStorageOptions(leveldb::MemManager *mem_manager,
                                          leveldb::Env *env);
 
-    leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
+    leveldb::DB *CreateDatabase(int cfg_id, int db_index, leveldb::Cache *cache,
                                 leveldb::MemTablePool *memtable_pool,
                                 leveldb::MemManager *mem_manager,
                                 leveldb::StoCClient *stoc_client,
-                                std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
-                                std::vector<leveldb::EnvBGThread *> &bg_flush_memtable_threads,
+                                const std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
+                                const std::vector<leveldb::EnvBGThread *> &bg_flush_memtable_threads,
                                 leveldb::EnvBGThread *reorg_thread,
                                 leveldb::EnvBGThread *compaction_coord_thread);
 }

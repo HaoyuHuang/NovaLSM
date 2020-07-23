@@ -189,25 +189,20 @@ namespace nova {
         return result.str();
     }
 
-    std::string
-    DBName(const std::string &dbname, uint32_t server_id, uint32_t index) {
-        return dbname + "/" + std::to_string(server_id) + "/" +
-               std::to_string(index);
+    LTCFragment::LTCFragment() : is_ready_(false),
+                                 is_ready_signal_(&is_ready_mutex_) {
     }
 
-    void ParseDBIndexFromDBName(const std::string &dbname, uint32_t *server_id,
-                                uint32_t *index) {
+    std::string
+    DBName(const std::string &dbname, uint32_t index) {
+        return dbname + "/" + std::to_string(index);
+    }
+
+    void ParseDBIndexFromDBName(const std::string &dbname, uint32_t *index) {
         int iend = dbname.size() - 1;
         int istart = dbname.find_last_of('/') + 1;
-        int send = istart - 2;
-        int sstart = dbname.find_last_of('/', send) + 1;
-
         uint64_t i64;
-        uint64_t s64;
         str_to_int(dbname.data() + istart, &i64, iend - istart + 1);
-        str_to_int(dbname.data() + sstart, &s64, send - sstart + 1);
-
-        *server_id = s64;
         *index = i64;
     }
 

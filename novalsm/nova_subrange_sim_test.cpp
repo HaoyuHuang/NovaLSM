@@ -130,9 +130,7 @@ namespace {
         options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
 
         leveldb::Logger *log = nullptr;
-        std::string db_path = DBName(NovaConfig::config->db_path,
-                                     NovaConfig::config->my_server_id,
-                                     db_index);
+        std::string db_path = DBName(NovaConfig::config->db_path, db_index);
         mkdirs(db_path.c_str());
 
         NOVA_ASSERT(env->NewLogger(
@@ -209,14 +207,13 @@ void TestSubRanges() {
     stat_thread->bgs_ = bgs;
     stat_thread->async_workers_ = {};
     stat_thread->async_compaction_workers_ = {};
-    stat_thread->dbs_ = {db};
     std::thread stats_thread(&NovaStatThread::Start, stat_thread);
 
     // load data.
     timeval start{};
     gettimeofday(&start, nullptr);
     uint64_t loaded_keys = 0;
-    std::vector<LTCFragment *> &frags = NovaConfig::config->fragments;
+    std::vector<LTCFragment *> &frags = NovaConfig::config->cfgs[0]->fragments;
     leveldb::StoCReplicateLogRecordState *state = new leveldb::StoCReplicateLogRecordState[NovaConfig::config->servers.size()];
     for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
         state[i].rdma_wr_id = -1;
@@ -321,13 +318,12 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->my_server_id = 0;
 
     NovaConfig::ReadFragments(
-            "/tmp/rdma-shared-ltc-nrecords-10000000-nccservers-1-nlogreplicas-1-nranges-1",
-            &NovaConfig::config->fragments);
+            "/tmp/rdma-shared-ltc-nrecords-10000000-nccservers-1-nlogreplicas-1-nranges-1");
     uint32_t start_stoc_id = 0;
-    for (int i = 0; i < NovaConfig::config->fragments.size(); i++) {
-        NovaConfig::config->fragments[i]->log_replica_stoc_ids.clear();
+    for (int i = 0; i < NovaConfig::config->cfgs[0]->fragments.size(); i++) {
+        NovaConfig::config->cfgs[0]->fragments[i]->log_replica_stoc_ids.clear();
         for (int r = 0; r < 0; r++) {
-            NovaConfig::config->fragments[i]->log_replica_stoc_ids.push_back(
+            NovaConfig::config->cfgs[0]->fragments[i]->log_replica_stoc_ids.push_back(
                     start_stoc_id);
             start_stoc_id = (start_stoc_id + 1) %
                             NovaConfig::config->stoc_servers.size();

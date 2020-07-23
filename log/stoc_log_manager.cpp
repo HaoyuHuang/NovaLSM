@@ -11,7 +11,7 @@ namespace nova {
     StoCInMemoryLogFileManager::StoCInMemoryLogFileManager(
             nova::NovaMemManager *mem_manager) : mem_manager_(mem_manager) {
         server_db_log_files_ = new DBLogFiles **[NovaConfig::config->servers.size()];
-        uint32_t nranges = NovaConfig::config->fragments.size() /
+        uint32_t nranges = NovaConfig::config->cfgs[0]->fragments.size() /
                            NovaConfig::config->ltc_servers.size();
         NOVA_LOG(rdmaio::DEBUG)
             << fmt::format("{} {}", NovaConfig::config->servers.size(),
@@ -24,8 +24,9 @@ namespace nova {
         }
     }
 
-    void StoCInMemoryLogFileManager::QueryLogFiles(uint32_t sid, uint32_t range_id,
-                                                   std::unordered_map<std::string, uint64_t> *logfile_offset) {
+    void
+    StoCInMemoryLogFileManager::QueryLogFiles(uint32_t sid, uint32_t range_id,
+                                              std::unordered_map<std::string, uint64_t> *logfile_offset) {
         DBLogFiles *db = server_db_log_files_[sid][range_id];
         db->mutex_.Lock();
         for (const auto &it : db->logfiles_) {
@@ -36,7 +37,8 @@ namespace nova {
     }
 
     void
-    StoCInMemoryLogFileManager::Add(uint64_t thread_id, const std::string &log_file,
+    StoCInMemoryLogFileManager::Add(uint64_t thread_id,
+                                    const std::string &log_file,
                                     char *buf) {
         uint32_t sid;
         uint32_t db_index;

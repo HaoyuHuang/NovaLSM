@@ -24,6 +24,8 @@
 #include <event.h>
 #include <list>
 
+#include "include/port/port_config.h"
+
 #include "rdma/rdma_ctrl.hpp"
 #include "table/format.h"
 #include "util/coding.h"
@@ -82,11 +84,18 @@ namespace nova {
     };
 
     struct LTCFragment {
+        LTCFragment();
+
         // for range partition only.
         RangePartition range;
         uint32_t dbid;
         uint32_t ltc_server_id;
         std::vector<uint32_t> log_replica_stoc_ids;
+        void *db = nullptr;
+
+        std::atomic_bool is_ready_;
+        leveldb::port::Mutex is_ready_mutex_;
+        leveldb::port::CondVar is_ready_signal_;
     };
 
     uint64_t keyhash(const char *key, uint64_t nkey);
@@ -146,10 +155,10 @@ namespace nova {
         GET_INDEX = 'i',
         EXISTS = 'h',
         MISS = 'm',
-        FORCE_GET = 'G',
         REINITIALIZE_QP = 'a',
         CLOSE_STOC_FILES = 'c',
-        STATS = 's'
+        STATS = 's',
+        CHANGE_CONFIG = 'b',
     };
 
     static RequestType char_to_req_type(char c) {
@@ -172,9 +181,9 @@ namespace nova {
     std::string ToString(const std::vector<uint32_t> &x);
 
     std::string
-    DBName(const std::string &dbname, uint32_t server_id, uint32_t index);
+    DBName(const std::string &dbname, uint32_t index);
 
-    void ParseDBIndexFromDBName(const std::string &dbname, uint32_t *server_id,
+    void ParseDBIndexFromDBName(const std::string &dbname,
                                 uint32_t *index);
 
     void mkdirs(const char *dir);
@@ -270,7 +279,8 @@ namespace nova {
 
     uint32_t int_to_str(char *str, uint64_t x);
 
-    inline uint32_t str_to_int(const char *str, uint64_t *out, uint32_t nkey = 0) {
+    inline uint32_t
+    str_to_int(const char *str, uint64_t *out, uint32_t nkey = 0) {
         if (str[0] == MSG_TERMINATER_CHAR) {
             return 0;
         }

@@ -680,7 +680,7 @@ namespace leveldb {
         IncrementReqId();
         NOVA_LOG(DEBUG)
             << fmt::format(
-                    "stocclient[{}]: Migration server:{} size:{} req:{}",
+                    "stocclient[{}]: RDMA WRITE server:{} size:{} req:{}",
                     stoc_client_id_, remote_server_id, size, req_id);
         return req_id;
     }
@@ -993,6 +993,7 @@ namespace leveldb {
                                StoCRequestType::RDMA_WRITE_REMOTE_BUF_ALLOCATED) {
                         uint64_t remote_buf = leveldb::DecodeFixed64(buf + 1);
                         uint64_t size = leveldb::DecodeFixed64(buf + 9);
+                        NOVA_ASSERT(size == context.size);
 
                         RDMARequestTask task = {};
                         task.type = RDMA_CLIENT_RDMA_WRITE_REMOTE_BUF_ALLOCATED;

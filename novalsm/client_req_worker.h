@@ -118,10 +118,6 @@ namespace nova {
 
         void Start();
 
-        void set_dbs(const std::vector<leveldb::DB *> &dbs) {
-            dbs_ = dbs;
-        }
-
         void ResetReplicateState() {
             for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
                 replicate_log_record_states[i].result = leveldb::StoCReplicateLogRecordResult::REPLICATE_LOG_RECORD_NONE;
@@ -137,7 +133,6 @@ namespace nova {
         int epoll_fd_ = -1;      /* used for all notification*/
         std::mutex mutex_;
 
-        std::vector<leveldb::DB *> dbs_;
         struct event_base *base = nullptr;
         rdmaio::RdmaCtrl *ctrl_;
         std::vector<nova::RDMAMsgCallback *> rdma_threads;

@@ -29,15 +29,16 @@
 
 
 namespace leveldb {
-    leveldb::Options BuildDBOptions(int db_index, leveldb::Cache *cache,
-                                    leveldb::MemTablePool *memtable_pool,
-                                    leveldb::MemManager *mem_manager,
-                                    leveldb::StoCClient *stoc_client,
-                                    std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
-                                    std::vector<leveldb::EnvBGThread *> &bg_flush_memtable_threads,
-                                    leveldb::EnvBGThread *reorg_thread,
-                                    leveldb::EnvBGThread *compaction_coord_thread,
-                                    leveldb::Env *env) {
+    leveldb::Options
+    BuildDBOptions(int cfg_id, int db_index, leveldb::Cache *cache,
+                   leveldb::MemTablePool *memtable_pool,
+                   leveldb::MemManager *mem_manager,
+                   leveldb::StoCClient *stoc_client,
+                   const std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
+                   const std::vector<leveldb::EnvBGThread *> &bg_flush_memtable_threads,
+                   leveldb::EnvBGThread *reorg_thread,
+                   leveldb::EnvBGThread *compaction_coord_thread,
+                   leveldb::Env *env) {
         leveldb::Options options;
         options.enable_detailed_stats = nova::NovaConfig::config->enable_detailed_db_stats;
         options.block_cache = cache;
@@ -106,8 +107,8 @@ namespace leveldb {
             options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
         }
         options.subrange_no_flush_num_keys = nova::NovaConfig::config->subrange_num_keys_no_flush;
-        options.lower_key = nova::NovaConfig::config->db_fragment[db_index]->range.key_start;
-        options.upper_key = nova::NovaConfig::config->db_fragment[db_index]->range.key_end;
+        options.lower_key = nova::NovaConfig::config->cfgs[cfg_id]->db_fragment[db_index]->range.key_start;
+        options.upper_key = nova::NovaConfig::config->cfgs[cfg_id]->db_fragment[db_index]->range.key_end;
         if (nova::NovaConfig::config->use_local_disk) {
             options.manifest_stoc_ids.push_back(
                     nova::NovaConfig::config->my_server_id);
@@ -174,12 +175,12 @@ namespace leveldb {
         return options;
     }
 
-    leveldb::DB *CreateDatabase(int db_index, leveldb::Cache *cache,
+    leveldb::DB *CreateDatabase(int cfg_id, int db_index, leveldb::Cache *cache,
                                 leveldb::MemTablePool *memtable_pool,
                                 leveldb::MemManager *mem_manager,
                                 leveldb::StoCClient *stoc_client,
-                                std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
-                                std::vector<leveldb::EnvBGThread *> &bg_flush_memtable_threads,
+                                const std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
+                                const std::vector<leveldb::EnvBGThread *> &bg_flush_memtable_threads,
                                 leveldb::EnvBGThread *reorg_thread,
                                 leveldb::EnvBGThread *compaction_coord_thread) {
         leveldb::EnvOptions env_option;
@@ -187,7 +188,7 @@ namespace leveldb {
         leveldb::PosixEnv *env = new leveldb::PosixEnv;
         env->set_env_option(env_option);
         leveldb::DB *db;
-        leveldb::Options options = BuildDBOptions(db_index, cache,
+        leveldb::Options options = BuildDBOptions(cfg_id, db_index, cache,
                                                   memtable_pool,
                                                   mem_manager,
                                                   stoc_client,
@@ -198,7 +199,6 @@ namespace leveldb {
                                                   env);
         leveldb::Logger *log = nullptr;
         std::string db_path = nova::DBName(nova::NovaConfig::config->db_path,
-                                           nova::NovaConfig::config->my_server_id,
                                            db_index);
         nova::mkdirs(db_path.c_str());
         NOVA_ASSERT(env->NewLogger(

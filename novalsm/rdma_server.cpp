@@ -28,6 +28,7 @@ namespace nova {
     }
 
     RDMAServerImpl::RDMAServerImpl(rdmaio::RdmaCtrl *rdma_ctrl,
+                                   RDMAWriteHandler *rdma_write_handler,
                                    NovaMemManager *mem_manager,
                                    leveldb::StocPersistentFileManager *stoc_file_manager,
                                    StoCInMemoryLogFileManager *log_manager,
@@ -35,6 +36,7 @@ namespace nova {
                                    bool is_compaction_thread,
                                    RDMAAdmissionCtrl *admission_control)
             : rdma_ctrl_(rdma_ctrl),
+              rdma_write_handler_(rdma_write_handler),
               mem_manager_(mem_manager),
               stoc_file_manager_(stoc_file_manager),
               log_manager_(log_manager), thread_id_(thread_id),
@@ -305,9 +307,7 @@ namespace nova {
                         }
                     } else if (context.request_type ==
                                leveldb::StoCRequestType::RDMA_WRITE_REMOTE_BUF_ALLOCATED) {
-                        // TODO: RDMA WRITE TASK.
-//                        auto scid = mem_manager_->slabclassid(0, context.size);
-//                        mem_manager_->FreeItem(0, context.buf, scid);
+                        rdma_write_handler_->Handle(context.buf, context.size);
                         request_context_map_.erase(req_id);
                         processed = true;
                     }

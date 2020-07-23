@@ -20,6 +20,8 @@
 #include "stoc/storage_worker.h"
 #include "rdma_admission_ctrl.h"
 
+#include "rdma_write_handler.h"
+
 namespace leveldb {
     class CompactionState;
 }
@@ -86,6 +88,7 @@ namespace nova {
     class RDMAServerImpl : public RDMAMsgCallback, public leveldb::RDMAServer {
     public:
         RDMAServerImpl(rdmaio::RdmaCtrl *rdma_ctrl,
+                       RDMAWriteHandler *rdma_write_handler,
                        NovaMemManager *mem_manager,
                        leveldb::StocPersistentFileManager *stoc_file_manager,
                        StoCInMemoryLogFileManager *log_manager,
@@ -114,6 +117,8 @@ namespace nova {
         static std::atomic_int_fast32_t compaction_storage_worker_seq_id_;
 
     private:
+        RDMAWriteHandler *rdma_write_handler_ = nullptr;
+
         bool is_running_ = true;
         bool is_compaction_thread_ = false;
 

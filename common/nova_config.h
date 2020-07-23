@@ -35,8 +35,20 @@ namespace nova {
         std::vector<uint64_t> accesses;
     };
 
+    struct Configuration {
+        uint32_t cfg_id = 0;
+        std::vector<LTCFragment *> fragments;
+        std::vector<LTCFragment *> db_fragment;
+
+        std::string DebugString();
+    };
+
     class NovaConfig {
     public:
+        NovaConfig() {
+            current_cfg_id = 0;
+        }
+
         static int
         ParseNumberOfDatabases(const std::vector<LTCFragment *> &fragments,
                                std::vector<LTCFragment *> *db_fragments,
@@ -57,24 +69,62 @@ namespace nova {
             return ndbs.size();
         }
 
-        static std::unordered_map<uint32_t, std::set<uint32_t >>
-        ReadDatabases(const std::vector<LTCFragment *> &fragments) {
-            std::unordered_map<uint32_t, std::set<uint32_t >> server_dbs;
-            for (int i = 0; i < fragments.size(); i++) {
-                uint32_t sid = fragments[i]->ltc_server_id;
-                uint32_t dbid = fragments[i]->dbid;
-                server_dbs[sid].insert(dbid);
+        static std::vector<uint32_t>
+        ReadDatabases() {
+            std::vector<uint32_t> dbs;
+            auto cfg = config->cfgs[0];
+            for (int i = 0; i < cfg->fragments.size(); i++) {
+                uint32_t sid = cfg->fragments[i]->ltc_server_id;
+                uint32_t dbid = cfg->fragments[i]->dbid;
+                dbs.push_back(dbid);
             }
-            return server_dbs;
+            return dbs;
+        }
+
+        static void ComputeLogReplicaLocations(uint32_t num_log_replicas) {
+            uint32_t start_stoc_id = 0;
+            for (auto cfg : config->cfgs) {
+                for (int i = 0; i < cfg->fragments.size(); i++) {
+                    cfg->fragments[i]->log_replica_stoc_ids.clear();
+                    std::set<uint32_t> set;
+                    for (int r = 0; r < num_log_replicas; r++) {
+                        if (config->stoc_servers[start_stoc_id].server_id ==
+                            config->my_server_id) {
+                            start_stoc_id = (start_stoc_id + 1) %
+                                            config->stoc_servers.size();
+                        }
+                        NOVA_ASSERT(
+                                config->stoc_servers[start_stoc_id].server_id !=
+                                config->my_server_id);
+                        cfg->fragments[i]->log_replica_stoc_ids.push_back(
+                                start_stoc_id);
+                        set.insert(start_stoc_id);
+                        start_stoc_id = (start_stoc_id + 1) %
+                                        NovaConfig::config->stoc_servers.size();
+                    }
+                    NOVA_ASSERT(set.size() == num_log_replicas);
+                    NOVA_ASSERT(set.size() ==
+                                cfg->fragments[i]->log_replica_stoc_ids.size());
+                }
+            }
         }
 
         static void
-        ReadFragments(const std::string &path,
-                      std::vector<LTCFragment *> *frags) {
+        ReadFragments(const std::string &path) {
             std::string line;
             ifstream file;
             file.open(path);
+
+            Configuration *cfg = nullptr;
+            uint32_t cfg_id = 0;
             while (std::getline(file, line)) {
+                if (line.find("config") != std::string::npos) {
+                    cfg = new Configuration;
+                    cfg->cfg_id = cfg_id;
+                    cfg_id++;
+                    config->cfgs.push_back(cfg);
+                    continue;
+                }
                 auto *frag = new LTCFragment();
                 std::vector<std::string> tokens = SplitByDelimiter(&line, ",");
                 frag->range.key_start = std::stoi(tokens[0]);
@@ -87,33 +137,33 @@ namespace nova {
                     frag->log_replica_stoc_ids.push_back(
                             std::stoi(tokens[i + 4]));
                 }
-                frags->push_back(frag);
+                cfg->fragments.push_back(frag);
             }
-            NOVA_LOG(INFO) << "CC Configuration has a total of "
-                           << frags->size()
-                           << " fragments.";
-            for (int i = 0; i < frags->size(); i++) {
-                NOVA_LOG(DEBUG) << fmt::format("frag[{}]: {}-{}-{}-{}-{}", i,
-                                               (*frags)[i]->range.key_start,
-                                               (*frags)[i]->range.key_end,
-                                               (*frags)[i]->ltc_server_id,
-                                               (*frags)[i]->dbid,
-                                               ToString(
-                                                       (*frags)[i]->log_replica_stoc_ids));
+            NOVA_LOG(INFO)
+                << fmt::format("{} configurations", config->cfgs.size());
+            for (auto c : config->cfgs) {
+                NOVA_LOG(INFO) << c->DebugString();
+            }
+
+            for (auto c : config->cfgs) {
+                ParseNumberOfDatabases(c->fragments, &c->db_fragment,
+                                       config->my_server_id);
             }
         }
 
-        static LTCFragment *home_fragment(uint64_t key) {
+        static LTCFragment *
+        home_fragment(uint64_t key, uint32_t server_cfg_id) {
             LTCFragment *home = nullptr;
+            Configuration *cfg = config->cfgs[server_cfg_id];
             NOVA_ASSERT(
-                    key <= config->fragments[config->fragments.size() -
-                                             1]->range.key_end);
+                    key <= cfg->fragments[cfg->fragments.size() -
+                                          1]->range.key_end);
             uint32_t l = 0;
-            uint32_t r = config->fragments.size() - 1;
+            uint32_t r = cfg->fragments.size() - 1;
 
             while (l <= r) {
                 uint32_t m = l + (r - l) / 2;
-                home = config->fragments[m];
+                home = cfg->fragments[m];
                 // Check if x is present at mid
                 if (key >= home->range.key_start &&
                     key < home->range.key_end) {
@@ -134,6 +184,9 @@ namespace nova {
 
         vector<Host> servers;
         int my_server_id;
+        vector<Host> ltc_servers;
+        vector<Host> stoc_servers;
+
         uint64_t load_default_value_size;
         int max_msg_size;
 
@@ -176,8 +229,6 @@ namespace nova {
         int num_tinyranges_per_subrange;
         int subrange_num_keys_no_flush;
 
-        vector<Host> ltc_servers;
-        vector<Host> stoc_servers;
         int num_conn_workers;
         int num_fg_rdma_workers;
         int num_compaction_workers;
@@ -193,8 +244,7 @@ namespace nova {
         uint64_t memtable_size_mb;
         uint64_t l0_stop_write_mb;
         uint64_t l0_start_compaction_mb;
-        std::vector<LTCFragment *> fragments;
-        std::vector<LTCFragment *> db_fragment;
+
         int num_stocs_scatter_data_blocks;
 
         int fail_stoc_id = 0;
@@ -236,8 +286,11 @@ namespace nova {
             }
         }
 
+        std::vector<Configuration *> cfgs;
+        std::atomic_uint_fast32_t current_cfg_id;
         std::mutex m;
         std::map<std::thread::id, pid_t> threads;
+
         static NovaConfig *config;
     };
 

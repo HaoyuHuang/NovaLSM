@@ -259,9 +259,8 @@ namespace leveldb {
                                       nova::NovaConfig::config->scatter_policy,
                                       num_stocs_to_select,
                                       &stocs_to_store_fragments_);
-        uint32_t sid = 0;
         uint32_t dbid = 0;
-        nova::ParseDBIndexFromDBName(dbname_, &sid, &dbid);
+        nova::ParseDBIndexFromDBName(dbname_, &dbid);
 
         while (it->Valid()) {
             Slice key = it->key();
@@ -672,8 +671,7 @@ namespace leveldb {
             NOVA_LOG(rdmaio::DEBUG) << fmt::format("create file {}", filename);
         }
         NOVA_ASSERT(mem_manager_);
-        uint32_t server_id = 0;
-        nova::ParseDBIndexFromDBName(dbname, &server_id, &dbid_);
+        nova::ParseDBIndexFromDBName(dbname, &dbid_);
         Status s;
         auto stoc_block_client = reinterpret_cast<leveldb::StoCBlockClient *>(stoc_client);
         NOVA_ASSERT(stoc_block_client);

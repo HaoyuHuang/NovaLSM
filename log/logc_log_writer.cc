@@ -91,7 +91,7 @@ namespace leveldb {
                              const std::vector<LevelDBLogRecord> &log_records,
                              uint32_t client_req_id,
                              StoCReplicateLogRecordState *replicate_log_record_states) {
-        nova::LTCFragment *frag = nova::NovaConfig::config->db_fragment[dbid];
+        nova::LTCFragment *frag = nova::NovaConfig::config->cfgs[0]->db_fragment[dbid];
         if (frag->log_replica_stoc_ids.empty()) {
             return true;
         }
@@ -146,7 +146,7 @@ namespace leveldb {
     bool LogCLogWriter::CheckCompletion(const std::string &log_file_name,
                                         uint32_t dbid,
                                         StoCReplicateLogRecordState *replicate_log_record_states) {
-        nova::LTCFragment *frag = nova::NovaConfig::config->db_fragment[dbid];
+        nova::LTCFragment *frag = nova::NovaConfig::config->cfgs[0]->db_fragment[dbid];
         // Pull all pending writes.
         int acks = 0;
         int total_states = 0;
@@ -177,7 +177,7 @@ namespace leveldb {
     Status
     LogCLogWriter::CloseLogFiles(const std::vector<std::string> &log_file_name,
                                  uint32_t dbid, uint32_t client_req_id) {
-        nova::LTCFragment *frag = nova::NovaConfig::config->db_fragment[dbid];
+        nova::LTCFragment *frag = nova::NovaConfig::config->cfgs[0]->db_fragment[dbid];
         for (const auto &logfile : log_file_name) {
             LogFileMetadata *meta = &logfile_last_buf_[logfile];
             delete meta->stoc_bufs;

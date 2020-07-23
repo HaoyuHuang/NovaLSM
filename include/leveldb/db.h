@@ -229,8 +229,8 @@ namespace leveldb {
 
         virtual void StartCompaction() = 0;
 
-        std::vector<DB *> dbs_;
-        std::vector<nova::RDMAMsgCallback *> rdma_threads_;
+//        std::vector<DB *> dbs_;
+//        std::vector<nova::RDMAMsgCallback *> rdma_threads_;
 
         uint64_t number_of_memtable_hits_ = 0;
         uint64_t number_of_gets_ = 0;

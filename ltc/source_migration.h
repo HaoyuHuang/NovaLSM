@@ -18,11 +18,12 @@ namespace leveldb {
 
     class SourceMigration {
     public:
-        void Start();
+        void MigrateDB(const std::vector<nova::LTCFragment*>& migrate_frags);
 
     private:
-        MemManager* mem_manager_ = nullptr;
-        DBImpl *db_ = nullptr;
+        uint32_t EncodeDBMeta(DBImpl* db, char *buf, uint32_t dbindex);
+
+        MemManager *mem_manager_ = nullptr;
         StoCBlockClient *client_ = nullptr;
     };
 }

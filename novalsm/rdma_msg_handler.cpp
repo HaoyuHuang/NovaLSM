@@ -65,7 +65,7 @@ namespace nova {
                 task.type == leveldb::RDMA_CLIENT_REQ_LOG_RECORD) {
                 NOVA_ASSERT(task.server_id == -1);
                 // A log record request.
-                nova::LTCFragment *frag = nova::NovaConfig::config->db_fragment[task.dbid];
+                nova::LTCFragment *frag = nova::NovaConfig::config->cfgs[0]->db_fragment[task.dbid];
                 for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
                     uint32_t stoc_server_id = nova::NovaConfig::config->stoc_servers[frag->log_replica_stoc_ids[i]].server_id;
                     serverids.push_back(stoc_server_id);

@@ -238,32 +238,9 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config->my_server_id = FLAGS_server_id;
 
-    NovaConfig::ReadFragments(FLAGS_ltc_config_path,
-                              &NovaConfig::config->fragments);
-    if (FLAGS_use_local_disk && FLAGS_server_id < FLAGS_number_of_ltcs) {
-        uint32_t start_stoc_id = 0;
-        for (int i = 0; i < NovaConfig::config->fragments.size(); i++) {
-            NovaConfig::config->fragments[i]->log_replica_stoc_ids.clear();
-            std::set<uint32_t> set;
-            for (int r = 0; r < FLAGS_num_log_replicas; r++) {
-                if (NovaConfig::config->stoc_servers[start_stoc_id].server_id ==
-                    FLAGS_server_id) {
-                    start_stoc_id = (start_stoc_id + 1) %
-                                    NovaConfig::config->stoc_servers.size();
-                }
-                NOVA_ASSERT(
-                        NovaConfig::config->stoc_servers[start_stoc_id].server_id !=
-                        FLAGS_server_id);
-                NovaConfig::config->fragments[i]->log_replica_stoc_ids.push_back(
-                        start_stoc_id);
-                set.insert(start_stoc_id);
-                start_stoc_id = (start_stoc_id + 1) %
-                                NovaConfig::config->stoc_servers.size();
-            }
-            NOVA_ASSERT(set.size() == FLAGS_num_log_replicas);
-            NOVA_ASSERT(set.size() ==
-                        NovaConfig::config->fragments[i]->log_replica_stoc_ids.size());
-        }
+    NovaConfig::ReadFragments(FLAGS_ltc_config_path);
+    if (FLAGS_num_log_replicas > 0) {
+        NovaConfig::ComputeLogReplicaLocations(FLAGS_num_log_replicas);
     }
 
     NovaConfig::config->num_conn_workers = FLAGS_ltc_num_client_workers;

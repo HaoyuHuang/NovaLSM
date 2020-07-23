@@ -20,8 +20,8 @@
 #include "leveldb/db_profiler.h"
 #include "leveldb/cache.h"
 #include "ltc/stoc_file_client_impl.h"
-//#include "ltc/source_migration.h"
-//#include "ltc/destination_migration.h"
+#include "ltc/source_migration.h"
+#include "ltc/destination_migration.h"
 
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -139,6 +139,7 @@ namespace leveldb {
 
         const std::string &dbname() override;
 
+        const Options options_;  // options_.comparator == &internal_comparator_
     private:
 
         Status GetWithLookupIndex(const ReadOptions &options, const Slice &key,
@@ -148,8 +149,6 @@ namespace leveldb {
                                  std::string *value);
 
         std::atomic_bool start_compaction_;
-        sem_t init_lsmtree_meta_signal_;
-        char *lsmtree_meta_buf_ = nullptr;
         bool is_ready_to_process_request = false;
 
         void CleanupLSMCompaction(CompactionState *state,
@@ -203,8 +202,8 @@ namespace leveldb {
 
         friend class DB;
 
-//        friend class SourceMigration;
-//        friend class DestinationMigration;
+        friend class SourceMigration;
+        friend class DestinationMigration;
         struct Writer;
 
         DBProfiler *db_profiler_ = nullptr;
@@ -279,7 +278,6 @@ namespace leveldb {
         const Comparator *user_comparator_;
         const InternalKeyComparator internal_comparator_;
         const InternalFilterPolicy internal_filter_policy_;
-        const Options options_;  // options_.comparator == &internal_comparator_
         const bool owns_info_log_;
         const bool owns_cache_;
         const std::string dbname_;

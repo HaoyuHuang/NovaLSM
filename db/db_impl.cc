@@ -149,8 +149,7 @@ namespace leveldb {
                 lookup_index_->Insert(Slice(), i, 0);
             }
         }
-        uint32_t sid;
-        nova::ParseDBIndexFromDBName(dbname_, &sid, &dbid_);
+        nova::ParseDBIndexFromDBName(dbname_, &dbid_);
     }
 
     DBImpl::~DBImpl() {
@@ -606,146 +605,146 @@ namespace leveldb {
             const std::unordered_map<std::string, uint64_t> &logfile_buf,
             uint32_t *recovered_log_records,
             timeval *rdma_read_complete) {
-        if (logfile_buf.empty()) {
-            return Status::OK();
-        }
-
-        auto client = reinterpret_cast<StoCBlockClient *> (options_.stoc_client);
-        std::vector<NovaCCRecoveryThread *> recovery_threads;
-        uint32_t memtable_per_thread =
-                logfile_buf.size() / options_.num_recovery_thread;
-        uint32_t remainder = logfile_buf.size() % options_.num_recovery_thread;
-        NOVA_ASSERT(logfile_buf.size() < partitioned_active_memtables_.size());
-        uint32_t memtable_index = 0;
-        uint32_t thread_id = 0;
-        while (memtable_index < logfile_buf.size()) {
-            std::vector<MemTable *> memtables;
-            for (int j = 0; j < memtable_per_thread; j++) {
-                memtables.push_back(
-                        partitioned_active_memtables_[memtable_index]->memtable);
-                memtable_index++;
-            }
-            if (remainder > 0) {
-                memtable_index++;
-                remainder--;
-            }
-            NovaCCRecoveryThread *thread = new NovaCCRecoveryThread(
-                    thread_id, memtables, options_.mem_manager);
-            recovery_threads.push_back(thread);
-            thread_id++;
-        }
-
-        // Pin each recovery thread to a core.
-        std::vector<std::thread> threads;
-        for (int i = 0; i < recovery_threads.size(); i++) {
-            threads.emplace_back(&NovaCCRecoveryThread::Recover,
-                                 recovery_threads[i]);
-            cpu_set_t cpuset;
-            CPU_ZERO(&cpuset);
-            CPU_SET(i, &cpuset);
-            int rc = pthread_setaffinity_np(threads[i].native_handle(),
-                                            sizeof(cpu_set_t), &cpuset);
-            NOVA_ASSERT(rc == 0) << rc;
-        }
-
-        std::vector<char *> rdma_bufs;
-        std::vector<uint32_t> reqs;
-        nova::LTCFragment *frag = nova::NovaConfig::config->db_fragment[dbid_];
-        uint32_t stoc_server_id = nova::NovaConfig::config->stoc_servers[frag->log_replica_stoc_ids[0]].server_id;
-        for (auto &replica : logfile_buf) {
-            uint32_t scid = options_.mem_manager->slabclassid(0,
-                                                              options_.max_log_file_size);
-            char *rdma_buf = options_.mem_manager->ItemAlloc(0, scid);
-            NOVA_ASSERT(rdma_buf);
-            rdma_bufs.push_back(rdma_buf);
-            uint32_t reqid = client->InitiateReadInMemoryLogFile(rdma_buf,
-                                                                 stoc_server_id,
-                                                                 replica.second,
-                                                                 options_.max_log_file_size);
-            reqs.push_back(reqid);
-        }
-
-        // Wait for all RDMA READ to complete.
-        for (auto &replica : logfile_buf) {
-            client->Wait();
-        }
-
-        for (int i = 0; i < reqs.size(); i++) {
-            leveldb::StoCResponse response;
-            NOVA_ASSERT(client->IsDone(reqs[i], &response, nullptr));
-        }
-
-        gettimeofday(rdma_read_complete, nullptr);
+//        if (logfile_buf.empty()) {
+//            return Status::OK();
+//        }
+//
+//        auto client = reinterpret_cast<StoCBlockClient *> (options_.stoc_client);
+//        std::vector<NovaCCRecoveryThread *> recovery_threads;
+//        uint32_t memtable_per_thread =
+//                logfile_buf.size() / options_.num_recovery_thread;
+//        uint32_t remainder = logfile_buf.size() % options_.num_recovery_thread;
+//        NOVA_ASSERT(logfile_buf.size() < partitioned_active_memtables_.size());
+//        uint32_t memtable_index = 0;
+//        uint32_t thread_id = 0;
+//        while (memtable_index < logfile_buf.size()) {
+//            std::vector<MemTable *> memtables;
+//            for (int j = 0; j < memtable_per_thread; j++) {
+//                memtables.push_back(
+//                        partitioned_active_memtables_[memtable_index]->memtable);
+//                memtable_index++;
+//            }
+//            if (remainder > 0) {
+//                memtable_index++;
+//                remainder--;
+//            }
+//            NovaCCRecoveryThread *thread = new NovaCCRecoveryThread(
+//                    thread_id, memtables, options_.mem_manager);
+//            recovery_threads.push_back(thread);
+//            thread_id++;
+//        }
+//
+//        // Pin each recovery thread to a core.
+//        std::vector<std::thread> threads;
+//        for (int i = 0; i < recovery_threads.size(); i++) {
+//            threads.emplace_back(&NovaCCRecoveryThread::Recover,
+//                                 recovery_threads[i]);
+//            cpu_set_t cpuset;
+//            CPU_ZERO(&cpuset);
+//            CPU_SET(i, &cpuset);
+//            int rc = pthread_setaffinity_np(threads[i].native_handle(),
+//                                            sizeof(cpu_set_t), &cpuset);
+//            NOVA_ASSERT(rc == 0) << rc;
+//        }
+//
+//        std::vector<char *> rdma_bufs;
+//        std::vector<uint32_t> reqs;
+//        nova::LTCFragment *frag = nova::NovaConfig::config->cfgs[0]->db_fragment[dbid_];
+//        uint32_t stoc_server_id = nova::NovaConfig::config->stoc_servers[frag->log_replica_stoc_ids[0]].server_id;
+//        for (auto &replica : logfile_buf) {
+//            uint32_t scid = options_.mem_manager->slabclassid(0,
+//                                                              options_.max_log_file_size);
+//            char *rdma_buf = options_.mem_manager->ItemAlloc(0, scid);
+//            NOVA_ASSERT(rdma_buf);
+//            rdma_bufs.push_back(rdma_buf);
+//            uint32_t reqid = client->InitiateReadInMemoryLogFile(rdma_buf,
+//                                                                 stoc_server_id,
+//                                                                 replica.second,
+//                                                                 options_.max_log_file_size);
+//            reqs.push_back(reqid);
+//        }
+//
+//        // Wait for all RDMA READ to complete.
+//        for (auto &replica : logfile_buf) {
+//            client->Wait();
+//        }
+//
+//        for (int i = 0; i < reqs.size(); i++) {
+//            leveldb::StoCResponse response;
+//            NOVA_ASSERT(client->IsDone(reqs[i], &response, nullptr));
+//        }
+//
+//        gettimeofday(rdma_read_complete, nullptr);
 
         // put all rdma foreground to sleep.
-        for (int i = 0; i < rdma_threads_.size(); i++) {
-            auto *thread = reinterpret_cast<nova::RDMAMsgHandler *>(rdma_threads_[i]);
-            thread->should_pause = true;
-        }
+//        for (int i = 0; i < rdma_threads_.size(); i++) {
+//            auto *thread = reinterpret_cast<nova::RDMAMsgHandler *>(rdma_threads_[i]);
+//            thread->should_pause = true;
+//        }
 
         // Divide.
-        NOVA_LOG(rdmaio::INFO)
-            << fmt::format(
-                    "Start recovery: memtables:{} memtable_per_thread:{}",
-                    logfile_buf.size(),
-                    memtable_per_thread);
-
-        std::vector<char *> replicas;
-        thread_id = 0;
-        for (int i = 0; i < logfile_buf.size(); i++) {
-            if (replicas.size() == memtable_per_thread) {
-                recovery_threads[thread_id]->log_replicas_ = replicas;
-                replicas.clear();
-                thread_id += 1;
-            }
-            replicas.push_back(rdma_bufs[i]);
-        }
-
-        if (!replicas.empty()) {
-            recovery_threads[thread_id]->log_replicas_ = replicas;
-        }
-
-        for (int i = 0;
-             i < options_.num_recovery_thread; i++) {
-            sem_post(&recovery_threads[i]->sem_);
-        }
-        NOVA_LOG(rdmaio::INFO)
-            << fmt::format("Start recovery: recovery threads:{}",
-                           recovery_threads.size());
-        for (int i = 0; i < recovery_threads.size(); i++) {
-            threads[i].join();
-        }
-
-        uint32_t log_records = 0;
-        for (int i = 0; i < recovery_threads.size(); i++) {
-            auto recovery = recovery_threads[i];
-            log_records += recovery->recovered_log_records;
-
-            NOVA_LOG(rdmaio::INFO)
-                << fmt::format("recovery duration of {}: {},{},{},{}",
-                               i,
-                               recovery->log_replicas_.size(),
-                               recovery->recovered_log_records,
-                               recovery->new_memtable_time,
-                               recovery->recovery_time);
-        }
-        *recovered_log_records = log_records;
-
-        uint64_t max_sequence = 0;
-        for (auto &recovery : recovery_threads) {
-            max_sequence = std::max(max_sequence,
-                                    recovery->max_sequence_number);
-        }
-
-        if (versions_->LastSequence() < max_sequence) {
-            versions_->SetLastSequence(max_sequence);
-        }
-
-        for (int i = 0; i < rdma_threads_.size(); i++) {
-            auto *thread = reinterpret_cast<nova::RDMAMsgHandler *>(rdma_threads_[i]);
-            thread->should_pause = false;
-            sem_post(&thread->sem_);
-        }
+//        NOVA_LOG(rdmaio::INFO)
+//            << fmt::format(
+//                    "Start recovery: memtables:{} memtable_per_thread:{}",
+//                    logfile_buf.size(),
+//                    memtable_per_thread);
+//
+//        std::vector<char *> replicas;
+//        thread_id = 0;
+//        for (int i = 0; i < logfile_buf.size(); i++) {
+//            if (replicas.size() == memtable_per_thread) {
+//                recovery_threads[thread_id]->log_replicas_ = replicas;
+//                replicas.clear();
+//                thread_id += 1;
+//            }
+//            replicas.push_back(rdma_bufs[i]);
+//        }
+//
+//        if (!replicas.empty()) {
+//            recovery_threads[thread_id]->log_replicas_ = replicas;
+//        }
+//
+//        for (int i = 0;
+//             i < options_.num_recovery_thread; i++) {
+//            sem_post(&recovery_threads[i]->sem_);
+//        }
+//        NOVA_LOG(rdmaio::INFO)
+//            << fmt::format("Start recovery: recovery threads:{}",
+//                           recovery_threads.size());
+//        for (int i = 0; i < recovery_threads.size(); i++) {
+//            threads[i].join();
+//        }
+//
+//        uint32_t log_records = 0;
+//        for (int i = 0; i < recovery_threads.size(); i++) {
+//            auto recovery = recovery_threads[i];
+//            log_records += recovery->recovered_log_records;
+//
+//            NOVA_LOG(rdmaio::INFO)
+//                << fmt::format("recovery duration of {}: {},{},{},{}",
+//                               i,
+//                               recovery->log_replicas_.size(),
+//                               recovery->recovered_log_records,
+//                               recovery->new_memtable_time,
+//                               recovery->recovery_time);
+//        }
+//        *recovered_log_records = log_records;
+//
+//        uint64_t max_sequence = 0;
+//        for (auto &recovery : recovery_threads) {
+//            max_sequence = std::max(max_sequence,
+//                                    recovery->max_sequence_number);
+//        }
+//
+//        if (versions_->LastSequence() < max_sequence) {
+//            versions_->SetLastSequence(max_sequence);
+//        }
+//
+//        for (int i = 0; i < rdma_threads_.size(); i++) {
+//            auto *thread = reinterpret_cast<nova::RDMAMsgHandler *>(rdma_threads_[i]);
+//            thread->should_pause = false;
+//            sem_post(&thread->sem_);
+//        }
         return Status::OK();
     }
 
@@ -1088,11 +1087,13 @@ namespace leveldb {
         options_.memtable_pool->mutex_.lock();
         options_.memtable_pool->num_available_memtables_ += num_available;
         NOVA_ASSERT(options_.memtable_pool->num_available_memtables_ <
-                    nova::NovaConfig::config->num_memtables - dbs_.size());
+                    nova::NovaConfig::config->num_memtables -
+                    nova::NovaConfig::config->cfgs[0]->fragments.size());
         options_.memtable_pool->mutex_.unlock();
 
         if (wakeup_all) {
-            for (int i = 0; i < dbs_.size(); i++) {
+            for (int i = 0;
+                 i < nova::NovaConfig::config->cfgs[0]->fragments.size(); i++) {
                 options_.memtable_pool->range_cond_vars_[i]->SignalAll();
             }
         } else {
@@ -1954,17 +1955,22 @@ namespace leveldb {
     }
 
     void DBImpl::StealMemTable(const leveldb::WriteOptions &options) {
-        uint32_t number_of_tries = std::min((size_t) 3, dbs_.size() - 1);
-        uint32_t rand_range_index = rand_r(options.rand_seed) % dbs_.size();
+        uint32_t number_of_tries = std::min((size_t) 3,
+                                            nova::NovaConfig::config->cfgs[0]->fragments.size() -
+                                            1);
+        uint32_t rand_range_index = rand_r(options.rand_seed) %
+                                    nova::NovaConfig::config->cfgs[0]->fragments.size();
 
         for (int i = 0; i < number_of_tries; i++) {
             // steal a memtable from another range.
-            rand_range_index = (rand_range_index + 1) % dbs_.size();
+            rand_range_index = (rand_range_index + 1) %
+                               nova::NovaConfig::config->cfgs[0]->fragments.size();
             if (rand_range_index == dbid_) {
-                rand_range_index = (rand_range_index + 1) % dbs_.size();
+                rand_range_index = (rand_range_index + 1) %
+                                   nova::NovaConfig::config->cfgs[0]->fragments.size();
             }
 
-            auto steal_from_range = reinterpret_cast<DBImpl *>(dbs_[rand_range_index]);
+            auto steal_from_range = reinterpret_cast<DBImpl *>(nova::NovaConfig::config->cfgs[0]->fragments[rand_range_index]);
             if (!steal_from_range->range_lock_.TryLock()) {
                 continue;
             }
@@ -2587,7 +2593,7 @@ namespace leveldb {
                 break;
             } else {
                 if (nova::NovaConfig::config->num_memtables >
-                    2 * dbs_.size()) {
+                    2 * nova::NovaConfig::config->cfgs[0]->fragments.size()) {
                     StealMemTable(options);
                 }
                 if (emptiest_memtable) {

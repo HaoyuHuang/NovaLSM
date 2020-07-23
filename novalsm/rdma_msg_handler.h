@@ -35,9 +35,8 @@ namespace nova {
     public:
         RDMAMsgHandler(RdmaCtrl *rdma_ctrl,
                        NovaMemManager *mem_manager,
-                       const std::vector<leveldb::DB *> &dbs,
                        RDMAAdmissionCtrl *admission_control) :
-                rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager), dbs_(dbs),
+                rdma_ctrl_(rdma_ctrl), mem_manager_(mem_manager),
                 admission_control_(admission_control) {
             stat_tasks_ = 0;
             sem_init(&sem_, 0, 0);
@@ -90,7 +89,6 @@ namespace nova {
         RdmaCtrl *rdma_ctrl_ = nullptr;
         NovaMemManager *mem_manager_ = nullptr;
         bool is_running_ = false;
-        std::vector<leveldb::DB *> dbs_;
         RDMAAdmissionCtrl *admission_control_ = nullptr;
         leveldb::port::Mutex mutex_;
 

@@ -73,8 +73,6 @@ namespace nova {
         std::vector<StorageWorker *> compaction_storage_workers;
         std::vector<leveldb::EnvBGThread *> bg_compaction_threads;
         std::vector<leveldb::EnvBGThread *> bg_flush_memtable_threads;
-        std::vector<leveldb::EnvBGThread *> reorg_bgs;
-        std::vector<leveldb::EnvBGThread *> compaction_coord_bgs;
 
         NovaStatThread *stat_thread_;
         nova::StoCHealthMonitor *monitor_ = nullptr;

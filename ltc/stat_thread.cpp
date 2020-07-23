@@ -108,7 +108,17 @@ namespace nova {
         std::string output;
         int flushed_memtable_size[BUCKET_SIZE];
         while (true) {
-            usleep(10000000);
+            sleep(1);
+
+            std::vector<leveldb::DB *> dbs;
+            Configuration *cfg = NovaConfig::config->cfgs[NovaConfig::config->current_cfg_id];
+            for (auto frag : cfg->fragments) {
+                auto db = reinterpret_cast<leveldb::DB *>(frag->db);
+                if (db) {
+                    dbs.push_back(db);
+                }
+            }
+
             output = "frdma,";
             for (int i = 0; i < foreground_rdma_tasks.size(); i++) {
                 uint32_t tasks = async_workers_[i]->stat_tasks_;
@@ -142,69 +152,69 @@ namespace nova {
                         compaction_storage_workers_);
 
             output += "active-memtables,";
-            for (int i = 0; i < dbs_.size(); i++) {
-                output += std::to_string(dbs_[i]->number_of_active_memtables_);
+            for (int i = 0; i < dbs.size(); i++) {
+                output += std::to_string(dbs[i]->number_of_active_memtables_);
                 output += ",";
             }
             output += "\n";
 
             output += "immutable-memtables,";
-            for (int i = 0; i < dbs_.size(); i++) {
+            for (int i = 0; i < dbs.size(); i++) {
                 output += std::to_string(
-                        dbs_[i]->number_of_immutable_memtables_);
+                        dbs[i]->number_of_immutable_memtables_);
                 output += ",";
             }
             output += "\n";
 
             output += "steals,";
-            for (int i = 0; i < dbs_.size(); i++) {
-                output += std::to_string(dbs_[i]->number_of_steals_);
+            for (int i = 0; i < dbs.size(); i++) {
+                output += std::to_string(dbs[i]->number_of_steals_);
                 output += ",";
             }
             output += "\n";
 
             output += "puts,";
-            for (int i = 0; i < dbs_.size(); i++) {
-                output += std::to_string(dbs_[i]->processed_writes_);
+            for (int i = 0; i < dbs.size(); i++) {
+                output += std::to_string(dbs[i]->processed_writes_);
                 output += ",";
             }
             output += "\n";
 
             output += "wait-due-to-contention,";
-            for (int i = 0; i < dbs_.size(); i++) {
+            for (int i = 0; i < dbs.size(); i++) {
                 output += std::to_string(
-                        dbs_[i]->number_of_wait_due_to_contention_);
+                        dbs[i]->number_of_wait_due_to_contention_);
                 output += ",";
             }
             output += "\n";
 
             output += "gets,";
-            for (int i = 0; i < dbs_.size(); i++) {
-                output += std::to_string(dbs_[i]->number_of_gets_);
+            for (int i = 0; i < dbs.size(); i++) {
+                output += std::to_string(dbs[i]->number_of_gets_);
                 output += ",";
             }
             output += "\n";
 
             output += "hits,";
-            for (int i = 0; i < dbs_.size(); i++) {
-                output += std::to_string(dbs_[i]->number_of_memtable_hits_);
+            for (int i = 0; i < dbs.size(); i++) {
+                output += std::to_string(dbs[i]->number_of_memtable_hits_);
                 output += ",";
             }
             output += "\n";
 
             output += "scans,";
-            for (int i = 0; i < dbs_.size(); i++) {
+            for (int i = 0; i < dbs.size(); i++) {
                 output += fmt::format("[{}]",
-                                      dbs_[i]->scan_stats.DebugString());
+                                      dbs[i]->scan_stats.DebugString());
                 output += ",";
             }
             output += "\n";
 
             output += "searched_file_per_miss,";
-            for (int i = 0; i < dbs_.size(); i++) {
-                double miss = dbs_[i]->number_of_gets_ -
-                              dbs_[i]->number_of_memtable_hits_;
-                double files = dbs_[i]->number_of_files_to_search_for_get_;
+            for (int i = 0; i < dbs.size(); i++) {
+                double miss = dbs[i]->number_of_gets_ -
+                        dbs[i]->number_of_memtable_hits_;
+                double files = dbs[i]->number_of_files_to_search_for_get_;
                 output += std::to_string(files / miss);
                 output += ",";
             }
@@ -227,15 +237,15 @@ namespace nova {
             output += "\n";
 
             output += "puts-no-wait,";
-            for (int i = 0; i < dbs_.size(); i++) {
-                output += std::to_string(dbs_[i]->number_of_puts_no_wait_);
+            for (int i = 0; i < dbs.size(); i++) {
+                output += std::to_string(dbs[i]->number_of_puts_no_wait_);
                 output += ",";
             }
             output += "\n";
 
             output += "puts-wait,";
-            for (int i = 0; i < dbs_.size(); i++) {
-                output += std::to_string(dbs_[i]->number_of_puts_wait_);
+            for (int i = 0; i < dbs.size(); i++) {
+                output += std::to_string(dbs[i]->number_of_puts_wait_);
                 output += ",";
             }
             output += "\n";
@@ -249,7 +259,7 @@ namespace nova {
                 size_dist[j] = 0;
             }
 
-            for (int i = 0; i < dbs_.size(); i++) {
+            for (int i = 0; i < dbs.size(); i++) {
                 output += "db-overlapping-sstable-stats-" + std::to_string(i) +
                           ",";
                 leveldb::DBStats stats = {};
@@ -258,7 +268,7 @@ namespace nova {
                     size_dist[j] = 0;
                 }
                 stats.sstable_size_dist = size_dist;
-                dbs_[i]->QueryDBStats(&stats);
+                dbs[i]->QueryDBStats(&stats);
 
                 aggregated_stats.dbsize += stats.dbsize;
                 aggregated_stats.num_l0_sstables += stats.num_l0_sstables;

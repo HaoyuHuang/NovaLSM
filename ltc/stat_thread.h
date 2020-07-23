@@ -18,7 +18,6 @@ namespace nova {
     public:
         void Start();
 
-        std::vector<leveldb::DB *> dbs_;
         std::vector<RDMAMsgHandler *> async_workers_;
         std::vector<RDMAMsgHandler *> async_compaction_workers_;
         std::vector<StorageWorker *> fg_storage_workers_;

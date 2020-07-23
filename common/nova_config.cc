@@ -20,4 +20,20 @@ namespace nova {
                               NovaConfig::config->servers.size();
         return nrdmatotal;
     }
+
+    std::string Configuration::DebugString() {
+        std::string debug = fmt::format("CfgId: {} Number of fragments: {}\n",
+                                        cfg_id, fragments.size());
+
+        for (int i = 0; i < fragments.size(); i++) {
+            debug += fmt::format("frag[{}]: {}-{}-{}-{}-{}\n", i,
+                                 fragments[i]->range.key_start,
+                                 fragments[i]->range.key_end,
+                                 fragments[i]->ltc_server_id,
+                                 fragments[i]->dbid,
+                                 ToString(
+                                         fragments[i]->log_replica_stoc_ids));
+        }
+        return debug;
+    }
 }

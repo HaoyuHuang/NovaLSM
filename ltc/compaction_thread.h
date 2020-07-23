@@ -18,7 +18,7 @@ namespace leveldb {
     class LTCNoopCompactionThread : public EnvBGThread {
     public:
         LTCNoopCompactionThread() {
-            for (int i = 0 ; i < BUCKET_SIZE; i++) {
+            for (int i = 0; i < BUCKET_SIZE; i++) {
                 memtable_size[i] = 0;
             }
         }

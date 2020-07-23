@@ -182,6 +182,7 @@ target_sources(leveldb
         "novalsm/rdma_server.cpp"
         "novalsm/rdma_server.h"
 
+
         "util/testharness.cc"
         "util/testharness.h"
         "util/testutil.cc"
@@ -189,14 +190,14 @@ target_sources(leveldb
 
         db/range_index.cpp
         db/range_index.h
-#        ltc/source_migration.cpp
-#        ltc/source_migration.h
-#        ltc/destination_migration.cpp
-#        ltc/destination_migration.h
-#        log/log_recovery.cpp
-#        log/log_recovery.h
-#        ltc/rdma_write_handler.cpp
-#        ltc/rdma_write_handler.h
+        ltc/source_migration.cpp
+        ltc/source_migration.h
+        ltc/destination_migration.cpp
+        ltc/destination_migration.h
+        log/log_recovery.cpp
+        log/log_recovery.h
+        novalsm/rdma_write_handler.cpp
+        novalsm/rdma_write_handler.h
         ltc/db_helper.cpp
         ltc/db_helper.h
 

@@ -158,25 +158,20 @@ namespace nova {
     }
 
     bool
-    process_socket_get(int fd, Connection *conn, bool no_redirect) {
+    process_socket_get(int fd, Connection *conn, char *request_buf,
+                       uint32_t server_cfg_id) {
         // Stats.
         NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         worker->stats.ngets++;
-        char *buf = worker->request_buf;
-        NOVA_ASSERT(
-                buf[0] == RequestType::GET || buf[0] == RequestType::FORCE_GET)
-            << buf;
-        buf++;
         uint64_t int_key = 0;
-        uint32_t nkey = str_to_int(buf, &int_key) - 1;
-        uint64_t hv = keyhash(buf, nkey);
-        char *tmp = buf;
-        tmp += nkey + 1;
+        uint32_t nkey = str_to_int(request_buf, &int_key) - 1;
+        uint64_t hv = keyhash(request_buf, nkey);
         worker->stats.nget_hits++;
 
-        leveldb::Slice key(buf, nkey);
-        LTCFragment *frag = NovaConfig::home_fragment(hv);
-        leveldb::DB *db = worker->dbs_[frag->dbid];
+        leveldb::Slice key(request_buf, nkey);
+        LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
+        leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frag->db);
+        NOVA_ASSERT(db);
         std::string value;
         leveldb::ReadOptions read_options;
         read_options.hash = int_key;
@@ -191,14 +186,19 @@ namespace nova {
             << fmt::format("k:{} status:{}", key.ToString(), s.ToString());
 
         conn->response_buf = worker->buf;
+        uint32_t response_size = 0;
         char *response_buf = conn->response_buf;
-        conn->response_size =
-                nint_to_str(value.size()) + 1 + 1 + value.size();
-
-        response_buf += int_to_str(response_buf, value.size() + 1);
-        response_buf[0] = 'h';
-        response_buf += 1;
+        uint32_t cfg_size = int_to_str(response_buf, server_cfg_id);
+        response_size += cfg_size;
+        response_buf += cfg_size;
+        uint32_t value_size = int_to_str(response_buf, value.size());
+        response_size += value_size;
+        response_buf += value_size;
         memcpy(response_buf, value.data(), value.size());
+        response_buf[0] = MSG_TERMINATER_CHAR;
+        response_size += 1;
+        conn->response_size = response_size;
+
         NOVA_ASSERT(conn->response_size <
                     NovaConfig::config->max_msg_size);
         return true;
@@ -243,12 +243,55 @@ namespace nova {
     }
 
     bool
+    process_socket_change_config_request(int fd, Connection *conn) {
+        int current_cfg_id = NovaConfig::config->current_cfg_id;
+        NOVA_LOG(rdmaio::INFO)
+            << fmt::format("Change configuration. Current cfg id: {}",
+                           current_cfg_id);
+
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
+        NovaConfig::config->current_cfg_id.fetch_add(1);
+
+        // Figure out the configuration change.
+        std::vector<LTCFragment *> migrate_frags;
+        std::vector<LTCFragment *> new_frags;
+        for (int fragid = 0;
+             fragid < NovaConfig::config->cfgs[0]->fragments.size(); fragid++) {
+            auto old_frag = NovaConfig::config->cfgs[0]->fragments[fragid];
+            auto current_frag = NovaConfig::config->cfgs[1]->fragments[fragid];
+            current_frag->db = old_frag->db;
+            if (old_frag->ltc_server_id != current_frag->ltc_server_id) {
+                if (old_frag->ltc_server_id ==
+                    NovaConfig::config->my_server_id) {
+                    migrate_frags.push_back(current_frag);
+                } else if (current_frag->ltc_server_id ==
+                           NovaConfig::config->my_server_id) {
+                    new_frags.push_back(current_frag);
+                }
+            }
+        }
+
+        char *response_buf = worker->buf;
+        int len = int_to_str(response_buf, 1);
+        response_buf[len] = MSG_TERMINATER_CHAR;
+        conn->response_buf = worker->buf;
+        conn->response_size = len + 1;
+        return true;
+    }
+
+    bool
     process_socket_stats_request(int fd, Connection *conn) {
         NOVA_LOG(rdmaio::INFO) << "Obtain stats";
         NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         int num_l0_sstables = 0;
         bool needs_compaction = false;
-        for (auto db : worker->dbs_) {
+        Configuration *cfg = NovaConfig::config->cfgs[NovaConfig::config->current_cfg_id];
+
+        for (auto frag : cfg->fragments) {
+            auto db = reinterpret_cast<leveldb::DB *>(frag->db);
+            if (!db) {
+                continue;
+            }
             leveldb::DBStats stats;
             stats.sstable_size_dist = new uint32_t[20];
             db->QueryDBStats(&stats);
@@ -310,15 +353,13 @@ namespace nova {
     }
 
     bool
-    process_socket_scan(int fd, Connection *conn) {
+    process_socket_scan(int fd, Connection *conn, char *request_buf,
+                        uint32_t server_cfg_id) {
         NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         worker->stats.nscans++;
-        char *buf = worker->request_buf;
-        NOVA_ASSERT(buf[0] == RequestType::REQ_SCAN) << buf;
         char *startkey;
-
         uint64_t key = 0;
-        buf++;
+        char *buf = request_buf;
         startkey = buf;
         int nkey = str_to_int(buf, &key) - 1;
         buf += nkey + 1;
@@ -326,25 +367,29 @@ namespace nova {
         buf += str_to_int(buf, &nrecords);
         std::string skey(startkey, nkey);
         NOVA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-                       << " Scan fd:"
-                       << fd << " key:" << skey << " nkey:" << nkey
-                       << " nrecords: " << nrecords;
+                        << " Scan fd:"
+                        << fd << " key:" << skey << " nkey:" << nkey
+                        << " nrecords: " << nrecords;
         uint64_t hv = keyhash(startkey, nkey);
-        LTCFragment *frag = NovaConfig::home_fragment(hv);
+        LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
         leveldb::ReadOptions read_options;
         read_options.stoc_client = worker->stoc_client_;
         read_options.mem_manager = worker->mem_manager_;
         read_options.thread_id = worker->thread_id_;
         read_options.rdma_backing_mem = worker->rdma_backing_mem;
         read_options.rdma_backing_mem_size = worker->rdma_backing_mem_size;
-        leveldb::Iterator *iterator = worker->dbs_[frag->dbid]->NewIterator(
-                read_options);
+
+        auto db = reinterpret_cast<leveldb::DB *>(frag->db);
+        leveldb::Iterator *iterator = db->NewIterator(read_options);
         iterator->Seek(startkey);
         int records = 0;
         uint64_t scan_size = 0;
 
         conn->response_buf = worker->buf;
         char *response_buf = conn->response_buf;
+        uint32_t cfg_size = int_to_str(response_buf, server_cfg_id);
+        response_buf += cfg_size;
+        scan_size += cfg_size;
 
         while (iterator->Valid() && records < nrecords) {
             leveldb::Slice key = iterator->key();
@@ -379,15 +424,14 @@ namespace nova {
 
     std::atomic_int_fast32_t total_writes;
 
-    bool process_socket_put(int fd, Connection *conn) {
+    bool process_socket_put(int fd, Connection *conn, char *request_buf,
+                            uint32_t server_cfg_id) {
         // Stats.
         NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         worker->stats.nputs++;
-        char *buf = worker->request_buf;
-        NOVA_ASSERT(buf[0] == RequestType::PUT) << buf;
+        char *buf = request_buf;
         char *ckey;
         uint64_t key = 0;
-        buf++;
         ckey = buf;
         int nkey = str_to_int(buf, &key) - 1;
         buf += nkey + 1;
@@ -395,10 +439,6 @@ namespace nova {
         buf += str_to_int(buf, &nval);
         char *val = buf;
         uint64_t hv = keyhash(ckey, nkey);
-//        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-//                        << " put fd:"
-//                        << fd << ": key:" << key << " nkey:" << nkey << " nval:"
-//                        << nval;
         // I'm the home.
         leveldb::Slice dbkey(ckey, nkey);
         leveldb::Slice dbval(val, nval);
@@ -416,75 +456,64 @@ namespace nova {
         option.rdma_backing_mem = worker->rdma_backing_mem;
         option.rdma_backing_mem_size = worker->rdma_backing_mem_size;
         option.is_loading_db = false;
-        LTCFragment *frag = NovaConfig::home_fragment(hv);
-        leveldb::DB *db = worker->dbs_[frag->dbid];
+        LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
+        leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frag->db);
         NOVA_ASSERT(db);
 
         leveldb::Status status = db->Put(option, dbkey, dbval);
         NOVA_ASSERT(status.ok()) << status.ToString();
 
         char *response_buf = worker->buf;
-        int nlen = 1;
-        int len = int_to_str(response_buf, nlen);
-        conn->response_buf = worker->buf;
-        conn->response_size = len + nlen;
-        return true;
-    }
-
-    bool process_socket_delete_log_file(int fd, Connection *conn) {
-        // Stats.
-//        NovaCCConnWorker *worker = (NovaCCConnWorker *) conn->worker;
-//        worker->stats.nremove_log_records++;
-//        char *buf = conn->request_buf;
-//        RDMA_ASSERT(buf[0] == RequestType::DELETE_LOG_FILE) << buf;
-//        buf++;
-//        uint32_t logfilename_size = leveldb::DecodeFixed32(buf);
-//        std::string logfile(buf + 4, logfilename_size);
-//
-//        RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-//                        << " delete log file fd:"
-//                        << fd << ": log:" << logfile << " nlog:"
-//                        << logfilename_size << " buf:" << conn->request_buf;
-//        worker->log_manager_->DeleteLogBuf(logfile);
-//
-//        char *response_buf = conn->buf;
-//        leveldb::EncodeFixed32(response_buf, 1);
-//        response_buf += 4;
-//        response_buf[0] = RequestType::DELETE_LOG_FILE_SUCC;
-//        conn->response_buf = conn->buf;
-//        conn->response_size = 5;
-//        RDMA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
+        uint32_t cfg_size = int_to_str(response_buf, server_cfg_id);
+        response_buf += cfg_size;
+        conn->response_size += cfg_size;
+        response_buf[0] = MSG_TERMINATER_CHAR;
+        conn->response_size += 1;
         return true;
     }
 
     bool process_socket_request_handler(int fd, Connection *conn) {
-        auto worker = (NICClientReqWorker*) conn->worker;
-        char *buf = worker->request_buf;
-        if (buf[0] == RequestType::GET) {
-            return process_socket_get(fd, conn, /*no_redirect=*/false);
+        auto worker = (NICClientReqWorker *) conn->worker;
+        char *request_buf = worker->request_buf;
+        char msg_type = request_buf[0];
+        request_buf++;
+        uint32_t server_cfg_id = NovaConfig::config->current_cfg_id;
+        if (msg_type == RequestType::GET || msg_type == RequestType::REQ_SCAN ||
+            msg_type == RequestType::PUT) {
+            uint64_t client_cfg_id = 0;
+            request_buf += str_to_int(request_buf, &client_cfg_id);
+            if (client_cfg_id != server_cfg_id) {
+                char *response_buf = worker->buf;
+                int len = int_to_str(response_buf, server_cfg_id);
+                response_buf += len;
+                response_buf[0] = MSG_TERMINATER_CHAR;
+                conn->response_buf = worker->buf;
+                conn->response_size = len + 1;
+                return true;
+            }
         }
-        if (buf[0] == RequestType::FORCE_GET) {
-            return process_socket_get(fd, conn, /*no_redirect=*/true);
+        if (msg_type == RequestType::GET) {
+            return process_socket_get(fd, conn, request_buf, server_cfg_id);
         }
-        if (buf[0] == RequestType::REQ_SCAN) {
-            return process_socket_scan(fd, conn);
+        if (msg_type == RequestType::REQ_SCAN) {
+            return process_socket_scan(fd, conn, request_buf, server_cfg_id);
         }
-        if (buf[0] == RequestType::PUT) {
-            return process_socket_put(fd, conn);
+        if (msg_type == RequestType::PUT) {
+            return process_socket_put(fd, conn, request_buf, server_cfg_id);
         }
-        if (buf[0] == RequestType::REINITIALIZE_QP) {
+        if (msg_type == RequestType::REINITIALIZE_QP) {
             return process_reintialize_qps(fd, conn);
         }
-        if (buf[0] == RequestType::CLOSE_STOC_FILES) {
+        if (msg_type == RequestType::CLOSE_STOC_FILES) {
             return process_close_stoc_files(fd, conn);
         }
-        if (buf[0] == RequestType::STATS) {
+        if (msg_type == RequestType::STATS) {
             return process_socket_stats_request(fd, conn);
         }
-//        if (buf[0] == RequestType::DELETE_LOG_FILE) {
-//            return process_socket_delete_log_file(fd, conn);
-//        }
-        NOVA_ASSERT(false) << buf[0];
+        if (msg_type == RequestType::CHANGE_CONFIG) {
+            return process_socket_change_config_request(fd, conn);
+        }
+        NOVA_ASSERT(false) << msg_type;
         return false;
     }
 
