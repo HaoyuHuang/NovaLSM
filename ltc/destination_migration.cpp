@@ -6,11 +6,10 @@
 
 #include "destination_migration.h"
 
-#include "common/nova_config.h"
-#include "log/log_recovery.h"
-
-#include "ltc/compaction_thread.h"
 #include "db_helper.h"
+#include "db/db_impl.h"
+#include "log/log_recovery.h"
+#include "ltc/compaction_thread.h"
 
 namespace leveldb {
     DestinationMigration::DestinationMigration(
@@ -51,6 +50,7 @@ namespace leveldb {
         }
 
     }
+
     void
     DestinationMigration::RecoverDBMeta(DBMeta dbmeta, int cfg_id) {
         // Open this new database;
@@ -85,45 +85,14 @@ namespace leveldb {
         auto client = new leveldb::StoCBlockClient(dbindex,
                                                    stoc_file_manager_);
         auto dbint = CreateDatabase(cfg_id, dbindex, nullptr, nullptr,
-                                 mem_manager_, client,
-                                 bg_compaction_threads_,
-                                 bg_flush_memtable_threads_, reorg,
-                                 coord);
+                                    mem_manager_, client,
+                                    bg_compaction_threads_,
+                                    bg_flush_memtable_threads_, reorg,
+                                    coord);
         auto frag = nova::NovaConfig::config->cfgs[cfg_id]->fragments[dbindex];
         frag->db = dbint;
         auto db = reinterpret_cast<leveldb::DBImpl *>(dbint);
-
-        db->versions_->Restore(&buf, last_sequence, next_file_number);
-
-        SubRanges *srs = new SubRanges;
-        srs->Decode(&buf);
-        db->DecodeMemTablePartitions(&buf);
-        db->lookup_index_->Decode(&buf);
-        db->versions_->DecodeTableIdMapping(&buf);
-        db->subrange_manager_->latest_subranges_.store(srs);
-
-        // Recover memtables from log files.
-        // TODO: Log File Name
-        // TODO: All memtables are immutable.
-        std::vector<MemTableLogFilePair> memtables_to_recover;
-        for (int i = 0; i < db->partitioned_active_memtables_.size(); i++) {
-            auto partition = db->partitioned_active_memtables_[i];
-            MemTableLogFilePair pair = {};
-            if (partition->memtable) {
-                pair.memtable = partition->memtable;
-                pair.logfile = nova::LogFileName(
-                        db->server_id_,
-                        db->dbid_, partition->memtable->memtableid());
-                memtables_to_recover.push_back(pair);
-            }
-            for (int j = 0; j < partition->closed_log_files.size(); j++) {
-                pair.memtable = db->versions_->mid_table_mapping_[partition->closed_log_files[j]]->memtable_;
-                // TODO: Use the server id of prior configuration.
-                pair.logfile = nova::LogFileName(db->server_id_, db->dbid_,
-                                                 partition->closed_log_files[j]);
-            }
-        }
-
+        auto memtables_to_recover = db->RecoverDBMetadata(&buf, last_sequence, next_file_number);
         LogRecovery recover;
         recover.Recover(memtables_to_recover);
 

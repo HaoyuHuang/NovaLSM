@@ -28,7 +28,6 @@ namespace nova {
     }
 
     RDMAServerImpl::RDMAServerImpl(rdmaio::RdmaCtrl *rdma_ctrl,
-                                   RDMAWriteHandler *rdma_write_handler,
                                    NovaMemManager *mem_manager,
                                    leveldb::StocPersistentFileManager *stoc_file_manager,
                                    StoCInMemoryLogFileManager *log_manager,
@@ -36,7 +35,6 @@ namespace nova {
                                    bool is_compaction_thread,
                                    RDMAAdmissionCtrl *admission_control)
             : rdma_ctrl_(rdma_ctrl),
-              rdma_write_handler_(rdma_write_handler),
               mem_manager_(mem_manager),
               stoc_file_manager_(stoc_file_manager),
               log_manager_(log_manager), thread_id_(thread_id),
@@ -226,6 +224,18 @@ namespace nova {
             it = private_cq_.erase(it);
         }
         return nworks;
+    }
+
+    RDMAWriteHandler::RDMAWriteHandler(
+            const std::vector<leveldb::DestinationMigration *> &destination_migration_threads)
+            : destination_migration_threads_(destination_migration_threads) {}
+
+    void RDMAWriteHandler::Handle(char *buf, uint32_t size) {
+        NOVA_ASSERT(buf[0] == leveldb::StoCRequestType::LTC_MIGRATION);
+        int value = leveldb::DestinationMigration::migration_seq_id_ %
+                    destination_migration_threads_.size();
+        leveldb::DestinationMigration::migration_seq_id_ += 1;
+        destination_migration_threads_[value]->AddReceivedDBId(buf, size);
     }
 
     // No need to flush RDMA requests since Flush will be done after all requests are processed in a receive queue.

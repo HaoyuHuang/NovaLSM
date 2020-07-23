@@ -20,8 +20,6 @@
 #include "leveldb/db_profiler.h"
 #include "leveldb/cache.h"
 #include "ltc/stoc_file_client_impl.h"
-#include "ltc/source_migration.h"
-#include "ltc/destination_migration.h"
 
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -36,6 +34,8 @@
 #include "compaction.h"
 #include "lookup_index.h"
 #include "range_index.h"
+
+#include "log/log_recovery.h"
 
 namespace leveldb {
 
@@ -139,6 +139,11 @@ namespace leveldb {
 
         const std::string &dbname() override;
 
+        uint32_t EncodeDBMetadata(char *buf);
+
+        std::vector<MemTableLogFilePair>
+        RecoverDBMetadata(Slice *buf, uint64_t last_sequence, uint64_t next_file_number);
+
         const Options options_;  // options_.comparator == &internal_comparator_
     private:
 
@@ -202,8 +207,6 @@ namespace leveldb {
 
         friend class DB;
 
-        friend class SourceMigration;
-        friend class DestinationMigration;
         struct Writer;
 
         DBProfiler *db_profiler_ = nullptr;

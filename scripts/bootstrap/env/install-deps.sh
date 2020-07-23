@@ -2,6 +2,7 @@
 export DEBIAN_FRONTEND=noninteractive
 
 sudo apt-get update
+sudo apt install libevent-dev
 bash scripts/bootstrap/env/setup-rdma.sh
 
 sudo apt-get --yes install libgflags-dev

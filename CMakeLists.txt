@@ -196,8 +196,6 @@ target_sources(leveldb
         ltc/destination_migration.h
         log/log_recovery.cpp
         log/log_recovery.h
-        novalsm/rdma_write_handler.cpp
-        novalsm/rdma_write_handler.h
         ltc/db_helper.cpp
         ltc/db_helper.h
 

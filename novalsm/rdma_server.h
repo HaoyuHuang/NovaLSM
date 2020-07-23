@@ -20,10 +20,11 @@
 #include "stoc/storage_worker.h"
 #include "rdma_admission_ctrl.h"
 
-#include "rdma_write_handler.h"
+#include "ltc/destination_migration.h"
 
 namespace leveldb {
     class CompactionState;
+    class DestinationMigration;
 }
 
 namespace nova {
@@ -84,11 +85,21 @@ namespace nova {
         bool is_meta_blocks;
     };
 
+    class RDMAWriteHandler {
+    public:
+        RDMAWriteHandler(
+                const std::vector<leveldb::DestinationMigration *> &destination_migration_threads);
+
+        void Handle(char *buf, uint32_t size);
+
+    private:
+        std::vector<leveldb::DestinationMigration *> destination_migration_threads_;
+    };
+
     // RDMA server class that handles RDMA client requests.
     class RDMAServerImpl : public RDMAMsgCallback, public leveldb::RDMAServer {
     public:
         RDMAServerImpl(rdmaio::RdmaCtrl *rdma_ctrl,
-                       RDMAWriteHandler *rdma_write_handler,
                        NovaMemManager *mem_manager,
                        leveldb::StocPersistentFileManager *stoc_file_manager,
                        StoCInMemoryLogFileManager *log_manager,
@@ -118,7 +129,6 @@ namespace nova {
 
     private:
         RDMAWriteHandler *rdma_write_handler_ = nullptr;
-
         bool is_running_ = true;
         bool is_compaction_thread_ = false;
 

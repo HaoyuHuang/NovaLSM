@@ -11,17 +11,15 @@
 #include <mutex>
 #include <semaphore.h>
 
-#include "db.h"
-#include "db/db_impl.h"
 #include "leveldb/db_types.h"
+#include "leveldb/env_bg_thread.h"
 #include "leveldb/stoc_client.h"
+#include "stoc/persistent_stoc_file.h"
 #include "stoc_client_impl.h"
 
 #include "log/log_recovery.h"
 
 namespace leveldb {
-    class DBImpl;
-
     class DestinationMigration {
     public:
         DestinationMigration(
@@ -33,7 +31,7 @@ namespace leveldb {
 
         void AddReceivedDBId(char *buf, uint32_t msg_size);
 
-        static std::atomic_uint_fast32_t migration_seq_id_;
+        static std::atomic_int_fast32_t migration_seq_id_;
     private:
         struct DBMeta {
             char *buf;
