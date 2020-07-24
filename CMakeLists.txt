@@ -190,10 +190,8 @@ target_sources(leveldb
 
         db/range_index.cpp
         db/range_index.h
-        ltc/source_migration.cpp
-        ltc/source_migration.h
-        ltc/destination_migration.cpp
-        ltc/destination_migration.h
+        ltc/db_migration.cpp
+        ltc/db_migration.h
         log/log_recovery.cpp
         log/log_recovery.h
         ltc/db_helper.cpp

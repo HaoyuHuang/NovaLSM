@@ -19,6 +19,7 @@
 #include "ltc/compaction_thread.h"
 #include "ltc/stat_thread.h"
 #include "novalsm/stoc_health_monitor.h"
+#include "ltc/db_migration.h"
 
 namespace nova {
     class NICClientReqWorker;
@@ -73,6 +74,7 @@ namespace nova {
         std::vector<StorageWorker *> compaction_storage_workers;
         std::vector<leveldb::EnvBGThread *> bg_compaction_threads;
         std::vector<leveldb::EnvBGThread *> bg_flush_memtable_threads;
+        std::vector<DBMigration *> db_migration_threads;
 
         NovaStatThread *stat_thread_;
         nova::StoCHealthMonitor *monitor_ = nullptr;
@@ -85,6 +87,7 @@ namespace nova {
         vector<thread> compaction_workers;
         vector<thread> reorg_workers;
         vector<thread> compaction_coord_workers;
+        vector<thread> db_migrate_workers;
         std::vector<std::thread> storage_worker_threads;
     };
 }

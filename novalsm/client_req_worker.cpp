@@ -170,6 +170,17 @@ namespace nova {
 
         leveldb::Slice key(request_buf, nkey);
         LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
+
+        bool wait = false;
+        while (!frag->is_ready_) {
+            wait = true;
+            frag->is_ready_mutex_.Lock();
+            frag->is_ready_signal_.Wait();
+        }
+        if (wait) {
+            frag->is_ready_mutex_.Unlock();
+        }
+
         leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frag->db);
         NOVA_ASSERT(db);
         std::string value;
@@ -250,8 +261,6 @@ namespace nova {
                            current_cfg_id);
 
         NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
-        NovaConfig::config->current_cfg_id.fetch_add(1);
-
         // Figure out the configuration change.
         std::vector<LTCFragment *> migrate_frags;
         std::vector<LTCFragment *> new_frags;
@@ -268,7 +277,24 @@ namespace nova {
                            NovaConfig::config->my_server_id) {
                     new_frags.push_back(current_frag);
                 }
+            } else {
+                current_frag->is_ready_ = true;
             }
+        }
+        NovaConfig::config->current_cfg_id.fetch_add(1);
+        int frags_per_thread = migrate_frags.size() / worker->db_migration_threads_.size();
+        std::vector<LTCFragment *> batches;
+        int thread_id = 0;
+        for (int i = 0; i < migrate_frags.size(); i++) {
+            if (batches.size() == frags_per_thread && migrate_frags.size() - i > frags_per_thread) {
+                worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batches);
+                batches.clear();
+                thread_id++;
+            }
+            batches.push_back(migrate_frags[i]);
+        }
+        if (!batches.empty()) {
+            worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batches);
         }
 
         char *response_buf = worker->buf;
@@ -372,6 +398,16 @@ namespace nova {
                         << " nrecords: " << nrecords;
         uint64_t hv = keyhash(startkey, nkey);
         LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
+        bool wait = false;
+        while (!frag->is_ready_) {
+            wait = true;
+            frag->is_ready_mutex_.Lock();
+            frag->is_ready_signal_.Wait();
+        }
+        if (wait) {
+            frag->is_ready_mutex_.Unlock();
+        }
+
         leveldb::ReadOptions read_options;
         read_options.stoc_client = worker->stoc_client_;
         read_options.mem_manager = worker->mem_manager_;
@@ -457,6 +493,17 @@ namespace nova {
         option.rdma_backing_mem_size = worker->rdma_backing_mem_size;
         option.is_loading_db = false;
         LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
+
+        bool wait = false;
+        while (!frag->is_ready_) {
+            wait = true;
+            frag->is_ready_mutex_.Lock();
+            frag->is_ready_signal_.Wait();
+        }
+        if (wait) {
+            frag->is_ready_mutex_.Unlock();
+        }
+
         leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frag->db);
         NOVA_ASSERT(db);
 

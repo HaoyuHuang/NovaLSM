@@ -137,6 +137,7 @@ namespace nova {
         rdmaio::RdmaCtrl *ctrl_;
         std::vector<nova::RDMAMsgCallback *> rdma_threads;
         leveldb::StocPersistentFileManager *stoc_file_manager_;
+        std::vector<DBMigration *> db_migration_threads_;
 
         leveldb::StoCBlockClient *stoc_client_;
         NovaMemManager *mem_manager_;

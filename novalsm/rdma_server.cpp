@@ -227,15 +227,15 @@ namespace nova {
     }
 
     RDMAWriteHandler::RDMAWriteHandler(
-            const std::vector<leveldb::DestinationMigration *> &destination_migration_threads)
+            const std::vector<DBMigration *> &destination_migration_threads)
             : destination_migration_threads_(destination_migration_threads) {}
 
     void RDMAWriteHandler::Handle(char *buf, uint32_t size) {
         NOVA_ASSERT(buf[0] == leveldb::StoCRequestType::LTC_MIGRATION);
-        int value = leveldb::DestinationMigration::migration_seq_id_ %
+        int value = DBMigration::migration_seq_id_ %
                     destination_migration_threads_.size();
-        leveldb::DestinationMigration::migration_seq_id_ += 1;
-        destination_migration_threads_[value]->AddReceivedDBId(buf, size);
+        DBMigration::migration_seq_id_ += 1;
+        destination_migration_threads_[value]->AddDestMigrateDB(buf, size);
     }
 
     // No need to flush RDMA requests since Flush will be done after all requests are processed in a receive queue.
@@ -535,8 +535,7 @@ namespace nova {
                     uint32_t server_id = leveldb::DecodeFixed32(buf + 1);
                     uint32_t dbid = leveldb::DecodeFixed32(buf + 5);
                     std::unordered_map<std::string, uint64_t> logfile_offset;
-                    log_manager_->QueryLogFiles(server_id, dbid,
-                                                &logfile_offset);
+                    log_manager_->QueryLogFiles(dbid, &logfile_offset);
                     // TODO.
                     uint32_t msg_size = 0;
                     char *send_buf = rdma_broker_->GetSendBuf(remote_server_id);

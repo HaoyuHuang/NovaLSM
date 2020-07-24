@@ -13,7 +13,7 @@
 #include "leveldb/comparator.h"
 #include "leveldb/env.h"
 #include "ltc/storage_selector.h"
-#include "ltc/destination_migration.h"
+#include "ltc/db_migration.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -117,6 +117,7 @@ DEFINE_int32(fail_stoc_id, -1, "The StoC to fail.");
 DEFINE_int32(exp_seconds_to_fail_stoc, -1,
              "Number of seconds elapsed to fail the stoc.");
 DEFINE_int32(failure_duration, -1, "Failure duration");
+DEFINE_int32(num_migration_threads, 1, "Number of migration threads");
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq;
@@ -127,7 +128,7 @@ std::atomic_int_fast32_t leveldb::EnvBGThread::bg_compaction_thread_id_seq;
 std::atomic_int_fast32_t nova::RDMAServerImpl::fg_storage_worker_seq_id_;
 std::atomic_int_fast32_t nova::RDMAServerImpl::bg_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::StoCBlockClient::rdma_worker_seq_id_;
-std::atomic_int_fast32_t leveldb::DestinationMigration::migration_seq_id_;
+std::atomic_int_fast32_t nova::DBMigration::migration_seq_id_;
 
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 std::atomic<nova::Servers *> leveldb::StorageSelector::available_stoc_servers;
@@ -294,6 +295,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->fail_stoc_id = FLAGS_fail_stoc_id;
     NovaConfig::config->exp_seconds_to_fail_stoc = FLAGS_exp_seconds_to_fail_stoc;
     NovaConfig::config->failure_duration = FLAGS_failure_duration;
+    NovaConfig::config->num_migration_threads = FLAGS_num_migration_threads;
 
     leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq = 0;
     leveldb::EnvBGThread::bg_compaction_thread_id_seq = 0;
@@ -301,7 +303,7 @@ int main(int argc, char *argv[]) {
     leveldb::StoCBlockClient::rdma_worker_seq_id_ = 0;
     nova::StorageWorker::storage_file_number_seq = 0;
     nova::RDMAServerImpl::compaction_storage_worker_seq_id_ = 0;
-    leveldb::DestinationMigration::migration_seq_id_ = 0;
+    nova::DBMigration::migration_seq_id_ = 0;
     nova::NovaGlobalVariables::global.Initialize();
     auto available_stoc_servers = new Servers;
     available_stoc_servers->servers = NovaConfig::config->stoc_servers;

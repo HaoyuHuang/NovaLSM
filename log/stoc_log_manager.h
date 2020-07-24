@@ -23,7 +23,7 @@ namespace nova {
 
         void DeleteLogBuf(const std::vector<std::string> &log_files);
 
-        void QueryLogFiles(uint32_t sid, uint32_t range_id,
+        void QueryLogFiles(uint32_t range_id,
                            std::unordered_map<std::string, uint64_t> *logfile_offset);
 
     private:
@@ -37,7 +37,7 @@ namespace nova {
             leveldb::port::Mutex mutex_;
         };
         NovaMemManager *mem_manager_;
-        DBLogFiles ***server_db_log_files_;
+        DBLogFiles **server_db_log_files_;
     };
 }
 

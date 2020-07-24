@@ -279,7 +279,8 @@ namespace leveldb {
         return msg_size;
     }
 
-    std::vector<MemTableLogFilePair> DBImpl::RecoverDBMetadata(Slice *buf, uint64_t last_sequence, uint64_t next_file_number) {
+    std::vector<MemTableLogFilePair>
+    DBImpl::RecoverDBMetadata(Slice *buf, uint64_t last_sequence, uint64_t next_file_number) {
         versions_->Restore(buf, last_sequence, next_file_number);
 
         SubRanges *srs = new SubRanges;
@@ -290,8 +291,6 @@ namespace leveldb {
         subrange_manager_->latest_subranges_.store(srs);
 
         // Recover memtables from log files.
-        // TODO: Log File Name
-        // TODO: All memtables are immutable.
         std::vector<MemTableLogFilePair> memtables_to_recover;
         for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
             auto partition = partitioned_active_memtables_[i];
@@ -299,15 +298,12 @@ namespace leveldb {
             if (partition->memtable) {
                 pair.memtable = partition->memtable;
                 pair.logfile = nova::LogFileName(
-                        server_id_,
                         dbid_, partition->memtable->memtableid());
                 memtables_to_recover.push_back(pair);
             }
             for (int j = 0; j < partition->closed_log_files.size(); j++) {
                 pair.memtable = versions_->mid_table_mapping_[partition->closed_log_files[j]]->memtable_;
-                // TODO: Use the server id of prior configuration.
-                pair.logfile = nova::LogFileName(server_id_, dbid_,
-                                                 partition->closed_log_files[j]);
+                pair.logfile = nova::LogFileName(dbid_, partition->closed_log_files[j]);
             }
         }
         return memtables_to_recover;
@@ -2825,7 +2821,7 @@ namespace leveldb {
             NOVA_ASSERT(stoc);
             stoc->set_dbid(dbid_);
             options.stoc_client->InitiateReplicateLogRecords(
-                    nova::LogFileName(server_id_, dbid_, memtable_id),
+                    nova::LogFileName(dbid_, memtable_id),
                     options.thread_id, dbid_, memtable_id,
                     options.rdma_backing_mem, log_records,
                     options.replicate_log_record_states);
@@ -2849,7 +2845,7 @@ namespace leveldb {
             NOVA_ASSERT(8 + key.size() + val.size() + 4 + 4 + 1 <=
                         options.rdma_backing_mem_size);
             options.stoc_client->InitiateReplicateLogRecords(
-                    nova::LogFileName(server_id_, dbid_, memtable_id),
+                    nova::LogFileName(dbid_, memtable_id),
                     options.thread_id, dbid_, memtable_id,
                     options.rdma_backing_mem, {log_record},
                     options.replicate_log_record_states);

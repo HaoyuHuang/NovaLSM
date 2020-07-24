@@ -536,6 +536,16 @@ namespace nova {
                    NovaConfig::config->servers.size();
         }
 
+        for (int i = 0; i < NovaConfig::config->num_migration_threads; i++) {
+            auto client = new leveldb::StoCBlockClient(i, stoc_file_manager);
+            client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
+            DBMigration *migrate = new DBMigration(mem_manager, client, stoc_file_manager,
+                                                   bg_rdma_msg_handlers,
+                                                   bg_compaction_threads, bg_flush_memtable_threads);
+            db_migration_threads.push_back(migrate);
+            db_migrate_workers.emplace_back(&DBMigration::Start, migrate);
+        }
+
         for (int i = 0;
              i <
              NovaConfig::config->num_conn_workers; i++) {
@@ -551,6 +561,7 @@ namespace nova {
             conn_workers[i]->rdma_threads = rdma_threads;
             conn_workers[i]->ctrl_ = rdma_ctrl;
             conn_workers[i]->stoc_file_manager_ = stoc_file_manager;
+            conn_workers[i]->db_migration_threads_ = db_migration_threads;
         }
 
         for (int i = 0;
@@ -638,7 +649,7 @@ namespace nova {
                 continue;
             }
 
-            auto db = reinterpret_cast<leveldb::DBImpl*>(dbs_[i]);
+            auto db = reinterpret_cast<leveldb::DBImpl *>(dbs_[i]);
             auto reorg_thread = reinterpret_cast<leveldb::LTCCompactionThread *>(db->options_.reorg_thread);
             reorg_workers.emplace_back(&leveldb::LTCCompactionThread::Start,
                                        reorg_thread);
@@ -734,7 +745,7 @@ namespace nova {
             if (!dbs_[db_index]) {
                 continue;
             }
-            auto db = reinterpret_cast<leveldb::DBImpl*>(dbs_[db_index]);
+            auto db = reinterpret_cast<leveldb::DBImpl *>(dbs_[db_index]);
             auto client = reinterpret_cast<leveldb::StoCBlockClient *>(db->options_.stoc_client);
             client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
         }

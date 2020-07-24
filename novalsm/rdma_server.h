@@ -20,15 +20,14 @@
 #include "stoc/storage_worker.h"
 #include "rdma_admission_ctrl.h"
 
-#include "ltc/destination_migration.h"
+#include "ltc/db_migration.h"
 
 namespace leveldb {
     class CompactionState;
-    class DestinationMigration;
 }
 
 namespace nova {
-
+    class DBMigration;
     struct StorageTask {
         leveldb::StoCRequestType request_type;
         uint32_t rdma_server_thread_id = 0;
@@ -88,12 +87,12 @@ namespace nova {
     class RDMAWriteHandler {
     public:
         RDMAWriteHandler(
-                const std::vector<leveldb::DestinationMigration *> &destination_migration_threads);
+                const std::vector<DBMigration *> &destination_migration_threads);
 
         void Handle(char *buf, uint32_t size);
 
     private:
-        std::vector<leveldb::DestinationMigration *> destination_migration_threads_;
+        std::vector<DBMigration *> destination_migration_threads_;
     };
 
     // RDMA server class that handles RDMA client requests.

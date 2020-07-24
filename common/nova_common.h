@@ -301,25 +301,14 @@ namespace nova {
     }
 
     inline std::string
-    LogFileName(uint32_t server_id, uint32_t db_id, uint32_t memtableid) {
-        return fmt::format("{}-{}-{}", server_id, db_id, memtableid);
+    LogFileName(uint32_t db_id, uint32_t memtableid) {
+        return fmt::format("{}-{}", db_id, memtableid);
     }
 
     inline void
-    ParseDBIndexFromLogFileName(const std::string &logname, uint32_t *server_id,
-                                uint32_t *index) {
+    ParseDBIndexFromLogFileName(const std::string &logname, uint32_t *index) {
         uint32_t data = 0;
         int i = 0;
-        while (i < logname.size()) {
-            if (logname[i] == '-') {
-                *server_id = data;
-                i++;
-                break;
-            }
-            data = data * 10 + logname[i] - '0';
-            i++;
-        }
-        data = 0;
         while (i < logname.size()) {
             if (logname[i] == '-') {
                 *index = data;

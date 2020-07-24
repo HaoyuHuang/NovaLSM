@@ -131,6 +131,9 @@ namespace nova {
                 frag->range.key_end = std::stoi(tokens[1]);
                 frag->ltc_server_id = std::stoi(tokens[2]);
                 frag->dbid = std::stoi(tokens[3]);
+                if (cfg->cfg_id == 0) {
+                    frag->is_ready_ = true;
+                }
 
                 int nreplicas = (tokens.size() - 4);
                 for (int i = 0; i < nreplicas; i++) {
@@ -250,6 +253,7 @@ namespace nova {
         int fail_stoc_id = 0;
         int exp_seconds_to_fail_stoc = 0;
         int failure_duration = 0;
+        int num_migration_threads = 0;
 
         void ReadZipfianDist() {
             if (zipfian_dist_file_path.empty()) {

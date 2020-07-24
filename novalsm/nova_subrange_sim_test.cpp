@@ -141,11 +141,9 @@ namespace {
                                  << status.ToString();
 
         uint32_t index = 0;
-        uint32_t sid = 0;
         std::string logname = leveldb::LogFileName(db_path, 1111);
-        ParseDBIndexFromLogFileName(logname, &sid, &index);
+        ParseDBIndexFromLogFileName(logname, &index);
         NOVA_ASSERT(index == db_index);
-        NOVA_ASSERT(NovaConfig::config->my_server_id == sid);
         return db;
     }
 }
@@ -158,7 +156,7 @@ std::atomic_int_fast32_t nova::RDMAServerImpl::bg_storage_worker_seq_id_;
 std::atomic_int_fast32_t nova::RDMAServerImpl::compaction_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::StoCBlockClient::rdma_worker_seq_id_;
 std::atomic_int_fast32_t nova::StorageWorker::storage_file_number_seq;
-std::atomic_int_fast32_t leveldb::DestinationMigration::migration_seq_id_;
+std::atomic_int_fast32_t nova::DBMigration::migration_seq_id_;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 std::atomic<nova::Servers *> leveldb::StorageSelector::available_stoc_servers;
 NovaGlobalVariables NovaGlobalVariables::global;
@@ -432,16 +430,13 @@ int main(int argc, char *argv[]) {
     NOVA_LOG(rdmaio::INFO) << new_edit.DebugString();
 //    TestSubRanges();
 
-    for (int i = 0; i < 10; i++) {
-        for (int j = 0; j < 64; j++) {
-            for (int k = 0; k < 100000; k++) {
-                uint32_t sid = 0;
-                uint32_t dbid = 0;
-                ParseDBIndexFromLogFileName(LogFileName(i, j, k), &sid, &dbid);
+    for (int j = 0; j < 64; j++) {
+        for (int k = 0; k < 100000; k++) {
+            uint32_t sid = 0;
+            uint32_t dbid = 0;
+            ParseDBIndexFromLogFileName(LogFileName(j, k), &dbid);
 //                RDMA_LOG(INFO) << fmt::format("{} {}", sid, dbid);
-                NOVA_ASSERT(sid == i);
-                NOVA_ASSERT(dbid == j);
-            }
+            NOVA_ASSERT(dbid == j);
         }
     }
 
