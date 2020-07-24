@@ -397,16 +397,8 @@ namespace nova {
                         << fd << " key:" << skey << " nkey:" << nkey
                         << " nrecords: " << nrecords;
         uint64_t hv = keyhash(startkey, nkey);
+        auto cfg = NovaConfig::config->cfgs[server_cfg_id];
         LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
-        bool wait = false;
-        while (!frag->is_ready_) {
-            wait = true;
-            frag->is_ready_mutex_.Lock();
-            frag->is_ready_signal_.Wait();
-        }
-        if (wait) {
-            frag->is_ready_mutex_.Unlock();
-        }
 
         leveldb::ReadOptions read_options;
         read_options.stoc_client = worker->stoc_client_;
@@ -414,11 +406,9 @@ namespace nova {
         read_options.thread_id = worker->thread_id_;
         read_options.rdma_backing_mem = worker->rdma_backing_mem;
         read_options.rdma_backing_mem_size = worker->rdma_backing_mem_size;
-
-        auto db = reinterpret_cast<leveldb::DB *>(frag->db);
-        leveldb::Iterator *iterator = db->NewIterator(read_options);
-        iterator->Seek(startkey);
-        int records = 0;
+        int pivot_db_id = frag->dbid;
+        int read_records = 0;
+        uint64_t prior_last_key = -1;
         uint64_t scan_size = 0;
 
         conn->response_buf = worker->buf;
@@ -427,34 +417,56 @@ namespace nova {
         response_buf += cfg_size;
         scan_size += cfg_size;
 
-        while (iterator->Valid() && records < nrecords) {
-            leveldb::Slice key = iterator->key();
-            leveldb::Slice value = iterator->value();
-            scan_size += nint_to_str(key.size()) + 1;
-            scan_size += key.size();
-            scan_size += nint_to_str(value.size()) + 1;
-            scan_size += value.size();
+        while (read_records < nrecords && pivot_db_id < cfg->fragments.size()) {
+            frag = cfg->fragments[pivot_db_id];
+            if (prior_last_key != frag->range.key_start) {
+                break;
+            }
+            if (frag->ltc_server_id != NovaConfig::config->my_server_id) {
+                break;
+            }
 
-            NOVA_LOG(DEBUG)
-                << fmt::format("Scan key:{} value:{}", key.ToString(),
-                               value.size());
+            bool wait = false;
+            while (!frag->is_ready_) {
+                wait = true;
+                frag->is_ready_mutex_.Lock();
+                frag->is_ready_signal_.Wait();
+            }
+            if (wait) {
+                frag->is_ready_mutex_.Unlock();
+            }
 
-            response_buf += int_to_str(response_buf, key.size());
-            memcpy(response_buf, key.data(), key.size());
-            response_buf += key.size();
-            response_buf += int_to_str(response_buf, value.size());
-            memcpy(response_buf, value.data(), value.size());
-            response_buf += value.size();
-            records++;
-            iterator->Next();
+
+            leveldb::DB *db = reinterpret_cast<leveldb::DB*>(frag->db);
+            leveldb::Iterator *iterator = db->NewIterator(read_options);
+            iterator->Seek(startkey);
+            while (iterator->Valid() && read_records < nrecords) {
+                leveldb::Slice key = iterator->key();
+                leveldb::Slice value = iterator->value();
+                scan_size += nint_to_str(key.size()) + 1;
+                scan_size += key.size();
+                scan_size += nint_to_str(value.size()) + 1;
+                scan_size += value.size();
+
+                response_buf += int_to_str(response_buf, key.size());
+                memcpy(response_buf, key.data(), key.size());
+                response_buf += key.size();
+                response_buf += int_to_str(response_buf, value.size());
+                memcpy(response_buf, value.data(), value.size());
+                response_buf += value.size();
+                read_records++;
+                iterator->Next();
+            }
+            delete iterator;
+            prior_last_key = frag->range.key_end;
+            pivot_db_id += 1;
         }
+
         conn->response_buf[scan_size] = MSG_TERMINATER_CHAR;
         scan_size += 1;
         conn->response_size = scan_size;
         NOVA_ASSERT(
                 conn->response_size < NovaConfig::config->max_msg_size);
-        delete iterator;
-        iterator = nullptr;
         return true;
     }
 
