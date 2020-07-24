@@ -189,28 +189,32 @@ namespace nova {
         leveldb::Status s = db->Get(
                 leveldb::ReadOptions(), key, &value);
         RDMA_ASSERT(s.ok());
-        conn->response_buf = worker->buf;
-        char *response_buf = conn->response_buf;
-        conn->response_size =
-                nint_to_str(value.size()) + 1 + 1 + value.size();
 
-        response_buf += int_to_str(response_buf, value.size() + 1);
-        response_buf[0] = 'h';
-        response_buf += 1;
+
+        conn->response_buf = worker->buf;
+        uint32_t response_size = 0;
+        char *response_buf = conn->response_buf;
+        uint32_t cfg_size = int_to_str(response_buf, 0);
+        response_size += cfg_size;
+        response_buf += cfg_size;
+        uint32_t value_size = int_to_str(response_buf, value.size());
+        response_size += value_size;
+        response_buf += value_size;
         memcpy(response_buf, value.data(), value.size());
+        response_buf[0] = MSG_TERMINATER_CHAR;
+        response_size += 1;
+        conn->response_size = response_size;
+
+        RDMA_ASSERT(conn->response_size <
+                    NovaConfig::config->max_msg_size);
         return true;
     }
 
     bool
-    process_socket_get(int fd, Connection *conn, bool no_redirect) {
+    process_socket_get(int fd, Connection *conn, char *buf) {
         // Stats.
         NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
         worker->stats.ngets++;
-        char *buf = worker->request_buf;
-        RDMA_ASSERT(
-                buf[0] == RequestType::GET || buf[0] == RequestType::FORCE_GET)
-            << buf;
-        buf++;
         uint64_t int_key = 0;
         uint32_t nkey = str_to_int(buf, &int_key) - 1;
         uint64_t hv = NovaConfig::keyhash(buf, nkey);
@@ -231,15 +235,12 @@ namespace nova {
     }
 
     bool
-    process_socket_scan(int fd, Connection *conn) {
+    process_socket_scan(int fd, Connection *conn, char *buf) {
         // Stats.
         NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
         worker->stats.nranges++;
-        char *buf = worker->request_buf;
-        RDMA_ASSERT(buf[0] == RequestType::REQ_SCAN) << buf;
         char *startkey;
         uint64_t key = 0;
-        buf++;
         startkey = buf;
         int nkey = str_to_int(buf, &key) - 1;
         buf += nkey + 1;
@@ -257,6 +258,11 @@ namespace nova {
         conn->response_buf = worker->buf;
         char *response_buf = conn->response_buf;
         uint64_t msg_size = 0;
+
+        uint32_t cfg_size = int_to_str(response_buf, 0);
+        response_buf += cfg_size;
+        msg_size += cfg_size;
+
         while (read_records < nrecords && pivot_db_id < worker->dbs_.size()) {
             leveldb::Iterator *iterator = worker->dbs_[pivot_db_id]->NewIterator(
                     leveldb::ReadOptions());
@@ -302,15 +308,12 @@ namespace nova {
         return true;
     }
 
-    bool process_socket_put(int fd, Connection *conn) {
+    bool process_socket_put(int fd, Connection *conn, char *buf) {
         // Stats.
         NovaConnWorker *worker = (NovaConnWorker *) conn->worker;
         worker->stats.nputs++;
-        char *buf = worker->request_buf;
-        RDMA_ASSERT(buf[0] == RequestType::PUT) << buf;
         char *ckey;
         uint64_t key = 0;
-        buf++;
         ckey = buf;
         int nkey = str_to_int(buf, &key) - 1;
         buf += nkey + 1;
@@ -345,10 +348,11 @@ namespace nova {
             RDMA_ASSERT(status.ok()) << status.ToString();
 
             char *response_buf = worker->buf;
-            int nlen = 1;
-            int len = int_to_str(response_buf, nlen);
-            conn->response_buf = worker->buf;
-            conn->response_size = len + nlen;
+            uint32_t cfg_size = int_to_str(response_buf, 0);
+            response_buf += cfg_size;
+            conn->response_size += cfg_size;
+            response_buf[0] = MSG_TERMINATER_CHAR;
+            conn->response_size += 1;
             return true;
         }
 
@@ -472,17 +476,23 @@ namespace nova {
     bool process_socket_request_handler(int fd, Connection *conn) {
         auto worker = (NovaConnWorker *) conn->worker;
         char *buf = worker->request_buf;
-        if (buf[0] == RequestType::GET) {
-            return process_socket_get(fd, conn, /*no_redirect=*/false);
+        char *request_buf = worker->request_buf;
+        char msg_type = request_buf[0];
+        request_buf++;
+        if (msg_type == RequestType::GET || msg_type == RequestType::REQ_SCAN ||
+            msg_type == RequestType::PUT) {
+            uint64_t client_cfg_id = 0;
+            request_buf += str_to_int(request_buf, &client_cfg_id);
         }
-        if (buf[0] == RequestType::FORCE_GET) {
-            return process_socket_get(fd, conn, /*no_redirect=*/true);
+
+        if (buf[0] == RequestType::GET) {
+            return process_socket_get(fd, conn, request_buf);
         }
         if (buf[0] == RequestType::REQ_SCAN) {
-            return process_socket_scan(fd, conn);
+            return process_socket_scan(fd, conn, request_buf);
         }
         if (buf[0] == RequestType::PUT) {
-            return process_socket_put(fd, conn);
+            return process_socket_put(fd, conn, request_buf);
         }
         if (buf[0] == RequestType::REPLICATE_LOG_RECORD) {
             return process_socket_replicate_log_record(fd, conn);
