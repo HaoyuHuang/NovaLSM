@@ -1326,6 +1326,7 @@ namespace leveldb {
                 atomic_memtable->l0_file_numbers_.empty()) {
                 continue;
             }
+            msg_size += EncodeFixed32(buf + msg_size, atomic_memtable->memtable_id_);
             msg_size += atomic_memtable->Encode(buf + msg_size);
         }
         msg_size += EncodeFixed32(buf + msg_size, 0);

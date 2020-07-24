@@ -488,14 +488,13 @@ namespace nova {
                     std::string log_file(buf + 5, size);
                     uint32_t slabclassid = mem_manager_->slabclassid(thread_id_,
                                                                      nova::NovaConfig::config->log_buf_size);
-                    char *rmda_buf = mem_manager_->ItemAlloc(thread_id_,
+                    char *rdma_buf = mem_manager_->ItemAlloc(thread_id_,
                                                              slabclassid);
-                    NOVA_ASSERT(rmda_buf) << "Running out of memory";
-                    log_manager_->Add(thread_id_, log_file, rmda_buf);
-
+                    NOVA_ASSERT(rdma_buf) << "Running out of memory";
+                    log_manager_->AddLocalBuf(log_file, rdma_buf);
                     ServerCompleteTask task = {};
                     task.request_type = leveldb::STOC_ALLOCATE_LOG_BUFFER;
-                    task.rdma_buf = rmda_buf;
+                    task.rdma_buf = rdma_buf;
                     task.remote_server_id = remote_server_id;
                     task.stoc_req_id = stoc_req_id;
                     private_cq_.push_back(task);

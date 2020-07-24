@@ -539,9 +539,9 @@ namespace nova {
         for (int i = 0; i < NovaConfig::config->num_migration_threads; i++) {
             auto client = new leveldb::StoCBlockClient(i, stoc_file_manager);
             client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
-            DBMigration *migrate = new DBMigration(mem_manager, client, stoc_file_manager,
-                                                   bg_rdma_msg_handlers,
-                                                   bg_compaction_threads, bg_flush_memtable_threads);
+            DBMigration *migrate = new DBMigration(mem_manager, client, log_manager, stoc_file_manager,
+                                                   bg_rdma_msg_handlers, bg_compaction_threads,
+                                                   bg_flush_memtable_threads);
             db_migration_threads.push_back(migrate);
             db_migrate_workers.emplace_back(&DBMigration::Start, migrate);
         }
@@ -621,7 +621,6 @@ namespace nova {
                     i, mem_env);
             fg_storage_workers.push_back(worker);
         }
-
         for (int i = 0;
              i < NovaConfig::config->num_compaction_workers; i++) {
             auto client = new leveldb::StoCBlockClient(i, stoc_file_manager);
@@ -648,7 +647,6 @@ namespace nova {
             if (!dbs_[i]) {
                 continue;
             }
-
             auto db = reinterpret_cast<leveldb::DBImpl *>(dbs_[i]);
             auto reorg_thread = reinterpret_cast<leveldb::LTCCompactionThread *>(db->options_.reorg_thread);
             reorg_workers.emplace_back(&leveldb::LTCCompactionThread::Start,

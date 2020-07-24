@@ -254,6 +254,34 @@ namespace nova {
     }
 
     bool
+    process_socket_query_ready_request(int fd, Connection *conn) {
+        int current_cfg_id = NovaConfig::config->current_cfg_id;
+        NOVA_LOG(rdmaio::INFO)
+            << fmt::format("Query configuration change. Current cfg id: {}",
+                           current_cfg_id);
+        NOVA_ASSERT(current_cfg_id == 1);
+        NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
+        int ret_val = 0;
+        for (int fragid = 0;
+             fragid < NovaConfig::config->cfgs[current_cfg_id]->fragments.size(); fragid++) {
+            auto current_frag = NovaConfig::config->cfgs[current_cfg_id]->fragments[fragid];
+            if (current_frag->ltc_server_id == NovaConfig::config->my_server_id) {
+                if (!current_frag->is_ready_) {
+                    NOVA_LOG(rdmaio::INFO)
+                        << fmt::format("Frag-{} is not ready {}", fragid, current_frag->DebugString());
+                    ret_val = 1;
+                }
+            }
+        }
+        char *response_buf = worker->buf;
+        int len = int_to_str(response_buf, ret_val);
+        response_buf[len] = MSG_TERMINATER_CHAR;
+        conn->response_buf = worker->buf;
+        conn->response_size = len + 1;
+        return true;
+    }
+
+    bool
     process_socket_change_config_request(int fd, Connection *conn) {
         int current_cfg_id = NovaConfig::config->current_cfg_id;
         NOVA_LOG(rdmaio::INFO)
@@ -263,7 +291,6 @@ namespace nova {
         NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         // Figure out the configuration change.
         std::vector<LTCFragment *> migrate_frags;
-        std::vector<LTCFragment *> new_frags;
         for (int fragid = 0;
              fragid < NovaConfig::config->cfgs[0]->fragments.size(); fragid++) {
             auto old_frag = NovaConfig::config->cfgs[0]->fragments[fragid];
@@ -273,30 +300,27 @@ namespace nova {
                 if (old_frag->ltc_server_id ==
                     NovaConfig::config->my_server_id) {
                     migrate_frags.push_back(current_frag);
-                } else if (current_frag->ltc_server_id ==
-                           NovaConfig::config->my_server_id) {
-                    new_frags.push_back(current_frag);
                 }
             } else {
                 current_frag->is_ready_ = true;
             }
         }
+        // Bump up version id.
         NovaConfig::config->current_cfg_id.fetch_add(1);
         int frags_per_thread = migrate_frags.size() / worker->db_migration_threads_.size();
-        std::vector<LTCFragment *> batches;
+        std::vector<LTCFragment *> batch;
         int thread_id = 0;
         for (int i = 0; i < migrate_frags.size(); i++) {
-            if (batches.size() == frags_per_thread && migrate_frags.size() - i > frags_per_thread) {
-                worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batches);
-                batches.clear();
+            if (batch.size() == frags_per_thread && migrate_frags.size() - i > frags_per_thread) {
+                worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batch);
+                batch.clear();
                 thread_id++;
             }
-            batches.push_back(migrate_frags[i]);
+            batch.push_back(migrate_frags[i]);
         }
-        if (!batches.empty()) {
-            worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batches);
+        if (!batch.empty()) {
+            worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batch);
         }
-
         char *response_buf = worker->buf;
         int len = int_to_str(response_buf, 1);
         response_buf[len] = MSG_TERMINATER_CHAR;
@@ -437,7 +461,7 @@ namespace nova {
             }
 
 
-            leveldb::DB *db = reinterpret_cast<leveldb::DB*>(frag->db);
+            leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frag->db);
             leveldb::Iterator *iterator = db->NewIterator(read_options);
             iterator->Seek(startkey);
             while (iterator->Valid() && read_records < nrecords) {
@@ -553,24 +577,20 @@ namespace nova {
         }
         if (msg_type == RequestType::GET) {
             return process_socket_get(fd, conn, request_buf, server_cfg_id);
-        }
-        if (msg_type == RequestType::REQ_SCAN) {
+        } else if (msg_type == RequestType::REQ_SCAN) {
             return process_socket_scan(fd, conn, request_buf, server_cfg_id);
-        }
-        if (msg_type == RequestType::PUT) {
+        } else if (msg_type == RequestType::PUT) {
             return process_socket_put(fd, conn, request_buf, server_cfg_id);
-        }
-        if (msg_type == RequestType::REINITIALIZE_QP) {
+        } else if (msg_type == RequestType::REINITIALIZE_QP) {
             return process_reintialize_qps(fd, conn);
-        }
-        if (msg_type == RequestType::CLOSE_STOC_FILES) {
+        } else if (msg_type == RequestType::CLOSE_STOC_FILES) {
             return process_close_stoc_files(fd, conn);
-        }
-        if (msg_type == RequestType::STATS) {
+        } else if (msg_type == RequestType::STATS) {
             return process_socket_stats_request(fd, conn);
-        }
-        if (msg_type == RequestType::CHANGE_CONFIG) {
+        } else if (msg_type == RequestType::CHANGE_CONFIG) {
             return process_socket_change_config_request(fd, conn);
+        } else if (msg_type == RequestType::QUERY_CONFIG_CHANGE) {
+            return process_socket_query_ready_request(fd, conn);
         }
         NOVA_ASSERT(false) << msg_type;
         return false;

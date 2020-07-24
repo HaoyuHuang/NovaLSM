@@ -9,6 +9,7 @@
 
 #include <unordered_map>
 
+#include "db/memtable.h"
 #include "common/nova_mem_manager.h"
 #include "db/dbformat.h"
 #include "leveldb/log_writer.h"
@@ -19,16 +20,24 @@ namespace nova {
     public:
         StoCInMemoryLogFileManager(NovaMemManager *mem_manager);
 
-        void Add(uint64_t thread_id, const std::string &log_file, char *buf);
+        void AddLocalBuf(const std::string &log_file, char *buf);
+
+        void AddRemoteBuf(const std::string &log_file, uint32_t remote_server_id, uint64_t remote_buf_offset);
 
         void DeleteLogBuf(const std::vector<std::string> &log_files);
 
         void QueryLogFiles(uint32_t range_id,
                            std::unordered_map<std::string, uint64_t> *logfile_offset);
 
+        uint32_t EncodeLogFiles(char *buf, uint32_t dbid);
+
+        bool
+        DecodeLogFiles(leveldb::Slice *buf, std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map);
+
     private:
         struct LogRecords {
-            std::unordered_map<uint64_t, std::vector<char *>> backing_mems;
+            char *local_backing_mem = nullptr;
+            std::unordered_map<uint32_t, uint64_t> remote_backing_mems;
             std::mutex mu;
         };
 
@@ -37,7 +46,7 @@ namespace nova {
             leveldb::port::Mutex mutex_;
         };
         NovaMemManager *mem_manager_;
-        DBLogFiles **server_db_log_files_;
+        DBLogFiles **db_log_files_;
     };
 }
 

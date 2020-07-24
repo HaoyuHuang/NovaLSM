@@ -8,39 +8,89 @@
 #include "stoc_log_manager.h"
 
 namespace nova {
+    uint32_t StoCInMemoryLogFileManager::EncodeLogFiles(char *buf, uint32_t dbid) {
+        uint32_t msg_size = 0;
+        DBLogFiles *logfiles = db_log_files_[dbid];
+        logfiles->mutex_.Lock();
+        msg_size += leveldb::EncodeFixed32(buf, logfiles->logfiles_.size());
+        for (auto logfile : logfiles->logfiles_) {
+            uint32_t dbindex = 0;
+            uint32_t memtableid = 0;
+            ParseDBIndexFromLogFileName(logfile.first, &dbindex, &memtableid);
+
+            msg_size += leveldb::EncodeFixed32(buf + msg_size, memtableid);
+            msg_size += leveldb::EncodeFixed32(buf + msg_size, logfile.second->remote_backing_mems.size());
+            for (const auto &replica : logfile.second->remote_backing_mems) {
+                msg_size += leveldb::EncodeFixed32(buf + msg_size, replica.first);
+                msg_size += leveldb::EncodeFixed64(buf + msg_size, replica.second);
+            }
+        }
+        logfiles->mutex_.Unlock();
+        return msg_size;
+    }
+
+    bool StoCInMemoryLogFileManager::DecodeLogFiles(leveldb::Slice *buf,
+                                                    std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map) {
+        uint32_t num_logfiles = 0;
+        if (!leveldb::DecodeFixed32(buf, &num_logfiles)) {
+            return false;
+        }
+        for (int i = 0; i < num_logfiles; i++) {
+            uint32_t memtableid = 0;
+            if (!leveldb::DecodeFixed32(buf, &memtableid)) {
+                return false;
+            }
+            uint32_t nreplicas = 0;
+            if (!leveldb::DecodeFixed32(buf, &nreplicas)) {
+                return false;
+            }
+            for (int r = 0; r < nreplicas; r++) {
+                uint32_t sid = 0;
+                uint64_t offset = 0;
+                if (!leveldb::DecodeFixed32(buf, &sid)) {
+                    return false;
+                }
+                if (!leveldb::DecodeFixed64(buf, &offset)) {
+                    return false;
+                }
+                (*mid_table_map)[memtableid].server_logbuf[sid] = offset;
+            }
+        }
+    }
+
+
     StoCInMemoryLogFileManager::StoCInMemoryLogFileManager(
             nova::NovaMemManager *mem_manager) : mem_manager_(mem_manager) {
         uint32_t nranges = NovaConfig::config->cfgs[0]->fragments.size();
-        server_db_log_files_ = new DBLogFiles *[nranges];
+        db_log_files_ = new DBLogFiles *[nranges];
         NOVA_LOG(rdmaio::DEBUG)
             << fmt::format("{} {}", NovaConfig::config->servers.size(),
                            nranges);
         for (int i = 0; i < nranges; i++) {
-            server_db_log_files_[i] = new DBLogFiles;
+            db_log_files_[i] = new DBLogFiles;
         }
     }
 
     void
     StoCInMemoryLogFileManager::QueryLogFiles(uint32_t range_id,
                                               std::unordered_map<std::string, uint64_t> *logfile_offset) {
-        DBLogFiles *db = server_db_log_files_[range_id];
+        DBLogFiles *db = db_log_files_[range_id];
         db->mutex_.Lock();
         for (const auto &it : db->logfiles_) {
-            uint64_t offset = (uint64_t) it.second->backing_mems.begin()->second[0];
+            uint64_t offset = (uint64_t) it.second->local_backing_mem;
             (*logfile_offset)[it.first] = offset;
         }
         db->mutex_.Unlock();
     }
 
     void
-    StoCInMemoryLogFileManager::Add(uint64_t thread_id,
-                                    const std::string &log_file,
-                                    char *buf) {
+    StoCInMemoryLogFileManager::AddLocalBuf(const std::string &log_file,
+                                            char *local_buf) {
         uint32_t db_index;
         ParseDBIndexFromLogFileName(log_file, &db_index);
         NOVA_LOG(rdmaio::DEBUG)
             << fmt::format("{} {}", log_file, db_index);
-        DBLogFiles *db = server_db_log_files_[db_index];
+        DBLogFiles *db = db_log_files_[db_index];
         db->mutex_.Lock();
         auto it = db->logfiles_.find(log_file);
         LogRecords *records;
@@ -53,19 +103,42 @@ namespace nova {
         db->mutex_.Unlock();
 
         records->mu.lock();
-        records->backing_mems[thread_id].push_back(buf);
+        records->local_backing_mem = local_buf;
         records->mu.unlock();
-
         NOVA_LOG(DEBUG)
-            << fmt::format("Allocate log buf for file:{} from thread {}",
-                           log_file, thread_id);
+            << fmt::format("Allocate log buf for file:{}", log_file);
+    }
+
+    void StoCInMemoryLogFileManager::AddRemoteBuf(const std::string &log_file, uint32_t remote_server_id,
+                                                  uint64_t remote_buf_offset) {
+        uint32_t db_index;
+        ParseDBIndexFromLogFileName(log_file, &db_index);
+        NOVA_LOG(rdmaio::DEBUG)
+            << fmt::format("{} {}", log_file, db_index);
+        DBLogFiles *db = db_log_files_[db_index];
+        db->mutex_.Lock();
+        auto it = db->logfiles_.find(log_file);
+        LogRecords *records;
+        if (it == db->logfiles_.end()) {
+            records = new LogRecords;
+            db->logfiles_[log_file] = records;
+        } else {
+            records = it->second;
+        }
+        db->mutex_.Unlock();
+
+        records->mu.lock();
+        records->remote_backing_mems[remote_server_id] = remote_buf_offset;
+        records->mu.unlock();
+        NOVA_LOG(DEBUG)
+            << fmt::format("Allocate log buf for file:{}", log_file);
     }
 
     void StoCInMemoryLogFileManager::DeleteLogBuf(
             const std::vector<std::string> &log_file) {
         uint32_t db_index;
         ParseDBIndexFromLogFileName(log_file[0], &db_index);
-        DBLogFiles *db = server_db_log_files_[db_index];
+        DBLogFiles *db = db_log_files_[db_index];
         db->mutex_.Lock();
         for (int i = 0; i < log_file.size(); i++) {
             auto it = db->logfiles_.find(log_file[i]);
@@ -73,16 +146,12 @@ namespace nova {
                 continue;
             }
             LogRecords *records = it->second;
-            for (const auto &it : records->backing_mems) {
-                const auto &items = it.second;
-                uint32_t scid = mem_manager_->slabclassid(it.first,
+            if (records->local_backing_mem) {
+                uint32_t scid = mem_manager_->slabclassid(0,
                                                           NovaConfig::config->log_buf_size);
-                if (!items.empty()) {
-                    mem_manager_->FreeItems(it.first, items, scid);
-                }
+                mem_manager_->FreeItem(0, records->local_backing_mem, scid);
                 NOVA_LOG(DEBUG)
-                    << fmt::format("Free {} log buf for file:{} from thread {}",
-                                   items.size(), log_file[i], it.first);
+                    << fmt::format("Free log buf for file:{}", log_file[i]);
             }
             db->logfiles_.erase(log_file[i]);
         }

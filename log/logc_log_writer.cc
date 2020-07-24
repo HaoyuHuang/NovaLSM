@@ -51,6 +51,7 @@ namespace leveldb {
                                        uint32_t log_record_size,
                                        uint32_t client_req_id,
                                        StoCReplicateLogRecordState *replicate_log_record_states) {
+        log_manager_->AddRemoteBuf(log_file_name, stoc_server_id, offset);
         replicate_log_record_states[stoc_server_id].result = StoCReplicateLogRecordResult::ALLOC_SUCCESS;
         auto meta = &logfile_last_buf_[log_file_name];
         meta->stoc_bufs[stoc_server_id].base = offset;

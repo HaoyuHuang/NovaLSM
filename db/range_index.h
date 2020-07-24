@@ -21,6 +21,10 @@ namespace leveldb {
         std::set<uint64_t> l0_sstable_ids;
 
         std::string DebugString() const;
+
+        uint32_t Encode(char *buf);
+
+        void Decode(Slice* buf);
     };
 
     class RangeIndexManager;
@@ -35,6 +39,10 @@ namespace leveldb {
         RangeIndex(ScanStats *scan_stats, RangeIndex *current,
                    uint32_t version_id,
                    uint32_t lsm_version_id);
+
+        uint32_t Encode(char *buf);
+
+        void Decode(Slice* buf);
 
         bool Ref();
 

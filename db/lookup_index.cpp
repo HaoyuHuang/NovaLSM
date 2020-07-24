@@ -42,28 +42,21 @@ namespace leveldb {
 
     uint32_t LookupIndex::Encode(char *buf) {
         uint32_t msg_size = 0;
-        msg_size += EncodeFixed32(buf + msg_size, 0);
+        msg_size += EncodeFixed32(buf + msg_size, size_);
         for (int i = 0; i < size_; i++) {
             TableLocation &loc = table_locator_[i];
             msg_size += EncodeFixed32(buf + msg_size, loc.memtable_id);
         }
-        msg_size += EncodeFixed32(buf + msg_size, 0);
         return msg_size;
     }
 
     void LookupIndex::Decode(Slice *buf) {
-        uint32_t pivot = 0;
-        NOVA_ASSERT(DecodeFixed32(buf, &pivot));
-        NOVA_ASSERT(pivot == 0);
-        int i = 0;
-        while (true) {
+        uint32_t size = 0;
+        NOVA_ASSERT(DecodeFixed32(buf, &size));
+        for (int i = 0; i < size; i++) {
             uint32_t id;
             NOVA_ASSERT(DecodeFixed32(buf, &id));
-            if (id == 0) {
-                break;
-            }
             table_locator_[i].memtable_id = id;
-            i++;
         }
     }
 }

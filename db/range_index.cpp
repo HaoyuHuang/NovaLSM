@@ -8,6 +8,35 @@
 #include "table/merger.h"
 
 namespace leveldb {
+    uint32_t RangeTables::Encode(char *buf) {
+        uint32_t msg_size = 0;
+        msg_size += EncodeFixed32(buf + msg_size, memtable_ids.size());
+        msg_size += EncodeFixed32(buf + msg_size, l0_sstable_ids.size());
+        for (auto mid : memtable_ids) {
+            msg_size += EncodeFixed32(buf + msg_size, mid);
+        }
+        for (auto l0 : l0_sstable_ids) {
+            msg_size += EncodeFixed64(buf + msg_size, l0);
+        }
+    }
+
+    void RangeTables::Decode(Slice *buf) {
+        uint32_t num_mids = 0;
+        uint32_t num_l0s = 0;
+        NOVA_ASSERT(DecodeFixed32(buf, &num_mids));
+        NOVA_ASSERT(DecodeFixed32(buf, &num_l0s));
+
+        for (int i = 0; i < num_mids; i++) {
+            uint32_t mid = 0;
+            NOVA_ASSERT(DecodeFixed32(buf, &mid));
+            memtable_ids.insert(mid);
+            uint64_t l0 = 0;
+            NOVA_ASSERT(DecodeFixed64(buf, &l0));
+            l0_sstable_ids.insert(l0);
+        }
+    }
+
+
     RangeIndex::RangeIndex(ScanStats *scan_stats) : scan_stats_(scan_stats) {
 
     }
@@ -17,6 +46,35 @@ namespace leveldb {
             : version_id_(version_id), lsm_version_id_(lsm_vid),
               scan_stats_(scan_stats) {
         is_deleted_ = false;
+    }
+
+    uint32_t RangeIndex::Encode(char *buf) {
+        uint32_t msg_size = 0;
+        msg_size += EncodeFixed32(buf + msg_size, lsm_version_id_);
+        msg_size += EncodeFixed32(buf + msg_size, ranges_.size());
+        for (int i = 0; i < ranges_.size(); i++) {
+            msg_size += ranges_[i].Encode(buf + msg_size);
+        }
+        for (int i = 0; i < range_tables_.size(); i++) {
+            msg_size += range_tables_[i].Encode(buf + msg_size);
+        }
+        return msg_size;
+    }
+
+    void RangeIndex::Decode(Slice *buf) {
+        NOVA_ASSERT(DecodeFixed32(buf, &lsm_version_id_));
+        uint32_t num_ranges = 0;
+        NOVA_ASSERT(DecodeFixed32(buf, &num_ranges));
+        for (int i = 0; i < num_ranges; i++) {
+            Range r = {};
+            r.Decode(buf);
+            ranges_.push_back(r);
+        }
+        for (int i = 0; i < num_ranges; i++) {
+            RangeTables r = {};
+            r.Decode(buf);
+            range_tables_.push_back(r);
+        }
     }
 
     RangeIndex::RangeIndex(ScanStats *scan_stats, RangeIndex *current,

@@ -139,10 +139,12 @@ namespace leveldb {
 
         const std::string &dbname() override;
 
-        uint32_t EncodeDBMetadata(char *buf);
+        uint32_t EncodeDBMetadata(char *buf, nova::StoCInMemoryLogFileManager *log_manager);
 
-        std::vector<MemTableLogFilePair>
-        RecoverDBMetadata(Slice *buf, uint64_t last_sequence, uint64_t next_file_number);
+        void
+        RecoverDBMetadata(Slice *buf, uint64_t last_sequence, uint64_t next_file_number,
+                          nova::StoCInMemoryLogFileManager *log_manager,
+                          std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map);
 
         const Options options_;  // options_.comparator == &internal_comparator_
     private:

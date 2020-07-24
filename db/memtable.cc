@@ -273,7 +273,6 @@ namespace leveldb {
 
     uint32_t AtomicMemTable::Encode(char *buf) {
         uint32_t msg_size = 0;
-        msg_size += EncodeFixed32(buf + msg_size, memtable_->memtableid());
         msg_size += EncodeFixed32(buf + msg_size, l0_file_numbers_.size());
         for (auto tableid : l0_file_numbers_) {
             msg_size += EncodeFixed64(buf + msg_size, tableid);
@@ -283,10 +282,6 @@ namespace leveldb {
 
     void AtomicMemTable::Decode(Slice *buf) {
         uint32_t size;
-        // TODO:
-        NOVA_ASSERT(DecodeFixed32(buf, &memtable_id_));
-        NOVA_ASSERT(memtable_);
-        NOVA_ASSERT(memtable_->memtableid() == memtable_id_);
         NOVA_ASSERT(DecodeFixed32(buf, &size));
         for (int i = 0; i < size; i++) {
             uint64_t l0;

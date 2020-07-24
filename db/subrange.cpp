@@ -448,4 +448,27 @@ namespace leveldb {
         return true;
     }
 
+    uint32_t SubRanges::Encode(char *buf) {
+        uint32_t msg_size = 0;
+        msg_size += EncodeFixed32(buf + msg_size, subranges.size());
+        for (int i = 0; i < subranges.size(); i++) {
+            msg_size += subranges[i].Encode(buf + msg_size, i);
+        }
+        return msg_size;
+    }
+
+    bool SubRanges::Decode(Slice *buf) {
+        uint32_t num_subranges = 0;
+        if (!DecodeFixed32(buf, &num_subranges)) {
+            return false;
+        }
+        for (int i = 0; i < num_subranges; i++) {
+            SubRange sr = {};
+            if (!sr.Decode(buf)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
 }

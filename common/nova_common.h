@@ -86,6 +86,8 @@ namespace nova {
     struct LTCFragment {
         LTCFragment();
 
+        std::string DebugString();
+
         // for range partition only.
         RangePartition range;
         uint32_t dbid;
@@ -159,6 +161,7 @@ namespace nova {
         CLOSE_STOC_FILES = 'c',
         STATS = 's',
         CHANGE_CONFIG = 'b',
+        QUERY_CONFIG_CHANGE = 'R',
     };
 
     static RequestType char_to_req_type(char c) {
@@ -313,6 +316,30 @@ namespace nova {
             if (logname[i] == '-') {
                 *index = data;
                 i++;
+                break;
+            }
+            data = data * 10 + logname[i] - '0';
+            i++;
+        }
+    }
+
+    inline void
+    ParseDBIndexFromLogFileName(const std::string &logname, uint32_t *dbindex, uint32_t *memtableid) {
+        uint32_t data = 0;
+        int i = 0;
+        while (i < logname.size()) {
+            if (logname[i] == '-') {
+                *dbindex = data;
+                i++;
+                break;
+            }
+            data = data * 10 + logname[i] - '0';
+            i++;
+        }
+        data = 0;
+        while (i < logname.size()) {
+            if (logname[i] == '-') {
+                *memtableid = data;
                 break;
             }
             data = data * 10 + logname[i] - '0';

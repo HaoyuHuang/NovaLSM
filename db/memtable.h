@@ -148,6 +148,12 @@ namespace leveldb {
         uint32_t number_of_pending_writes_ = 0;
     };
 
+    struct MemTableLogFilePair {
+        MemTable *memtable = nullptr;
+        std::string logfile;
+        std::unordered_map<uint32_t, uint64_t> server_logbuf;
+    };
+
     // static partition.
     struct MemTablePartition {
         MemTablePartition() : background_work_finished_signal_(&mutex) {

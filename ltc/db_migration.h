@@ -17,7 +17,7 @@
 #include "stoc/persistent_stoc_file.h"
 #include "stoc_client_impl.h"
 #include "novalsm/rdma_msg_handler.h"
-
+#include "log/stoc_log_manager.h"
 #include "log/log_recovery.h"
 
 namespace leveldb {
@@ -37,6 +37,7 @@ namespace nova {
         DBMigration(
                 leveldb::MemManager *mem_manager,
                 leveldb::StoCBlockClient *client,
+                nova::StoCInMemoryLogFileManager *log_manager,
                 leveldb::StocPersistentFileManager *stoc_file_manager,
                 const std::vector<RDMAMsgHandler *> &bg_rdma_msg_handlers,
                 const std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
@@ -68,6 +69,7 @@ namespace nova {
 
         leveldb::MemManager *mem_manager_ = nullptr;
         leveldb::StoCBlockClient *client_ = nullptr;
+        nova::StoCInMemoryLogFileManager *log_manager_ = nullptr;
         leveldb::StocPersistentFileManager *stoc_file_manager_ = nullptr;
         std::vector<RDMAMsgHandler *> bg_rdma_msg_handlers_;
         std::vector<leveldb::EnvBGThread *> bg_compaction_threads_;

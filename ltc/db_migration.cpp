@@ -14,6 +14,7 @@
 namespace nova {
     DBMigration::DBMigration(leveldb::MemManager *mem_manager,
                              leveldb::StoCBlockClient *client,
+                             nova::StoCInMemoryLogFileManager *log_manager,
                              leveldb::StocPersistentFileManager *stoc_file_manager,
                              const std::vector<RDMAMsgHandler *> &bg_rdma_msg_handlers,
                              const std::vector<leveldb::EnvBGThread *> &bg_compaction_threads,
@@ -21,6 +22,7 @@ namespace nova {
             :
             mem_manager_(mem_manager),
             client_(client),
+            log_manager_(log_manager),
             stoc_file_manager_(stoc_file_manager),
             bg_rdma_msg_handlers_(bg_rdma_msg_handlers),
             bg_compaction_threads_(bg_compaction_threads),
@@ -88,13 +90,12 @@ namespace nova {
         // bump up the configuration id.
         std::vector<char *> bufs;
         std::vector<uint32_t> msg_sizes;
-        leveldb::DBImpl *db = reinterpret_cast<leveldb::DBImpl *>(migrate_frags[0]->db);
         uint32_t scid = mem_manager_->slabclassid(0,
-                                                  db->options_.max_stoc_file_size);
+                                                  NovaConfig::config->max_stoc_file_size);
         for (auto frag : migrate_frags) {
             leveldb::DBImpl *db = reinterpret_cast<leveldb::DBImpl *>(frag->db);
             char *buf = mem_manager_->ItemAlloc(0, scid);
-            msg_sizes.push_back(db->EncodeDBMetadata(buf));
+            msg_sizes.push_back(db->EncodeDBMetadata(buf, log_manager_));
             bufs.push_back(buf);
         }
 
@@ -124,19 +125,9 @@ namespace nova {
         leveldb::Slice buf(charbuf, nova::NovaConfig::config->max_stoc_file_size);
 
         uint32_t dbindex;
-        uint32_t version_size;
-        uint32_t srs_size;
-        uint32_t memtable_size;
-        uint32_t lookup_index_size;
-        uint32_t tableid_mapping_size;
         uint64_t last_sequence = 0;
         uint64_t next_file_number = 0;
         NOVA_ASSERT(DecodeFixed32(&buf, &dbindex));
-        NOVA_ASSERT(DecodeFixed32(&buf, &version_size));
-        NOVA_ASSERT(DecodeFixed32(&buf, &srs_size));
-        NOVA_ASSERT(DecodeFixed32(&buf, &memtable_size));
-        NOVA_ASSERT(DecodeFixed32(&buf, &lookup_index_size));
-        NOVA_ASSERT(DecodeFixed32(&buf, &tableid_mapping_size));
         NOVA_ASSERT(DecodeFixed64(&buf, &last_sequence));
         NOVA_ASSERT(DecodeFixed64(&buf, &next_file_number));
 
@@ -144,19 +135,19 @@ namespace nova {
         auto coord = new leveldb::LTCCompactionThread(mem_manager_);
         auto client = new leveldb::StoCBlockClient(dbindex,
                                                    stoc_file_manager_);
-        auto dbint = CreateDatabase(cfg_id, dbindex, nullptr, nullptr,
-                                    mem_manager_, client,
-                                    bg_compaction_threads_,
-                                    bg_flush_memtable_threads_, reorg,
-                                    coord);
-        coord->db_ = dbint;
+        auto db = CreateDatabase(cfg_id, dbindex, nullptr, nullptr,
+                                 mem_manager_, client,
+                                 bg_compaction_threads_,
+                                 bg_flush_memtable_threads_, reorg,
+                                 coord);
+        coord->db_ = db;
         coord->stoc_client_ = new leveldb::StoCBlockClient(dbindex,
                                                            stoc_file_manager_);
         coord->stoc_client_->rdma_msg_handlers_ = bg_rdma_msg_handlers_;
         coord->thread_id_ = dbindex;
         auto frag = nova::NovaConfig::config->cfgs[cfg_id]->fragments[dbindex];
-        frag->db = dbint;
-        auto db = reinterpret_cast<leveldb::DBImpl *>(dbint);
+        frag->db = db;
+        auto dbimpl = reinterpret_cast<leveldb::DBImpl *>(db);
         db->processed_writes_ = 0;
         db->number_of_puts_no_wait_ = 0;
         db->number_of_puts_wait_ = 0;
@@ -165,9 +156,15 @@ namespace nova {
         db->number_of_gets_ = 0;
         db->number_of_memtable_hits_ = 0;
 
-        auto memtables_to_recover = db->RecoverDBMetadata(&buf, last_sequence, next_file_number);
+        std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> memtables_to_recover;
+        // bump up the numbers to avoid conflicts.
+        last_sequence += 100000;
+        next_file_number += 100000;
+        dbimpl->RecoverDBMetadata(&buf, last_sequence, next_file_number, log_manager_, &memtables_to_recover);
         leveldb::LogRecovery recover(mem_manager_, client_);
         recover.Recover(memtables_to_recover, cfg_id, dbindex);
+        threads_for_new_dbs_.emplace_back(&leveldb::LTCCompactionThread::Start, reorg);
+        threads_for_new_dbs_.emplace_back(&leveldb::LTCCompactionThread::Start, coord);
 
         db->StartCompaction();
         frag->is_ready_ = true;

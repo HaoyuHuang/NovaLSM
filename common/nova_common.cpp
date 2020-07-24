@@ -193,6 +193,10 @@ namespace nova {
                                  is_ready_signal_(&is_ready_mutex_) {
     }
 
+    std::string LTCFragment::DebugString() {
+        return fmt::format("[{},{}): {}-{}", range.key_start, range.key_end, ltc_server_id, dbid);
+    }
+
     std::string
     DBName(const std::string &dbname, uint32_t index) {
         return dbname + "/" + std::to_string(index);

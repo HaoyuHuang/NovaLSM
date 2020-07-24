@@ -235,41 +235,46 @@ namespace leveldb {
         }
     }
 
-    uint32_t DBImpl::EncodeDBMetadata(char *buf) {
+    uint32_t DBImpl::EncodeDBMetadata(char *buf, nova::StoCInMemoryLogFileManager *log_manager) {
         // dump the latest version, subranges, log files, range index, lookup index, and table id mapping.
-        uint32_t msg_size = 1 + 4 + 4 + 4 + 4 + 4 + 4 + 8 + 8;
+        uint32_t msg_size = 1 + 4 + 8 + 8;
 
         // wait for all pending writes to complete.
         mutex_.Lock();
         AtomicVersion *atomic_version = versions_->versions_[versions_->current_version_id()];
         Version *v = atomic_version->Ref();
-        // Get all log files.
+
+        // Version
         uint32_t version_size = v->Encode(buf + msg_size);
         msg_size += version_size;
+        // Subranges
         SubRanges *srs = subrange_manager_->latest_subranges_;
         uint32_t srs_size = srs->Encode(buf + msg_size);
         msg_size += srs_size;
-        uint32_t memtables_size = EncodeMemTablePartitions(buf + msg_size);
-        mutex_.Unlock();
 
+        // memtables
+        uint32_t memtables_size = EncodeMemTablePartitions(buf + msg_size);
+
+        // log files
+        uint32_t logfile_size = log_manager->EncodeLogFiles(buf + msg_size, dbid_);
+        msg_size += logfile_size;
+
+        // lookup index
         uint32_t lookup_index_size = lookup_index_->Encode(buf + msg_size);
         msg_size += lookup_index_size;
         uint32_t tableid_mapping_size = versions_->EncodeTableIdMapping(
                 buf + msg_size, memtable_id_seq_);
+        msg_size += tableid_mapping_size;
+
+        // range index
+        auto range_index = range_index_manager_->current();
+        uint32_t range_index_size = range_index->Encode(buf + msg_size);
+        msg_size += range_index_size;
+        mutex_.Unlock();
         {
             uint32_t header_size = 1;
             buf[0] = StoCRequestType::LTC_MIGRATION;
             EncodeFixed32(buf + header_size, dbid_);
-            header_size += 4;
-            EncodeFixed32(buf + header_size, version_size);
-            header_size += 4;
-            EncodeFixed32(buf + header_size, srs_size);
-            header_size += 4;
-            EncodeFixed32(buf + header_size, memtables_size);
-            header_size += 4;
-            EncodeFixed32(buf + header_size, lookup_index_size);
-            header_size += 4;
-            EncodeFixed32(buf + header_size, tableid_mapping_size);
             header_size += 4;
             EncodeFixed64(buf + header_size, versions_->last_sequence_);
             header_size += 8;
@@ -279,34 +284,43 @@ namespace leveldb {
         return msg_size;
     }
 
-    std::vector<MemTableLogFilePair>
-    DBImpl::RecoverDBMetadata(Slice *buf, uint64_t last_sequence, uint64_t next_file_number) {
+    void
+    DBImpl::RecoverDBMetadata(Slice *buf, uint64_t last_sequence, uint64_t next_file_number,
+                              nova::StoCInMemoryLogFileManager *log_manager,
+                              std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map) {
         versions_->Restore(buf, last_sequence, next_file_number);
-
         SubRanges *srs = new SubRanges;
-        srs->Decode(buf);
-        DecodeMemTablePartitions(buf);
-        lookup_index_->Decode(buf);
-        versions_->DecodeTableIdMapping(buf);
+        NOVA_ASSERT(srs->Decode(buf));
         subrange_manager_->latest_subranges_.store(srs);
 
+        DecodeMemTablePartitions(buf);
+        NOVA_ASSERT(log_manager->DecodeLogFiles(buf, mid_table_map));
+
+        lookup_index_->Decode(buf);
+        versions_->DecodeTableIdMapping(buf);
+        RangeIndex *range_index = new RangeIndex(&scan_stats, 0, versions_->current_version_id());
+        range_index->Decode(buf);
+        NOVA_ASSERT(versions_->current_version_id() == range_index->lsm_version_id_)
+            << fmt::format("{}-{}", versions_->current_version_id(), range_index->lsm_version_id_);
+        range_index_manager_->Initialize(range_index);
+
         // Recover memtables from log files.
-        std::vector<MemTableLogFilePair> memtables_to_recover;
         for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
             auto partition = partitioned_active_memtables_[i];
-            MemTableLogFilePair pair = {};
             if (partition->memtable) {
+                uint32_t mid = partition->memtable->memtableid();
+                auto &pair = (*mid_table_map)[mid];
                 pair.memtable = partition->memtable;
                 pair.logfile = nova::LogFileName(
                         dbid_, partition->memtable->memtableid());
-                memtables_to_recover.push_back(pair);
             }
             for (int j = 0; j < partition->closed_log_files.size(); j++) {
-                pair.memtable = versions_->mid_table_mapping_[partition->closed_log_files[j]]->memtable_;
-                pair.logfile = nova::LogFileName(dbid_, partition->closed_log_files[j]);
+                uint32_t mid = partition->closed_log_files[j];
+                auto &pair = (*mid_table_map)[mid];
+                pair.memtable = versions_->mid_table_mapping_[mid]->memtable_;
+                pair.logfile = nova::LogFileName(dbid_, mid);
             }
         }
-        return memtables_to_recover;
     }
 
     void

@@ -13,19 +13,14 @@
 namespace leveldb {
     class StoCBlockClient;
 
-    struct MemTableLogFilePair {
-        MemTable *memtable = nullptr;
-        std::string logfile;
-        uint64_t logfile_offset;
-        uint64_t logfile_size;
-    };
-
     class LogRecovery {
     public:
         LogRecovery(leveldb::MemManager *mem_manager,
                     leveldb::StoCBlockClient *client);
 
-        void Recover(const std::vector<MemTableLogFilePair> &memtables_to_recover, uint32_t cfg_id, uint32_t dbid);
+        void
+        Recover(const std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> &memtables_to_recover, uint32_t cfg_id,
+                uint32_t dbid);
 
     private:
         leveldb::MemManager *mem_manager_;

@@ -158,7 +158,7 @@ namespace leveldb {
 
         uint32_t Encode(char *buf);
 
-        uint32_t Decode(Slice *buf);
+        bool Decode(Slice *buf);
 
         SubRange &first() {
             return subranges[0];
