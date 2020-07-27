@@ -26,10 +26,9 @@ namespace nova {
 
     class LoadThread {
     public:
-        LoadThread(std::vector<leveldb::DB *> &dbs,
-                   std::vector<RDMAMsgHandler *> &async_workers,
+        LoadThread(std::vector<RDMAMsgHandler *> &async_workers,
                    NovaMemManager *mem_manager,
-                   std::set<uint32_t> &assigned_dbids, uint32_t tid);
+                   std::set<uint32_t> &assigned_frags, uint32_t tid);
 
         void Start();
 
@@ -42,9 +41,8 @@ namespace nova {
 
         std::vector<RDMAMsgHandler *> async_workers_;
         NovaMemManager *mem_manager_;
-        std::vector<leveldb::DB *> dbs_;
         uint32_t tid_;
-        std::set<uint32_t> assigned_dbids_;
+        std::set<uint32_t> assigned_frags_;
     };
 
 

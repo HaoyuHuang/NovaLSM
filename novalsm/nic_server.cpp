@@ -25,19 +25,11 @@ namespace nova {
         store->Start();
     }
 
-    LoadThread::LoadThread(std::vector<leveldb::DB *> &dbs,
-                           std::vector<nova::RDMAMsgHandler *> &async_workers,
-                           nova::NovaMemManager *mem_manager,
-                           std::set<uint32_t> &assigned_dbids,
-                           uint32_t tid) : dbs_(dbs),
-                                           async_workers_(
-                                                   async_workers),
-                                           mem_manager_(
-                                                   mem_manager),
-                                           assigned_dbids_(
-                                                   assigned_dbids),
-                                           tid_(tid) {
-
+    LoadThread::LoadThread(std::vector<nova::RDMAMsgHandler *> &async_workers, nova::NovaMemManager *mem_manager,
+                           std::set<uint32_t> &assigned_dbids, uint32_t tid) : async_workers_(async_workers),
+                                                                               mem_manager_(mem_manager),
+                                                                               assigned_frags_(assigned_dbids),
+                                                                               tid_(tid) {
     }
 
     uint64_t LoadThread::LoadDataWithRangePartition() {
@@ -58,23 +50,24 @@ namespace nova {
         int pivot = 0;
         int i = pivot;
         int loaded_frags = 0;
+        std::vector<leveldb::DB *> dbs;
         while (loaded_frags < frags.size()) {
-            if (frags[i]->ltc_server_id !=
-                NovaConfig::config->my_server_id) {
+            if (frags[i]->ltc_server_id != NovaConfig::config->my_server_id) {
                 loaded_frags++;
                 i = (i + 1) % frags.size();
                 continue;
             }
 
             uint32_t dbid = frags[i]->dbid;
-            if (assigned_dbids_.find(dbid) == assigned_dbids_.end()) {
+            if (assigned_frags_.find(dbid) == assigned_frags_.end()) {
                 loaded_frags++;
                 i = (i + 1) % frags.size();
                 continue;
             }
 
             // Insert cold keys first so that hot keys will be at the top level.
-            leveldb::DB *db = dbs_[frags[i]->dbid];
+            leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frags[i]->db);
+            dbs.push_back(db);
             NOVA_LOG(INFO) << fmt::format("t[{}] Insert range {} to {}", tid_,
                                           frags[i]->range.key_start,
                                           frags[i]->range.key_end);
@@ -86,9 +79,9 @@ namespace nova {
                 std::string val(
                         NovaConfig::config->load_default_value_size, v);
 
-                for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
-                    state[i].rdma_wr_id = -1;
-                    state[i].result = leveldb::StoCReplicateLogRecordResult::REPLICATE_LOG_RECORD_NONE;
+                for (int k = 0; k < NovaConfig::config->servers.size(); k++) {
+                    state[k].rdma_wr_id = -1;
+                    state[k].result = leveldb::StoCReplicateLogRecordResult::REPLICATE_LOG_RECORD_NONE;
                 }
                 leveldb::WriteOptions option;
                 option.hash = j;
@@ -120,7 +113,7 @@ namespace nova {
             i = (i + 1) % frags.size();
         }
 
-        for (auto db : dbs_) {
+        for (auto db : dbs) {
             db->StartCompaction();
         }
         // Wait until there are no SSTables at L0.
@@ -128,7 +121,7 @@ namespace nova {
             uint32_t l0tables = 0;
             uint32_t nmemtables = 0;
             bool needs_compaction = false;
-            for (auto db : dbs_) {
+            for (auto db : dbs) {
                 leveldb::DBStats stats;
                 stats.sstable_size_dist = new uint32_t[20];
                 db->QueryDBStats(&stats);
@@ -165,12 +158,10 @@ namespace nova {
         read_options.verify_checksums = false;
         std::vector<LTCFragment *> &frags = NovaConfig::config->cfgs[0]->fragments;
         for (int i = 0; i < frags.size(); i++) {
-            if (frags[i]->ltc_server_id !=
-                NovaConfig::config->my_server_id) {
+            if (frags[i]->ltc_server_id != NovaConfig::config->my_server_id) {
                 continue;
             }
-            leveldb::DB *db = dbs_[frags[i]->dbid];
-
+            leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frags[i]->db);
             NOVA_LOG(INFO) << fmt::format("t[{}] Verify range {} to {}", tid_,
                                           frags[i]->range.key_start,
                                           frags[i]->range.key_end);
@@ -230,30 +221,19 @@ namespace nova {
             }
         }
 
-        std::vector<leveldb::DB *> mydbs;
-        for (auto db :dbs_) {
-            if (db) {
-                mydbs.push_back(db);
-            }
-        }
         uint32_t nloading_threads = 1;
-        uint32_t ndb_per_thread = mydbs.size() / nloading_threads;
+        uint32_t ndb_per_thread = dbs_.size() / nloading_threads;
         uint32_t current_db_id = 0;
-
-        NOVA_LOG(INFO)
-            << fmt::format("{} dbs. {} dbs per load thread.", mydbs.size(),
-                           ndb_per_thread);
-
+        NOVA_LOG(INFO) << fmt::format("{} dbs. {} dbs per load thread.", dbs_.size(), ndb_per_thread);
         std::vector<std::thread> load_threads;
         std::vector<LoadThread *> ts;
         for (int i = 0; i < nloading_threads; i++) {
             std::set<uint32_t> dbids;
-            for (int i = 0; i < ndb_per_thread; i++) {
+            for (int j = 0; j < ndb_per_thread; j++) {
                 dbids.insert(current_db_id);
                 current_db_id += 1;
             }
-            LoadThread *t = new LoadThread(mydbs, fg_rdma_msg_handlers,
-                                           mem_manager, dbids, i);
+            auto t = new LoadThread(fg_rdma_msg_handlers, mem_manager, dbids, i);
             ts.push_back(t);
             load_threads.emplace_back(std::thread(&LoadThread::Start, t));
         }
@@ -280,25 +260,25 @@ namespace nova {
         }
         NOVA_LOG(INFO) << fmt::format("Total throughput: {}", thpt);
 
-        for (int i = 0; i < mydbs.size(); i++) {
+        for (int i = 0; i < dbs_.size(); i++) {
+            if (!dbs_[i]) {
+                return;
+            }
             NOVA_LOG(INFO) << "Database " << i;
             std::string value;
-            mydbs[i]->GetProperty("leveldb.sstables", &value);
+            dbs_[i]->GetProperty("leveldb.sstables", &value);
             NOVA_LOG(INFO) << "\n" << value;
             value.clear();
-            mydbs[i]->GetProperty("leveldb.approximate-memory-usage", &value);
+            dbs_[i]->GetProperty("leveldb.approximate-memory-usage", &value);
             NOVA_LOG(INFO) << "\n" << "leveldb memory usage " << value;
         }
     }
 
     NICServer::NICServer(RdmaCtrl *rdma_ctrl,
-                         char *rdmabuf, int nport)
-            : nport_(nport) {
-        std::vector<uint32_t> all_dbs = NovaConfig::ReadDatabases();
-        std::vector<uint32_t> my_dbs = NovaConfig::ReadDatabases();
-
-        for (auto dbid : all_dbs) {
-            std::string db_path = DBName(NovaConfig::config->db_path, dbid);
+                         char *rdmabuf, int nport) : nport_(nport) {
+        Configuration *cfg = NovaConfig::config->cfgs[0];
+        for (int i = 0; i < cfg->fragments.size(); i++) {
+            std::string db_path = DBName(NovaConfig::config->db_path, cfg->fragments[i]->dbid);
             mkdir(db_path.c_str(), 0777);
         }
         char *buf = rdmabuf;
@@ -343,14 +323,14 @@ namespace nova {
         leveldb::MemTablePool *pool = new leveldb::MemTablePool;
         pool->num_available_memtables_ =
                 NovaConfig::config->num_memtables;
-        pool->range_cond_vars_ = new leveldb::port::CondVar *[all_dbs.size()];
+        pool->range_cond_vars_ = new leveldb::port::CondVar *[cfg->fragments.size()];
 
         leveldb::EnvOptions env_option;
         env_option.sstable_mode = leveldb::NovaSSTableMode::SSTABLE_DISK;
         leveldb::PosixEnv *env = new leveldb::PosixEnv;
         env->set_env_option(env_option);
 
-        uint32_t nranges = all_dbs.size() /
+        uint32_t nranges = cfg->fragments.size() /
                            NovaConfig::config->ltc_servers.size();
 
         leveldb::StocPersistentFileManager *stoc_file_manager = new leveldb::StocPersistentFileManager(
@@ -361,24 +341,21 @@ namespace nova {
                 nranges);
 
         std::vector<nova::RDMAMsgCallback *> rdma_threads;
-        for (int db_index = 0; db_index < all_dbs.size(); db_index++) {
+        for (int db_index = 0; db_index < cfg->fragments.size(); db_index++) {
             if (NovaConfig::config->cfgs[0]->fragments[db_index]->ltc_server_id !=
                 NovaConfig::config->my_server_id) {
                 dbs_.push_back(nullptr);
+                continue;
             }
-
             auto reorg = new leveldb::LTCCompactionThread(mem_manager);
             auto coord = new leveldb::LTCCompactionThread(mem_manager);
-            auto client = new leveldb::StoCBlockClient(all_dbs[db_index],
+            auto client = new leveldb::StoCBlockClient(db_index,
                                                        stoc_file_manager);
             dbs_.push_back(
-                    CreateDatabase(0, all_dbs[db_index], block_cache, pool,
-                                   mem_manager, client,
-                                   bg_compaction_threads,
-                                   bg_flush_memtable_threads, reorg,
-                                   coord));
+                    CreateDatabase(0, db_index, block_cache, pool, mem_manager, client, bg_compaction_threads,
+                                   bg_flush_memtable_threads, reorg, coord));
         }
-        for (int db_index = 0; db_index < all_dbs.size(); db_index++) {
+        for (int db_index = 0; db_index < cfg->fragments.size(); db_index++) {
             NovaConfig::config->cfgs[0]->fragments[db_index]->db = dbs_[db_index];
         }
 
@@ -544,6 +521,11 @@ namespace nova {
                                                    bg_flush_memtable_threads);
             db_migration_threads.push_back(migrate);
             db_migrate_workers.emplace_back(&DBMigration::Start, migrate);
+        }
+
+        for (auto rdma_server : rdma_servers) {
+            nova::RDMAWriteHandler *write_handler = new nova::RDMAWriteHandler(db_migration_threads);
+            rdma_server->rdma_write_handler_ = write_handler;
         }
 
         for (int i = 0;
@@ -739,7 +721,7 @@ namespace nova {
             usleep(10000);
         }
 
-        for (int db_index = 0; db_index < all_dbs.size(); db_index++) {
+        for (int db_index = 0; db_index < cfg->fragments.size(); db_index++) {
             if (!dbs_[db_index]) {
                 continue;
             }
@@ -749,7 +731,7 @@ namespace nova {
         }
 
         if (NovaConfig::config->recover_dbs) {
-            for (int db_index = 0; db_index < all_dbs.size(); db_index++) {
+            for (int db_index = 0; db_index < cfg->fragments.size(); db_index++) {
                 if (!dbs_[db_index]) {
                     continue;
                 }
@@ -832,8 +814,7 @@ namespace nova {
             stoc_client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             monitor_ = new StoCHealthMonitor(
                     NovaConfig::config->fail_stoc_id,
-                    NovaConfig::config->exp_seconds_to_fail_stoc, stoc_client,
-                    dbs_);
+                    NovaConfig::config->exp_seconds_to_fail_stoc, stoc_client, dbs_);
             stats_t_.emplace_back(
                     std::thread(&StoCHealthMonitor::Start, monitor_));
         }

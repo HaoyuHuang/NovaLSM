@@ -43,6 +43,7 @@ namespace leveldb {
     uint32_t LookupIndex::Encode(char *buf) {
         uint32_t msg_size = 0;
         msg_size += EncodeFixed32(buf + msg_size, size_);
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Lookup index size: {}", size_);
         for (int i = 0; i < size_; i++) {
             TableLocation &loc = table_locator_[i];
             msg_size += EncodeFixed32(buf + msg_size, loc.memtable_id);
@@ -53,6 +54,7 @@ namespace leveldb {
     void LookupIndex::Decode(Slice *buf) {
         uint32_t size = 0;
         NOVA_ASSERT(DecodeFixed32(buf, &size));
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Lookup index size: {}", size);
         for (int i = 0; i < size; i++) {
             uint32_t id;
             NOVA_ASSERT(DecodeFixed32(buf, &id));

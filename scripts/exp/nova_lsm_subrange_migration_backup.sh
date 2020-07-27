@@ -122,10 +122,15 @@ function run_bench() {
     mkdir -p $dir
     chmod -R 777 $dir
 
-	cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "shared" $recordcount $number_of_ltcs $cc_nreplicas_per_range $cc_nranges_per_server"
+    # Generate zipfian distribution first
+    cmd="java -jar $cache_bin_dir/nova_compute_ref_count.jar $recordcount $zipfianconstant"
+    echo $cmd
+    eval $cmd
+
+	cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "migration" $recordcount $number_of_ltcs $cc_nreplicas_per_range $cc_nranges_per_server $zipfianconstant"
 	echo $cmd
 	eval $cmd
-	ltc_config_path="$config_dir/nova-shared-cc-nrecords-$recordcount-nccservers-$number_of_ltcs-nlogreplicas-$cc_nreplicas_per_range-nranges-$cc_nranges_per_server"
+	ltc_config_path="$config_dir/nova-migration-cc-nrecords-$recordcount-nccservers-$number_of_ltcs-nlogreplicas-$cc_nreplicas_per_range-nranges-$cc_nranges_per_server"
 	
 	db_path="/db/nova-db-$recordcount-$value_size"
 	echo "$nova_servers $ltc_config_path $db_path"

@@ -18,6 +18,7 @@ namespace leveldb {
         for (auto l0 : l0_sstable_ids) {
             msg_size += EncodeFixed64(buf + msg_size, l0);
         }
+        return msg_size;
     }
 
     void RangeTables::Decode(Slice *buf) {
@@ -30,6 +31,9 @@ namespace leveldb {
             uint32_t mid = 0;
             NOVA_ASSERT(DecodeFixed32(buf, &mid));
             memtable_ids.insert(mid);
+        }
+
+        for (int i = 0; i < num_l0s; i++) {
             uint64_t l0 = 0;
             NOVA_ASSERT(DecodeFixed64(buf, &l0));
             l0_sstable_ids.insert(l0);
@@ -62,8 +66,8 @@ namespace leveldb {
     }
 
     void RangeIndex::Decode(Slice *buf) {
-        NOVA_ASSERT(DecodeFixed32(buf, &lsm_version_id_));
         uint32_t num_ranges = 0;
+        NOVA_ASSERT(DecodeFixed32(buf, &lsm_version_id_));
         NOVA_ASSERT(DecodeFixed32(buf, &num_ranges));
         for (int i = 0; i < num_ranges; i++) {
             Range r = {};
@@ -291,6 +295,26 @@ namespace leveldb {
         }
     }
 
+    void RangeIndexManager::AppendNewVersion(RangeIndex *new_range_idx) {
+        new_range_idx->refs_ = 1;
+        new_range_idx->next_ = current_->next_;
+        new_range_idx->prev_ = current_;
+        current_->next_->prev_ = new_range_idx;
+        current_->next_ = new_range_idx;
+        current_->UnRef();
+        current_ = new_range_idx;
+        // Ref memtables here so that a scan sees a consistent view. Also, a scan does not need to reference of the memtables anymore.
+        // Otherwise, a scan may fail to ref some memtables which may produce stale data.
+        for (int i = 0; i < new_range_idx->range_tables_.size(); i++) {
+            const auto &table = new_range_idx->range_tables_[i];
+            for (auto memtableid : table.memtable_ids) {
+                auto memtable = versions_->mid_table_mapping_[memtableid];
+                NOVA_ASSERT(memtable);
+                memtable->RefMemTable();
+            }
+        }
+    }
+
     void
     RangeIndexManager::AppendNewVersion(ScanStats *scan_stats,
                                         const RangeIndexVersionEdit &edit) {
@@ -357,23 +381,7 @@ namespace leveldb {
                 << fmt::format("New version {} {}", new_range_idx->version_id_,
                                new_range_idx->DebugString());
         }
-        new_range_idx->refs_ = 1;
-        new_range_idx->next_ = current_->next_;
-        new_range_idx->prev_ = current_;
-        current_->next_->prev_ = new_range_idx;
-        current_->next_ = new_range_idx;
-        current_->UnRef();
-        current_ = new_range_idx;
-        // Ref memtables here so that a scan sees a consistent view. Also, a scan does not need to reference of the memtables anymore.
-        // Otherwise, a scan may fail to ref some memtables which may produce stale data.
-        for (int i = 0; i < new_range_idx->range_tables_.size(); i++) {
-            const auto &table = new_range_idx->range_tables_[i];
-            for (auto memtableid : table.memtable_ids) {
-                auto memtable = versions_->mid_table_mapping_[memtableid];
-                NOVA_ASSERT(memtable);
-                memtable->RefMemTable();
-            }
-        }
+        AppendNewVersion(new_range_idx);
         mutex_.unlock();
     }
 }

@@ -178,15 +178,12 @@ namespace nova {
     }
 
     std::string ToString(const std::vector<uint32_t> &x) {
-        stringstream result;
-        auto it = x.begin();
-        result << *it;
-        it++;
-        for (; it != x.end(); it++) {
-            result << ",";
-            result << *it;
+        std::string  str;
+        for (int i = 0; i < x.size(); i++) {
+            str += std::to_string(x[i]);
+            str += ",";
         }
-        return result.str();
+        return str;
     }
 
     LTCFragment::LTCFragment() : is_ready_(false),

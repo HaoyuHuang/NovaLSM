@@ -133,7 +133,6 @@ namespace leveldb {
 
         void Decode(Slice *buf);
 
-        bool locked = false;
         bool is_immutable_ = false;
         bool is_flushed_ = false;
         uint32_t last_version_id_ = 0;

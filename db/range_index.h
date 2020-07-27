@@ -153,8 +153,9 @@ namespace leveldb {
 
         void Initialize(RangeIndex *init);
 
-        void AppendNewVersion(ScanStats *scan_stats,
-                              const RangeIndexVersionEdit &edit);
+        void AppendNewVersion(ScanStats *scan_stats, const RangeIndexVersionEdit &edit);
+
+        void AppendNewVersion(RangeIndex *new_range_idx);
 
         void DeleteObsoleteVersions();
 

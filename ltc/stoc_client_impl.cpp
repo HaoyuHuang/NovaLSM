@@ -237,7 +237,6 @@ namespace leveldb {
         leveldb::EncodeFixed32(sendbuf, req_id);
         context.wr_id = rdma_broker_->PostRead(local_buf, size, stoc_id,
                                                0, remote_offset, false);
-
         request_context_[req_id] = context;
         IncrementReqId();
         NOVA_LOG(DEBUG)

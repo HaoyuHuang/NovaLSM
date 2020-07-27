@@ -237,13 +237,16 @@ namespace leveldb {
 
     uint32_t DBImpl::EncodeDBMetadata(char *buf, nova::StoCInMemoryLogFileManager *log_manager) {
         // dump the latest version, subranges, log files, range index, lookup index, and table id mapping.
-        uint32_t msg_size = 1 + 4 + 8 + 8;
-
-        // wait for all pending writes to complete.
+        uint32_t msg_size = 1 + 4 + 4 + 8 + 8;
+        // Lock the database and all memtable partitions.
+        // This ensures a consistent snapshot of the database.
         mutex_.Lock();
+        for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
+            partitioned_active_memtables_[i]->mutex.Lock();
+        }
+
         AtomicVersion *atomic_version = versions_->versions_[versions_->current_version_id()];
         Version *v = atomic_version->Ref();
-
         // Version
         uint32_t version_size = v->Encode(buf + msg_size);
         msg_size += version_size;
@@ -254,7 +257,7 @@ namespace leveldb {
 
         // memtables
         uint32_t memtables_size = EncodeMemTablePartitions(buf + msg_size);
-
+        msg_size += memtables_size;
         // log files
         uint32_t logfile_size = log_manager->EncodeLogFiles(buf + msg_size, dbid_);
         msg_size += logfile_size;
@@ -269,39 +272,76 @@ namespace leveldb {
         // range index
         auto range_index = range_index_manager_->current();
         uint32_t range_index_size = range_index->Encode(buf + msg_size);
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Version: {}", v->DebugString());
+        NOVA_LOG(rdmaio::INFO) << fmt::format("SRS: {}", srs->DebugString());
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Range index: {}", range_index->DebugString());
         msg_size += range_index_size;
-        mutex_.Unlock();
+        for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
+            partitioned_active_memtables_[i]->mutex.Unlock();
+        }
         {
             uint32_t header_size = 1;
             buf[0] = StoCRequestType::LTC_MIGRATION;
-            EncodeFixed32(buf + header_size, dbid_);
-            header_size += 4;
-            EncodeFixed64(buf + header_size, versions_->last_sequence_);
-            header_size += 8;
+            header_size += EncodeFixed32(buf + header_size, dbid_);
+            header_size += EncodeFixed32(buf + header_size, v->version_id_);
+            header_size += EncodeFixed64(buf + header_size, versions_->last_sequence_);
             EncodeFixed64(buf + header_size, versions_->next_file_number_);
         }
-        NOVA_ASSERT(msg_size < options_.max_stoc_file_size);
+        mutex_.Unlock();
+        NOVA_LOG(rdmaio::INFO)
+            << fmt::format("{}-{}: v:{} srs:{} mp:{} log:{} lookupidx:{} tid:{} rangeidx:{} {} {} {} {}", msg_size,
+                           options_.max_stoc_file_size, version_size, srs_size, memtables_size, logfile_size,
+                           lookup_index_size, tableid_mapping_size, range_index_size, dbid_, v->version_id_,
+                           versions_->last_sequence_, versions_->next_file_number_);
+        NOVA_ASSERT(msg_size < options_.max_stoc_file_size)
+            << fmt::format("{}-{}: v:{} srs:{} mp:{} log:{} lookupidx:{} tid:{} rangeidx:{}", msg_size,
+                           options_.max_stoc_file_size, version_size, srs_size, memtables_size, logfile_size,
+                           lookup_index_size, tableid_mapping_size, range_index_size);
         return msg_size;
     }
 
     void
-    DBImpl::RecoverDBMetadata(Slice *buf, uint64_t last_sequence, uint64_t next_file_number,
+    DBImpl::RecoverDBMetadata(const Slice &buf, uint32_t version_id, uint64_t last_sequence, uint64_t next_file_number,
                               nova::StoCInMemoryLogFileManager *log_manager,
                               std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map) {
-        versions_->Restore(buf, last_sequence, next_file_number);
+        Slice tmp = buf;
+        uint32_t size = tmp.size();
+        versions_->Restore(&tmp, version_id, last_sequence, next_file_number);
+        NOVA_LOG(rdmaio::INFO)
+            << fmt::format("Decoded {} bytes: version: {}", size - tmp.size(), versions_->current()->DebugString());
+        size = tmp.size();
+
         SubRanges *srs = new SubRanges;
-        NOVA_ASSERT(srs->Decode(buf));
+        NOVA_ASSERT(srs->Decode(&tmp));
         subrange_manager_->latest_subranges_.store(srs);
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Decoded {} bytes: SRS: {}", size - tmp.size(), srs->DebugString());
+        size = tmp.size();
 
-        DecodeMemTablePartitions(buf);
-        NOVA_ASSERT(log_manager->DecodeLogFiles(buf, mid_table_map));
+        DecodeMemTablePartitions(&tmp);
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Decoded {} bytes: MemtablePartition", size - tmp.size());
+        size = tmp.size();
 
-        lookup_index_->Decode(buf);
-        versions_->DecodeTableIdMapping(buf);
+        NOVA_ASSERT(log_manager->DecodeLogFiles(&tmp, mid_table_map));
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Decoded {} bytes: Log manager", size - tmp.size());
+        size = tmp.size();
+
+        lookup_index_->Decode(&tmp);
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Decoded {} bytes: Lookup index", size - tmp.size());
+        size = tmp.size();
+
+        versions_->DecodeTableIdMapping(&tmp);
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Decoded {} bytes: TableIdMapping", size - tmp.size());
+        size = tmp.size();
+
         RangeIndex *range_index = new RangeIndex(&scan_stats, 0, versions_->current_version_id());
-        range_index->Decode(buf);
+        range_index->Decode(&tmp);
+        NOVA_LOG(rdmaio::INFO)
+            << fmt::format("Decoded {} bytes: Range idx: {}", size - tmp.size(), range_index->DebugString());
+        size = tmp.size();
+
         NOVA_ASSERT(versions_->current_version_id() == range_index->lsm_version_id_)
             << fmt::format("{}-{}", versions_->current_version_id(), range_index->lsm_version_id_);
+        NOVA_ASSERT(range_index_manager_);
         range_index_manager_->Initialize(range_index);
 
         // Recover memtables from log files.
@@ -311,13 +351,13 @@ namespace leveldb {
                 uint32_t mid = partition->memtable->memtableid();
                 auto &pair = (*mid_table_map)[mid];
                 pair.memtable = partition->memtable;
-                pair.logfile = nova::LogFileName(
-                        dbid_, partition->memtable->memtableid());
+                pair.logfile = nova::LogFileName(dbid_, partition->memtable->memtableid());
             }
             for (int j = 0; j < partition->closed_log_files.size(); j++) {
                 uint32_t mid = partition->closed_log_files[j];
                 auto &pair = (*mid_table_map)[mid];
                 pair.memtable = versions_->mid_table_mapping_[mid]->memtable_;
+                NOVA_ASSERT(pair.memtable);
                 pair.logfile = nova::LogFileName(dbid_, mid);
             }
         }
@@ -619,8 +659,6 @@ namespace leveldb {
         }
 
         if (options_.enable_range_index) {
-            range_index_manager_ = new RangeIndexManager(&scan_stats, versions_,
-                                                         user_comparator_);
             RangeIndex *init = new RangeIndex(&scan_stats, 0,
                                               versions_->current_version_id());
             if (options_.enable_subranges) {
@@ -2131,22 +2169,22 @@ namespace leveldb {
     }
 
     uint32_t DBImpl::EncodeMemTablePartitions(char *buf) {
+        // All partitions are locked already.
         uint32_t msg_size = 0;
         for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
             MemTablePartition *p = partitioned_active_memtables_[i];
-            p->mutex.Lock();
             uint32_t memtableid = 0;
             if (p->memtable) {
                 memtableid = p->memtable->memtableid();
             }
             msg_size += EncodeFixed32(buf + msg_size, memtableid);
-            msg_size += EncodeFixed32(buf + msg_size,
-                                      p->closed_log_files.size());
+            msg_size += EncodeFixed32(buf + msg_size, p->closed_log_files.size());
             for (auto logfile : p->closed_log_files) {
                 msg_size += EncodeFixed32(buf + msg_size, logfile);
             }
+            NOVA_LOG(rdmaio::INFO) << fmt::format("Range {} has active-{} and {} pending log files", dbid_, memtableid,
+                                                  p->closed_log_files.size());
             p->closed_log_files.clear();
-            p->mutex.Unlock();
         }
         return msg_size;
     }
@@ -2165,12 +2203,14 @@ namespace leveldb {
             }
             uint32_t size = 0;
             NOVA_ASSERT(DecodeFixed32(buf, &size));
+            NOVA_LOG(rdmaio::INFO) << fmt::format("Decode active memtable {} {}", memtableid, size);
             for (int j = 0; j < size; j++) {
                 uint32_t imm_memtableid = 0;
                 NOVA_ASSERT(DecodeFixed32(buf, &imm_memtableid));
                 MemTable *table = new MemTable(internal_comparator_,
                                                imm_memtableid,
                                                nullptr);
+                NOVA_ASSERT(!p->available_slots.empty());
                 uint32_t slotid = p->available_slots.front();
                 p->available_slots.pop();
                 partitioned_imms_[slotid] = imm_memtableid;
@@ -3133,6 +3173,10 @@ namespace leveldb {
                                                           impl->user_comparator_,
                                                           &impl->partitioned_active_memtables_,
                                                           &impl->partitioned_imms_);
+        }
+        if (options.enable_range_index) {
+            impl->range_index_manager_ = new RangeIndexManager(&impl->scan_stats, impl->versions_,
+                                                               impl->user_comparator_);
         }
         impl->mutex_.Unlock();
         *dbptr = impl;

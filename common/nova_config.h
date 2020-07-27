@@ -38,7 +38,6 @@ namespace nova {
     struct Configuration {
         uint32_t cfg_id = 0;
         std::vector<LTCFragment *> fragments;
-        std::vector<LTCFragment *> db_fragment;
 
         std::string DebugString();
     };
@@ -49,62 +48,24 @@ namespace nova {
             current_cfg_id = 0;
         }
 
-        static int
-        ParseNumberOfDatabases(const std::vector<LTCFragment *> &fragments,
-                               std::vector<LTCFragment *> *db_fragments,
-                               uint32_t server_id) {
-            std::set<uint32_t> ndbs;
-            for (int i = 0; i < fragments.size(); i++) {
-                if (fragments[i]->ltc_server_id == server_id) {
-                    ndbs.insert(fragments[i]->dbid);
-                }
-            }
-            db_fragments->resize(ndbs.size());
-
-            for (int i = 0; i < fragments.size(); i++) {
-                if (fragments[i]->ltc_server_id == server_id) {
-                    (*db_fragments)[fragments[i]->dbid] = fragments[i];
-                }
-            }
-            return ndbs.size();
-        }
-
-        static std::vector<uint32_t>
-        ReadDatabases() {
-            std::vector<uint32_t> dbs;
-            auto cfg = config->cfgs[0];
-            for (int i = 0; i < cfg->fragments.size(); i++) {
-                uint32_t sid = cfg->fragments[i]->ltc_server_id;
-                uint32_t dbid = cfg->fragments[i]->dbid;
-                dbs.push_back(dbid);
-            }
-            return dbs;
-        }
-
         static void ComputeLogReplicaLocations(uint32_t num_log_replicas) {
-            uint32_t start_stoc_id = 0;
             for (auto cfg : config->cfgs) {
+                uint32_t start_stoc_id = 0;
                 for (int i = 0; i < cfg->fragments.size(); i++) {
                     cfg->fragments[i]->log_replica_stoc_ids.clear();
                     std::set<uint32_t> set;
                     for (int r = 0; r < num_log_replicas; r++) {
-                        if (config->stoc_servers[start_stoc_id].server_id ==
-                            config->my_server_id) {
-                            start_stoc_id = (start_stoc_id + 1) %
-                                            config->stoc_servers.size();
+                        if (config->use_local_disk &&
+                            config->stoc_servers[start_stoc_id].server_id == config->my_server_id) {
+                            // Don't write the log record locally.
+                            start_stoc_id = (start_stoc_id + 1) % config->stoc_servers.size();
                         }
-                        NOVA_ASSERT(
-                                config->stoc_servers[start_stoc_id].server_id !=
-                                config->my_server_id);
-                        cfg->fragments[i]->log_replica_stoc_ids.push_back(
-                                start_stoc_id);
+                        cfg->fragments[i]->log_replica_stoc_ids.push_back(start_stoc_id);
                         set.insert(start_stoc_id);
-                        start_stoc_id = (start_stoc_id + 1) %
-                                        NovaConfig::config->stoc_servers.size();
+                        start_stoc_id = (start_stoc_id + 1) % NovaConfig::config->stoc_servers.size();
                     }
                     NOVA_ASSERT(set.size() == num_log_replicas);
-                    NOVA_ASSERT(set.size() ==
-                                cfg->fragments[i]->log_replica_stoc_ids.size());
+                    NOVA_ASSERT(set.size() == cfg->fragments[i]->log_replica_stoc_ids.size());
                 }
             }
         }
@@ -141,16 +102,6 @@ namespace nova {
                             std::stoi(tokens[i + 4]));
                 }
                 cfg->fragments.push_back(frag);
-            }
-            NOVA_LOG(INFO)
-                << fmt::format("{} configurations", config->cfgs.size());
-            for (auto c : config->cfgs) {
-                NOVA_LOG(INFO) << c->DebugString();
-            }
-
-            for (auto c : config->cfgs) {
-                ParseNumberOfDatabases(c->fragments, &c->db_fragment,
-                                       config->my_server_id);
             }
         }
 

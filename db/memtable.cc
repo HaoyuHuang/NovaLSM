@@ -213,7 +213,9 @@ namespace leveldb {
         l0_file_numbers_.clear();
         is_flushed_ = false;
         is_immutable_ = false;
-        NOVA_ASSERT(!memtable_);
+        memtable_id_ = mem->memtableid();
+
+//        NOVA_ASSERT(!memtable_);
         memtable_ = mem;
         memtable_->Ref();
         mutex_.unlock();
@@ -273,6 +275,12 @@ namespace leveldb {
 
     uint32_t AtomicMemTable::Encode(char *buf) {
         uint32_t msg_size = 0;
+        msg_size += EncodeBool(buf + msg_size, is_immutable_);
+        msg_size += EncodeBool(buf + msg_size, is_flushed_);
+        msg_size += EncodeFixed32(buf + msg_size, last_version_id_);
+        msg_size += EncodeFixed32(buf + msg_size, memtable_id_);
+        msg_size += EncodeFixed32(buf + msg_size, nentries_);
+        msg_size += EncodeFixed32(buf + msg_size, memtable_size_);
         msg_size += EncodeFixed32(buf + msg_size, l0_file_numbers_.size());
         for (auto tableid : l0_file_numbers_) {
             msg_size += EncodeFixed64(buf + msg_size, tableid);
@@ -281,6 +289,14 @@ namespace leveldb {
     }
 
     void AtomicMemTable::Decode(Slice *buf) {
+        NOVA_ASSERT(DecodeBool(buf, &is_immutable_));
+        NOVA_ASSERT(DecodeBool(buf, &is_flushed_));
+        NOVA_ASSERT(DecodeFixed32(buf, &last_version_id_));
+        NOVA_ASSERT(DecodeFixed32(buf, &memtable_id_));
+        uint32_t nentries = 0;
+        NOVA_ASSERT(DecodeFixed32(buf, &nentries));
+        nentries_ = nentries;
+        NOVA_ASSERT(DecodeFixed32(buf, &memtable_size_));
         uint32_t size;
         NOVA_ASSERT(DecodeFixed32(buf, &size));
         for (int i = 0; i < size; i++) {

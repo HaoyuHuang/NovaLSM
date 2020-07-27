@@ -209,7 +209,7 @@ namespace leveldb {
 
         // List of files per level
         std::vector<std::vector<FileMetaData *>> files_;
-        uint32_t version_id_;
+        uint32_t version_id_ = 0;
         uint64_t l0_bytes_ = 0;
         VersionSet *vset_ = nullptr;
         const InternalKeyComparator *icmp_;
@@ -333,7 +333,7 @@ namespace leveldb {
                        std::vector<SubRange> *subrange_edits);
 
         void
-        Restore(Slice *buf, uint64_t last_sequence, uint64_t next_file_number);
+        Restore(Slice *buf, uint32_t version_id, uint64_t last_sequence, uint64_t next_file_number);
 
         // Return the current version.
         Version *current() const { return current_; }

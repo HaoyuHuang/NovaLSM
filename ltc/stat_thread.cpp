@@ -87,7 +87,6 @@ namespace nova {
         std::vector<StorageWorkerStats> fg_storage_stats;
         std::vector<StorageWorkerStats> bg_storage_stats;
         std::vector<StorageWorkerStats> compaction_storage_stats;
-
         std::vector<uint32_t> compaction_stats;
 
         for (int i = 0; i < async_workers_.size(); i++) {
@@ -108,7 +107,7 @@ namespace nova {
         std::string output;
         int flushed_memtable_size[BUCKET_SIZE];
         while (true) {
-            sleep(1);
+            sleep(10);
 
             std::vector<leveldb::DB *> dbs;
             Configuration *cfg = NovaConfig::config->cfgs[NovaConfig::config->current_cfg_id];

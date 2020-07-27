@@ -32,6 +32,8 @@ namespace leveldb {
 
         void Decode(Slice *buf);
 
+        std::string DebugString();
+
     private:
         uint32_t size_ = 0;
         TableLocation *table_locator_ = nullptr;

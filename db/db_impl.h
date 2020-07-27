@@ -142,7 +142,7 @@ namespace leveldb {
         uint32_t EncodeDBMetadata(char *buf, nova::StoCInMemoryLogFileManager *log_manager);
 
         void
-        RecoverDBMetadata(Slice *buf, uint64_t last_sequence, uint64_t next_file_number,
+        RecoverDBMetadata(const Slice &buf, uint32_t version_id, uint64_t last_sequence, uint64_t next_file_number,
                           nova::StoCInMemoryLogFileManager *log_manager,
                           std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map);
 

@@ -13,17 +13,19 @@ namespace nova {
         DBLogFiles *logfiles = db_log_files_[dbid];
         logfiles->mutex_.Lock();
         msg_size += leveldb::EncodeFixed32(buf, logfiles->logfiles_.size());
-        for (auto logfile : logfiles->logfiles_) {
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Log: Number of log files: {}", logfiles->logfiles_.size());
+        for (const auto& logfile : logfiles->logfiles_) {
             uint32_t dbindex = 0;
             uint32_t memtableid = 0;
             ParseDBIndexFromLogFileName(logfile.first, &dbindex, &memtableid);
-
+            NOVA_ASSERT(dbindex == dbid) << fmt::format("{}-{}", dbindex, dbid);
             msg_size += leveldb::EncodeFixed32(buf + msg_size, memtableid);
             msg_size += leveldb::EncodeFixed32(buf + msg_size, logfile.second->remote_backing_mems.size());
             for (const auto &replica : logfile.second->remote_backing_mems) {
                 msg_size += leveldb::EncodeFixed32(buf + msg_size, replica.first);
                 msg_size += leveldb::EncodeFixed64(buf + msg_size, replica.second);
             }
+            NOVA_LOG(rdmaio::INFO) << fmt::format("Log: Range {} memtable:{}", dbid, memtableid);
         }
         logfiles->mutex_.Unlock();
         return msg_size;
@@ -32,30 +34,22 @@ namespace nova {
     bool StoCInMemoryLogFileManager::DecodeLogFiles(leveldb::Slice *buf,
                                                     std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map) {
         uint32_t num_logfiles = 0;
-        if (!leveldb::DecodeFixed32(buf, &num_logfiles)) {
-            return false;
-        }
+        NOVA_ASSERT(leveldb::DecodeFixed32(buf, &num_logfiles));
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Log: Decoded number of log files: {}", num_logfiles);
         for (int i = 0; i < num_logfiles; i++) {
             uint32_t memtableid = 0;
-            if (!leveldb::DecodeFixed32(buf, &memtableid)) {
-                return false;
-            }
+            NOVA_ASSERT(leveldb::DecodeFixed32(buf, &memtableid));
             uint32_t nreplicas = 0;
-            if (!leveldb::DecodeFixed32(buf, &nreplicas)) {
-                return false;
-            }
+            NOVA_ASSERT(leveldb::DecodeFixed32(buf, &nreplicas));
             for (int r = 0; r < nreplicas; r++) {
                 uint32_t sid = 0;
                 uint64_t offset = 0;
-                if (!leveldb::DecodeFixed32(buf, &sid)) {
-                    return false;
-                }
-                if (!leveldb::DecodeFixed64(buf, &offset)) {
-                    return false;
-                }
+                NOVA_ASSERT(leveldb::DecodeFixed32(buf, &sid));
+                NOVA_ASSERT(leveldb::DecodeFixed64(buf, &offset));
                 (*mid_table_map)[memtableid].server_logbuf[sid] = offset;
             }
         }
+        return true;
     }
 
 
@@ -113,7 +107,7 @@ namespace nova {
                                                   uint64_t remote_buf_offset) {
         uint32_t db_index;
         ParseDBIndexFromLogFileName(log_file, &db_index);
-        NOVA_LOG(rdmaio::DEBUG)
+        NOVA_LOG(rdmaio::INFO)
             << fmt::format("{} {}", log_file, db_index);
         DBLogFiles *db = db_log_files_[db_index];
         db->mutex_.Lock();

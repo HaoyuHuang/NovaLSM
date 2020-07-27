@@ -107,8 +107,8 @@ namespace leveldb {
             options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
         }
         options.subrange_no_flush_num_keys = nova::NovaConfig::config->subrange_num_keys_no_flush;
-        options.lower_key = nova::NovaConfig::config->cfgs[cfg_id]->db_fragment[db_index]->range.key_start;
-        options.upper_key = nova::NovaConfig::config->cfgs[cfg_id]->db_fragment[db_index]->range.key_end;
+        options.lower_key = nova::NovaConfig::config->cfgs[cfg_id]->fragments[db_index]->range.key_start;
+        options.upper_key = nova::NovaConfig::config->cfgs[cfg_id]->fragments[db_index]->range.key_end;
         if (nova::NovaConfig::config->use_local_disk) {
             options.manifest_stoc_ids.push_back(
                     nova::NovaConfig::config->my_server_id);

@@ -122,23 +122,16 @@ namespace leveldb {
     }
 
     bool SubRange::Decode(Slice *input) {
-        if (!DecodeFixed32(input, &decoded_subrange_id)) {
-            return false;
-        }
-        if (!DecodeFixed32(input, &num_duplicates)) {
-            return false;
-        }
         uint32_t nranges = 0;
-        if (!DecodeFixed32(input, &nranges)) {
-            return false;
-        }
+        NOVA_ASSERT(DecodeFixed32(input, &decoded_subrange_id));
+        NOVA_ASSERT(DecodeFixed32(input, &num_duplicates));
+        NOVA_ASSERT(DecodeFixed32(input, &nranges));
         for (int i = 0; i < nranges; i++) {
             Range r = {};
-            if (!r.Decode(input)) {
-                return false;
-            }
+            NOVA_ASSERT(r.Decode(input));
             tiny_ranges.push_back(std::move(r));
         }
+        return true;
     }
 
     uint32_t
@@ -459,14 +452,12 @@ namespace leveldb {
 
     bool SubRanges::Decode(Slice *buf) {
         uint32_t num_subranges = 0;
-        if (!DecodeFixed32(buf, &num_subranges)) {
-            return false;
-        }
+        NOVA_ASSERT(DecodeFixed32(buf, &num_subranges));
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Decoded number of subranges: {}", num_subranges);
         for (int i = 0; i < num_subranges; i++) {
             SubRange sr = {};
-            if (!sr.Decode(buf)) {
-                return false;
-            }
+            NOVA_ASSERT(sr.Decode(buf));
+            subranges.push_back(sr);
         }
         return true;
     }

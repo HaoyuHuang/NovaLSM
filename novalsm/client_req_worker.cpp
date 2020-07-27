@@ -297,15 +297,15 @@ namespace nova {
             auto current_frag = NovaConfig::config->cfgs[1]->fragments[fragid];
             current_frag->db = old_frag->db;
             if (old_frag->ltc_server_id != current_frag->ltc_server_id) {
-                if (old_frag->ltc_server_id ==
-                    NovaConfig::config->my_server_id) {
+                if (old_frag->ltc_server_id == NovaConfig::config->my_server_id) {
+                    NOVA_LOG(rdmaio::INFO) << fmt::format("Migrate {}", current_frag->DebugString());
                     migrate_frags.push_back(current_frag);
                 }
             } else {
                 current_frag->is_ready_ = true;
             }
         }
-        // Bump up version id.
+        // Bump up cfg id.
         NovaConfig::config->current_cfg_id.fetch_add(1);
         int frags_per_thread = migrate_frags.size() / worker->db_migration_threads_.size();
         std::vector<LTCFragment *> batch;
@@ -496,8 +496,7 @@ namespace nova {
 
     std::atomic_int_fast32_t total_writes;
 
-    bool process_socket_put(int fd, Connection *conn, char *request_buf,
-                            uint32_t server_cfg_id) {
+    bool process_socket_put(int fd, Connection *conn, char *request_buf, uint32_t server_cfg_id) {
         // Stats.
         NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         worker->stats.nputs++;
@@ -547,11 +546,14 @@ namespace nova {
         NOVA_ASSERT(status.ok()) << status.ToString();
 
         char *response_buf = worker->buf;
+        uint32_t response_size = 0;
         uint32_t cfg_size = int_to_str(response_buf, server_cfg_id);
         response_buf += cfg_size;
-        conn->response_size += cfg_size;
+        response_size += cfg_size;
         response_buf[0] = MSG_TERMINATER_CHAR;
-        conn->response_size += 1;
+        response_size += 1;
+        conn->response_buf = worker->buf;
+        conn->response_size = response_size;
         return true;
     }
 

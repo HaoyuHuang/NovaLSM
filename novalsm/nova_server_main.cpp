@@ -246,6 +246,10 @@ int main(int argc, char *argv[]) {
     if (FLAGS_num_log_replicas > 0) {
         NovaConfig::ComputeLogReplicaLocations(FLAGS_num_log_replicas);
     }
+    NOVA_LOG(INFO) << fmt::format("{} configurations", NovaConfig::config->cfgs.size());
+    for (auto c : NovaConfig::config->cfgs) {
+        NOVA_LOG(INFO) << c->DebugString();
+    }
 
     NovaConfig::config->num_conn_workers = FLAGS_ltc_num_client_workers;
     NovaConfig::config->num_fg_rdma_workers = FLAGS_num_rdma_fg_workers;

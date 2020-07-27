@@ -6,10 +6,10 @@ REMOTE_HOME="/proj/bg-PG0"
 HOME="/users/haoyu"
 setup_script="$REMOTE_HOME/haoyu/scripts/env"
 limit_dir="$REMOTE_HOME/haoyu/scripts"
-LOCAL_HOME="/Users/haoyuh/Documents/PhdUSC/dblab/rdma/scripts"
+LOCAL_HOME="/home/haoyuhua/Documents/nova/NovaLSM/scripts/bootstrap"
 
 
-host="Nova2.bg-PG0.apt.emulab.net"
+host="Nova.bg-PG0.apt.emulab.net"
 scp -r $LOCAL_HOME/env/*sh haoyu@node-0.${host}:/proj/bg-PG0/haoyu/scripts/env/
 
 for ((i=0;i<END;i++)); do

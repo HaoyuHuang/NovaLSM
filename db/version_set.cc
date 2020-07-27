@@ -1096,9 +1096,9 @@ namespace leveldb {
         return Status::OK();
     }
 
-    void VersionSet::Restore(Slice *buf, uint64_t last_sequence,
+    void VersionSet::Restore(Slice *buf, uint32_t version_id, uint64_t last_sequence,
                              uint64_t next_file_number) {
-        Version *version = new Version(&icmp_, table_cache_, options_, 0, this);
+        Version *version = new Version(&icmp_, table_cache_, options_, version_id, this);
         version->Decode(buf);
         // Install recovered version
         Finalize(version);
@@ -1312,6 +1312,9 @@ namespace leveldb {
                 NOVA_ASSERT(meta->Decode(buf, false));
                 files_[level].push_back(meta);
                 fn_files_[meta->number] = meta;
+                if (level == 0) {
+                    l0_bytes_ += meta->file_size;
+                }
             }
         }
     }
@@ -1319,30 +1322,27 @@ namespace leveldb {
     uint32_t
     VersionSet::EncodeTableIdMapping(char *buf, uint32_t latest_memtableid) {
         uint32_t msg_size = 0;
-        msg_size += EncodeFixed32(buf + msg_size, 0);
         for (int i = 0; i < latest_memtableid; i++) {
             auto atomic_memtable = mid_table_mapping_[i];
-            if (atomic_memtable->memtable_ != nullptr &&
-                atomic_memtable->l0_file_numbers_.empty()) {
+            if (atomic_memtable->memtable_ == nullptr && atomic_memtable->l0_file_numbers_.empty()) {
                 continue;
             }
             msg_size += EncodeFixed32(buf + msg_size, atomic_memtable->memtable_id_);
             msg_size += atomic_memtable->Encode(buf + msg_size);
+            NOVA_LOG(rdmaio::INFO) << fmt::format("tableid mapping: {}", atomic_memtable->memtable_id_);
         }
         msg_size += EncodeFixed32(buf + msg_size, 0);
         return msg_size;
     }
 
     void VersionSet::DecodeTableIdMapping(Slice *buf) {
-        uint32_t pivot = 0;
-        NOVA_ASSERT(DecodeFixed32(buf, &pivot));
-        NOVA_ASSERT(pivot == 0);
         while (true) {
-            uint32_t mid;
+            uint32_t mid = 0;
             NOVA_ASSERT(DecodeFixed32(buf, &mid));
             if (mid == 0) {
                 break;
             }
+            NOVA_LOG(rdmaio::INFO) << fmt::format("Decode tableid mapping: {}", mid);
             NOVA_ASSERT(mid < MAX_LIVE_MEMTABLES);
             mid_table_mapping_[mid]->Decode(buf);
         }

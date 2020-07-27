@@ -121,13 +121,12 @@ namespace nova {
         std::vector<StorageWorker *> fg_storage_workers_;
         std::vector<StorageWorker *> bg_storage_workers_;
         std::vector<StorageWorker *> compaction_storage_workers_;
+        RDMAWriteHandler *rdma_write_handler_ = nullptr;
 
         static std::atomic_int_fast32_t fg_storage_worker_seq_id_;
         static std::atomic_int_fast32_t bg_storage_worker_seq_id_;
         static std::atomic_int_fast32_t compaction_storage_worker_seq_id_;
-
     private:
-        RDMAWriteHandler *rdma_write_handler_ = nullptr;
         bool is_running_ = true;
         bool is_compaction_thread_ = false;
 

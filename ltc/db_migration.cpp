@@ -99,50 +99,46 @@ namespace nova {
             bufs.push_back(buf);
         }
 
-        // Inform the destination of the buf offset.
+        // Inform the destination of the database metadata.
         for (int i = 0; i < migrate_frags.size(); i++) {
             client_->InitiateRDMAWRITE(migrate_frags[i]->ltc_server_id, bufs[i],
                                        msg_sizes[i]);
         }
-        for (int i = 0; i < bufs.size(); i++) {
+        for (int i = 0; i < migrate_frags.size(); i++) {
             client_->Wait();
         }
-        for (int i = 0; i < bufs.size(); i++) {
+        for (int i = 0; i < migrate_frags.size(); i++) {
             mem_manager_->FreeItem(0, bufs[i], scid);
         }
     }
 
     void
     DBMigration::RecoverDBMeta(DBMeta dbmeta, int cfg_id) {
-        // Open this new database;
-        // Wait for lsm tree metadata.
-        // build lsm tree.
-        // now accept request.
+        // Open the new database.
         NOVA_ASSERT(dbmeta.buf);
         NOVA_ASSERT(dbmeta.buf[0] == leveldb::StoCRequestType::LTC_MIGRATION);
         char *charbuf = dbmeta.buf;
         charbuf += 1;
         leveldb::Slice buf(charbuf, nova::NovaConfig::config->max_stoc_file_size);
 
-        uint32_t dbindex;
+        uint32_t dbindex = 0;
+        uint32_t version_id = 0;
         uint64_t last_sequence = 0;
         uint64_t next_file_number = 0;
         NOVA_ASSERT(DecodeFixed32(&buf, &dbindex));
+        NOVA_ASSERT(DecodeFixed32(&buf, &version_id));
         NOVA_ASSERT(DecodeFixed64(&buf, &last_sequence));
         NOVA_ASSERT(DecodeFixed64(&buf, &next_file_number));
 
+        NOVA_LOG(rdmaio::INFO) << fmt::format("{} {} {} {}", dbindex, version_id, last_sequence, next_file_number);
+
         auto reorg = new leveldb::LTCCompactionThread(mem_manager_);
         auto coord = new leveldb::LTCCompactionThread(mem_manager_);
-        auto client = new leveldb::StoCBlockClient(dbindex,
-                                                   stoc_file_manager_);
-        auto db = CreateDatabase(cfg_id, dbindex, nullptr, nullptr,
-                                 mem_manager_, client,
-                                 bg_compaction_threads_,
-                                 bg_flush_memtable_threads_, reorg,
-                                 coord);
+        auto client = new leveldb::StoCBlockClient(dbindex, stoc_file_manager_);
+        auto db = CreateDatabase(cfg_id, dbindex, nullptr, nullptr, mem_manager_, client, bg_compaction_threads_,
+                                 bg_flush_memtable_threads_, reorg, coord);
         coord->db_ = db;
-        coord->stoc_client_ = new leveldb::StoCBlockClient(dbindex,
-                                                           stoc_file_manager_);
+        coord->stoc_client_ = new leveldb::StoCBlockClient(dbindex, stoc_file_manager_);
         coord->stoc_client_->rdma_msg_handlers_ = bg_rdma_msg_handlers_;
         coord->thread_id_ = dbindex;
         auto frag = nova::NovaConfig::config->cfgs[cfg_id]->fragments[dbindex];
@@ -160,9 +156,19 @@ namespace nova {
         // bump up the numbers to avoid conflicts.
         last_sequence += 100000;
         next_file_number += 100000;
-        dbimpl->RecoverDBMetadata(&buf, last_sequence, next_file_number, log_manager_, &memtables_to_recover);
+        dbimpl->RecoverDBMetadata(buf, version_id, last_sequence, next_file_number, log_manager_,
+                                  &memtables_to_recover);
+        std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> actual_memtables_to_recover;
+        for (auto memtable : memtables_to_recover) {
+            if (memtable.second.server_logbuf.empty()) {
+                NOVA_LOG(rdmaio::INFO) << fmt::format("Nothing to recover for memtable {}", memtable.first);
+                continue;
+            }
+            actual_memtables_to_recover[memtable.first] = memtable.second;
+        }
+
         leveldb::LogRecovery recover(mem_manager_, client_);
-        recover.Recover(memtables_to_recover, cfg_id, dbindex);
+        recover.Recover(actual_memtables_to_recover, cfg_id, dbindex);
         threads_for_new_dbs_.emplace_back(&leveldb::LTCCompactionThread::Start, reorg);
         threads_for_new_dbs_.emplace_back(&leveldb::LTCCompactionThread::Start, coord);
 

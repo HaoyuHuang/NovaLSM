@@ -94,6 +94,14 @@ namespace leveldb {
     }
 
     uint32_t FileMetaData::Encode(char *buf) const {
+//        eturn DecodeFixed64(input, &number) &&
+//              DecodeFixed64(input, &file_size) &&
+//              DecodeFixed64(input, &converted_file_size) &&
+//              GetInternalKey(input, &smallest, copy) &&
+//              GetInternalKey(input, &largest, copy) &&
+//              DecodeFixed64(input, &flush_timestamp) &&
+//              DecodeFixed32(input, &level) && DecodeReplicas(input);
+
         char *dst = buf;
         uint32_t msg_size = 0;
         msg_size += EncodeFixed64(dst + msg_size, number);
