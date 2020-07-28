@@ -340,11 +340,12 @@ namespace nova {
         while (i < logname.size()) {
             if (logname[i] == '-') {
                 *memtableid = data;
-                break;
+                return;
             }
             data = data * 10 + logname[i] - '0';
             i++;
         }
+        *memtableid = data;
     }
 
     int
@@ -654,25 +655,28 @@ namespace nova {
         return size;
     }
 
-    inline uint32_t DecodeLogRecord(char *buf,
-                                    leveldb::LevelDBLogRecord *log_record) {
-        uint32_t read_size = 0;
-        uint32_t record_size = leveldb::DecodeFixed32(buf + read_size);
-        read_size += 4;
-        if (record_size == 0) {
-            return 0;
+    inline bool DecodeLogRecord(leveldb::Slice *buf,
+                                leveldb::LevelDBLogRecord *log_record) {
+        uint32_t record_size;
+        if (!leveldb::DecodeFixed32(buf, &record_size)) {
+            return false;
         }
-        log_record->key = leveldb::DecodeSlice(buf + read_size);
-        read_size += (4 + log_record->key.size());
-        log_record->value = leveldb::DecodeSlice(buf + read_size);
-        read_size += (4 + log_record->value.size());
-        log_record->sequence_number = leveldb::DecodeFixed64(buf + read_size);
-        read_size += 8;
-        if (buf[read_size] == 1) {
-            read_size += 1;
-            NOVA_ASSERT(read_size == record_size);
-            return read_size;
+        if (!leveldb::DecodeStr(buf, &log_record->key, false)) {
+            return false;
         }
+        if (!leveldb::DecodeStr(buf, &log_record->value, false)) {
+            return false;
+        }
+        if (!leveldb::DecodeFixed64(buf, &log_record->sequence_number)) {
+            return false;
+        }
+        if ((*buf)[0] != 1) {
+            return false;
+        }
+        if (record_size != LogRecordSize(*log_record)) {
+            return false;
+        }
+        *buf = leveldb::Slice(buf->data() + 1, buf->size() - 1);
         return 0;
     }
 }

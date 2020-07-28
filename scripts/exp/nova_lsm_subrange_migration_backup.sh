@@ -314,7 +314,7 @@ enable_subrange_reorg="true"
 
 major_compaction_type="lc"
 workload="workloadw"
-num_memtables="256"
+num_memtables="2"
 num_memtable_partitions="64"
 use_local_disk="false"
 log_record_mode="none"

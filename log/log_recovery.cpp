@@ -26,12 +26,11 @@ namespace leveldb {
         if (memtables_to_recover.empty()) {
             return;
         }
-
         std::vector<char *> rdma_bufs;
         std::vector<uint32_t> reqs;
         timeval start = {};
         gettimeofday(&start, nullptr);
-        for (auto &replica : memtables_to_recover) {
+        for (const auto &replica : memtables_to_recover) {
             uint32_t scid = mem_manager_->slabclassid(0, nova::NovaConfig::config->max_stoc_file_size);
             char *rdma_buf = mem_manager_->ItemAlloc(0, scid);
             NOVA_ASSERT(rdma_buf);
@@ -40,9 +39,7 @@ namespace leveldb {
 
             uint32_t server_id = replica.second.server_logbuf.begin()->first;
             uint64_t remote_offset = replica.second.server_logbuf.begin()->second;
-            uint32_t reqid = client_->InitiateReadInMemoryLogFile(rdma_buf,
-                                                                  server_id,
-                                                                  remote_offset,
+            uint32_t reqid = client_->InitiateReadInMemoryLogFile(rdma_buf, server_id, remote_offset,
                                                                   nova::NovaConfig::config->max_stoc_file_size);
             NOVA_LOG(rdmaio::INFO)
                 << fmt::format("Recovery memtable-{} from server-{} offset:{}", replica.first, server_id,
@@ -51,7 +48,7 @@ namespace leveldb {
         }
 
         // Wait for all RDMA READ to complete.
-        for (auto &replica : memtables_to_recover) {
+        for (const auto &replica : memtables_to_recover) {
             client_->Wait();
         }
 
@@ -69,21 +66,19 @@ namespace leveldb {
 
         uint32_t recovered_log_records = 0;
         int index = 0;
-        for (auto &replica : memtables_to_recover) {
+        for (const auto &replica : memtables_to_recover) {
             char *buf = rdma_bufs[index];
+            leveldb::Slice slice(buf, nova::NovaConfig::config->max_stoc_file_size);
+
             leveldb::MemTable *memtable = replica.second.memtable;
             leveldb::LevelDBLogRecord record = {};
-            uint32_t record_size = nova::DecodeLogRecord(buf, &record);
             uint32_t log_records = 0;
-            while (record_size != 0) {
-                memtable->Add(record.sequence_number,
-                              leveldb::ValueType::kTypeValue, record.key,
-                              record.value);
+            while (nova::DecodeLogRecord(&slice, &record)) {
+                memtable->Add(record.sequence_number, leveldb::ValueType::kTypeValue, record.key, record.value);
                 recovered_log_records += 1;
-                buf += record_size;
                 log_records += 1;
-                record_size = nova::DecodeLogRecord(buf, &record);
             }
+            index++;
             NOVA_LOG(rdmaio::INFO)
                 << fmt::format("Recovery memtable-{} with {} log records", memtable->memtableid(), log_records);
             uint32_t scid = mem_manager_->slabclassid(0, nova::NovaConfig::config->max_stoc_file_size);

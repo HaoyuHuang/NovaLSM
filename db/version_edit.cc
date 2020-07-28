@@ -99,7 +99,7 @@ namespace leveldb {
     Status VersionEdit::DecodeFrom(const Slice &src, Slice *result) {
         Clear();
         Slice input = src;
-        const char *msg = nullptr;
+        std::string msg;
         uint32_t tag;
 
         // Temporary storage for parsing
@@ -111,7 +111,7 @@ namespace leveldb {
         InternalKey key;
         SubRange sr;
 
-        while (msg == nullptr && input.size() > 0) {
+        while (msg.empty() && input.size() > 0) {
             tag = input[0];
             input.remove_prefix(1);
 
@@ -169,17 +169,17 @@ namespace leveldb {
                     break;
 
                 default:
-                    msg = "unknown tag " + tag;
+                    msg = "unknown tag " + std::to_string(tag);
                     break;
             }
         }
 
-        if (msg == nullptr && !input.empty()) {
+        if (msg.empty() && !input.empty()) {
             msg = "invalid tag";
         }
 
         Status s;
-        if (msg != nullptr) {
+        if (!msg.empty()) {
             s = Status::Corruption("VersionEdit", msg);
         }
         if (result != nullptr) {

@@ -273,6 +273,13 @@ void Read(uint32_t id) {
 
 int main(int argc, char *argv[]) {
 
+    {
+        uint32_t db = 0;
+        uint32_t mid = 0;
+        ParseDBIndexFromLogFileName("0-100", &db, &mid);
+        NOVA_LOG(rdmaio::INFO) << fmt::format("!!!!!!!!!!! {}-{}", db, mid);
+    }
+
     NovaConfig::config = new NovaConfig;
     NovaConfig::config->stoc_files_path = "/tmp/rtables";
 

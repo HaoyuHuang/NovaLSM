@@ -274,17 +274,11 @@ namespace nova {
             // a send request completes.
             admission_control_->RemoveRequests(remote_server_id, 1);
         }
-        if (opcode == IBV_WC_SEND || opcode == IBV_WC_RDMA_READ) {
+        if (opcode == IBV_WC_SEND) {
             return true;
         }
-        bool processed_by_client = stoc_client_->OnRecv(opcode, wr_id,
-                                                        remote_server_id, buf,
-                                                        imm_data, nullptr);
-        bool processed_by_server = rdma_server_->ProcessRDMAWC(opcode, wr_id,
-                                                               remote_server_id,
-                                                               buf,
-                                                               imm_data,
-                                                               nullptr);
+        bool processed_by_client = stoc_client_->OnRecv(opcode, wr_id, remote_server_id, buf, imm_data, nullptr);
+        bool processed_by_server = rdma_server_->ProcessRDMAWC(opcode, wr_id, remote_server_id, buf, imm_data, nullptr);
         if (processed_by_client && processed_by_server) {
             NOVA_ASSERT(false)
                 << fmt::format("Processed by both client and server");

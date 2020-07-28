@@ -96,6 +96,7 @@ namespace nova {
             leveldb::DBImpl *db = reinterpret_cast<leveldb::DBImpl *>(frag->db);
             char *buf = mem_manager_->ItemAlloc(0, scid);
             msg_sizes.push_back(db->EncodeDBMetadata(buf, log_manager_));
+            db->StopCompaction();
             bufs.push_back(buf);
         }
 
@@ -125,13 +126,15 @@ namespace nova {
         uint32_t version_id = 0;
         uint64_t last_sequence = 0;
         uint64_t next_file_number = 0;
+        uint64_t memtable_id_seq = 0;
         NOVA_ASSERT(DecodeFixed32(&buf, &dbindex));
         NOVA_ASSERT(DecodeFixed32(&buf, &version_id));
         NOVA_ASSERT(DecodeFixed64(&buf, &last_sequence));
         NOVA_ASSERT(DecodeFixed64(&buf, &next_file_number));
+        NOVA_ASSERT(DecodeFixed64(&buf, &memtable_id_seq));
 
-        NOVA_LOG(rdmaio::INFO) << fmt::format("{} {} {} {}", dbindex, version_id, last_sequence, next_file_number);
-
+        NOVA_LOG(rdmaio::INFO)
+            << fmt::format("{} {} {} {} {}", dbindex, version_id, last_sequence, next_file_number, memtable_id_seq);
         auto reorg = new leveldb::LTCCompactionThread(mem_manager_);
         auto coord = new leveldb::LTCCompactionThread(mem_manager_);
         auto client = new leveldb::StoCBlockClient(dbindex, stoc_file_manager_);
@@ -144,6 +147,12 @@ namespace nova {
         auto frag = nova::NovaConfig::config->cfgs[cfg_id]->fragments[dbindex];
         frag->db = db;
         auto dbimpl = reinterpret_cast<leveldb::DBImpl *>(db);
+        dbimpl->log_manager_ = log_manager_;
+        {
+            auto c = reinterpret_cast<leveldb::StoCBlockClient *>(dbimpl->options_.stoc_client);
+            c->rdma_msg_handlers_ = bg_rdma_msg_handlers_;
+        }
+
         db->processed_writes_ = 0;
         db->number_of_puts_no_wait_ = 0;
         db->number_of_puts_wait_ = 0;
@@ -156,22 +165,22 @@ namespace nova {
         // bump up the numbers to avoid conflicts.
         last_sequence += 100000;
         next_file_number += 100000;
-        dbimpl->RecoverDBMetadata(buf, version_id, last_sequence, next_file_number, log_manager_,
+        memtable_id_seq += 10;
+        dbimpl->RecoverDBMetadata(buf, version_id, last_sequence, next_file_number, memtable_id_seq, log_manager_,
                                   &memtables_to_recover);
         std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> actual_memtables_to_recover;
-        for (auto memtable : memtables_to_recover) {
+        for (const auto &memtable : memtables_to_recover) {
+            NOVA_ASSERT(memtable.second.memtable) << fmt::format("{}-{}", dbindex, memtable.first);
             if (memtable.second.server_logbuf.empty()) {
-                NOVA_LOG(rdmaio::INFO) << fmt::format("Nothing to recover for memtable {}", memtable.first);
+                NOVA_LOG(rdmaio::INFO) << fmt::format("Nothing to recover for memtable {}-{}", dbindex, memtable.first);
                 continue;
             }
             actual_memtables_to_recover[memtable.first] = memtable.second;
         }
-
         leveldb::LogRecovery recover(mem_manager_, client_);
         recover.Recover(actual_memtables_to_recover, cfg_id, dbindex);
         threads_for_new_dbs_.emplace_back(&leveldb::LTCCompactionThread::Start, reorg);
         threads_for_new_dbs_.emplace_back(&leveldb::LTCCompactionThread::Start, coord);
-
         db->StartCompaction();
         frag->is_ready_ = true;
         frag->is_ready_signal_.SignalAll();

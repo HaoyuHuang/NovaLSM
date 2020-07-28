@@ -1103,6 +1103,7 @@ namespace leveldb {
         // Install recovered version
         Finalize(version);
         AppendVersion(version);
+        version_id_seq_ = version_id + 1;
         next_file_number_ = next_file_number + 1;
         last_sequence_ = last_sequence;
     }

@@ -304,7 +304,7 @@ namespace leveldb {
         mem_file->set_num_data_blocks(current_data_blocks);
 
         // Finish and check for file errors
-        NOVA_ASSERT(s.ok());
+        NOVA_ASSERT(s.ok()) << s.ToString();
         s = compact->outfile->Sync();
         s = compact->outfile->Close();
 

@@ -308,17 +308,20 @@ namespace nova {
         // Bump up cfg id.
         NovaConfig::config->current_cfg_id.fetch_add(1);
         int frags_per_thread = migrate_frags.size() / worker->db_migration_threads_.size();
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Migrate {} ranges per migration thread.", frags_per_thread);
+
         std::vector<LTCFragment *> batch;
         int thread_id = 0;
         for (int i = 0; i < migrate_frags.size(); i++) {
-            if (batch.size() == frags_per_thread && migrate_frags.size() - i > frags_per_thread) {
+            if (batch.size() == frags_per_thread) {
                 worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batch);
                 batch.clear();
-                thread_id++;
+                thread_id = (thread_id + 1) % worker->db_migration_threads_.size();
             }
             batch.push_back(migrate_frags[i]);
         }
         if (!batch.empty()) {
+            thread_id = (thread_id + 1) % worker->db_migration_threads_.size();
             worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batch);
         }
         char *response_buf = worker->buf;
@@ -416,10 +419,9 @@ namespace nova {
         uint64_t nrecords;
         buf += str_to_int(buf, &nrecords);
         std::string skey(startkey, nkey);
-        NOVA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-                        << " Scan fd:"
-                        << fd << " key:" << skey << " nkey:" << nkey
-                        << " nrecords: " << nrecords;
+        NOVA_LOG(DEBUG)
+            << fmt::format("memstore[{}]: scan fd:{} key:{} nkey:{} nrecords:{}", worker->thread_id_, fd, skey,
+                           nkey, nrecords);
         uint64_t hv = keyhash(startkey, nkey);
         auto cfg = NovaConfig::config->cfgs[server_cfg_id];
         LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
@@ -443,7 +445,7 @@ namespace nova {
 
         while (read_records < nrecords && pivot_db_id < cfg->fragments.size()) {
             frag = cfg->fragments[pivot_db_id];
-            if (prior_last_key != frag->range.key_start) {
+            if (prior_last_key != -1 && prior_last_key != frag->range.key_start) {
                 break;
             }
             if (frag->ltc_server_id != NovaConfig::config->my_server_id) {
@@ -486,11 +488,12 @@ namespace nova {
             pivot_db_id += 1;
         }
 
+        NOVA_LOG(rdmaio::DEBUG) << fmt::format("Scan size:{}", scan_size);
+
         conn->response_buf[scan_size] = MSG_TERMINATER_CHAR;
         scan_size += 1;
         conn->response_size = scan_size;
-        NOVA_ASSERT(
-                conn->response_size < NovaConfig::config->max_msg_size);
+        NOVA_ASSERT(conn->response_size < NovaConfig::config->max_msg_size);
         return true;
     }
 

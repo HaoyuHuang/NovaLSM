@@ -235,8 +235,7 @@ namespace leveldb {
         context.done = false;
         char *sendbuf = rdma_broker_->GetSendBuf(stoc_id);
         leveldb::EncodeFixed32(sendbuf, req_id);
-        context.wr_id = rdma_broker_->PostRead(local_buf, size, stoc_id,
-                                               0, remote_offset, false);
+        context.wr_id = rdma_broker_->PostRead(local_buf, size, stoc_id, 0, remote_offset, false);
         request_context_[req_id] = context;
         IncrementReqId();
         NOVA_LOG(DEBUG)
@@ -401,8 +400,7 @@ namespace leveldb {
             rdma_msg_handlers_[id % rdma_msg_handlers_.size()]->AddTask(task);
             return;
         }
-        uint32_t seq = StoCBlockClient::rdma_worker_seq_id_.fetch_add(1,
-                                                                      std::memory_order_relaxed) %
+        uint32_t seq = StoCBlockClient::rdma_worker_seq_id_.fetch_add(1, std::memory_order_relaxed) %
                        rdma_msg_handlers_.size();
         rdma_msg_handlers_[seq]->AddTask(task);
     }

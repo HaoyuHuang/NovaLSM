@@ -349,8 +349,7 @@ namespace nova {
             }
             auto reorg = new leveldb::LTCCompactionThread(mem_manager);
             auto coord = new leveldb::LTCCompactionThread(mem_manager);
-            auto client = new leveldb::StoCBlockClient(db_index,
-                                                       stoc_file_manager);
+            auto client = new leveldb::StoCBlockClient(db_index, stoc_file_manager);
             dbs_.push_back(
                     CreateDatabase(0, db_index, block_cache, pool, mem_manager, client, bg_compaction_threads,
                                    bg_flush_memtable_threads, reorg, coord));
@@ -528,9 +527,7 @@ namespace nova {
             rdma_server->rdma_write_handler_ = write_handler;
         }
 
-        for (int i = 0;
-             i <
-             NovaConfig::config->num_conn_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_conn_workers; i++) {
             conn_workers.push_back(new NICClientReqWorker(i));
             conn_workers[i]->mem_manager_ = mem_manager;
 
@@ -546,18 +543,14 @@ namespace nova {
             conn_workers[i]->db_migration_threads_ = db_migration_threads;
         }
 
-        for (int i = 0;
-             i <
-             NovaConfig::config->num_compaction_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_compaction_workers; i++) {
             auto bg = static_cast<leveldb::LTCCompactionThread *>(bg_flush_memtable_threads[i]);
             bg->stoc_client_ = new leveldb::StoCBlockClient(i,
                                                             stoc_file_manager);
             bg->stoc_client_->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             bg->thread_id_ = i;
         }
-        for (int i = 0;
-             i <
-             NovaConfig::config->num_compaction_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_compaction_workers; i++) {
             auto bg = static_cast<leveldb::LTCCompactionThread *>(bg_compaction_threads[i]);
             bg->stoc_client_ = new leveldb::StoCBlockClient(i,
                                                             stoc_file_manager);
@@ -575,8 +568,7 @@ namespace nova {
                                                                mem_env);
         storage_options.comparator = new leveldb::InternalKeyComparator(
                 user_comparator);
-        for (int i = 0;
-             i < NovaConfig::config->num_storage_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_storage_workers; i++) {
             auto client = new leveldb::StoCBlockClient(i, stoc_file_manager);
             client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             StorageWorker *worker = new StorageWorker(
@@ -589,8 +581,7 @@ namespace nova {
                     i, mem_env);
             bg_storage_workers.push_back(worker);
         }
-        for (int i = 0;
-             i < NovaConfig::config->num_storage_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_storage_workers; i++) {
             auto client = new leveldb::StoCBlockClient(i, stoc_file_manager);
             client->rdma_msg_handlers_ = fg_rdma_msg_handlers;
             StorageWorker *worker = new StorageWorker(
@@ -603,8 +594,7 @@ namespace nova {
                     i, mem_env);
             fg_storage_workers.push_back(worker);
         }
-        for (int i = 0;
-             i < NovaConfig::config->num_compaction_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_compaction_workers; i++) {
             auto client = new leveldb::StoCBlockClient(i, stoc_file_manager);
             client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             StorageWorker *worker = new StorageWorker(
@@ -631,55 +621,38 @@ namespace nova {
             }
             auto db = reinterpret_cast<leveldb::DBImpl *>(dbs_[i]);
             auto reorg_thread = reinterpret_cast<leveldb::LTCCompactionThread *>(db->options_.reorg_thread);
-            reorg_workers.emplace_back(&leveldb::LTCCompactionThread::Start,
-                                       reorg_thread);
+            reorg_workers.emplace_back(&leveldb::LTCCompactionThread::Start, reorg_thread);
             auto coord_thread = reinterpret_cast<leveldb::LTCCompactionThread *>(db->options_.compaction_coordinator_thread);
             coord_thread->db_ = dbs_[i];
-            coord_thread->stoc_client_ = new leveldb::StoCBlockClient(i,
-                                                                      stoc_file_manager);
+            coord_thread->stoc_client_ = new leveldb::StoCBlockClient(i, stoc_file_manager);
             coord_thread->stoc_client_->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             coord_thread->thread_id_ = i;
-            compaction_coord_workers.emplace_back(
-                    &leveldb::LTCCompactionThread::Start, coord_thread);
+            compaction_coord_workers.emplace_back(&leveldb::LTCCompactionThread::Start, coord_thread);
         }
 
         // Start the threads.
         if (NovaConfig::config->enable_rdma) {
-            for (int i = 0;
-                 i <
-                 NovaConfig::config->num_fg_rdma_workers; i++) {
-                fg_rdma_workers.emplace_back(&RDMAMsgHandler::Start,
-                                             fg_rdma_msg_handlers[i]);
+            for (int i = 0; i < NovaConfig::config->num_fg_rdma_workers; i++) {
+                fg_rdma_workers.emplace_back(&RDMAMsgHandler::Start, fg_rdma_msg_handlers[i]);
             }
-            for (int i = 0;
-                 i < NovaConfig::config->num_bg_rdma_workers; i++) {
-                fg_rdma_workers.emplace_back(&RDMAMsgHandler::Start,
-                                             bg_rdma_msg_handlers[i]);
+            for (int i = 0; i < NovaConfig::config->num_bg_rdma_workers; i++) {
+                fg_rdma_workers.emplace_back(&RDMAMsgHandler::Start, bg_rdma_msg_handlers[i]);
             }
         }
-        for (int i = 0;
-             i < NovaConfig::config->num_compaction_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_compaction_workers; i++) {
             auto bg = reinterpret_cast<leveldb::LTCCompactionThread *>(bg_flush_memtable_threads[i]);
-            compaction_workers.emplace_back(
-                    &leveldb::LTCCompactionThread::Start, bg);
+            compaction_workers.emplace_back(&leveldb::LTCCompactionThread::Start, bg);
         }
-        for (int i = 0;
-             i < NovaConfig::config->num_compaction_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_compaction_workers; i++) {
             auto bg = reinterpret_cast<leveldb::LTCCompactionThread *>(bg_compaction_threads[i]);
-            compaction_workers.emplace_back(
-                    &leveldb::LTCCompactionThread::Start, bg);
+            compaction_workers.emplace_back(&leveldb::LTCCompactionThread::Start, bg);
         }
-        for (int i = 0;
-             i < NovaConfig::config->num_storage_workers; i++) {
-            storage_worker_threads.emplace_back(
-                    &StorageWorker::Start, fg_storage_workers[i]);
-            storage_worker_threads.emplace_back(
-                    &StorageWorker::Start, bg_storage_workers[i]);
+        for (int i = 0; i < NovaConfig::config->num_storage_workers; i++) {
+            storage_worker_threads.emplace_back(&StorageWorker::Start, fg_storage_workers[i]);
+            storage_worker_threads.emplace_back(&StorageWorker::Start, bg_storage_workers[i]);
         }
-        for (int i = 0;
-             i < NovaConfig::config->num_compaction_workers; i++) {
-            storage_worker_threads.emplace_back(
-                    &StorageWorker::Start, compaction_storage_workers[i]);
+        for (int i = 0; i < NovaConfig::config->num_compaction_workers; i++) {
+            storage_worker_threads.emplace_back(&StorageWorker::Start, compaction_storage_workers[i]);
         }
 
         // Wait for all RDMA connections to setup.
@@ -726,6 +699,7 @@ namespace nova {
                 continue;
             }
             auto db = reinterpret_cast<leveldb::DBImpl *>(dbs_[db_index]);
+            db->log_manager_ = log_manager;
             auto client = reinterpret_cast<leveldb::StoCBlockClient *>(db->options_.stoc_client);
             client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
         }
@@ -735,6 +709,7 @@ namespace nova {
                 if (!dbs_[db_index]) {
                     continue;
                 }
+                NOVA_LOG(rdmaio::INFO) << fmt::format("!!!Recover database range {}", db_index);
                 NOVA_ASSERT(dbs_[db_index]->Recover().ok());
             }
         }
@@ -766,8 +741,7 @@ namespace nova {
 
         stat_thread_->async_workers_ = fg_rdma_msg_handlers;
         stat_thread_->async_compaction_workers_ = bg_rdma_msg_handlers;
-        stats_t_.emplace_back(
-                std::thread(&NovaStatThread::Start, stat_thread_));
+        stats_t_.emplace_back(std::thread(&NovaStatThread::Start, stat_thread_));
 
         NovaGlobalVariables::global.is_ready_to_process_requests = true;
         {
@@ -800,8 +774,7 @@ namespace nova {
                         break;
                     }
                 }
-                if (ready_ltcs.size() ==
-                    NovaConfig::config->ltc_servers.size()) {
+                if (ready_ltcs.size() == NovaConfig::config->ltc_servers.size()) {
                     break;
                 }
                 sleep(1);
@@ -809,21 +782,15 @@ namespace nova {
         }
 
         if (NovaConfig::config->fail_stoc_id != -1) {
-            auto stoc_client = new leveldb::StoCBlockClient(100,
-                                                            stoc_file_manager);
+            auto stoc_client = new leveldb::StoCBlockClient(100, stoc_file_manager);
             stoc_client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             monitor_ = new StoCHealthMonitor(
                     NovaConfig::config->fail_stoc_id,
                     NovaConfig::config->exp_seconds_to_fail_stoc, stoc_client, dbs_);
-            stats_t_.emplace_back(
-                    std::thread(&StoCHealthMonitor::Start, monitor_));
+            stats_t_.emplace_back(std::thread(&StoCHealthMonitor::Start, monitor_));
         }
-
-
         // Start connection threads in the end after we have loaded all data.
-        for (int i = 0;
-             i <
-             NovaConfig::config->num_conn_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_conn_workers; i++) {
             conn_worker_threads.emplace_back(start, conn_workers[i]);
         }
         current_conn_worker_id_ = 0;

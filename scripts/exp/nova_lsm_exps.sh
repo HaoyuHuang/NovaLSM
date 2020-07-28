@@ -1,5 +1,5 @@
 #!/bin/bash
-recordcount="1000000"
+recordcount="10000000"
 dryrun="false"
 
 number_of_ltcs="1"
@@ -22,7 +22,7 @@ nranges_per_server="1"
 
 # bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_replication.sh $recordcount $dryrun > stoc_scale_out
 
-nranges_per_server="4"
+nranges_per_server="16"
 number_of_ltcs="2"
 num_sstable_replicas="1"
 nservers="3"

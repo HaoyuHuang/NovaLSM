@@ -14,7 +14,7 @@ namespace nova {
         logfiles->mutex_.Lock();
         msg_size += leveldb::EncodeFixed32(buf, logfiles->logfiles_.size());
         NOVA_LOG(rdmaio::INFO) << fmt::format("Log: Number of log files: {}", logfiles->logfiles_.size());
-        for (const auto& logfile : logfiles->logfiles_) {
+        for (const auto &logfile : logfiles->logfiles_) {
             uint32_t dbindex = 0;
             uint32_t memtableid = 0;
             ParseDBIndexFromLogFileName(logfile.first, &dbindex, &memtableid);
@@ -25,7 +25,7 @@ namespace nova {
                 msg_size += leveldb::EncodeFixed32(buf + msg_size, replica.first);
                 msg_size += leveldb::EncodeFixed64(buf + msg_size, replica.second);
             }
-            NOVA_LOG(rdmaio::INFO) << fmt::format("Log: Range {} memtable:{}", dbid, memtableid);
+            NOVA_LOG(rdmaio::INFO) << fmt::format("Log file {}: Range {} memtable:{}", logfile.first, dbid, memtableid);
         }
         logfiles->mutex_.Unlock();
         return msg_size;
@@ -46,7 +46,9 @@ namespace nova {
                 uint64_t offset = 0;
                 NOVA_ASSERT(leveldb::DecodeFixed32(buf, &sid));
                 NOVA_ASSERT(leveldb::DecodeFixed64(buf, &offset));
-                (*mid_table_map)[memtableid].server_logbuf[sid] = offset;
+                if (mid_table_map->find(memtableid) != mid_table_map->end()) {
+                    (*mid_table_map)[memtableid].server_logbuf[sid] = offset;
+                }
             }
         }
         return true;
@@ -107,8 +109,6 @@ namespace nova {
                                                   uint64_t remote_buf_offset) {
         uint32_t db_index;
         ParseDBIndexFromLogFileName(log_file, &db_index);
-        NOVA_LOG(rdmaio::INFO)
-            << fmt::format("{} {}", log_file, db_index);
         DBLogFiles *db = db_log_files_[db_index];
         db->mutex_.Lock();
         auto it = db->logfiles_.find(log_file);
@@ -124,8 +124,7 @@ namespace nova {
         records->mu.lock();
         records->remote_backing_mems[remote_server_id] = remote_buf_offset;
         records->mu.unlock();
-        NOVA_LOG(DEBUG)
-            << fmt::format("Allocate log buf for file:{}", log_file);
+        NOVA_LOG(DEBUG) << fmt::format("Allocate log buf for file:{}", log_file);
     }
 
     void StoCInMemoryLogFileManager::DeleteLogBuf(
@@ -141,8 +140,7 @@ namespace nova {
             }
             LogRecords *records = it->second;
             if (records->local_backing_mem) {
-                uint32_t scid = mem_manager_->slabclassid(0,
-                                                          NovaConfig::config->log_buf_size);
+                uint32_t scid = mem_manager_->slabclassid(0, NovaConfig::config->log_buf_size);
                 mem_manager_->FreeItem(0, records->local_backing_mem, scid);
                 NOVA_LOG(DEBUG)
                     << fmt::format("Free log buf for file:{}", log_file[i]);
