@@ -35,8 +35,8 @@ namespace leveldb {
         if (is_ready_) {
             return;
         }
+        is_ready_mutex_.Lock();
         while (!is_ready_) {
-            is_ready_mutex_.Lock();
             is_ready_signal_.Wait();
         }
         is_ready_mutex_.Unlock();
@@ -308,7 +308,7 @@ namespace leveldb {
         return msg_size;
     }
 
-    void AtomicMemTable::Decode(Slice *buf, const InternalKeyComparator& cmp) {
+    bool AtomicMemTable::Decode(Slice *buf, const InternalKeyComparator& cmp) {
         NOVA_ASSERT(DecodeBool(buf, &is_immutable_));
         NOVA_ASSERT(DecodeBool(buf, &is_flushed_));
         NOVA_ASSERT(DecodeFixed32(buf, &last_version_id_));
@@ -320,8 +320,10 @@ namespace leveldb {
         uint32_t size;
         NOVA_ASSERT(DecodeFixed32(buf, &size));
 
+        bool memtable_exists = true;
         if (!memtable_) {
             memtable_ = new MemTable(cmp, memtable_id_, nullptr, false);
+            memtable_exists = false;
         }
 
         for (int i = 0; i < size; i++) {
@@ -329,6 +331,7 @@ namespace leveldb {
             NOVA_ASSERT(DecodeFixed64(buf, &l0));
             l0_file_numbers_.insert(l0);
         }
+        return memtable_exists;
     }
 
     void AtomicMemTable::UpdateL0Files(uint32_t version_id,

@@ -134,7 +134,8 @@ namespace nova {
         NOVA_ASSERT(DecodeFixed64(&buf, &memtable_id_seq));
 
         NOVA_LOG(rdmaio::INFO)
-            << fmt::format("{} {} {} {} {}", dbindex, version_id, last_sequence, next_file_number, memtable_id_seq);
+            << fmt::format("!!!!!Recover {} {} {} {} {}", dbindex, version_id, last_sequence, next_file_number,
+                           memtable_id_seq);
         auto reorg = new leveldb::LTCCompactionThread(mem_manager_);
         auto coord = new leveldb::LTCCompactionThread(mem_manager_);
         auto client = new leveldb::StoCBlockClient(dbindex, stoc_file_manager_);
@@ -196,5 +197,6 @@ namespace nova {
 
         uint32_t scid = mem_manager_->slabclassid(0, dbmeta.msg_size);
         mem_manager_->FreeItem(0, dbmeta.buf, scid);
+        NOVA_LOG(rdmaio::INFO) << fmt::format("!!!!!Recover {} complete", dbindex);
     }
 }

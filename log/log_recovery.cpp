@@ -42,7 +42,7 @@ namespace leveldb {
             uint32_t reqid = client_->InitiateReadInMemoryLogFile(rdma_buf, server_id, remote_offset,
                                                                   nova::NovaConfig::config->max_stoc_file_size);
             NOVA_LOG(rdmaio::INFO)
-                << fmt::format("Recovery memtable-{} from server-{} offset:{}", replica.first, server_id,
+                << fmt::format("Restore memtable-{} from server-{} offset:{}", replica.first, server_id,
                                remote_offset);
             reqs.push_back(reqid);
         }
@@ -107,7 +107,7 @@ namespace leveldb {
         timeval end{};
         gettimeofday(&end, nullptr);
         NOVA_LOG(rdmaio::INFO)
-            << fmt::format("recovery duration: {},{},{},{}",
+            << fmt::format("memtable recovery duration: {},{},{},{}",
                            memtables_to_recover.size(),
                            recovered_log_records,
                            time_diff(start, rdma_read_complete),

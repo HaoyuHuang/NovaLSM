@@ -139,7 +139,7 @@ namespace leveldb {
 
         uint32_t Encode(char *buf);
 
-        void Decode(Slice *buf, const InternalKeyComparator& cmp);
+        bool Decode(Slice *buf, const InternalKeyComparator& cmp);
 
         bool is_immutable_ = false;
         bool is_flushed_ = false;

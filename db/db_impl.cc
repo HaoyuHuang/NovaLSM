@@ -332,7 +332,7 @@ namespace leveldb {
         NOVA_LOG(rdmaio::INFO) << fmt::format("Decoded {} bytes: Lookup index", size - tmp.size());
         size = tmp.size();
 
-        versions_->DecodeTableIdMapping(&tmp, internal_comparator_);
+        versions_->DecodeTableIdMapping(&tmp, internal_comparator_, mid_table_map);
         NOVA_LOG(rdmaio::INFO) << fmt::format("Decoded {} bytes: TableIdMapping", size - tmp.size());
         size = tmp.size();
 
@@ -525,10 +525,10 @@ namespace leveldb {
                     "Recover the latest verion from manifest file {} at StoC-{}, off:{}",
                     manifest, stoc_id, (uint64_t) buf);
         uint32_t req_id = client->InitiateReadDataBlock(handle, 0,
-                                      nova::NovaConfig::config->max_stoc_file_size,
-                                      buf,
-                                      nova::NovaConfig::config->max_stoc_file_size,
-                                      manifest, false);
+                                                        nova::NovaConfig::config->max_stoc_file_size,
+                                                        buf,
+                                                        nova::NovaConfig::config->max_stoc_file_size,
+                                                        manifest, false);
         client->Wait();
         StoCResponse response;
         NOVA_ASSERT(client->IsDone(req_id, &response, nullptr));
@@ -546,20 +546,14 @@ namespace leveldb {
 //            client->Wait();
 //        }
         for (auto &it : logfile_buf) {
-            NOVA_LOG(rdmaio::INFO)
-                << fmt::format("log file {}:{}", it.first, it.second);
+            NOVA_LOG(rdmaio::INFO) << fmt::format("log file {}:{}", it.first, it.second);
         }
         // Recover log records.
         std::vector<SubRange> subrange_edits;
-        NOVA_ASSERT(versions_->Recover(
-                Slice(buf, nova::NovaConfig::config->max_stoc_file_size),
-                &subrange_edits).ok());
+        NOVA_ASSERT(versions_->Recover(Slice(buf, nova::NovaConfig::config->max_stoc_file_size), &subrange_edits).ok());
+        NOVA_LOG(rdmaio::INFO) << fmt::format("Recovered Version: {}", versions_->current()->DebugString());
         NOVA_LOG(rdmaio::INFO)
-            << fmt::format("Recovered Version: {}",
-                           versions_->current()->DebugString());
-        NOVA_LOG(rdmaio::INFO)
-            << fmt::format("Recovered lsn:{} lfn:{}", versions_->last_sequence_,
-                           versions_->NextFileNumber());
+            << fmt::format("Recovered lsn:{} lfn:{}", versions_->last_sequence_, versions_->NextFileNumber());
         versions_->last_sequence_.fetch_add(1);
 
         // Inform all StoCs of the mapping between a file and stoc file id.
@@ -568,13 +562,9 @@ namespace leveldb {
         for (int level = 0; level < options_.level; level++) {
             for (int i = 0; i < files[level].size(); i++) {
                 auto meta = files[level][i];
-                for (int replica_id = 0; replica_id <
-                                         meta->block_replica_handles.size(); replica_id++) {
-                    std::string metafilename = TableFileName(dbname_,
-                                                             meta->number,
-                                                             true, replica_id);
-                    std::string filename = TableFileName(dbname_, meta->number,
-                                                         false, replica_id);
+                for (int replica_id = 0; replica_id < meta->block_replica_handles.size(); replica_id++) {
+                    std::string metafilename = TableFileName(dbname_, meta->number, true, replica_id);
+                    std::string filename = TableFileName(dbname_, meta->number, false, replica_id);
                     auto meta_handle = meta->block_replica_handles[replica_id].meta_block_handle;
                     stoc_fn_stocfileid[meta_handle.server_id][metafilename] = meta_handle.stoc_file_id;
                     for (auto &data_block : meta->block_replica_handles[replica_id].data_block_group_handles) {
@@ -585,15 +575,11 @@ namespace leveldb {
         }
 
         NOVA_LOG(rdmaio::INFO)
-            << fmt::format("Recover Start Install FileStoCFile mapping size:{}",
-                           stoc_fn_stocfileid.size());
+            << fmt::format("Recover Start Install FileStoCFile mapping size:{}", stoc_fn_stocfileid.size());
         for (const auto &mapping : stoc_fn_stocfileid) {
             NOVA_LOG(rdmaio::INFO)
-                << fmt::format(
-                        "Recover Install FileStoCFile mapping {} size:{}",
-                        mapping.first, mapping.second.size());
-            client->InitiateInstallFileNameStoCFileMapping(mapping.first,
-                                                           mapping.second);
+                << fmt::format("Recover Install FileStoCFile mapping {} size:{}", mapping.first, mapping.second.size());
+            client->InitiateInstallFileNameStoCFileMapping(mapping.first, mapping.second);
             client->Wait();
         }
 
@@ -607,8 +593,7 @@ namespace leveldb {
         NOVA_LOG(rdmaio::INFO)
             << fmt::format("Recover Start Fetching meta blocks size:{}",
                            meta_files.size());
-        FetchMetadataFilesInParallel(meta_files, dbname_, options_, client,
-                                     env_);
+        FetchMetadataFilesInParallel(meta_files, dbname_, options_, client, env_);
         // Rebuild lookup index.
         ReadOptions ro;
         ro.mem_manager = options_.mem_manager;
@@ -706,8 +691,7 @@ namespace leveldb {
         timeval rdma_read_complete = {};
         gettimeofday(&rdma_read_complete, nullptr);
 
-        NOVA_ASSERT(RecoverLogFile(logfile_buf, &recovered_log_records,
-                                   &rdma_read_complete).ok());
+        NOVA_ASSERT(RecoverLogFile(logfile_buf, &recovered_log_records, &rdma_read_complete).ok());
         timeval end = {};
         gettimeofday(&end, nullptr);
 

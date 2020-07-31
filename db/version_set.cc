@@ -1157,6 +1157,9 @@ namespace leveldb {
         AppendVersion(v);
         next_file_number_ = next_file + 1;
         last_sequence_ = last_sequence;
+        for (auto file : v->fn_files_) {
+            file.second->memtable_ids.clear();
+        }
         return Status::OK();
     }
 
@@ -1336,7 +1339,8 @@ namespace leveldb {
         return msg_size;
     }
 
-    void VersionSet::DecodeTableIdMapping(Slice *buf, const InternalKeyComparator& cmp) {
+    void VersionSet::DecodeTableIdMapping(Slice *buf, const InternalKeyComparator &cmp,
+                                          std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map) {
         while (true) {
             uint32_t mid = 0;
             NOVA_ASSERT(DecodeFixed32(buf, &mid));
@@ -1345,7 +1349,10 @@ namespace leveldb {
             }
             NOVA_LOG(rdmaio::INFO) << fmt::format("Decode tableid mapping: {}", mid);
             NOVA_ASSERT(mid < MAX_LIVE_MEMTABLES);
-            mid_table_mapping_[mid]->Decode(buf, cmp);
+            if (!mid_table_mapping_[mid]->Decode(buf, cmp)) {
+                NOVA_LOG(rdmaio::INFO) << fmt::format("MemTable does not exist in memtable partitions {}:{}", dbname_, mid);
+                (*mid_table_map)[mid].memtable = mid_table_mapping_[mid]->memtable_;
+            }
         }
     }
 

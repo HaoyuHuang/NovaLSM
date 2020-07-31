@@ -144,7 +144,18 @@ function run_bench() {
 	for s in ${servers[@]}
 	do
 		echo "restore database image $s"
-		ssh -oStrictHostKeyChecking=no $s "rm -rf /db/nova-db-$recordcount-1024/ && cp -r /db/snapshot-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas/nova-db-$recordcount-1024/ /db/"
+		ssh -oStrictHostKeyChecking=no $s "rm -rf /db/nova-db-$recordcount-1024/ && cp -r /db/snapshot-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas/nova-db-$recordcount-1024/ /db/ &" &
+	done
+
+	sleep 10
+
+	for m in ${machines[@]}
+	do
+		while ssh -oStrictHostKeyChecking=no $m "ps -ef | grep -v grep | grep -v ssh | grep -v bash | grep -c \"cp -r\""
+		do
+			sleep 10
+			echo "waiting for $m"
+		done
 	done
 	
 	# start stats
@@ -333,26 +344,26 @@ major_compaction_max_tables_in_a_set="20"
 enable_load_data="false"
 
 
-cc_nranges_per_server="16"
+cc_nranges_per_server="64"
 num_log_replicas="1"
 num_memtable_partitions="1"
 num_memtables="2"
 
-nservers="4"
-nmachines="7"
+nservers="15"
+nmachines="25"
 workload="workloadw"
 dist="zipfian"
 scatter_policy="power_of_two"
 workload="workloada"
 ltc_num_stocs_scatter_data_blocks="1"
-nclients="3"
+nclients="10"
 nthreads="512"
 major_compaction_max_parallism="1"
 level="6"
 num_sstable_replicas="1"
 num_migration_threads="32"
 workload="workloadw"
-number_of_ltcs="3"
+number_of_ltcs="5"
 enable_range_index="true"
 
 l0_start_compaction_mb=$((4*1024))

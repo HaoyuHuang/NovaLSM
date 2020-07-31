@@ -155,6 +155,8 @@ namespace leveldb {
 
         bool DecodeReplicas(Slice *ptr);
 
+        bool DecodeMemTableIds(Slice *ptr);
+
         std::string DebugString() const;
 
         std::string ShortDebugString() const;

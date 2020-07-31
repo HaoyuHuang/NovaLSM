@@ -393,7 +393,7 @@ namespace leveldb {
 
         uint32_t EncodeTableIdMapping(char *buf, uint32_t latest_memtableid);
 
-        void DecodeTableIdMapping(Slice *buf, const InternalKeyComparator& cmp);
+        void DecodeTableIdMapping(Slice *buf, const InternalKeyComparator& cmp, std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map);
 
     private:
         class Builder;

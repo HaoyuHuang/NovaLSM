@@ -94,33 +94,39 @@ namespace leveldb {
     }
 
     uint32_t FileMetaData::Encode(char *buf) const {
-//        eturn DecodeFixed64(input, &number) &&
-//              DecodeFixed64(input, &file_size) &&
-//              DecodeFixed64(input, &converted_file_size) &&
-//              GetInternalKey(input, &smallest, copy) &&
-//              GetInternalKey(input, &largest, copy) &&
-//              DecodeFixed64(input, &flush_timestamp) &&
-//              DecodeFixed32(input, &level) && DecodeReplicas(input);
-
         char *dst = buf;
         uint32_t msg_size = 0;
+
+//        int refs = 0;
+//        int allowed_seeks = 0;  // Seeks allowed until compaction
+//        //
+//        std::set<uint32_t> memtable_ids;
+//        uint64_t number = 0;
+//        uint64_t file_size = 0;    // File size in bytes in original SSTable format.
+//        uint64_t converted_file_size = 0; // File size in bytes after converted to StoC file.
+//        uint64_t flush_timestamp = 0;
+//        uint32_t level = 0;
+//        InternalKey smallest;  // Smallest internal key served by table
+//        InternalKey largest;   // Largest internal key served by table
+//        FileCompactionStatus compaction_status;
+//        std::vector<FileReplicaMetaData> block_replica_handles = {};
+
         msg_size += EncodeFixed64(dst + msg_size, number);
         msg_size += EncodeFixed64(dst + msg_size, file_size);
         msg_size += EncodeFixed64(dst + msg_size, converted_file_size);
-        msg_size += EncodeStr(dst + msg_size,
-                              smallest.Encode().ToString());
-        msg_size += EncodeStr(dst + msg_size,
-                              largest.Encode().ToString());
+        msg_size += EncodeStr(dst + msg_size, smallest.Encode().ToString());
+        msg_size += EncodeStr(dst + msg_size, largest.Encode().ToString());
         msg_size += EncodeFixed64(dst + msg_size, flush_timestamp);
         msg_size += EncodeFixed32(dst + msg_size, level);
-
+        msg_size += EncodeFixed32(dst + msg_size, memtable_ids.size());
+        for (uint32_t mid : memtable_ids) {
+            msg_size += EncodeFixed32(dst + msg_size, mid);
+        }
         msg_size += EncodeFixed32(dst + msg_size, block_replica_handles.size());
         for (int i = 0; i < block_replica_handles.size(); i++) {
-            block_replica_handles[i].meta_block_handle.EncodeHandle(
-                    dst + msg_size);
+            block_replica_handles[i].meta_block_handle.EncodeHandle(dst + msg_size);
             msg_size += StoCBlockHandle::HandleSize();
-            msg_size += EncodeFixed32(dst + msg_size,
-                                      block_replica_handles[i].data_block_group_handles.size());
+            msg_size += EncodeFixed32(dst + msg_size, block_replica_handles[i].data_block_group_handles.size());
             for (auto &handle : block_replica_handles[i].data_block_group_handles) {
                 handle.EncodeHandle(dst + msg_size);
                 msg_size += StoCBlockHandle::HandleSize();
@@ -136,6 +142,21 @@ namespace leveldb {
         } else {
             return false;
         }
+    }
+
+    bool FileMetaData::DecodeMemTableIds(Slice *ptr) {
+        uint32_t num_ids;
+        if (!DecodeFixed32(ptr, &num_ids)) {
+            return false;
+        }
+        for (int i = 0; i < num_ids; i++) {
+            uint32_t mid = 0;
+            if (!DecodeFixed32(ptr, &mid)) {
+                return false;
+            }
+            memtable_ids.insert(mid);
+        }
+        return true;
     }
 
     bool FileMetaData::DecodeReplicas(Slice *ptr) {
@@ -165,7 +186,7 @@ namespace leveldb {
                GetInternalKey(input, &smallest, copy) &&
                GetInternalKey(input, &largest, copy) &&
                DecodeFixed64(input, &flush_timestamp) &&
-               DecodeFixed32(input, &level) && DecodeReplicas(input);
+               DecodeFixed32(input, &level) && DecodeMemTableIds(input) && DecodeReplicas(input);
     }
 
     uint32_t ReplicationPair::Encode(char *buf) const {

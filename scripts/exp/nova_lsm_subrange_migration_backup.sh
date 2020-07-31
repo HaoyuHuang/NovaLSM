@@ -297,7 +297,7 @@ num_storage_workers="32"
 
 nmachines="15"
 nclients="1"
-maxexecutiontime=1200
+maxexecutiontime=300
 workload="workloadw"
 enable_load_data="true"
 mem_pool_size_gb="20"
@@ -325,7 +325,7 @@ number_of_ltcs="1"
 nclients="1"
 nservers="6"
 level="6"
-nmachines="7"
+nmachines="25"
 
 exp_seconds_to_fail_stoc="-1"
 fail_stoc_id="-1"

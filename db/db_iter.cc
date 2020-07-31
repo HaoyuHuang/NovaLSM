@@ -187,6 +187,9 @@ namespace leveldb {
                 Slice ukey = ExtractUserKey(ikey);
                 nova::str_to_int(ukey.data(), &key, ukey.size());
                 if (key == range_partition_.key_end - 1) {
+//                    NOVA_LOG(rdmaio::INFO)
+//                        << fmt::format("Stop iterating since reaching the end of range partition {}:{}:{}",
+//                                       ukey.ToString(), range_partition_.key_start, range_partition_.key_end);
                     valid_ = false;
                     saved_ikey_.clear();
                     return;
@@ -248,11 +251,7 @@ namespace leveldb {
                             skipping = true;
                             break;
                         case kTypeValue:
-                            if (skipping &&
-                                user_comparator_->Compare(ikey.user_key,
-                                                          ExtractUserKey(
-                                                                  *skip)) <=
-                                0) {
+                            if (skipping && user_comparator_->Compare(ikey.user_key, ExtractUserKey(*skip)) <= 0) {
                                 // Entry hidden
                             } else {
                                 valid_ = true;
@@ -284,9 +283,7 @@ namespace leveldb {
                         ClearSavedValue();
                         return;
                     }
-                    if (user_comparator_->Compare(ExtractUserKey(iter_->key()),
-                                                  ExtractUserKey(saved_ikey_)) <
-                        0) {
+                    if (user_comparator_->Compare(ExtractUserKey(iter_->key()), ExtractUserKey(saved_ikey_)) < 0) {
                         break;
                     }
                 }
@@ -305,10 +302,7 @@ namespace leveldb {
                     ParsedInternalKey ikey;
                     if (ParseKey(&ikey) && ikey.sequence <= sequence_) {
                         if ((value_type != kTypeDeletion) &&
-                            user_comparator_->Compare(ikey.user_key,
-                                                      ExtractUserKey(
-                                                              saved_ikey_)) <
-                            0) {
+                            user_comparator_->Compare(ikey.user_key, ExtractUserKey(saved_ikey_)) < 0) {
                             // We encountered a non-deleted value in entries for previous keys,
                             break;
                         }
@@ -324,8 +318,7 @@ namespace leveldb {
                                 swap(empty, saved_value_);
                             }
                             SaveKey(iter_->key(), &saved_ikey_);
-                            saved_value_.assign(raw_value.data(),
-                                                raw_value.size());
+                            saved_value_.assign(raw_value.data(), raw_value.size());
                         }
                     }
                     iter_->Prev();
@@ -347,9 +340,7 @@ namespace leveldb {
             direction_ = kForward;
             ClearSavedValue();
             saved_ikey_.clear();
-            AppendInternalKey(&saved_ikey_,
-                              ParsedInternalKey(target, sequence_,
-                                                kValueTypeForSeek));
+            AppendInternalKey(&saved_ikey_, ParsedInternalKey(target, sequence_, kValueTypeForSeek));
             iter_->Seek(saved_ikey_);
             if (iter_->Valid()) {
                 FindNextUserEntry(false, &saved_ikey_ /* temporary storage */);

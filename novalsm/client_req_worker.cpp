@@ -171,13 +171,11 @@ namespace nova {
         leveldb::Slice key(request_buf, nkey);
         LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
 
-        bool wait = false;
-        while (!frag->is_ready_) {
-            wait = true;
+        if (!frag->is_ready_) {
             frag->is_ready_mutex_.Lock();
-            frag->is_ready_signal_.Wait();
-        }
-        if (wait) {
+            while (!frag->is_ready_) {
+                frag->is_ready_signal_.Wait();
+            }
             frag->is_ready_mutex_.Unlock();
         }
 
@@ -455,16 +453,13 @@ namespace nova {
                 break;
             }
 
-            bool wait = false;
-            while (!frag->is_ready_) {
-                wait = true;
+            if (!frag->is_ready_) {
                 frag->is_ready_mutex_.Lock();
-                frag->is_ready_signal_.Wait();
-            }
-            if (wait) {
+                while (!frag->is_ready_) {
+                    frag->is_ready_signal_.Wait();
+                }
                 frag->is_ready_mutex_.Unlock();
             }
-
 
             leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frag->db);
             leveldb::Iterator *iterator = db->NewIterator(read_options);
@@ -484,8 +479,10 @@ namespace nova {
                 memcpy(response_buf, value.data(), value.size());
                 response_buf += value.size();
                 read_records++;
+//                NOVA_LOG(rdmaio::INFO) << fmt::format("Getting key {}", key.ToString());
                 iterator->Next();
             }
+//            NOVA_LOG(rdmaio::INFO) << fmt::format("Go to next range partition {}", pivot_db_id + 1);
             delete iterator;
             prior_last_key = frag->range.key_end;
             pivot_db_id += 1;
@@ -535,13 +532,11 @@ namespace nova {
         option.is_loading_db = false;
         LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
 
-        bool wait = false;
-        while (!frag->is_ready_) {
-            wait = true;
+        if (!frag->is_ready_) {
             frag->is_ready_mutex_.Lock();
-            frag->is_ready_signal_.Wait();
-        }
-        if (wait) {
+            while (!frag->is_ready_) {
+                frag->is_ready_signal_.Wait();
+            }
             frag->is_ready_mutex_.Unlock();
         }
 
