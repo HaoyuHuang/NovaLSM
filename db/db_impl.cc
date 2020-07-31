@@ -155,7 +155,7 @@ namespace leveldb {
     DBImpl::~DBImpl() {
         // Wait for background work to finish.
         if (db_lock_ != nullptr) {
-            env_->UnlockFile(db_lock_);
+//            env_->UnlockFile("");
         }
 
         delete versions_;
@@ -332,7 +332,7 @@ namespace leveldb {
         NOVA_LOG(rdmaio::INFO) << fmt::format("Decoded {} bytes: Lookup index", size - tmp.size());
         size = tmp.size();
 
-        versions_->DecodeTableIdMapping(&tmp);
+        versions_->DecodeTableIdMapping(&tmp, internal_comparator_);
         NOVA_LOG(rdmaio::INFO) << fmt::format("Decoded {} bytes: TableIdMapping", size - tmp.size());
         size = tmp.size();
 
@@ -347,23 +347,14 @@ namespace leveldb {
         NOVA_ASSERT(range_index_manager_);
         range_index_manager_->Initialize(range_index);
 
-        // Recover memtables from log files.
-//        for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
-//            auto partition = partitioned_active_memtables_[i];
-//            if (partition->memtable) {
-//                uint32_t mid = partition->memtable->memtableid();
-//                auto &pair = (*mid_table_map)[mid];
-//                pair.memtable = partition->memtable;
-//                pair.logfile = nova::LogFileName(dbid_, partition->memtable->memtableid());
-//            }
-//            for (int j = 0; j < partition->closed_log_files.size(); j++) {
-//                uint32_t mid = partition->closed_log_files[j];
-//                auto &pair = (*mid_table_map)[mid];
-//                pair.memtable = versions_->mid_table_mapping_[mid]->memtable_;
-//                NOVA_ASSERT(pair.memtable);
-//                pair.logfile = nova::LogFileName(dbid_, mid);
-//            }
-//        }
+        // Mark immutable memtables as immutable.
+        for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
+            auto partition = partitioned_active_memtables_[i];
+            for (int j = 0; j < partition->immutable_memtable_ids.size(); j++) {
+                uint32_t mid = partition->immutable_memtable_ids[j];
+                versions_->mid_table_mapping_[mid]->is_immutable_ = true;
+            }
+        }
     }
 
     void
@@ -523,6 +514,7 @@ namespace leveldb {
                                                           nova::NovaConfig::config->max_stoc_file_size);
         char *buf = options_.mem_manager->ItemAlloc(0, scid);
         NOVA_ASSERT(buf);
+        memset(buf, 0, nova::NovaConfig::config->max_stoc_file_size);
         StoCBlockHandle handle = {};
         handle.server_id = stoc_id;
         handle.stoc_file_id = 0;
@@ -530,14 +522,17 @@ namespace leveldb {
         handle.size = nova::NovaConfig::config->max_stoc_file_size;
 
         NOVA_LOG(rdmaio::INFO) << fmt::format(
-                    "Recover the latest verion from manifest file {} at StoC-{}",
-                    manifest, stoc_id);
-        client->InitiateReadDataBlock(handle, 0,
+                    "Recover the latest verion from manifest file {} at StoC-{}, off:{}",
+                    manifest, stoc_id, (uint64_t) buf);
+        uint32_t req_id = client->InitiateReadDataBlock(handle, 0,
                                       nova::NovaConfig::config->max_stoc_file_size,
                                       buf,
                                       nova::NovaConfig::config->max_stoc_file_size,
                                       manifest, false);
         client->Wait();
+        StoCResponse response;
+        NOVA_ASSERT(client->IsDone(req_id, &response, nullptr));
+
         std::unordered_map<std::string, uint64_t> logfile_buf;
 //        rdma::CCFragment *frag = rdma::NovaConfig::config->db_fragment[dbid_];
 //        if (!frag->log_replica_stoc_ids.empty()) {
@@ -669,7 +664,7 @@ namespace leveldb {
                     const auto &sr = new_srs->subranges[i];
                     if (last_key == sr.tiny_ranges[0].lower) {
                         init->range_tables_[range_index_id].memtable_ids.insert(
-                                partitioned_active_memtables_[i]->memtable->memtableid());
+                                partitioned_active_memtables_[i]->active_memtable->memtableid());
                         continue;
                     }
                     Range r = {};
@@ -678,7 +673,7 @@ namespace leveldb {
                     init->ranges_.push_back(r);
                     RangeTables tables = {};
                     tables.memtable_ids.insert(
-                            partitioned_active_memtables_[i]->memtable->memtableid());
+                            partitioned_active_memtables_[i]->active_memtable->memtableid());
                     init->range_tables_.push_back(tables);
                     last_key = sr.tiny_ranges[0].lower;
                     range_index_id += 1;
@@ -691,7 +686,7 @@ namespace leveldb {
                 RangeTables tables = {};
                 for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
                     tables.memtable_ids.insert(
-                            partitioned_active_memtables_[i]->memtable->memtableid());
+                            partitioned_active_memtables_[i]->active_memtable->memtableid());
                 }
                 init->range_tables_.push_back(tables);
             }
@@ -1066,6 +1061,12 @@ namespace leveldb {
             bg_thread->mem_manager()->FreeItem(0, backing_mem, scid);
         }
         iterators.clear();
+
+        // Add output memtable to the memtable partition.
+        MemTablePartition *p = partitioned_active_memtables_[partition_id];
+        int start_id = 0;
+        p->mutex.Lock();
+
         // Update range index.
         if (range_index_manager_) {
             RangeIndexVersionEdit range_edit;
@@ -1074,6 +1075,7 @@ namespace leveldb {
             range_edit.new_memtable_id = memtable_id;
             range_edit.add_new_memtable = true;
             range_index_manager_->AppendNewVersion(&scan_stats, range_edit);
+            range_index_manager_->DeleteObsoleteVersions();
         }
 
         // The lookup index is updated before this so that new gets will reference the new memtable.
@@ -1083,12 +1085,9 @@ namespace leveldb {
             atomic_imm->is_immutable_ = true;
             atomic_imm->SetFlushed(dbname_, {}, 0);
         }
-        // Add output memtable to the memtable partition.
-        MemTablePartition *p = partitioned_active_memtables_[partition_id];
-        int start_id = 0;
-        p->mutex.Lock();
-        if (!p->memtable) {
-            p->memtable = output_memtable;
+
+        if (!p->active_memtable) {
+            p->active_memtable = output_memtable;
         } else {
             partitioned_imms_[tasks[start_id].imm_slot] = output_memtable->memtableid();
             start_id++;
@@ -1106,12 +1105,11 @@ namespace leveldb {
         if (no_slots) {
             p->background_work_finished_signal_.SignalAll();
         }
-        number_of_immutable_memtables_.fetch_add(
-                -tasks.size() + start_id);
-        for (auto &log_file : p->closed_log_files) {
+        number_of_immutable_memtables_.fetch_add(-tasks.size() + start_id);
+        for (auto &log_file : p->immutable_memtable_ids) {
             closed_memtable_log_files->push_back(log_file);
         }
-        p->closed_log_files.clear();
+        p->immutable_memtable_ids.clear();
         p->mutex.Unlock();
         delete state;
     }
@@ -1345,6 +1343,7 @@ namespace leveldb {
             Status s = versions_->LogAndApply(&edit, v, true);
             if (range_index_manager_) {
                 range_index_manager_->AppendNewVersion(&scan_stats, range_edit);
+                range_index_manager_->DeleteObsoleteVersions();
             }
             NOVA_ASSERT(s.ok());
             if (!compacted_tables_.empty()) {
@@ -1372,10 +1371,10 @@ namespace leveldb {
                     p->background_work_finished_signal_.SignalAll();
                 }
                 number_of_immutable_memtables_.fetch_add(-it.second.size());
-                for (auto &log_file : p->closed_log_files) {
+                for (auto &log_file : p->immutable_memtable_ids) {
                     closed_memtable_log_files.push_back(log_file);
                 }
-                p->closed_log_files.clear();
+                p->immutable_memtable_ids.clear();
                 p->mutex.Unlock();
             }
         } else if (delete_obsolete_files) {
@@ -1392,8 +1391,7 @@ namespace leveldb {
         }
         DeleteFiles(bg_thread, files_to_delete, server_pairs);
         // Delete log files.
-        if (nova::NovaConfig::config->log_record_mode ==
-            nova::NovaLogRecordMode::LOG_RDMA &&
+        if (nova::NovaConfig::config->log_record_mode == nova::NovaLogRecordMode::LOG_RDMA &&
             !closed_memtable_log_files.empty()) {
             std::vector<std::string> logs;
             for (const auto &file : closed_memtable_log_files) {
@@ -2052,8 +2050,8 @@ namespace leveldb {
         SequenceNumber latest_snapshot;
         uint32_t seed;
         Iterator *iter = NewInternalIterator(options, &latest_snapshot, &seed);
-        return NewDBIterator(this, user_comparator(), iter,
-                             latest_snapshot, seed);
+        return NewDBIterator(this, user_comparator(), iter, latest_snapshot, seed,
+                             nova::NovaConfig::config->cfgs[options.cfg_id]->fragments[dbid_]->range);
     }
 
     const Snapshot *DBImpl::GetSnapshot() {
@@ -2177,32 +2175,59 @@ namespace leveldb {
         for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
             MemTablePartition *p = partitioned_active_memtables_[i];
             uint32_t memtableid = 0;
-            if (p->memtable) {
-                memtableid = p->memtable->memtableid();
+            if (p->active_memtable) {
+                memtableid = p->active_memtable->memtableid();
             }
             msg_size += EncodeFixed32(buf + msg_size, memtableid);
-            msg_size += EncodeFixed32(buf + msg_size, p->closed_log_files.size());
-            for (auto logfile : p->closed_log_files) {
+            msg_size += EncodeFixed32(buf + msg_size, p->immutable_memtable_ids.size());
+            for (auto logfile : p->immutable_memtable_ids) {
                 msg_size += EncodeFixed32(buf + msg_size, logfile);
             }
             NOVA_LOG(rdmaio::INFO) << fmt::format("Range {} has active-{} and {} pending log files", dbid_, memtableid,
-                                                  p->closed_log_files.size());
-            p->closed_log_files.clear();
+                                                  p->immutable_memtable_ids.size());
+            p->immutable_memtable_ids.clear();
         }
         return msg_size;
     }
 
-    void DBImpl::DecodeMemTablePartitions(Slice *buf, std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map) {
+    void DBImpl::DecodeMemTablePartitions(Slice *buf,
+                                          std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map) {
+        auto srs = subrange_manager_->latest_subranges_.load();
         for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
             MemTablePartition *p = partitioned_active_memtables_[i];
             p->mutex.Lock();
+            p->active_memtable = nullptr;
             uint32_t memtableid = 0;
             NOVA_ASSERT(DecodeFixed32(buf, &memtableid));
             if (memtableid != 0) {
-                p->memtable = new MemTable(internal_comparator_, memtableid, nullptr);
-                versions_->mid_table_mapping_[memtableid]->SetMemTable(p->memtable);
-                (*mid_table_map)[memtableid].memtable = p->memtable;
-                (*mid_table_map)[memtableid].logfile = nova::LogFileName(dbid_, memtableid);
+                if (nova::NovaConfig::config->ltc_migration_policy == nova::LTCMigrationPolicy::IMMEDIATE) {
+                    // Mark this table as immutable.
+                    MemTable *table = new MemTable(internal_comparator_, memtableid, nullptr, false);
+                    NOVA_ASSERT(!p->available_slots.empty());
+                    uint32_t slotid = p->available_slots.front();
+                    p->available_slots.pop();
+                    partitioned_imms_[slotid] = memtableid;
+                    p->immutable_memtable_ids.push_back(memtableid);
+                    versions_->mid_table_mapping_[memtableid]->SetMemTable(table);
+
+                    MemTableLogFilePair pair = {};
+                    pair.is_immutable = true;
+                    pair.memtable = table;
+                    pair.logfile = nova::LogFileName(dbid_, memtableid);
+                    pair.partition_id = i;
+                    pair.subrange = &srs->subranges[i];
+                    pair.imm_slot = slotid;
+                    (*mid_table_map)[memtableid] = pair;
+                } else {
+                    p->active_memtable = new MemTable(internal_comparator_, memtableid, nullptr, false);
+                    versions_->mid_table_mapping_[memtableid]->SetMemTable(p->active_memtable);
+
+                    MemTableLogFilePair pair = {};
+                    pair.is_immutable = false;
+                    pair.memtable = p->active_memtable;
+                    pair.logfile = nova::LogFileName(dbid_, memtableid);
+                    (*mid_table_map)[memtableid] = pair;
+                }
             }
             uint32_t size = 0;
             NOVA_ASSERT(DecodeFixed32(buf, &size));
@@ -2210,16 +2235,30 @@ namespace leveldb {
             for (int j = 0; j < size; j++) {
                 uint32_t imm_memtableid = 0;
                 NOVA_ASSERT(DecodeFixed32(buf, &imm_memtableid));
-                MemTable *table = new MemTable(internal_comparator_, imm_memtableid, nullptr);
-                (*mid_table_map)[memtableid].memtable = table;
-                (*mid_table_map)[memtableid].logfile = nova::LogFileName(dbid_, memtableid);
-
+                MemTable *table = new MemTable(internal_comparator_, imm_memtableid, nullptr, false);
                 NOVA_ASSERT(!p->available_slots.empty());
                 uint32_t slotid = p->available_slots.front();
                 p->available_slots.pop();
                 partitioned_imms_[slotid] = imm_memtableid;
-                p->closed_log_files.push_back(imm_memtableid);
+                p->immutable_memtable_ids.push_back(imm_memtableid);
                 versions_->mid_table_mapping_[imm_memtableid]->SetMemTable(table);
+
+                MemTableLogFilePair pair = {};
+                pair.is_immutable = true;
+                pair.memtable = table;
+                pair.logfile = nova::LogFileName(dbid_, memtableid);
+                pair.partition_id = i;
+                pair.subrange = &srs->subranges[i];
+                pair.imm_slot = slotid;
+                (*mid_table_map)[memtableid] = pair;
+            }
+
+            if (nova::NovaConfig::config->ltc_migration_policy == nova::LTCMigrationPolicy::IMMEDIATE &&
+                !p->available_slots.empty()) {
+                // Create a new active memtable.
+                uint32_t new_memtable_id = memtable_id_seq_.fetch_add(1);
+                p->active_memtable = new MemTable(internal_comparator_, new_memtable_id, nullptr, true);
+                versions_->mid_table_mapping_[new_memtable_id]->SetMemTable(p->active_memtable);
             }
             p->mutex.Unlock();
         }
@@ -2231,7 +2270,7 @@ namespace leveldb {
             MemTablePartition *partition = partitioned_active_memtables_[partition_id];
             uint32_t next_imm_slot = -1;
             partition->mutex.Lock();
-            MemTable *table = partition->memtable;
+            MemTable *table = partition->active_memtable;
             if (table &&
                 versions_->mid_table_mapping_[table->memtableid()]->nentries_ >
                 0) {
@@ -2244,13 +2283,13 @@ namespace leveldb {
                     NOVA_ASSERT(partitioned_imms_[next_imm_slot] == 0);
                     partitioned_imms_[next_imm_slot] = table->memtableid();
                     uint32_t memtable_id = memtable_id_seq_.fetch_add(1);
-                    partition->closed_log_files.push_back(table->memtableid());
+                    partition->immutable_memtable_ids.push_back(table->memtableid());
                     table = new MemTable(internal_comparator_, memtable_id,
                                          db_profiler_);
                     NOVA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
                     versions_->mid_table_mapping_[memtable_id]->SetMemTable(
                             table);
-                    partition->memtable = table;
+                    partition->active_memtable = table;
                     number_of_immutable_memtables_.fetch_add(1);
                     int thread_id =
                             EnvBGThread::bg_flush_memtable_thread_id_seq.fetch_add(
@@ -2287,11 +2326,11 @@ namespace leveldb {
 
         MemTable *table = nullptr;
         bool wait = false;
-        int next_imm_slot;
+        int imm_slot;
         uint64_t start_wait = 0;
         while (true) {
-            table = partition->memtable;
-            next_imm_slot = -1;
+            table = partition->active_memtable;
+            imm_slot = -1;
             if (table) {
                 auto atomic_mem = versions_->mid_table_mapping_[table->memtableid()];
                 if (atomic_mem->memtable_size_ <= options_.write_buffer_size) {
@@ -2333,16 +2372,16 @@ namespace leveldb {
                 // The table is full.
                 NOVA_ASSERT(!partition->available_slots.empty());
                 // Mark the active memtable as immutable and schedule compaction.
-                next_imm_slot = partition->available_slots.front();
+                imm_slot = partition->available_slots.front();
                 partition->available_slots.pop();
-                NOVA_ASSERT(partitioned_imms_[next_imm_slot] == 0);
-                partitioned_imms_[next_imm_slot] = table->memtableid();
-                partition->closed_log_files.push_back(table->memtableid());
+                NOVA_ASSERT(partitioned_imms_[imm_slot] == 0);
+                partitioned_imms_[imm_slot] = table->memtableid();
+                partition->immutable_memtable_ids.push_back(table->memtableid());
                 number_of_immutable_memtables_.fetch_add(1);
-                partition->memtable = nullptr;
+                partition->active_memtable = nullptr;
             }
             if (partition->available_slots.empty()) {
-                if (next_imm_slot != -1) {
+                if (imm_slot != -1) {
                     int thread_id = -1;
                     bool merge_memtables_without_flushing = false;
                     if (subrange) {
@@ -2356,8 +2395,8 @@ namespace leveldb {
                                 bg_flush_memtable_threads_.size();
                     }
                     ScheduleFlushMemTableTask(thread_id,
-                                              versions_->mid_table_mapping_[partitioned_imms_[next_imm_slot]]->memtable_,
-                                              partition_id, next_imm_slot,
+                                              versions_->mid_table_mapping_[partitioned_imms_[imm_slot]]->memtable_,
+                                              partition_id, imm_slot,
                                               options.rand_seed,
                                               merge_memtables_without_flushing);
                 }
@@ -2367,7 +2406,6 @@ namespace leveldb {
                     partition->mutex.Unlock();
                     return false;
                 }
-
                 if (start_wait == 0) {
                     start_wait = env_->NowMicros();
                 }
@@ -2380,7 +2418,7 @@ namespace leveldb {
                                      db_profiler_);
                 NOVA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
                 versions_->mid_table_mapping_[memtable_id]->SetMemTable(table);
-                partition->memtable = table;
+                partition->active_memtable = table;
 
                 if (range_index_manager_) {
                     RangeIndexVersionEdit edit;
@@ -2425,7 +2463,7 @@ namespace leveldb {
         }
         partition->mutex.Unlock();
         // Schedule.
-        if (next_imm_slot != -1) {
+        if (imm_slot != -1) {
             int thread_id = -1;
             bool merge_memtables_without_flushing = false;
             if (subrange) {
@@ -2439,9 +2477,9 @@ namespace leveldb {
                         bg_flush_memtable_threads_.size();
             }
             ScheduleFlushMemTableTask(thread_id,
-                                      versions_->mid_table_mapping_[partitioned_imms_[next_imm_slot]]->memtable_,
+                                      versions_->mid_table_mapping_[partitioned_imms_[imm_slot]]->memtable_,
                                       partition_id,
-                                      next_imm_slot, options.rand_seed,
+                                      imm_slot, options.rand_seed,
                                       merge_memtables_without_flushing);
         }
         return true;
@@ -3129,7 +3167,7 @@ namespace leveldb {
                 impl->versions_->mid_table_mapping_[memtable_id]->SetMemTable(
                         table);
                 impl->partitioned_active_memtables_[i] = new MemTablePartition;
-                impl->partitioned_active_memtables_[i]->memtable = table;
+                impl->partitioned_active_memtables_[i]->active_memtable = table;
                 impl->partitioned_active_memtables_[i]->partition_id = i;
                 uint32_t slots = nslots;
                 if (remainder > 0) {
@@ -3199,7 +3237,7 @@ namespace leveldb {
 
         FileLock *lock;
         const std::string lockname = LockFileName(dbname);
-        result = env->LockFile(lockname, &lock);
+//        result = env->LockFile(lockname);
         if (result.ok()) {
             uint64_t number;
             FileType type;
@@ -3212,7 +3250,7 @@ namespace leveldb {
                     }
                 }
             }
-            env->UnlockFile(lock);  // Ignore error since state is already gone
+//            env->UnlockFile(lockname);  // Ignore error since state is already gone
             env->DeleteFile(lockname);
             env->DeleteDir(
                     dbname);  // Ignore error in case dir contains other files

@@ -677,13 +677,18 @@ namespace leveldb {
         NOVA_ASSERT(stoc_block_client);
         stoc_block_client->set_dbid(dbid_);
         {
-            auto metafile = TableFileName(dbname, file_number, false,
-                                          replica_id);
+            auto metafile = TableFileName(dbname, file_number, false, replica_id);
             if (!env_->FileExists(metafile)) {
-                std::vector<const FileMetaData *> files;
-                files.push_back(meta);
-                FetchMetadataFiles(files, dbname, options, stoc_block_client,
-                                   env_);
+                NOVA_ASSERT(env_->LockFile(metafile, file_number).ok());
+                if (!env_->FileExists(metafile)) {
+                    NOVA_LOG(rdmaio::INFO)
+                        << fmt::format("Fetch missing metadata db:{} fd:{} file {}", dbname, file_number,
+                                       meta->DebugString());
+                    std::vector<const FileMetaData *> files;
+                    files.push_back(meta);
+                    FetchMetadataFiles(files, dbname, options, stoc_block_client, env_);
+                }
+                NOVA_ASSERT(env_->UnlockFile(metafile, file_number).ok());
             }
             s = env_->NewRandomAccessFile(metafile, &local_ra_file_);
         }

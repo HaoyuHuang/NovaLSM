@@ -95,6 +95,7 @@ namespace nova {
         std::vector<uint32_t> log_replica_stoc_ids;
         void *db = nullptr;
 
+        std::atomic_bool is_complete_;
         std::atomic_bool is_ready_;
         leveldb::port::Mutex is_ready_mutex_;
         leveldb::port::CondVar is_ready_signal_;
@@ -677,7 +678,7 @@ namespace nova {
             return false;
         }
         *buf = leveldb::Slice(buf->data() + 1, buf->size() - 1);
-        return 0;
+        return true;
     }
 }
 #endif //NOVA_COMMON_H

@@ -248,7 +248,7 @@ namespace leveldb {
         for (int i = 0; i < options_.num_memtable_partitions; i++) {
             std::vector<AtomicMemTable *> memtables;
             (*partitioned_active_memtables_)[i]->mutex.Lock();
-            MemTable *m = (*partitioned_active_memtables_)[i]->memtable;
+            MemTable *m = (*partitioned_active_memtables_)[i]->active_memtable;
             if (m) {
                 NOVA_ASSERT(
                         versions_->mid_table_mapping_[m->memtableid()]->RefMemTable());
@@ -909,7 +909,7 @@ namespace leveldb {
                 slots += 1;
             }
             (*partitioned_active_memtables_)[subrange_id]->mutex.Lock();
-            MemTable *m = (*partitioned_active_memtables_)[subrange_id]->memtable;
+            MemTable *m = (*partitioned_active_memtables_)[subrange_id]->active_memtable;
             if (m) {
                 NOVA_ASSERT(
                         versions_->mid_table_mapping_[m->memtableid()]->RefMemTable());

@@ -47,9 +47,8 @@ namespace leveldb {
                 kForward, kReverse
             };
 
-            DBIter(DBImpl *db, const Comparator *cmp, Iterator *iter,
-                   SequenceNumber s,
-                   uint32_t seed)
+            DBIter(DBImpl *db, const Comparator *cmp, Iterator *iter, SequenceNumber s, uint32_t seed,
+                   const nova::RangePartition &range_partition)
                     : db_(db),
                       user_comparator_(cmp),
                       iter_(iter),
@@ -57,7 +56,8 @@ namespace leveldb {
                       direction_(kForward),
                       valid_(false),
                       rnd_(seed),
-                      bytes_until_read_sampling_(RandomCompactionPeriod()) {}
+                      bytes_until_read_sampling_(RandomCompactionPeriod()),
+                      range_partition_(range_partition) {}
 
             DBIter(const DBIter &) = delete;
 
@@ -138,6 +138,7 @@ namespace leveldb {
             bool valid_;
             Random rnd_;
             size_t bytes_until_read_sampling_;
+            nova::RangePartition range_partition_;
         };
 
         inline bool DBIter::ParseKey(ParsedInternalKey *ikey) {
@@ -161,7 +162,6 @@ namespace leveldb {
 
         void DBIter::Next() {
             assert(valid_);
-
             if (direction_ == kReverse) {  // Switch directions?
                 direction_ = kForward;
                 // iter_ is pointing just before the entries for this->key(),
@@ -180,8 +180,17 @@ namespace leveldb {
                 // saved_key_ already contains the key to skip past.
             } else {
                 // Store in saved_key_ the current key so we skip it below.
-                SaveKey(iter_->key(), &saved_ikey_);
-
+                // The current key is the last key in this range. There is no need to call next.
+                Slice ikey = iter_->key();
+                SaveKey(ikey, &saved_ikey_);
+                uint64_t key = 0;
+                Slice ukey = ExtractUserKey(ikey);
+                nova::str_to_int(ukey.data(), &key, ukey.size());
+                if (key == range_partition_.key_end - 1) {
+                    valid_ = false;
+                    saved_ikey_.clear();
+                    return;
+                }
                 // iter_ is pointing to current key. We can now safely move to the next to
                 // avoid checking current key.
                 if (!GoToNextEntry(&saved_ikey_) && iter_->Valid()) {
@@ -206,10 +215,7 @@ namespace leveldb {
                 if (ParseKey(&ikey) && ikey.sequence <= sequence_) {
                     switch (ikey.type) {
                         case kTypeValue:
-                            if (user_comparator_->Compare(ikey.user_key,
-                                                          ExtractUserKey(
-                                                                  *current_key)) <=
-                                0) {
+                            if (user_comparator_->Compare(ikey.user_key, ExtractUserKey(*current_key)) <= 0) {
                                 // Entry hidden
                             } else {
                                 // The next unique key. DONE. :)
@@ -372,11 +378,10 @@ namespace leveldb {
 
     }  // anonymous namespace
 
-    Iterator *NewDBIterator(DBImpl *db, const Comparator *user_key_comparator,
-                            Iterator *internal_iter, SequenceNumber sequence,
-                            uint32_t seed) {
-        return new DBIter(db, user_key_comparator, internal_iter, sequence,
-                          seed);
+    Iterator *
+    NewDBIterator(DBImpl *db, const Comparator *user_key_comparator, Iterator *internal_iter, SequenceNumber sequence,
+                  uint32_t seed, const nova::RangePartition &range_partition) {
+        return new DBIter(db, user_key_comparator, internal_iter, sequence, seed, range_partition);
     }
 
 }  // namespace leveldb

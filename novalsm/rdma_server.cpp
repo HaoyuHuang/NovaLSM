@@ -154,17 +154,18 @@ namespace nova {
                        leveldb::StoCRequestType::STOC_READ_BLOCKS) {
                 char *sendbuf = rdma_broker_->GetSendBuf(task.remote_server_id);
                 uint64_t wr_id = rdma_broker_->PostWrite(task.rdma_buf,
-                                                         task.stoc_block_handle.size,
+                                                         task.size,
                                                          task.remote_server_id,
                                                          task.ltc_mr_offset,
                                                          false,
                                                          task.stoc_req_id);
+                NOVA_LOG(rdmaio::DEBUG)
+                    << fmt::format("Read {} s:{} req:{} mr:{} size:{} off:{}", task.stoc_block_handle.DebugString(),
+                                   task.remote_server_id, task.stoc_req_id, task.ltc_mr_offset, task.size, (uint64_t) (task.rdma_buf));
                 sendbuf[0] = leveldb::StoCRequestType::STOC_READ_BLOCKS;
                 leveldb::EncodeFixed64(sendbuf + 1, wr_id);
-                leveldb::EncodeFixed32(sendbuf + 9,
-                                       task.stoc_block_handle.size);
-                leveldb::EncodeFixed64(sendbuf + 13,
-                                       (uint64_t) (task.rdma_buf));
+                leveldb::EncodeFixed32(sendbuf + 9, task.stoc_block_handle.size);
+                leveldb::EncodeFixed64(sendbuf + 13, (uint64_t) (task.rdma_buf));
             } else if (task.request_type ==
                        leveldb::StoCRequestType::STOC_PERSIST) {
                 char *sendbuf = rdma_broker_->GetSendBuf(task.remote_server_id);
@@ -382,13 +383,10 @@ namespace nova {
                                 filename);
 
                     if (!filename.empty()) {
-                        stoc_file_id = stoc_file_manager_->OpenStoCFile(
-                                thread_id_,
-                                filename)->file_id();
+                        stoc_file_id = stoc_file_manager_->OpenStoCFile(thread_id_, filename)->file_id();
                     }
 
-                    uint32_t scid = mem_manager_->slabclassid(thread_id_,
-                                                              size);
+                    uint32_t scid = mem_manager_->slabclassid(thread_id_, size);
                     char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, scid);
                     NOVA_ASSERT(rdma_buf);
 

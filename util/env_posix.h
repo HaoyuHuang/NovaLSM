@@ -16,6 +16,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <list>
 
 #include <atomic>
 #include <cerrno>
@@ -243,6 +244,8 @@ namespace leveldb {
 
         const std::string &filename() const { return filename_; }
 
+        uint32_t num_waiting_ = 0;
+        std::mutex mu_;
     private:
         const int fd_;
         const std::string filename_;
@@ -257,13 +260,14 @@ namespace leveldb {
 // Instances are thread-safe because all member data is guarded by a mutex.
     class PosixLockTable {
     public:
-        bool Insert(const std::string &fname) LOCKS_EXCLUDED(mu_);
+        PosixLockTable();
 
-        void Remove(const std::string &fname) LOCKS_EXCLUDED(mu_);
+        void Lock(const std::string &fname, uint64_t fd);
 
+        void Unlock(const std::string &fname, uint64_t fd);
     private:
         port::Mutex mu_;
-        std::set<std::string> locked_files_ GUARDED_BY(mu_);
+        std::unordered_map<uint64_t, PosixFileLock*> fd_lock_;
     };
 
     class PosixEnv : public Env {
@@ -307,9 +311,9 @@ namespace leveldb {
                           const std::string &to) override;
 
         Status
-        LockFile(const std::string &filename, FileLock **lock) override;
+        LockFile(const std::string &filename, uint64_t fd) override;
 
-        Status UnlockFile(FileLock *lock) override;
+        Status UnlockFile(const std::string &fname, uint64_t fd) override;
 
         void StartThread(void (*thread_main)(void *thread_main_arg),
                          void *thread_main_arg) override;
@@ -330,7 +334,7 @@ namespace leveldb {
 
         bool HasMemSSTables();
 
-        PosixLockTable locks_;  // Thread-safe.
+        PosixLockTable lock_table_;
         Limiter mmap_limiter_;  // Thread-safe.
         Limiter fd_limiter_;    // Thread-safe.
 

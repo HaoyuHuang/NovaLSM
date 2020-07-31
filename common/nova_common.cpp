@@ -187,7 +187,7 @@ namespace nova {
     }
 
     LTCFragment::LTCFragment() : is_ready_(false),
-                                 is_ready_signal_(&is_ready_mutex_) {
+                                 is_ready_signal_(&is_ready_mutex_), is_complete_(false) {
     }
 
     std::string LTCFragment::DebugString() {

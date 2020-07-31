@@ -323,9 +323,9 @@ cc_nranges_per_server="1"
 
 number_of_ltcs="1"
 nclients="1"
-nservers="5"
+nservers="6"
 level="6"
-nmachines="5"
+nmachines="7"
 
 exp_seconds_to_fail_stoc="-1"
 fail_stoc_id="-1"

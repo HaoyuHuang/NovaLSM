@@ -393,7 +393,7 @@ namespace leveldb {
 
         uint32_t EncodeTableIdMapping(char *buf, uint32_t latest_memtableid);
 
-        void DecodeTableIdMapping(Slice *buf);
+        void DecodeTableIdMapping(Slice *buf, const InternalKeyComparator& cmp);
 
     private:
         class Builder;

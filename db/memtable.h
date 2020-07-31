@@ -27,7 +27,8 @@ namespace leveldb {
         // is zero and the caller must call Ref() at least once.
         explicit MemTable(const InternalKeyComparator &comparator,
                           uint32_t memtable_id,
-                          DBProfiler *db_profiler);
+                          DBProfiler *db_profiler,
+                          bool is_ready = true);
 
         MemTable(const MemTable &) = delete;
 
@@ -41,6 +42,8 @@ namespace leveldb {
         uint32_t memtableid() {
             return memtable_id_;
         }
+
+        void SetReadyToProcessRequests();
 
         // Drop reference count.  Delete if no more references exist.
         uint32_t Unref(uint32_t unrefcount = 1) {
@@ -83,6 +86,8 @@ namespace leveldb {
 
         bool is_pinned_ = false;
     private:
+        void WaitUntilReady();
+
         friend class MemTableIterator;
 
         friend class MemTableBackwardIterator;
@@ -96,8 +101,11 @@ namespace leveldb {
             int operator()(const char *a, const char *b) const;
         };
 
-        typedef SkipList<const char *, KeyComparator> Table;
+        std::atomic_bool is_ready_;
+        port::Mutex is_ready_mutex_;
+        port::CondVar is_ready_signal_;
 
+        typedef SkipList<const char *, KeyComparator> Table;
         DBProfiler *db_profiler_ = nullptr;
         KeyComparator comparator_;
         int refs_ = 0;
@@ -131,7 +139,7 @@ namespace leveldb {
 
         uint32_t Encode(char *buf);
 
-        void Decode(Slice *buf);
+        void Decode(Slice *buf, const InternalKeyComparator& cmp);
 
         bool is_immutable_ = false;
         bool is_flushed_ = false;
@@ -149,6 +157,10 @@ namespace leveldb {
 
     struct MemTableLogFilePair {
         MemTable *memtable = nullptr;
+        SubRange *subrange = nullptr;
+        bool is_immutable = false;
+        uint32_t partition_id = 0;
+        uint32_t imm_slot = 0;
         std::string logfile;
         std::unordered_map<uint32_t, uint64_t> server_logbuf;
     };
@@ -157,12 +169,12 @@ namespace leveldb {
     struct MemTablePartition {
         MemTablePartition() : background_work_finished_signal_(&mutex) {
         };
-        MemTable *memtable = nullptr;
+        MemTable *active_memtable = nullptr;
         port::Mutex mutex;
         uint32_t partition_id = 0;
         std::vector<uint32_t> imm_slots;
         std::queue<uint32_t> available_slots;
-        std::vector<uint32_t> closed_log_files;
+        std::vector<uint32_t> immutable_memtable_ids;
         port::CondVar background_work_finished_signal_ GUARDED_BY(mutex);
     };
 }  // namespace leveldb

@@ -159,10 +159,12 @@ namespace leveldb {
         const auto &range = range_index->ranges_[index];
         const auto &range_table = range_index->range_tables_[index];
         for (uint32_t memtableid : range_table.memtable_ids) {
-            list.push_back(
-                    v->vset_->mid_table_mapping_[memtableid]->memtable_->NewIterator(
-                            TraceType::MEMTABLE,
-                            AccessCaller::kUserIterator));
+            auto memtable = v->vset_->mid_table_mapping_[memtableid]->memtable_;
+            if (!memtable) {
+                continue;
+            }
+//            NOVA_ASSERT(memtable) << memtableid;
+            list.push_back(memtable->NewIterator(TraceType::MEMTABLE, AccessCaller::kUserIterator));
         }
         for (uint64_t sstableid : range_table.l0_sstable_ids) {
             auto meta = v->fn_files_[sstableid];
@@ -182,6 +184,10 @@ namespace leveldb {
         NOVA_LOG(rdmaio::DEBUG)
             << fmt::format("RangeIndexScan Decode: {}",
                            index);
+        if (list.empty()) {
+            return NewEmptyIterator();
+        }
+
         auto it = NewMergingIterator(v->icmp_, &list[0], list.size());
         if (flag) {
             it->Seek(InternalKey(range.lower, 0,

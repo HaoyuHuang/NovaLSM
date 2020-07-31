@@ -30,6 +30,11 @@ namespace nova {
         POWER_OF_THREE
     };
 
+    enum LTCMigrationPolicy {
+        PROCESS_UNTIL_MIGRATION_COMPLETE,
+        IMMEDIATE
+    };
+
     struct ZipfianDist {
         uint64_t sum = 0;
         std::vector<uint64_t> accesses;
@@ -94,6 +99,7 @@ namespace nova {
                 frag->dbid = std::stoi(tokens[3]);
                 if (cfg->cfg_id == 0) {
                     frag->is_ready_ = true;
+                    frag->is_complete_ = true;
                 }
 
                 int nreplicas = (tokens.size() - 4);
@@ -200,11 +206,12 @@ namespace nova {
         uint64_t l0_start_compaction_mb;
 
         int num_stocs_scatter_data_blocks;
-
         int fail_stoc_id = 0;
         int exp_seconds_to_fail_stoc = 0;
         int failure_duration = 0;
         int num_migration_threads = 0;
+
+        LTCMigrationPolicy ltc_migration_policy;
 
         void ReadZipfianDist() {
             if (zipfian_dist_file_path.empty()) {
@@ -245,7 +252,6 @@ namespace nova {
         std::atomic_uint_fast32_t current_cfg_id;
         std::mutex m;
         std::map<std::thread::id, pid_t> threads;
-
         static NovaConfig *config;
     };
 

@@ -430,16 +430,37 @@ namespace leveldb {
     PosixFileLock::PosixFileLock(int fd, std::string filename)
             : fd_(fd), filename_(std::move(filename)) {}
 
-    bool PosixLockTable::Insert(const std::string &fname) {
-        mu_.Lock();
-        bool succeeded = locked_files_.insert(fname).second;
-        mu_.Unlock();
-        return succeeded;
+    PosixLockTable::PosixLockTable() {
     }
 
-    void PosixLockTable::Remove(const std::string &fname) {
+    void PosixLockTable::Lock(const std::string &fname, uint64_t fd) {
+//        NOVA_LOG(rdmaio::INFO) << fmt::format("!!!!!!!!!Lock {}:{}", fname, fd);
+        PosixFileLock *lock = nullptr;
         mu_.Lock();
-        locked_files_.erase(fname);
+        auto pair = fd_lock_.find(fd);
+        if (pair == fd_lock_.end()) {
+            lock = new PosixFileLock(fd, fname);
+            fd_lock_[fd] = lock;
+        } else {
+            lock = pair->second;
+        }
+        lock->num_waiting_ += 1;
+        mu_.Unlock();
+
+        lock->mu_.lock();
+    }
+
+    void PosixLockTable::Unlock(const std::string &fname, uint64_t fd) {
+//        NOVA_LOG(rdmaio::INFO) << fmt::format("!!!!!!!!!UnLock {}:{}", fname, fd);
+        mu_.Lock();
+        NOVA_ASSERT(fd_lock_.find(fd) != fd_lock_.end());
+        auto lock = fd_lock_[fd];
+        lock->num_waiting_ -= 1;
+        lock->mu_.unlock();
+        if (lock->num_waiting_ == 0) {
+            fd_lock_.erase(fd);
+            delete lock;
+        }
         mu_.Unlock();
     }
 
@@ -773,41 +794,13 @@ namespace leveldb {
     }
 
     Status
-    PosixEnv::LockFile(const std::string &filename, FileLock **lock) {
-        *lock = nullptr;
-
-        int fd = ::open(filename.c_str(),
-                        O_RDWR | O_CREAT | kOpenBaseFlags, 0644);
-        if (fd < 0) {
-            return PosixError(filename, errno);
-        }
-
-        if (!locks_.Insert(filename)) {
-            ::close(fd);
-            return Status::IOError("lock " + filename,
-                                   "already held by process");
-        }
-
-        if (LockOrUnlock(fd, true) == -1) {
-            int lock_errno = errno;
-            ::close(fd);
-            locks_.Remove(filename);
-            return PosixError("lock " + filename, lock_errno);
-        }
-
-        *lock = new PosixFileLock(fd, filename);
+    PosixEnv::LockFile(const std::string &filename, uint64_t fd) {
+        lock_table_.Lock(filename, fd);
         return Status::OK();
     }
 
-    Status PosixEnv::UnlockFile(FileLock *lock) {
-        PosixFileLock *posix_file_lock = static_cast<PosixFileLock *>(lock);
-        if (LockOrUnlock(posix_file_lock->fd(), false) == -1) {
-            return PosixError("unlock " + posix_file_lock->filename(),
-                              errno);
-        }
-        locks_.Remove(posix_file_lock->filename());
-        ::close(posix_file_lock->fd());
-        delete posix_file_lock;
+    Status PosixEnv::UnlockFile(const std::string &fname, uint64_t fd) {
+        lock_table_.Unlock(fname, fd);
         return Status::OK();
     }
 

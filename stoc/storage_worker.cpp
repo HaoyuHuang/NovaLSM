@@ -133,7 +133,6 @@ namespace nova {
                 ct.remote_server_id = task.remote_server_id;
                 ct.stoc_req_id = task.stoc_req_id;
                 ct.request_type = task.request_type;
-
                 ct.rdma_buf = task.rdma_buf;
                 ct.ltc_mr_offset = task.ltc_mr_offset;
                 ct.stoc_block_handle = task.stoc_block_handle;
@@ -145,6 +144,7 @@ namespace nova {
                                                       task.stoc_block_handle.offset,
                                                       task.stoc_block_handle.size,
                                                       task.rdma_buf, &result);
+                    ct.size = result.size();
                     task.stoc_block_handle.size = result.size();
                     NOVA_ASSERT(result.size() <= task.stoc_block_handle.size);
                     stat_read_bytes_ += task.stoc_block_handle.size;

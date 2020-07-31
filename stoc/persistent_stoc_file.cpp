@@ -589,8 +589,7 @@ namespace leveldb {
     void StocPersistentFileManager::ReadDataBlock(
             const leveldb::StoCBlockHandle &stoc_block_handle, uint64_t offset,
             uint32_t size, char *scratch, Slice *result) {
-        StoCPersistentFile *stoc_file = FindStoCFile(
-                stoc_block_handle.stoc_file_id);
+        StoCPersistentFile *stoc_file = FindStoCFile(stoc_block_handle.stoc_file_id);
         NOVA_ASSERT(stoc_file) << stoc_block_handle.stoc_file_id;
         if (!block_cache_) {
             leveldb::FileType type;
@@ -611,6 +610,8 @@ namespace leveldb {
                             "Read {} from stoc file {} offset:{} size:{}",
                             stoc_block_handle.DebugString(),
                             stoc_file->file_id(), offset, size);
+            } else {
+                NOVA_LOG(rdmaio::INFO) << fmt::format("Read file {} read size {}:{}", stoc_file->stoc_file_name_, size, result->size());
             }
             return;
         }
@@ -676,9 +677,9 @@ namespace leveldb {
         if (type == FileType::kDescriptorFile) {
             id = current_manifest_file_stoc_file_id_;
             current_manifest_file_stoc_file_id_ += 1;
+            NOVA_LOG(rdmaio::INFO) << fmt::format("Open manifest file {} id:{}", filename, id);
             NOVA_ASSERT(
-                    current_manifest_file_stoc_file_id_ <= MAX_MANIFEST_FILE_ID)
-                << filename;
+                    current_manifest_file_stoc_file_id_ <= MAX_MANIFEST_FILE_ID) << filename;
         } else {
             id = current_stoc_file_id_;
             current_stoc_file_id_ += 1;

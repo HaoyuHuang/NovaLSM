@@ -46,9 +46,7 @@ namespace nova {
                 uint64_t offset = 0;
                 NOVA_ASSERT(leveldb::DecodeFixed32(buf, &sid));
                 NOVA_ASSERT(leveldb::DecodeFixed64(buf, &offset));
-                if (mid_table_map->find(memtableid) != mid_table_map->end()) {
-                    (*mid_table_map)[memtableid].server_logbuf[sid] = offset;
-                }
+                (*mid_table_map)[memtableid].server_logbuf[sid] = offset;
             }
         }
         return true;

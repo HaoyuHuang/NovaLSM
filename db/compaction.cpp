@@ -85,13 +85,10 @@ namespace leveldb {
                                                                          meta->block_replica_handles[replica_id].meta_block_handle.size);
                 WritableFile *writable_file;
                 EnvFileMetadata env_meta = {};
-                auto sstablename = TableFileName(dbname, meta->number, false,
-                                                 replica_id);
-                Status s = env->NewWritableFile(sstablename, env_meta,
-                                                &writable_file);
+                auto sstablename = TableFileName(dbname, meta->number, false, replica_id);
+                Status s = env->NewWritableFile(sstablename, env_meta, &writable_file);
                 NOVA_ASSERT(s.ok());
-                Slice sstable_meta(backing_buf,
-                                   meta->block_replica_handles[replica_id].meta_block_handle.size);
+                Slice sstable_meta(backing_buf, meta->block_replica_handles[replica_id].meta_block_handle.size);
                 s = writable_file->Append(sstable_meta);
                 NOVA_ASSERT(s.ok());
                 s = writable_file->Flush();

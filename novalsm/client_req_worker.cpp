@@ -191,6 +191,7 @@ namespace nova {
         read_options.thread_id = worker->thread_id_;
         read_options.rdma_backing_mem = worker->rdma_backing_mem;
         read_options.rdma_backing_mem_size = worker->rdma_backing_mem_size;
+        read_options.cfg_id = server_cfg_id;
 
         leveldb::Status s = db->Get(read_options, key, &value);
         NOVA_ASSERT(s.ok())
@@ -266,7 +267,7 @@ namespace nova {
              fragid < NovaConfig::config->cfgs[current_cfg_id]->fragments.size(); fragid++) {
             auto current_frag = NovaConfig::config->cfgs[current_cfg_id]->fragments[fragid];
             if (current_frag->ltc_server_id == NovaConfig::config->my_server_id) {
-                if (!current_frag->is_ready_) {
+                if (!current_frag->is_complete_) {
                     NOVA_LOG(rdmaio::INFO)
                         << fmt::format("Frag-{} is not ready {}", fragid, current_frag->DebugString());
                     ret_val = 1;
@@ -303,6 +304,7 @@ namespace nova {
                 }
             } else {
                 current_frag->is_ready_ = true;
+                current_frag->is_complete_ = true;
             }
         }
         // Bump up cfg id.
@@ -432,6 +434,7 @@ namespace nova {
         read_options.thread_id = worker->thread_id_;
         read_options.rdma_backing_mem = worker->rdma_backing_mem;
         read_options.rdma_backing_mem_size = worker->rdma_backing_mem_size;
+        read_options.cfg_id = server_cfg_id;
         int pivot_db_id = frag->dbid;
         int read_records = 0;
         uint64_t prior_last_key = -1;

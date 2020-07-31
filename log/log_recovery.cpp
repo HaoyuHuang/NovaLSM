@@ -5,7 +5,7 @@
 //
 
 #include "log_recovery.h"
-
+#include "db/db_impl.h"
 #include "common/nova_config.h"
 
 namespace leveldb {
@@ -59,13 +59,13 @@ namespace leveldb {
 
         timeval rdma_read_complete;
         gettimeofday(&rdma_read_complete, nullptr);
-
         NOVA_LOG(rdmaio::INFO)
             << fmt::format(
                     "Start recovery: memtables:{}", memtables_to_recover.size());
-
         uint32_t recovered_log_records = 0;
         int index = 0;
+        leveldb::DBImpl *dbimpl = reinterpret_cast<leveldb::DBImpl *>(nova::NovaConfig::config->cfgs[cfg_id]->fragments[dbid]->db);
+        uint32_t rand_seed = 0;
         for (const auto &replica : memtables_to_recover) {
             char *buf = rdma_bufs[index];
             leveldb::Slice slice(buf, nova::NovaConfig::config->max_stoc_file_size);
@@ -78,6 +78,25 @@ namespace leveldb {
                 recovered_log_records += 1;
                 log_records += 1;
             }
+            memtable->SetReadyToProcessRequests();
+            // Schedule for compaction.
+            if (replica.second.is_immutable) {
+                int thread_id = -1;
+                bool merge_memtables_without_flushing = false;
+                if (replica.second.subrange) {
+                    thread_id = replica.second.subrange->GetCompactionThreadId(
+                            &EnvBGThread::bg_flush_memtable_thread_id_seq,
+                            &merge_memtables_without_flushing);
+                } else {
+                    thread_id =
+                            EnvBGThread::bg_flush_memtable_thread_id_seq.fetch_add(
+                                    1, std::memory_order_relaxed) %
+                            dbimpl->bg_flush_memtable_threads_.size();
+                }
+                dbimpl->ScheduleFlushMemTableTask(thread_id, memtable, replica.second.partition_id,
+                                                  replica.second.imm_slot, &rand_seed,
+                                                  merge_memtables_without_flushing);
+            }
             index++;
             NOVA_LOG(rdmaio::INFO)
                 << fmt::format("Recovery memtable-{} with {} log records", memtable->memtableid(), log_records);
@@ -87,7 +106,6 @@ namespace leveldb {
 
         timeval end{};
         gettimeofday(&end, nullptr);
-
         NOVA_LOG(rdmaio::INFO)
             << fmt::format("recovery duration: {},{},{},{}",
                            memtables_to_recover.size(),

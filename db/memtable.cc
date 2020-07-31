@@ -24,10 +24,28 @@ namespace leveldb {
 
     MemTable::MemTable(const InternalKeyComparator &comparator,
                        uint32_t memtable_id,
-                       DBProfiler *db_profiler)
+                       DBProfiler *db_profiler,
+                       bool is_ready)
             : comparator_(comparator), memtable_id_(memtable_id), refs_(0),
               table_(comparator_, &arena_),
-              db_profiler_(db_profiler) {}
+              db_profiler_(db_profiler), is_ready_(is_ready), is_ready_signal_(&is_ready_mutex_) {
+    }
+
+    void MemTable::WaitUntilReady() {
+        if (is_ready_) {
+            return;
+        }
+        while (!is_ready_) {
+            is_ready_mutex_.Lock();
+            is_ready_signal_.Wait();
+        }
+        is_ready_mutex_.Unlock();
+    }
+
+    void MemTable::SetReadyToProcessRequests() {
+        is_ready_ = true;
+        is_ready_signal_.SignalAll();
+    }
 
     MemTable::~MemTable() { assert(refs_ == 0); }
 
@@ -144,6 +162,7 @@ namespace leveldb {
     Iterator *MemTable::NewIterator(TraceType trace_type,
                                     AccessCaller caller,
                                     uint32_t sample_size) {
+        WaitUntilReady();
         return new MemTableIterator(this, trace_type, caller, sample_size);
     }
 
@@ -173,6 +192,7 @@ namespace leveldb {
     }
 
     bool MemTable::Get(const LookupKey &key, std::string *value, Status *s) {
+        WaitUntilReady();
         Slice memkey = key.memtable_key();
         Table::Iterator iter(&table_);
         iter.Seek(memkey.data());
@@ -288,7 +308,7 @@ namespace leveldb {
         return msg_size;
     }
 
-    void AtomicMemTable::Decode(Slice *buf) {
+    void AtomicMemTable::Decode(Slice *buf, const InternalKeyComparator& cmp) {
         NOVA_ASSERT(DecodeBool(buf, &is_immutable_));
         NOVA_ASSERT(DecodeBool(buf, &is_flushed_));
         NOVA_ASSERT(DecodeFixed32(buf, &last_version_id_));
@@ -299,6 +319,11 @@ namespace leveldb {
         NOVA_ASSERT(DecodeFixed32(buf, &memtable_size_));
         uint32_t size;
         NOVA_ASSERT(DecodeFixed32(buf, &size));
+
+        if (!memtable_) {
+            memtable_ = new MemTable(cmp, memtable_id_, nullptr, false);
+        }
+
         for (int i = 0; i < size; i++) {
             uint64_t l0;
             NOVA_ASSERT(DecodeFixed64(buf, &l0));

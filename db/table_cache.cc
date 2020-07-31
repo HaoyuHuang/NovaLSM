@@ -79,13 +79,12 @@ namespace leveldb {
         *handle = cache_->Lookup(key);
 
         bool cache_hit = true;
-        StoCRandomAccessFileClientImpl *file;
+        StoCRandomAccessFileClientImpl *file = nullptr;
 
         if (*handle) {
             cache_hit = true;
             // Check if the file is deleted.
-            TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache_->Value(
-                    *handle));
+            TableAndFile *tf = reinterpret_cast<TableAndFile *>(cache_->Value(*handle));
             file = dynamic_cast<StoCRandomAccessFileClientImpl *>(tf->file);
         } else {
             cache_hit = false;

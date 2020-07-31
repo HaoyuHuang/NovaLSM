@@ -111,7 +111,7 @@ function run_bench() {
 
 	current_time=$(date "+%Y-%m-%d-%H-%M-%S")
 	nstoc=$((nservers-number_of_ltcs))
-	result_dir_name="nova-d-$dist-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$l0_stop_write_mb-np-$num_memtable_partitions-nr-$cc_nranges_per_server"
+	result_dir_name="nova-try-$try-d-$dist-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$l0_stop_write_mb-np-$num_memtable_partitions-nr-$cc_nranges_per_server"
 	echo "running experiment $result_dir_name"
 
 	# Copy the files over local node
@@ -173,7 +173,7 @@ function run_bench() {
 	do
 		echo "creating server on $s"
 		nova_rdma_port=$((rdma_port))
-		cmd="stdbuf --output=0 --error=0 ./nova_server_main  --enable_range_index=$enable_range_index --num_migration_threads=$num_migration_threads --num_sstable_replicas=$num_sstable_replicas --level=$level --l0_start_compaction_mb=$l0_start_compaction_mb --subrange_no_flush_num_keys=$subrange_no_flush_num_keys --enable_detailed_db_stats=$enable_detailed_db_stats --major_compaction_type=$major_compaction_type --major_compaction_max_parallism=$major_compaction_max_parallism --major_compaction_max_tables_in_a_set=$major_compaction_max_tables_in_a_set --enable_flush_multiple_memtables=$enable_flush_multiple_memtables --recover_dbs=$recover_dbs --num_recovery_threads=$num_recovery_threads  --sampling_ratio=1 --zipfian_dist_ref_counts=$zipfian_dist_file_path --client_access_pattern=$dist  --memtable_type=static_partition --enable_subrange=$enable_subrange --num_log_replicas=$num_log_replicas --log_record_mode=$log_record_mode --scatter_policy=$scatter_policy --number_of_ltcs=$number_of_ltcs --enable_lookup_index=$enable_lookup_index --l0_stop_write_mb=$l0_stop_write_mb --num_memtable_partitions=$num_memtable_partitions --num_memtables=$num_memtables --num_rdma_bg_workers=$num_rdma_bg_workers --db_path=$db_path --num_storage_workers=$num_storage_workers --stoc_files_path=$cc_stoc_files_path --max_stoc_file_size_mb=$max_stoc_file_size_mb --sstable_size_mb=$sstable_size_mb --ltc_num_stocs_scatter_data_blocks=$ltc_num_stocs_scatter_data_blocks --all_servers=$nova_servers --server_id=$server_id --mem_pool_size_gb=$mem_pool_size_gb --use_fixed_value_size=$value_size --ltc_config_path=$ltc_config_path --ltc_num_client_workers=$cc_nconn_workers --num_rdma_fg_workers=$num_rdma_fg_workers --num_compaction_workers=$num_compaction_workers --block_cache_mb=$block_cache_mb --row_cache_mb=$row_cache_mb --memtable_size_mb=$memtable_size_mb --cc_log_buf_size=$cc_log_buf_size --rdma_port=$rdma_port --rdma_max_msg_size=$rdma_max_msg_size --rdma_max_num_sends=$rdma_max_num_sends --rdma_doorbell_batch_size=$rdma_doorbell_batch_size --enable_rdma=$enable_rdma --enable_load_data=$enable_load_data --use_local_disk=$use_local_disk"
+		cmd="stdbuf --output=0 --error=0 ./nova_server_main --ltc_migration_policy=$ltc_migration_policy --enable_range_index=$enable_range_index --num_migration_threads=$num_migration_threads --num_sstable_replicas=$num_sstable_replicas --level=$level --l0_start_compaction_mb=$l0_start_compaction_mb --subrange_no_flush_num_keys=$subrange_no_flush_num_keys --enable_detailed_db_stats=$enable_detailed_db_stats --major_compaction_type=$major_compaction_type --major_compaction_max_parallism=$major_compaction_max_parallism --major_compaction_max_tables_in_a_set=$major_compaction_max_tables_in_a_set --enable_flush_multiple_memtables=$enable_flush_multiple_memtables --recover_dbs=$recover_dbs --num_recovery_threads=$num_recovery_threads  --sampling_ratio=1 --zipfian_dist_ref_counts=$zipfian_dist_file_path --client_access_pattern=$dist  --memtable_type=static_partition --enable_subrange=$enable_subrange --num_log_replicas=$num_log_replicas --log_record_mode=$log_record_mode --scatter_policy=$scatter_policy --number_of_ltcs=$number_of_ltcs --enable_lookup_index=$enable_lookup_index --l0_stop_write_mb=$l0_stop_write_mb --num_memtable_partitions=$num_memtable_partitions --num_memtables=$num_memtables --num_rdma_bg_workers=$num_rdma_bg_workers --db_path=$db_path --num_storage_workers=$num_storage_workers --stoc_files_path=$cc_stoc_files_path --max_stoc_file_size_mb=$max_stoc_file_size_mb --sstable_size_mb=$sstable_size_mb --ltc_num_stocs_scatter_data_blocks=$ltc_num_stocs_scatter_data_blocks --all_servers=$nova_servers --server_id=$server_id --mem_pool_size_gb=$mem_pool_size_gb --use_fixed_value_size=$value_size --ltc_config_path=$ltc_config_path --ltc_num_client_workers=$cc_nconn_workers --num_rdma_fg_workers=$num_rdma_fg_workers --num_compaction_workers=$num_compaction_workers --block_cache_mb=$block_cache_mb --row_cache_mb=$row_cache_mb --memtable_size_mb=$memtable_size_mb --cc_log_buf_size=$cc_log_buf_size --rdma_port=$rdma_port --rdma_max_msg_size=$rdma_max_msg_size --rdma_max_num_sends=$rdma_max_num_sends --rdma_doorbell_batch_size=$rdma_doorbell_batch_size --enable_rdma=$enable_rdma --enable_load_data=$enable_load_data --use_local_disk=$use_local_disk"
 		echo "$cmd"
 		ssh -oStrictHostKeyChecking=no $s "mkdir -p $cc_stoc_files_path && mkdir -p $db_path && cd $cache_bin_dir && $cmd >& $results/server-$s-out &" &
 		server_id=$((server_id+1))
@@ -338,33 +338,37 @@ num_log_replicas="1"
 num_memtable_partitions="1"
 num_memtables="2"
 
-nservers="3"
-nmachines="5"
+nservers="4"
+nmachines="7"
 workload="workloadw"
 dist="zipfian"
 scatter_policy="power_of_two"
 workload="workloada"
 ltc_num_stocs_scatter_data_blocks="1"
-nclients="1"
+nclients="3"
 nthreads="512"
 major_compaction_max_parallism="1"
 level="6"
 num_sstable_replicas="1"
 num_migration_threads="32"
 workload="workloadw"
-number_of_ltcs="2"
+number_of_ltcs="3"
 enable_range_index="true"
 
 l0_start_compaction_mb=$((4*1024))
 l0_stop_write_mb=$((10*1024))
 l0_start_compaction_mb=$((l0_start_compaction_mb/number_of_ltcs/cc_nranges_per_server))
 l0_stop_write_mb=$((l0_stop_write_mb/number_of_ltcs/cc_nranges_per_server))
+ltc_migration_policy="immediate"
 
 elapsed_seconds_to_trigger_change="300"
 
+
+for try in "1" "2" "3" "4" "5" "6" "7" "8" "9" "10"
+do
 for workload in "workloadw" "workloada" "workloade"
 do
 run_bench
 done
-
+done
 # python /proj/bg-PG0/haoyu/scripts/parse_ycsb_nova_leveldb.py $nmachines $exp_results_dir > stats_ltc_scale_scatter_out

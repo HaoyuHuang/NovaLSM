@@ -247,6 +247,7 @@ namespace leveldb {
         bool fill_cache = true;
 
         uint64_t thread_id;
+        uint32_t cfg_id;
 
         MemManager *mem_manager = nullptr;
 

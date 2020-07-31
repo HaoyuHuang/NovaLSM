@@ -183,12 +183,12 @@ namespace leveldb {
         // to go away.
         //
         // May create the named file if it does not already exist.
-        virtual Status LockFile(const std::string &fname, FileLock **lock) = 0;
+        virtual Status LockFile(const std::string &fname, uint64_t fd) = 0;
 
         // Release the lock acquired by a previous successful call to LockFile.
         // REQUIRES: lock was returned by a successful LockFile() call
         // REQUIRES: lock has not already been unlocked.
-        virtual Status UnlockFile(FileLock *lock) = 0;
+        virtual Status UnlockFile(const std::string &fname, uint64_t fd) = 0;
 
         // Start a new thread, invoking "function(arg)" within the new thread.
         // When "function(arg)" returns, the thread will be destroyed.
@@ -439,12 +439,12 @@ namespace leveldb {
             return target_->RenameFile(s, t);
         }
 
-        Status LockFile(const std::string &f, FileLock **l) override {
-            return target_->LockFile(f, l);
+        Status LockFile(const std::string &f, uint64_t fd) override {
+            return target_->LockFile(f, fd);
         }
 
-        Status UnlockFile(FileLock *l) override {
-            return target_->UnlockFile(l);
+        Status UnlockFile(const std::string &fname, uint64_t fd) override {
+            return target_->UnlockFile(fname, fd);
         }
 
         void StartThread(void (*f)(void *), void *a) override {

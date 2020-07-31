@@ -1336,7 +1336,7 @@ namespace leveldb {
         return msg_size;
     }
 
-    void VersionSet::DecodeTableIdMapping(Slice *buf) {
+    void VersionSet::DecodeTableIdMapping(Slice *buf, const InternalKeyComparator& cmp) {
         while (true) {
             uint32_t mid = 0;
             NOVA_ASSERT(DecodeFixed32(buf, &mid));
@@ -1345,7 +1345,7 @@ namespace leveldb {
             }
             NOVA_LOG(rdmaio::INFO) << fmt::format("Decode tableid mapping: {}", mid);
             NOVA_ASSERT(mid < MAX_LIVE_MEMTABLES);
-            mid_table_mapping_[mid]->Decode(buf);
+            mid_table_mapping_[mid]->Decode(buf, cmp);
         }
     }
 

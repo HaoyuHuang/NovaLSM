@@ -118,6 +118,7 @@ DEFINE_int32(exp_seconds_to_fail_stoc, -1,
              "Number of seconds elapsed to fail the stoc.");
 DEFINE_int32(failure_duration, -1, "Failure duration");
 DEFINE_int32(num_migration_threads, 1, "Number of migration threads");
+DEFINE_string(ltc_migration_policy, "base", "immediate/base");
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq;
@@ -300,6 +301,12 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->exp_seconds_to_fail_stoc = FLAGS_exp_seconds_to_fail_stoc;
     NovaConfig::config->failure_duration = FLAGS_failure_duration;
     NovaConfig::config->num_migration_threads = FLAGS_num_migration_threads;
+
+    if (FLAGS_ltc_migration_policy == "immediate") {
+        NovaConfig::config->ltc_migration_policy = LTCMigrationPolicy::IMMEDIATE;
+    } else {
+        NovaConfig::config->ltc_migration_policy = LTCMigrationPolicy::PROCESS_UNTIL_MIGRATION_COMPLETE;
+    }
 
     leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq = 0;
     leveldb::EnvBGThread::bg_compaction_thread_id_seq = 0;

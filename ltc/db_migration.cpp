@@ -170,20 +170,30 @@ namespace nova {
                                   &memtables_to_recover);
         std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> actual_memtables_to_recover;
         for (const auto &memtable : memtables_to_recover) {
-            NOVA_ASSERT(memtable.second.memtable) << fmt::format("{}-{}", dbindex, memtable.first);
-            if (memtable.second.server_logbuf.empty()) {
+            if (memtable.second.server_logbuf.empty() || !memtable.second.memtable) {
                 NOVA_LOG(rdmaio::INFO) << fmt::format("Nothing to recover for memtable {}-{}", dbindex, memtable.first);
+                if (memtable.second.memtable) {
+                    memtable.second.memtable->SetReadyToProcessRequests();
+                }
                 continue;
             }
             actual_memtables_to_recover[memtable.first] = memtable.second;
+        }
+        // The database is ready to process requests immediately.
+        if (nova::NovaConfig::config->ltc_migration_policy == LTCMigrationPolicy::IMMEDIATE) {
+            frag->is_ready_ = true;
+            frag->is_ready_signal_.SignalAll();
         }
         leveldb::LogRecovery recover(mem_manager_, client_);
         recover.Recover(actual_memtables_to_recover, cfg_id, dbindex);
         threads_for_new_dbs_.emplace_back(&leveldb::LTCCompactionThread::Start, reorg);
         threads_for_new_dbs_.emplace_back(&leveldb::LTCCompactionThread::Start, coord);
         db->StartCompaction();
+
         frag->is_ready_ = true;
+        frag->is_complete_ = true;
         frag->is_ready_signal_.SignalAll();
+
         uint32_t scid = mem_manager_->slabclassid(0, dbmeta.msg_size);
         mem_manager_->FreeItem(0, dbmeta.buf, scid);
     }

@@ -148,8 +148,14 @@ namespace leveldb {
                           uint64_t memtable_id_seq, nova::StoCInMemoryLogFileManager *log_manager,
                           std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map);
 
+        void ScheduleFlushMemTableTask(
+                int thread_id, MemTable *imm,
+                uint32_t partition_id, uint32_t imm_slot,
+                unsigned int *rand_seed, bool merge_memtables_without_flushing);
+
         const Options options_;  // options_.comparator == &internal_comparator_
         nova::StoCInMemoryLogFileManager *log_manager_ = nullptr;
+        std::vector<EnvBGThread *> bg_flush_memtable_threads_;
     private:
 
         Status GetWithLookupIndex(const ReadOptions &options, const Slice &key,
@@ -262,11 +268,6 @@ namespace leveldb {
 
         void RecordBackgroundError(const Status &s);
 
-        void ScheduleFlushMemTableTask(
-                int thread_id, MemTable *imm,
-                uint32_t partition_id, uint32_t imm_slot,
-                unsigned int *rand_seed, bool merge_memtables_without_flushing);
-
         void ScheduleCompactionTask(int thread_id, void *compaction);
 
         void ScheduleFileDeletionTask(int thread_id);
@@ -309,7 +310,6 @@ namespace leveldb {
         port::CondVar l0_stop_write_signal_;
 
         std::vector<EnvBGThread *> bg_compaction_threads_;
-        std::vector<EnvBGThread *> bg_flush_memtable_threads_;
         EnvBGThread *reorg_thread_;
         EnvBGThread *compaction_coordinator_thread_;
 
@@ -324,10 +324,8 @@ namespace leveldb {
         // memtable pool.
         std::vector<AtomicMemTable *> active_memtables_;
         // partitioned memtables.
-        std::vector<MemTablePartition *> partitioned_active_memtables_ GUARDED_BY(
-                mutex_);
-        std::vector<uint32_t> partitioned_imms_ GUARDED_BY(
-                mutex_);  // Memtable being compacted
+        std::vector<MemTablePartition *> partitioned_active_memtables_ GUARDED_BY(mutex_);
+        std::vector<uint32_t> partitioned_imms_ GUARDED_BY(mutex_);  // Memtable being compacted
 
         uint32_t seed_ GUARDED_BY(mutex_);  // For sampling.
 
@@ -335,8 +333,7 @@ namespace leveldb {
 
         // Set of table files to protect from deletion because they are
         // part of ongoing compactions.
-        std::unordered_map<uint64_t, FileMetaData> compacted_tables_ GUARDED_BY(
-                mutex_);
+        std::unordered_map<uint64_t, FileMetaData> compacted_tables_ GUARDED_BY(mutex_);
         bool is_major_compaciton_running_ = false;
         ManualCompaction *manual_compaction_ GUARDED_BY(mutex_);
 

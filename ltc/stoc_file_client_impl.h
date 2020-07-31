@@ -49,7 +49,7 @@ namespace leveldb {
 
         Status Fsync() override;
 
-        Status SyncAppend(const Slice &data, const std::vector<uint32_t>& stoc_id);
+        Status SyncAppend(const Slice &data, const std::vector<uint32_t> &stoc_id);
 
         void Format();
 
@@ -145,9 +145,8 @@ namespace leveldb {
         ~StoCRandomAccessFileClientImpl() override;
 
         Status
-        Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset,
-             size_t n,
-             Slice *result, char *scratch) override;
+        Read(const StoCBlockHandle &stoc_block_handle, uint64_t offset, size_t n, Slice *result,
+             char *scratch) override;
 
         Status
         Read(const ReadOptions &read_options,

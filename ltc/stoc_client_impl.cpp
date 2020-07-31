@@ -406,10 +406,8 @@ namespace leveldb {
     }
 
     uint32_t StoCBlockClient::InitiateReadDataBlock(
-            const leveldb::StoCBlockHandle &block_handle, uint64_t offset,
-            uint32_t size, char *result, uint32_t result_size,
-            std::string filename,
-            bool is_foreground_reads) {
+            const leveldb::StoCBlockHandle &block_handle, uint64_t offset, uint32_t size, char *result,
+            uint32_t result_size, std::string filename, bool is_foreground_reads) {
         NOVA_ASSERT(size <= result_size)
             << fmt::format("{} {} {} {}", block_handle.DebugString(), filename,
                            size, result_size);
@@ -922,8 +920,7 @@ namespace leveldb {
                         }
 
                         // Waiting for WRITEs.
-                        if (nova::IsRDMAWRITEComplete(context.backing_mem,
-                                                      context.size)) {
+                        if (nova::IsRDMAWRITEComplete(context.backing_mem, context.size)) {
                             NOVA_LOG(DEBUG) << fmt::format(
                                         "stocclient[{}]: Read StoC file blocks complete size:{} req:{}",
                                         stoc_client_id_, context.size, req_id);

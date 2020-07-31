@@ -9,6 +9,7 @@
 
 #include "db/dbformat.h"
 #include "leveldb/db.h"
+#include "common/nova_common.h"
 
 namespace leveldb {
 
@@ -19,7 +20,7 @@ namespace leveldb {
 // into appropriate user keys.
     Iterator *NewDBIterator(DBImpl *db, const Comparator *user_key_comparator,
                             Iterator *internal_iter, SequenceNumber sequence,
-                            uint32_t seed);
+                            uint32_t seed, const nova::RangePartition &range_partition);
 
 }  // namespace leveldb
 

@@ -18,17 +18,15 @@ nranges_per_server="1"
 # done
 # done
 
-
-
 # bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_replication.sh $recordcount $dryrun > stoc_scale_out
 
 nranges_per_server="16"
-number_of_ltcs="2"
+number_of_ltcs="3"
 num_sstable_replicas="1"
-nservers="3"
+nservers="4"
 num_memtable_partitions="1"
 dist="zipfian"
-# bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_migration_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server >> lsm_backup_out
+bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_migration_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server >> lsm_backup_out
 bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_ltc_migration.sh $recordcount $dryrun > stoc_scale_out
 
 
