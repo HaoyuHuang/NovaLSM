@@ -276,9 +276,6 @@ namespace leveldb {
         NOVA_LOG(rdmaio::INFO) << fmt::format("SRS: {}", srs->DebugString());
         NOVA_LOG(rdmaio::INFO) << fmt::format("Range index: {}", range_index->DebugString());
         msg_size += range_index_size;
-        for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
-            partitioned_active_memtables_[i]->mutex.Unlock();
-        }
         {
             uint32_t header_size = 1;
             buf[0] = StoCRequestType::LTC_MIGRATION;
@@ -287,6 +284,9 @@ namespace leveldb {
             header_size += EncodeFixed64(buf + header_size, versions_->last_sequence_);
             header_size += EncodeFixed64(buf + header_size, versions_->next_file_number_);
             header_size += EncodeFixed64(buf + header_size, memtable_id_seq_);
+        }
+        for (int i = 0; i < partitioned_active_memtables_.size(); i++) {
+            partitioned_active_memtables_[i]->mutex.Unlock();
         }
         mutex_.Unlock();
         NOVA_LOG(rdmaio::INFO)
@@ -510,8 +510,7 @@ namespace leveldb {
         uint32_t stoc_id = options_.manifest_stoc_ids[0];
         std::string manifest = DescriptorFileName(dbname_, 0, 0);
         auto client = reinterpret_cast<StoCBlockClient *> (options_.stoc_client);
-        uint32_t scid = options_.mem_manager->slabclassid(0,
-                                                          nova::NovaConfig::config->max_stoc_file_size);
+        uint32_t scid = options_.mem_manager->slabclassid(0, nova::NovaConfig::config->max_stoc_file_size);
         char *buf = options_.mem_manager->ItemAlloc(0, scid);
         NOVA_ASSERT(buf);
         memset(buf, 0, nova::NovaConfig::config->max_stoc_file_size);
@@ -934,8 +933,7 @@ namespace leveldb {
             meta.flush_timestamp = versions_->last_sequence_;
             meta.level = 0;
             Status s;
-            Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
-                                              AccessCaller::kCompaction);
+            Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE, AccessCaller::kCompaction);
             nova::NovaGlobalVariables::global.generated_memtable_sizes += imm->ApproximateMemoryUsage();
             s = BuildTable(dbname_, env_, options_, table_cache_, iter,
                            &meta, bg_thread, prune_memtable);
@@ -981,38 +979,19 @@ namespace leveldb {
         if (subrange_manager_) {
             subranges = subrange_manager_->latest_subranges_;
         }
-        CompactionState *state = new CompactionState(nullptr, subranges,
-                                                     versions_->last_sequence_);
+        CompactionState *state = new CompactionState(nullptr, subranges, versions_->last_sequence_);
         std::function<uint64_t(void)> fn_generator = std::bind(
                 &VersionSet::NewFileNumber, versions_);
         CompactionJob job(fn_generator, env_, dbname_, user_comparator_,
                           options_, bg_thread, table_cache_);
         uint32_t memtable_id = memtable_id_seq_.fetch_add(1);
-        MemTable *output_memtable = new MemTable(internal_comparator_,
-                                                 memtable_id, db_profiler_);
+        MemTable *output_memtable = new MemTable(internal_comparator_, memtable_id, db_profiler_);
         NOVA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
-        versions_->mid_table_mapping_[memtable_id]->SetMemTable(
-                output_memtable);
+        versions_->mid_table_mapping_[memtable_id]->SetMemTable(output_memtable);
 
         std::vector<LevelDBLogRecord> log_records;
-        auto fn_add_to_memtable = [&](const ParsedInternalKey &ikey,
-                                      const Slice &value) {
-            output_memtable->Add(ikey.sequence, ValueType::kTypeValue,
-                                 ikey.user_key, value);
-
-            if (lookup_index_) {
-                // Update lookup index.
-                uint64_t key;
-                nova::str_to_int(ikey.user_key.data(), &key,
-                                 ikey.user_key.size());
-                uint32_t current_mid = lookup_index_->Lookup(ikey.user_key,
-                                                             key);
-                if (immids.find(current_mid) != immids.end()) {
-                    lookup_index_->CAS(ikey.user_key, key, current_mid,
-                                       memtable_id);
-                }
-            }
-
+        auto fn_add_to_memtable = [&](const ParsedInternalKey &ikey, const Slice &value) {
+            output_memtable->Add(ikey.sequence, ValueType::kTypeValue, ikey.user_key, value);
             LevelDBLogRecord log_record = {};
             log_record.sequence_number = ikey.sequence;
             log_record.key = ikey.user_key;
@@ -1033,15 +1012,12 @@ namespace leveldb {
                 wo.replicate_log_record_states[i].result = leveldb::StoCReplicateLogRecordResult::REPLICATE_LOG_RECORD_NONE;
                 wo.replicate_log_record_states[i].rdma_wr_id = -1;
             }
-            uint32_t rdma_backing_mem_size = nova::LogRecordsSize(log_records);
-            uint32_t scid = bg_thread->mem_manager()->slabclassid(0,
-                                                                  rdma_backing_mem_size);
+            uint32_t scid = bg_thread->mem_manager()->slabclassid(0, nova::NovaConfig::config->max_stoc_file_size);
             char *backing_mem = bg_thread->mem_manager()->ItemAlloc(0, scid);
             wo.rdma_backing_mem = backing_mem;
-            wo.rdma_backing_mem_size = rdma_backing_mem_size;
+            wo.rdma_backing_mem_size = nova::NovaConfig::config->max_stoc_file_size;
             wo.is_loading_db = false;
-            GenerateLogRecord(wo, log_records,
-                              output_memtable->memtableid());
+            GenerateLogRecord(wo, log_records, output_memtable->memtableid());
             bg_thread->mem_manager()->FreeItem(0, backing_mem, scid);
         }
         iterators.clear();
@@ -1050,6 +1026,24 @@ namespace leveldb {
         MemTablePartition *p = partitioned_active_memtables_[partition_id];
         int start_id = 0;
         p->mutex.Lock();
+        {
+            if (lookup_index_) {
+                auto new_memtable_it = output_memtable->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
+                                                                    AccessCaller::kCompaction);
+                while (new_memtable_it->Valid()) {
+                    Slice ukey = ExtractUserKey(new_memtable_it->key());
+                    // Update lookup index.
+                    uint64_t key;
+                    nova::str_to_int(ukey.data(), &key, ukey.size());
+                    uint32_t current_mid = lookup_index_->Lookup(ukey, key);
+                    if (immids.find(current_mid) != immids.end()) {
+                        lookup_index_->CAS(ukey, key, current_mid, memtable_id);
+                    }
+                    new_memtable_it->Next();
+                }
+                delete new_memtable_it;
+            }
+        }
 
         // Update range index.
         if (range_index_manager_) {
@@ -1251,9 +1245,7 @@ namespace leveldb {
         }
     }
 
-    void DBImpl::PerformCompaction(leveldb::EnvBGThread *bg_thread,
-                                   const std::vector<EnvBGTask> &tasks) {
-
+    void DBImpl::PerformCompaction(leveldb::EnvBGThread *bg_thread, const std::vector<EnvBGTask> &tasks) {
         std::vector<EnvBGTask> memtable_tasks;
         std::unordered_map<uint32_t, std::vector<EnvBGTask>> pid_mergable_memtables;
         std::vector<EnvBGTask> sstable_tasks;
@@ -1261,8 +1253,7 @@ namespace leveldb {
         for (auto &task : tasks) {
             if (task.memtable) {
                 if (task.merge_memtables_without_flushing) {
-                    pid_mergable_memtables[task.memtable_partition_id].push_back(
-                            task);
+                    pid_mergable_memtables[task.memtable_partition_id].push_back(task);
                     continue;
                 }
                 memtable_tasks.push_back(task);
@@ -1486,11 +1477,9 @@ namespace leveldb {
                 sleep(1);
                 continue;
             }
-            NOVA_ASSERT(versions_->versions_[current->version_id()]->Ref() ==
-                        current);
+            NOVA_ASSERT(versions_->versions_[current->version_id()]->Ref() == current);
             NOVA_LOG(rdmaio::DEBUG)
-                << fmt::format("comv-init {} {}", current->version_id_,
-                               current->refs_);
+                << fmt::format("comv-init {} {}", current->version_id_, current->refs_);
             mutex_.Unlock();
 
             std::vector<Compaction *> compactions;
@@ -1506,12 +1495,9 @@ namespace leveldb {
                 VersionEdit edit;
                 RangeIndexVersionEdit range_edit;
                 std::unordered_map<uint32_t, MemTableL0FilesEdit> edits;
-                if (ComputeCompactions(current, &compactions, &edit,
-                                       &range_edit,
-                                       &edits)) {
+                if (ComputeCompactions(current, &compactions, &edit, &range_edit, &edits)) {
                     // Contain moves. Cleanup LSM immediately.
-                    CleanupLSMCompaction(nullptr, edit, range_edit, edits,
-                                         nullptr, current->version_id_);
+                    CleanupLSMCompaction(nullptr, edit, range_edit, edits, nullptr, current->version_id_);
                 }
             }
             cleaned.resize(compactions.size());
@@ -1519,10 +1505,8 @@ namespace leveldb {
             mutex_compacting_tables.Lock();
             for (int i = 0; i < compactions.size(); i++) {
                 for (int which = 0; which < 2; which++) {
-                    for (int j = 0;
-                         j < compactions[i]->inputs_[which].size(); j++) {
-                        compacting_tables_.insert(
-                                compactions[i]->inputs_[which][j]->number);
+                    for (int j = 0; j < compactions[i]->inputs_[which].size(); j++) {
+                        compacting_tables_.insert(compactions[i]->inputs_[which][j]->number);
                     }
                 }
             }
@@ -1538,8 +1522,7 @@ namespace leveldb {
                 }
                 uint64_t smallest_snapshot = versions_->LastSequence();
                 for (int i = 0; i < compactions.size(); i++) {
-                    auto state = new CompactionState(compactions[i], subs,
-                                                     smallest_snapshot);
+                    auto state = new CompactionState(compactions[i], subs, smallest_snapshot);
                     states.push_back(state);
                 }
                 if (options_.major_compaction_type == kMajorCoordinated) {
@@ -1750,37 +1733,30 @@ namespace leveldb {
                 metafiles.push_back(f);
             }
             // Prefetch metadata files stored on other servers.
-            FetchMetadataFilesInParallel(metafiles, dbname_, options_,
-                                         client, env_);
+            FetchMetadataFilesInParallel(metafiles, dbname_, options_, client, env_);
         }
         if (state) {
             ObtainLookupIndexEdits(state, &edits);
-            InstallCompactionResults(state, &edit,
-                                     state->compaction->target_level());
+            InstallCompactionResults(state, &edit, state->compaction->target_level());
             if (state->compaction->level() == 0) {
                 if (state->compaction->target_level() == 0) {
                     std::vector<uint64_t> newids;
                     for (int i = 0; i < state->outputs.size(); i++) {
                         newids.push_back(state->outputs[i].number);
                     }
-                    for (int i = 0;
-                         i < state->compaction->inputs_[0].size(); i++) {
+                    for (int i = 0; i < state->compaction->inputs_[0].size(); i++) {
                         uint64_t oldid = state->compaction->inputs_[0][i]->number;
                         range_edit.replace_l0_sstables[oldid] = newids;
                     }
                 } else {
-                    for (int i = 0;
-                         i < state->compaction->inputs_[0].size(); i++) {
-                        range_edit.removed_l0_sstables.push_back(
-                                state->compaction->inputs_[0][i]->number);
+                    for (int i = 0; i < state->compaction->inputs_[0].size(); i++) {
+                        range_edit.removed_l0_sstables.push_back(state->compaction->inputs_[0][i]->number);
                     }
                 }
             }
         }
         NOVA_LOG(rdmaio::DEBUG) << edit.DebugString();
-        versions_->AppendChangesToManifest(&edit,
-                                           manifest_file_,
-                                           options_.manifest_stoc_ids);
+        versions_->AppendChangesToManifest(&edit, manifest_file_, options_.manifest_stoc_ids);
         if (range_index_manager_) {
             range_index_manager_->DeleteObsoleteVersions();
         }
@@ -1793,8 +1769,7 @@ namespace leveldb {
         UpdateLookupIndex(v->version_id_, edits);
         range_edit.lsm_version_id = v->version_id_;
         if (state) {
-            versions_->AddCompactedInputs(state->compaction,
-                                          &compacted_tables_);
+            versions_->AddCompactedInputs(state->compaction, &compacted_tables_);
         }
         versions_->LogAndApply(&edit, v, true);
 
@@ -1803,16 +1778,13 @@ namespace leveldb {
             skip_compacting_version = 0;
         }
         DeleteObsoleteVersions(compaction_coordinator_thread_);
-        ObtainObsoleteFiles(compaction_coordinator_thread_,
-                            &files_to_delete, &server_pairs,
-                            skip_compacting_version);
+        ObtainObsoleteFiles(compaction_coordinator_thread_, &files_to_delete, &server_pairs, skip_compacting_version);
         if (range_index_manager_) {
             range_index_manager_->AppendNewVersion(&scan_stats, range_edit);
             range_index_manager_->DeleteObsoleteVersions();
         }
         mutex_.Unlock();
-        DeleteFiles(compaction_coordinator_thread_, files_to_delete,
-                    server_pairs);
+        DeleteFiles(compaction_coordinator_thread_, files_to_delete, server_pairs);
         l0_stop_write_signal_.SignalAll();
     }
 
@@ -1880,7 +1852,9 @@ namespace leveldb {
                        std::string *value) {
         number_of_gets_ += 1;
         if (lookup_index_) {
-            return GetWithLookupIndex(options, key, value);
+            if (GetWithLookupIndex(options, key, value).ok()) {
+                return Status::OK();
+            }
         }
         return GetWithRangeIndex(options, key, value);
     }
@@ -1903,9 +1877,7 @@ namespace leveldb {
         const RangeTables &range_table = range_index->range_tables_[index];
         // Search memtables.
         for (uint32_t memtableid : range_table.memtable_ids) {
-            versions_->mid_table_mapping_[memtableid]->memtable_->Get(lkey,
-                                                                      value,
-                                                                      &s);
+            versions_->mid_table_mapping_[memtableid]->memtable_->Get(lkey, value, &s);
         }
         std::vector<uint64_t> l0fns;
         l0fns.insert(l0fns.begin(), range_table.l0_sstable_ids.begin(),
@@ -1946,13 +1918,19 @@ namespace leveldb {
         if (memtable != nullptr) {
             number_of_memtable_hits_ += 1;
             NOVA_ASSERT(memtable->memtable_->memtableid() == memtableid);
-            NOVA_ASSERT(memtable->memtable_->Get(lkey, value, &s))
-                << fmt::format("key:{} memtable:{} s:{}",
-                               key.ToString(),
-                               memtable->memtable_->memtableid(),
-                               s.ToString());
+//            NOVA_ASSERT()
+//                << fmt::format("key:{} memtable:{} s:{}",
+//                               key.ToString(),
+//                               memtable->memtable_->memtableid(),
+//                               s.ToString());
+
+            bool found = memtable->memtable_->Get(lkey, value, &s);
             versions_->mid_table_mapping_[memtableid]->Unref(dbname_);
-            return Status::OK();
+            if (found) {
+                return Status::OK();
+            } else {
+                return Status::NotFound("");
+            }
         }
 
         Version *current = nullptr;
@@ -1971,8 +1949,7 @@ namespace leveldb {
             atomic_memtable->mutex_.lock();
             if (vid >= atomic_memtable->last_version_id_) {
                 // good to go.
-                l0fns.insert(l0fns.end(),
-                             atomic_memtable->l0_file_numbers_.begin(),
+                l0fns.insert(l0fns.end(), atomic_memtable->l0_file_numbers_.begin(),
                              atomic_memtable->l0_file_numbers_.end());
                 atomic_memtable->mutex_.unlock();
                 break;
@@ -1983,8 +1960,7 @@ namespace leveldb {
         }
 
         if (!l0fns.empty()) {
-            s = current->Get(options, l0fns, lkey, &latest_seq, value,
-                             &number_of_files_to_search_for_get_);
+            s = current->Get(options, l0fns, lkey, &latest_seq, value, &number_of_files_to_search_for_get_);
         }
 //        std::string l0fns_str;
 //        for (auto &l0 : l0fns) {
@@ -1992,15 +1968,12 @@ namespace leveldb {
 //            l0fns_str += ",";
 //        }
         NOVA_ASSERT(!s.IsIOError())
-            << fmt::format("v:{} status:{} mid:{} version:{}", vid,
-                           s.ToString(),
-                           memtableid, current->DebugString());
+            << fmt::format("v:{} status:{} mid:{} version:{}", vid, s.ToString(), memtableid, current->DebugString());
         if (s.IsNotFound()) {
             // Search L1 files.
             Version::GetStats stats = {};
             SequenceNumber l1seq;
-            s = current->Get(options, lkey, &l1seq, value,
-                             &stats, GetSearchScope::kL1AndAbove,
+            s = current->Get(options, lkey, &l1seq, value, &stats, GetSearchScope::kL1AndAbove,
                              &number_of_files_to_search_for_get_);
 //            if (l1seq > latest_seq) {
 //                value->assign(l1val);
@@ -2898,7 +2871,6 @@ namespace leveldb {
             nova::NovaLogRecordMode::LOG_RDMA && !options.local_write) {
             auto stoc = reinterpret_cast<leveldb::StoCBlockClient *>(options.stoc_client);
             NOVA_ASSERT(stoc);
-            stoc->set_dbid(dbid_);
             options.stoc_client->InitiateReplicateLogRecords(
                     nova::LogFileName(dbid_, memtable_id),
                     options.thread_id, dbid_, memtable_id,
@@ -2916,7 +2888,6 @@ namespace leveldb {
             nova::NovaLogRecordMode::LOG_RDMA && !options.local_write) {
             auto stoc = reinterpret_cast<leveldb::StoCBlockClient *>(options.stoc_client);
             NOVA_ASSERT(stoc);
-            stoc->set_dbid(dbid_);
             LevelDBLogRecord log_record = {};
             log_record.sequence_number = last_sequence;
             log_record.key = key;

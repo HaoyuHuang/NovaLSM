@@ -199,10 +199,8 @@ namespace leveldb {
         if (r->status.ok()) {
             char trailer[kBlockTrailerSize];
             trailer[0] = type;
-            uint32_t crc = crc32c::Value(block_contents.data(),
-                                         block_contents.size());
-            crc = crc32c::Extend(crc, trailer,
-                                 1);  // Extend crc to cover block type
+            uint32_t crc = crc32c::Value(block_contents.data(), block_contents.size());
+            crc = crc32c::Extend(crc, trailer, 1);  // Extend crc to cover block type
             EncodeFixed32(trailer + 1, crc32c::Mask(crc));
             // Make sure the last byte is not 0.
             trailer[kBlockTrailerSize - 1] = '!';

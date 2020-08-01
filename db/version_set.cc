@@ -965,8 +965,7 @@ namespace leveldb {
                 // Make sure there is no overlap in levels > 0
                 if (level > 0) {
                     for (uint32_t i = 1; i < v->files_[level].size(); i++) {
-                        const InternalKey &prev_end = v->files_[level][i -
-                                                                       1]->largest;
+                        const InternalKey &prev_end = v->files_[level][i - 1]->largest;
                         const InternalKey &this_begin = v->files_[level][i]->smallest;
                         if (vset_->icmp_.Compare(prev_end, this_begin) >= 0) {
                             fprintf(stderr,
@@ -988,11 +987,8 @@ namespace leveldb {
                 std::vector<FileMetaData *> *files = &v->files_[level];
                 if (level > 0 && !files->empty()) {
                     // Must not overlap
-                    NOVA_ASSERT(vset_->icmp_.Compare(
-                            (*files)[files->size() - 1]->largest,
-                            f->smallest) < 0)
-                        << fmt::format("level:{} fn:{} f:{} v:{}", level,
-                                       f->number, f->DebugString(),
+                    NOVA_ASSERT(vset_->icmp_.Compare((*files)[files->size() - 1]->largest, f->smallest) < 0)
+                        << fmt::format("level:{} fn:{} f:{} v:{}", level, f->number, f->DebugString(),
                                        v->DebugString());
                 }
                 f->refs++;
@@ -1089,15 +1085,14 @@ namespace leveldb {
             builder.SaveTo(v);
         }
         Finalize(v);
-//        RDMA_LOG(rdmaio::INFO) << v->DebugString();
+        NOVA_LOG(rdmaio::DEBUG) << v->DebugString();
         if (install_new_version) {
             AppendVersion(v);
         }
         return Status::OK();
     }
 
-    void VersionSet::Restore(Slice *buf, uint32_t version_id, uint64_t last_sequence,
-                             uint64_t next_file_number) {
+    void VersionSet::Restore(Slice *buf, uint32_t version_id, uint64_t last_sequence, uint64_t next_file_number) {
         Version *version = new Version(&icmp_, table_cache_, options_, version_id, this);
         version->Decode(buf);
         // Install recovered version
@@ -1106,6 +1101,8 @@ namespace leveldb {
         version_id_seq_ = version_id + 1;
         next_file_number_ = next_file_number + 1;
         last_sequence_ = last_sequence;
+        // Do not delete this version.
+        versions_[version_id]->Ref();
     }
 
     Status VersionSet::Recover(Slice record,
@@ -1177,13 +1174,15 @@ namespace leveldb {
             double score;
             // Compute the ratio of current size to size limit.
             const uint64_t level_bytes = TotalFileSize(v->files_[level]);
-            if (level_bytes > 0 && level == 0 &&
-                options_->l0bytes_start_compaction_trigger == 0) {
+            if (level == 0 && nova::NovaConfig::config->cfgs.size() > 1 &&
+                v->files_[level].size() > options_->l0nfiles_start_compaction_trigger) {
                 score = 99999;
             } else {
-                score =
-                        static_cast<double>(level_bytes) /
-                        MaxBytesForLevel(*options_, level);
+                if (level_bytes > 0 && level == 0 && options_->l0bytes_start_compaction_trigger == 0) {
+                    score = 99999;
+                } else {
+                    score = static_cast<double>(level_bytes) / MaxBytesForLevel(*options_, level);
+                }
             }
             if (score > best_score) {
                 best_level = level;
@@ -1350,7 +1349,10 @@ namespace leveldb {
             NOVA_LOG(rdmaio::INFO) << fmt::format("Decode tableid mapping: {}", mid);
             NOVA_ASSERT(mid < MAX_LIVE_MEMTABLES);
             if (!mid_table_mapping_[mid]->Decode(buf, cmp)) {
-                NOVA_LOG(rdmaio::INFO) << fmt::format("MemTable does not exist in memtable partitions {}:{}", dbname_, mid);
+                NOVA_LOG(rdmaio::INFO)
+                    << fmt::format("MemTable does not exist in memtable partitions {}:{}", dbname_, mid);
+            }
+            if (mid_table_mapping_[mid]->memtable_) {
                 (*mid_table_map)[mid].memtable = mid_table_mapping_[mid]->memtable_;
             }
         }
@@ -1369,8 +1371,7 @@ namespace leveldb {
     }
 
     Iterator *
-    Compaction::MakeInputIterator(TableCache *table_cache,
-                                  EnvBGThread *bg_thread) {
+    Compaction::MakeInputIterator(TableCache *table_cache, EnvBGThread *bg_thread) {
         ReadOptions options;
         options.verify_checksums = options_->paranoid_checks;
         options.fill_cache = false;
@@ -1536,12 +1537,10 @@ namespace leveldb {
             }
         }
         NOVA_LOG(rdmaio::INFO)
-            << fmt::format("Compacting level {} {}:{}", level, l0files.size(),
-                           l1files.size());
+            << fmt::format("Compacting level {} {}:{}", level, l0files.size(), l1files.size());
         int set_index = 0;
         while (!l0files.empty() && compactions.size() < 64) {
-            auto compaction = new Compaction(this, icmp_, options_, level,
-                                             level + 1);
+            auto compaction = new Compaction(this, icmp_, options_, level, level + 1);
             // Make a copy.
             {
                 std::vector<FileMetaData *> l0copy(l0files);

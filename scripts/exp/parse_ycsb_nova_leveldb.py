@@ -1001,6 +1001,7 @@ param_dict["sr"]="SSTable replicas"
 param_dict["f"]="failure duration"
 param_dict["el"]="Enable Lookup index"
 param_dict["try"]="Try"
+param_dict["cfg"]="Migration"
 
 ncores = 32
 disk_metric="bandwidth"

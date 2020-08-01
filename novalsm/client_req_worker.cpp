@@ -290,8 +290,7 @@ namespace nova {
         NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         // Figure out the configuration change.
         std::vector<LTCFragment *> migrate_frags;
-        for (int fragid = 0;
-             fragid < NovaConfig::config->cfgs[0]->fragments.size(); fragid++) {
+        for (int fragid = 0; fragid < NovaConfig::config->cfgs[0]->fragments.size(); fragid++) {
             auto old_frag = NovaConfig::config->cfgs[0]->fragments[fragid];
             auto current_frag = NovaConfig::config->cfgs[1]->fragments[fragid];
             current_frag->db = old_frag->db;

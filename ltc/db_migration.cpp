@@ -95,15 +95,14 @@ namespace nova {
         for (auto frag : migrate_frags) {
             leveldb::DBImpl *db = reinterpret_cast<leveldb::DBImpl *>(frag->db);
             char *buf = mem_manager_->ItemAlloc(0, scid);
+            bufs.push_back(buf);
             msg_sizes.push_back(db->EncodeDBMetadata(buf, log_manager_));
             db->StopCompaction();
-            bufs.push_back(buf);
         }
 
         // Inform the destination of the database metadata.
         for (int i = 0; i < migrate_frags.size(); i++) {
-            client_->InitiateRDMAWRITE(migrate_frags[i]->ltc_server_id, bufs[i],
-                                       msg_sizes[i]);
+            client_->InitiateRDMAWRITE(migrate_frags[i]->ltc_server_id, bufs[i], msg_sizes[i]);
         }
         for (int i = 0; i < migrate_frags.size(); i++) {
             client_->Wait();
@@ -187,14 +186,13 @@ namespace nova {
         }
         leveldb::LogRecovery recover(mem_manager_, client_);
         recover.Recover(actual_memtables_to_recover, cfg_id, dbindex);
-        threads_for_new_dbs_.emplace_back(&leveldb::LTCCompactionThread::Start, reorg);
-        threads_for_new_dbs_.emplace_back(&leveldb::LTCCompactionThread::Start, coord);
+        threads_for_new_dbs_.emplace_back(std::thread(&leveldb::LTCCompactionThread::Start, reorg));
+        threads_for_new_dbs_.emplace_back(std::thread(&leveldb::LTCCompactionThread::Start, coord));
         db->StartCompaction();
 
         frag->is_ready_ = true;
         frag->is_complete_ = true;
         frag->is_ready_signal_.SignalAll();
-
         uint32_t scid = mem_manager_->slabclassid(0, dbmeta.msg_size);
         mem_manager_->FreeItem(0, dbmeta.buf, scid);
         NOVA_LOG(rdmaio::INFO) << fmt::format("!!!!!Recover {} complete", dbindex);

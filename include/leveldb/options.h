@@ -35,7 +35,7 @@ namespace leveldb {
     enum CompressionType {
         // NOTE: do not change the values of existing entries, as these are
         // part of the persistent format on disk.
-                kNoCompression = 0x0,
+        kNoCompression = 0x0,
         kSnappyCompression = 0x1
     };
 
@@ -140,6 +140,7 @@ namespace leveldb {
         // 4 GB.
         uint64_t l0bytes_start_compaction_trigger = 4l * 1024 * 1024 * 1024;
         uint64_t l0bytes_stop_writes_trigger = 0;
+        uint64_t l0nfiles_start_compaction_trigger = 4;
         int level = 0;
 
         uint32_t num_memtable_partitions = 1;

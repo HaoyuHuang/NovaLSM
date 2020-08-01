@@ -415,8 +415,7 @@ namespace leveldb {
             StoCBlockHandle converted_handle = {};
             uint32_t stoc_file_id = block_handle.stoc_file_id;
             if (!filename.empty()) {
-                stoc_file_id = stoc_file_manager_->OpenStoCFile(0,
-                                                                filename)->file_id();
+                stoc_file_id = stoc_file_manager_->OpenStoCFile(0, filename)->file_id();
             }
             Slice output;
             converted_handle.server_id = block_handle.server_id;
@@ -835,8 +834,7 @@ namespace leveldb {
             case IBV_WC_SEND:
                 break;
             case IBV_WC_RDMA_WRITE: {
-                if (buf[0] ==
-                    leveldb::StoCRequestType::STOC_REPLICATE_LOG_RECORDS) {
+                if (buf[0] == leveldb::StoCRequestType::STOC_REPLICATE_LOG_RECORDS) {
                     req_id = leveldb::DecodeFixed32(buf + 1);
                     auto context_it = request_context_.find(req_id);
                     NOVA_ASSERT(context_it != request_context_.end())
@@ -870,12 +868,9 @@ namespace leveldb {
                                 "stocclient[{}]: BUG req:{} wr_id:{} first:{}",
                                 stoc_client_id_, req_id, wr_id, buf[0]);
                     auto &context = context_it->second;
-
                     NOVA_LOG(DEBUG) << fmt::format(
-                                "stocclient[{}]: Log record replicated req:{} wr_id:{} first:{}",
+                                "stocclient[{}]: req:{} wr_id:{} first:{}",
                                 stoc_client_id_, req_id, wr_id, buf[0]);
-                    auto scid = mem_manager_->slabclassid(0, context.size);
-                    mem_manager_->FreeItem(0, context.backing_mem, scid);
                     context.done = true;
                     processed = true;
                 }
@@ -911,13 +906,12 @@ namespace leveldb {
                                     stoc_file_offset,
                                     req_id);
                         processed = true;
-                    } else if (context.req_type ==
-                               StoCRequestType::STOC_READ_BLOCKS) {
-                        if (context.log_file_name.empty()) {
-                            NOVA_ASSERT(
-                                    context.backing_mem[context.size - 1] != 0)
-                                << context.log_file_name;
-                        }
+                    } else if (context.req_type == StoCRequestType::STOC_READ_BLOCKS) {
+//                        if (context.log_file_name.empty()) {
+//                            NOVA_ASSERT(
+//                                    context.backing_mem[context.size - 1] != 0)
+//                                << context.log_file_name;
+//                        }
 
                         // Waiting for WRITEs.
                         if (nova::IsRDMAWRITEComplete(context.backing_mem, context.size)) {

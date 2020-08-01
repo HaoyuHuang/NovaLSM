@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/new-nova-lsm-sr-ltc-migration-$recordcount"
+exp_results_dir="$home_dir/august-nova-lsm-sr-ltc-migration-$recordcount"
 dryrun="$2"
 
 mkdir -p $results
@@ -111,7 +111,7 @@ function run_bench() {
 
 	current_time=$(date "+%Y-%m-%d-%H-%M-%S")
 	nstoc=$((nservers-number_of_ltcs))
-	result_dir_name="nova-try-$try-d-$dist-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$l0_stop_write_mb-np-$num_memtable_partitions-nr-$cc_nranges_per_server"
+	result_dir_name="nova-try-$try-cfg-$change_cfg-d-$dist-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$l0_stop_write_mb-np-$num_memtable_partitions-nr-$cc_nranges_per_server"
 	echo "running experiment $result_dir_name"
 
 	# Copy the files over local node
@@ -121,9 +121,9 @@ function run_bench() {
     mkdir -p $dir
     chmod -R 777 $dir
 
-	cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "migration" $recordcount $number_of_ltcs $cc_nreplicas_per_range $cc_nranges_per_server $zipfianconstant"
-	echo $cmd
-	eval $cmd
+	# cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "migration" $recordcount $number_of_ltcs $cc_nreplicas_per_range $cc_nranges_per_server $zipfianconstant"
+	# echo $cmd
+	# eval $cmd
 	ltc_config_path="$config_dir/nova-migration-cc-nrecords-$recordcount-nccservers-$number_of_ltcs-nlogreplicas-$cc_nreplicas_per_range-nranges-$cc_nranges_per_server"
 	
 	db_path="/db/nova-db-$recordcount-$value_size"
@@ -204,8 +204,10 @@ function run_bench() {
 		done
 	done
 
-	java -jar $cache_bin_dir/nova_coordinator.jar $nova_all_servers $elapsed_seconds_to_trigger_change
-	
+	if [[ $change_cfg == "true" ]]; then
+		java -jar $cache_bin_dir/nova_coordinator.jar $nova_all_servers $elapsed_seconds_to_trigger_change	
+	fi
+
 	port=$((port+1))
 	rdma_port=$((rdma_port+1))
 	sleep 10
@@ -263,7 +265,7 @@ function run_bench() {
 	for s in ${servers[@]}
 	do
 		ssh -oStrictHostKeyChecking=no $s "mkdir -p $results/server-$server_id-dblogs/ && cp -r $db_path/*/LOG* $results/server-$server_id-dblogs/"
-		ssh -oStrictHostKeyChecking=no $s "rm -rf $db_path && rm -rf $cc_stoc_files_path"
+		# ssh -oStrictHostKeyChecking=no $s "rm -rf $db_path && rm -rf $cc_stoc_files_path"
 		server_id=$((server_id+1))
 	done
 
@@ -372,12 +374,14 @@ l0_start_compaction_mb=$((l0_start_compaction_mb/number_of_ltcs/cc_nranges_per_s
 l0_stop_write_mb=$((l0_stop_write_mb/number_of_ltcs/cc_nranges_per_server))
 ltc_migration_policy="immediate"
 
-elapsed_seconds_to_trigger_change="300"
+elapsed_seconds_to_trigger_change="60"
 
+try="1"
+change_cfg="true"
 
-for try in "1" "2" "3" "4" "5" "6" "7" "8" "9" "10"
+for change_cfg in "true" "false" #"2" "3" "4" "5" "6" "7" "8" "9" "10"
 do
-for workload in "workloadw" "workloada" "workloade"
+for workload in "workloada" "workloade" "workloadw" 
 do
 run_bench
 done

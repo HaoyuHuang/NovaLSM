@@ -114,7 +114,7 @@ namespace leveldb {
         const Options &options_;
 
         char *backing_mem_ = nullptr;
-        uint64_t allocated_size_ = 0;
+        const uint64_t allocated_size_;
         uint64_t used_size_ = 0;
         std::vector<int> nblocks_in_group_;
 

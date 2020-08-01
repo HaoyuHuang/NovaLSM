@@ -319,17 +319,16 @@ namespace leveldb {
         NOVA_ASSERT(DecodeFixed32(buf, &memtable_size_));
         uint32_t size;
         NOVA_ASSERT(DecodeFixed32(buf, &size));
-
-        bool memtable_exists = true;
-        if (!memtable_) {
-            memtable_ = new MemTable(cmp, memtable_id_, nullptr, false);
-            memtable_exists = false;
-        }
-
         for (int i = 0; i < size; i++) {
             uint64_t l0;
             NOVA_ASSERT(DecodeFixed64(buf, &l0));
             l0_file_numbers_.insert(l0);
+        }
+
+        bool memtable_exists = true;
+        if (!is_flushed_ && !memtable_) {
+            memtable_ = new MemTable(cmp, memtable_id_, nullptr, false);
+            memtable_exists = false;
         }
         return memtable_exists;
     }

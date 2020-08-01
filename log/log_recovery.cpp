@@ -59,9 +59,6 @@ namespace leveldb {
 
         timeval rdma_read_complete;
         gettimeofday(&rdma_read_complete, nullptr);
-        NOVA_LOG(rdmaio::INFO)
-            << fmt::format(
-                    "Start recovery: memtables:{}", memtables_to_recover.size());
         uint32_t recovered_log_records = 0;
         int index = 0;
         leveldb::DBImpl *dbimpl = reinterpret_cast<leveldb::DBImpl *>(nova::NovaConfig::config->cfgs[cfg_id]->fragments[dbid]->db);

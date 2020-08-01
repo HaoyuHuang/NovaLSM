@@ -363,8 +363,7 @@ namespace nova {
                     uint64_t offset = 0;
                     uint32_t size = 0;
                     uint64_t ltc_mr_offset = 0;
-                    bool is_foreground_read = leveldb::DecodeBool(
-                            buf + msg_size);
+                    bool is_foreground_read = leveldb::DecodeBool(buf + msg_size);
                     msg_size += 1;
                     stoc_file_id = leveldb::DecodeFixed32(buf + msg_size);
                     msg_size += 4;
@@ -378,9 +377,7 @@ namespace nova {
                     leveldb::DecodeStr(buf + msg_size, &filename);
                     NOVA_LOG(DEBUG) << fmt::format(
                                 "rdma-server{}: Read blocks of StoC file {} offset:{} size:{} ltc_mr_offset:{} file:{}",
-                                thread_id_, stoc_file_id, offset, size,
-                                ltc_mr_offset,
-                                filename);
+                                thread_id_, stoc_file_id, offset, size, ltc_mr_offset, filename);
 
                     if (!filename.empty()) {
                         stoc_file_id = stoc_file_manager_->OpenStoCFile(thread_id_, filename)->file_id();
@@ -486,8 +483,7 @@ namespace nova {
                     std::string log_file(buf + 5, size);
                     uint32_t slabclassid = mem_manager_->slabclassid(thread_id_,
                                                                      nova::NovaConfig::config->log_buf_size);
-                    char *rdma_buf = mem_manager_->ItemAlloc(thread_id_,
-                                                             slabclassid);
+                    char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, slabclassid);
                     NOVA_ASSERT(rdma_buf) << "Running out of memory";
                     log_manager_->AddLocalBuf(log_file, rdma_buf);
                     ServerCompleteTask task = {};
@@ -504,10 +500,8 @@ namespace nova {
                 } else if (buf[0] ==
                            leveldb::StoCRequestType::RDMA_WRITE_REQUEST) {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);
-                    uint32_t slabclassid = mem_manager_->slabclassid(thread_id_,
-                                                                     size);
-                    char *rdmabuf = mem_manager_->ItemAlloc(thread_id_,
-                                                            slabclassid);
+                    uint32_t slabclassid = mem_manager_->slabclassid(thread_id_, size);
+                    char *rdmabuf = mem_manager_->ItemAlloc(thread_id_, slabclassid);
                     NOVA_ASSERT(rdmabuf) << "Running out of memory";
 
                     ServerCompleteTask task = {};

@@ -55,9 +55,9 @@ namespace nova {
 
         struct DBMeta {
             MigrateType migrate_type;
-            nova::LTCFragment *source_fragment;
-            char *buf;
-            uint32_t msg_size;
+            nova::LTCFragment *source_fragment = nullptr;
+            char *buf = nullptr;
+            uint32_t msg_size = 0;
         };
 
         void RecoverDBMeta(DBMeta dbmeta, int cfg_id);

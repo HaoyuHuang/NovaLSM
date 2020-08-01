@@ -115,10 +115,6 @@ namespace leveldb {
 
         std::vector<nova::RDMAMsgHandler *> rdma_msg_handlers_;
 
-        void set_dbid(uint32_t dbid) {
-            dbid_ = dbid;
-        }
-
         sem_t Wait() {
             NOVA_ASSERT(sem_wait(&sem_) == 0);
         }
@@ -136,7 +132,6 @@ namespace leveldb {
         StocPersistentFileManager *stoc_file_manager_;
         uint32_t current_rdma_msg_handler_id_ = 0;
         uint32_t req_id_ = 1;
-        uint32_t dbid_ = 0;
     };
 
     class StoCRDMAClient : public StoCClient {

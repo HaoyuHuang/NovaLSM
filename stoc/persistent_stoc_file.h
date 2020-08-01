@@ -50,6 +50,10 @@ namespace leveldb {
 
         void ForceSeal();
 
+        bool sealed() const {
+            return sealed_;
+        }
+
         std::string stoc_file_name_;
     private:
 
@@ -128,8 +132,7 @@ namespace leveldb {
         StoCPersistentFile *
         OpenStoCFile(uint32_t thread_id, std::string &filename);
 
-        void OpenStoCFiles(
-                const std::unordered_map<std::string, uint32_t> &fn_files);
+        void OpenStoCFiles(const std::unordered_map<std::string, uint32_t> &fn_files);
 
         void DeleteSSTable(const std::string &filename);
 

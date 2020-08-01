@@ -145,7 +145,6 @@ namespace nova {
                                                       task.stoc_block_handle.size,
                                                       task.rdma_buf, &result);
                     ct.size = result.size();
-                    task.stoc_block_handle.size = result.size();
                     NOVA_ASSERT(result.size() <= task.stoc_block_handle.size);
                     stat_read_bytes_ += task.stoc_block_handle.size;
                 } else if (task.request_type ==
@@ -221,8 +220,7 @@ namespace nova {
                     {
                         std::vector<const leveldb::FileMetaData *> files;
                         for (int which = 0; which < 2; which++) {
-                            for (int i = 0;
-                                 i < compaction->num_input_files(which); i++) {
+                            for (int i = 0; i < compaction->num_input_files(which); i++) {
                                 files.push_back(compaction->input(which, i));
                             }
                         }
@@ -237,9 +235,7 @@ namespace nova {
                                                user_comparator_,
                                                options_, this, &table_cache);
                     NOVA_LOG(rdmaio::DEBUG)
-                        << fmt::format("storage[{}]: {}", thread_id_,
-                                       compaction->DebugString(
-                                               user_comparator_));
+                        << fmt::format("storage[{}]: {}", thread_id_, compaction->DebugString(user_comparator_));
                     auto it = compaction->MakeInputIterator(&table_cache, this);
                     leveldb::CompactionStats stats = state->BuildStats();
                     job.CompactTables(state, it, &stats, true,

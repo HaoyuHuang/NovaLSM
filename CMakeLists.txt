@@ -83,7 +83,7 @@ endif (BUILD_SHARED_LIBS)
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
 
-add_library(leveldb "")
+add_library(leveldb "" novalsm/file_reader.cpp)
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
@@ -352,6 +352,10 @@ target_link_libraries(leveldb ibverbs event fmt)
 
 add_executable(nova_server_main "novalsm/nova_server_main.cpp")
 target_link_libraries(nova_server_main -lgflags leveldb)
+
+
+add_executable(file_reader "novalsm/file_reader.cpp")
+target_link_libraries(file_reader -lgflags leveldb)
 
 add_executable(nova_server_main_debug "novalsm/nova_server_main.cpp")
 target_link_libraries(nova_server_main_debug -lgflags leveldb -pg)

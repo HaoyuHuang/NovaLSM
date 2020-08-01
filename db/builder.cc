@@ -89,8 +89,7 @@ namespace leveldb {
         if (iter->Valid()) {
             const Comparator *user_comp = reinterpret_cast<const InternalKeyComparator *>(options.comparator)->user_comparator();
             MemManager *mem_manager = bg_thread->mem_manager();
-            std::string filename = TableFileName(dbname,
-                                                 meta->number, false, 0);
+            std::string filename = TableFileName(dbname, meta->number, false, 0);
             StoCWritableFileClient *stoc_writable_file = new StoCWritableFileClient(
                     env,
                     options,
@@ -113,8 +112,7 @@ namespace leveldb {
                 Slice key = iter->key();
                 if (prune_memtables) {
                     Slice ukey = ExtractUserKey(key);
-                    if (!user_key.empty() &&
-                        user_comp->Compare(ukey, user_key) == 0) {
+                    if (!user_key.empty() && user_comp->Compare(ukey, user_key) == 0) {
                         insert = false;
                     }
                     user_key = ukey;
@@ -139,8 +137,7 @@ namespace leveldb {
                 assert(meta->file_size > 0);
 
                 stoc_writable_file->set_meta(*meta);
-                stoc_writable_file->set_num_data_blocks(
-                        builder->NumDataBlocks());
+                stoc_writable_file->set_num_data_blocks(builder->NumDataBlocks());
             }
             delete builder;
             builder = nullptr;

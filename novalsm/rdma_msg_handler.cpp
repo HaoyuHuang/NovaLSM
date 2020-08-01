@@ -98,9 +98,7 @@ namespace nova {
                     ctx.req_id = task.thread_id;
                     break;
                 case leveldb::RDMA_CLIENT_RDMA_WRITE_REQUEST:
-                    ctx.req_id = stoc_client_->InitiateRDMAWRITE(task.server_id,
-                                                                 task.write_buf,
-                                                                 task.size);
+                    ctx.req_id = stoc_client_->InitiateRDMAWRITE(task.server_id, task.write_buf, task.size);
                     break;
                 case leveldb::RDMA_CLIENT_RDMA_WRITE_REMOTE_BUF_ALLOCATED: {
                     char *sendbuf = rdma_broker_->GetSendBuf(task.server_id);

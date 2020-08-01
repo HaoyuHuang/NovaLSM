@@ -534,8 +534,9 @@ namespace nova {
             uint32_t scid = mem_manager->slabclassid(0, MAX_BLOCK_SIZE);
             conn_workers[i]->rdma_backing_mem = mem_manager->ItemAlloc(0, scid);
             conn_workers[i]->rdma_backing_mem_size = MAX_BLOCK_SIZE;
-            conn_workers[i]->stoc_client_ = new leveldb::StoCBlockClient(i,
-                                                                         stoc_file_manager);
+            memset(conn_workers[i]->rdma_backing_mem, 0, MAX_BLOCK_SIZE);
+
+            conn_workers[i]->stoc_client_ = new leveldb::StoCBlockClient(i, stoc_file_manager);
             conn_workers[i]->stoc_client_->rdma_msg_handlers_ = fg_rdma_msg_handlers;
             conn_workers[i]->rdma_threads = rdma_threads;
             conn_workers[i]->ctrl_ = rdma_ctrl;

@@ -40,6 +40,7 @@ namespace leveldb {
         FilterBlockReader *filter;
         const char *filter_data;
         int level;
+        uint32_t db_index;
         uint64_t file_number;
         std::unordered_map<uint64_t, uint64_t> stoc_file_data_relative_offset;
 
@@ -70,7 +71,7 @@ namespace leveldb {
                            Footer::kEncodedLength,
                            &footer_input, footer_space);
         NOVA_ASSERT(footer_input.size() == Footer::kEncodedLength)
-            << fmt::format("{} {} {}", footer_input.size(),
+            << fmt::format("{} {} {} {} {}", size, h.DebugString(), footer_input.size(),
                            Footer::kEncodedLength, meta->DebugString());
         if (!s.ok()) return s;
 
@@ -106,6 +107,7 @@ namespace leveldb {
                                                  : 0);
             rep->filter_data = nullptr;
             rep->file_number = file_number;
+            rep->db_index =
             rep->level = level;
             rep->filter = nullptr;
             (*table)->rep_ = rep;
@@ -239,25 +241,23 @@ namespace leveldb {
                 }
             }
         } else {
-            s = table->ReadBlock(table->rep_->file, options, stoc_block_handle,
-                                 &contents);
+            s = table->ReadBlock(table->rep_->file, options, stoc_block_handle, &contents);
             if (s.ok()) {
-                block = new Block(contents, table->rep_->file_number,
-                                  stoc_block_handle.offset);
+                block = new Block(contents, table->rep_->file_number, stoc_block_handle.offset);
             }
         }
 
         NOVA_ASSERT(s.ok())
             <<
             fmt::format(
-                    "{} Cache hit {} Insert {} fn:{} rs:{} rr:{} roff:{} rsize:{}",
+                    "{} Cache hit {} Insert {} fn:{} rs:{} rr:{} roff:{} rsize:{} meta:{}",
                     s.ToString(),
                     cache_hit,
                     insert,
                     table->rep_->file_number,
                     stoc_block_handle.server_id,
                     stoc_block_handle.stoc_file_id,
-                    stoc_block_handle.offset, stoc_block_handle.size);
+                    stoc_block_handle.offset, stoc_block_handle.size, table->rep_->meta->DebugString());
 
         if (table->db_profiler_ != nullptr) {
             Access access = {
@@ -430,8 +430,8 @@ namespace leveldb {
                 return s;
             }
         }
-
-        switch (data[n]) {
+        char type = data[n];
+        switch (type) {
             case kNoCompression:
                 if (data != buf) {
                     // File implementation gave us pointer to some other data.
@@ -471,7 +471,7 @@ namespace leveldb {
             }
             default:
                 delete[] buf;
-                return Status::Corruption("bad block type");
+                return Status::Corruption(fmt::format("bad block type {}", type));
         }
         return Status::OK();
     }
@@ -490,9 +490,7 @@ namespace leveldb {
         char *buf = new char[n + kBlockTrailerSize];
         Slice contents;
         auto f = reinterpret_cast<StoCRandomAccessFileClient *>(file);
-        Status s = f->Read(options, stoc_block_handle, stoc_block_handle.offset,
-                           n + kBlockTrailerSize, &contents,
-                           buf);
+        Status s = f->Read(options, stoc_block_handle, stoc_block_handle.offset, n + kBlockTrailerSize, &contents, buf);
         if (!s.ok()) {
             delete[] buf;
             return s;

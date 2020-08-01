@@ -37,32 +37,20 @@ namespace leveldb {
                        const std::string &dbname, const Options &options,
                        StoCBlockClient *client, Env *env) {
         // Fetch all metadata files in parallel.
-        char *backing_mems[files.size() *
-                           nova::NovaConfig::config->number_of_sstable_replicas];
+        char *backing_mems[files.size() * nova::NovaConfig::config->number_of_sstable_replicas];
         int index = 0;
         for (int i = 0; i < files.size(); i++) {
             auto meta = files[i];
-            for (int replica_id = 0; replica_id <
-                                     meta->block_replica_handles.size(); replica_id++) {
-                std::string filename = TableFileName(dbname, meta->number, true,
-                                                     replica_id);
-                uint32_t backing_scid = options.mem_manager->slabclassid(0,
-                                                                         meta->block_replica_handles[replica_id].meta_block_handle.size);
-                char *backing_buf = options.mem_manager->ItemAlloc(0,
-                                                                   backing_scid);
+            for (int replica_id = 0; replica_id < meta->block_replica_handles.size(); replica_id++) {
+                std::string filename = TableFileName(dbname, meta->number, true, replica_id);
+                const StoCBlockHandle &meta_handle = meta->block_replica_handles[replica_id].meta_block_handle;
+                uint32_t backing_scid = options.mem_manager->slabclassid(0, meta_handle.size);
+                char *backing_buf = options.mem_manager->ItemAlloc(0, backing_scid);
+                memset(backing_buf, 0, meta_handle.size);
                 NOVA_LOG(rdmaio::DEBUG)
-                    << fmt::format("Fetch metadata blocks {} handle:{}",
-                                   filename, meta->DebugString());
-                backing_buf[
-                        meta->block_replica_handles[replica_id].meta_block_handle.size -
-                        1] = 0;
-                uint32_t req_id = client->InitiateReadDataBlock(
-                        meta->block_replica_handles[replica_id].meta_block_handle,
-                        0,
-                        meta->block_replica_handles[replica_id].meta_block_handle.size,
-                        backing_buf,
-                        meta->block_replica_handles[replica_id].meta_block_handle.size,
-                        filename, false);
+                    << fmt::format("Fetch metadata blocks {} handle:{}", filename, meta->DebugString());
+                uint32_t req_id = client->InitiateReadDataBlock(meta_handle, 0, meta_handle.size, backing_buf,
+                                                                meta_handle.size, "", false);
                 backing_mems[index] = backing_buf;
                 index++;
             }
@@ -70,25 +58,23 @@ namespace leveldb {
 
         for (int i = 0; i < files.size(); i++) {
             auto meta = files[i];
-            for (int replica_id = 0; replica_id <
-                                     meta->block_replica_handles.size(); replica_id++) {
+            for (int replica_id = 0; replica_id < meta->block_replica_handles.size(); replica_id++) {
                 client->Wait();
             }
         }
         index = 0;
         for (int i = 0; i < files.size(); i++) {
             auto meta = files[i];
-            for (int replica_id = 0; replica_id <
-                                     meta->block_replica_handles.size(); replica_id++) {
+            for (int replica_id = 0; replica_id < meta->block_replica_handles.size(); replica_id++) {
                 char *backing_buf = backing_mems[index];
-                uint32_t backing_scid = options.mem_manager->slabclassid(0,
-                                                                         meta->block_replica_handles[replica_id].meta_block_handle.size);
+                const StoCBlockHandle &meta_handle = meta->block_replica_handles[replica_id].meta_block_handle;
+                uint32_t backing_scid = options.mem_manager->slabclassid(0, meta_handle.size);
                 WritableFile *writable_file;
                 EnvFileMetadata env_meta = {};
                 auto sstablename = TableFileName(dbname, meta->number, false, replica_id);
                 Status s = env->NewWritableFile(sstablename, env_meta, &writable_file);
                 NOVA_ASSERT(s.ok());
-                Slice sstable_meta(backing_buf, meta->block_replica_handles[replica_id].meta_block_handle.size);
+                Slice sstable_meta(backing_buf, meta_handle.size);
                 s = writable_file->Append(sstable_meta);
                 NOVA_ASSERT(s.ok());
                 s = writable_file->Flush();
