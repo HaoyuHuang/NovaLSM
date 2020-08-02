@@ -426,7 +426,7 @@ namespace leveldb {
         if (!delete_file) {
             return false;
         }
-        NOVA_LOG(rdmaio::INFO) << fmt::format("Delete SSTable {} from Stoc File {}.", filename, stoc_file_name_);
+        NOVA_LOG(rdmaio::DEBUG) << fmt::format("Delete SSTable {} from Stoc File {}.", filename, stoc_file_name_);
         NOVA_ASSERT(file_);
         Status s = file_->Close();
         NOVA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
@@ -636,7 +636,7 @@ namespace leveldb {
         for (const auto &it : fn_files) {
             const auto &fn = it.first;
             const auto &fileid = it.second;
-            NOVA_LOG(rdmaio::INFO)
+            NOVA_LOG(rdmaio::DEBUG)
                     << fmt::format("Open StoC file {} for file {}", fileid, fn);
             StoCPersistentFile *stoc_file = new StoCPersistentFile(
                     fileid, env_,
@@ -671,14 +671,14 @@ namespace leveldb {
         if (type == FileType::kDescriptorFile) {
             id = current_manifest_file_stoc_file_id_;
             current_manifest_file_stoc_file_id_ += 1;
-            NOVA_LOG(rdmaio::INFO) << fmt::format("Open manifest file {} id:{}", filename, id);
+            NOVA_LOG(rdmaio::DEBUG) << fmt::format("Open manifest file {} id:{}", filename, id);
             NOVA_ASSERT(
                     current_manifest_file_stoc_file_id_ <= MAX_MANIFEST_FILE_ID) << filename;
         } else {
             id = current_stoc_file_id_;
             current_stoc_file_id_ += 1;
         }
-        NOVA_LOG(rdmaio::INFO)
+        NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format("Create a new stoc file {} for thread {} fn:{}", id,
                                thread_id, filename);
         mutex_.unlock();

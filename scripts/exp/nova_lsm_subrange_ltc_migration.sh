@@ -325,7 +325,7 @@ number_of_ltcs="1"
 maxexecutiontime=1200
 workload="workloadw"
 enable_load_data="false"
-mem_pool_size_gb="30"
+mem_pool_size_gb="40"
 
 major_compaction_type="sc"
 num_recovery_threads="32"

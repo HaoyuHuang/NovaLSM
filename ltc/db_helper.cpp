@@ -45,7 +45,7 @@ namespace leveldb {
         options.memtable_pool = memtable_pool;
         if (nova::NovaConfig::config->memtable_size_mb > 0) {
             options.write_buffer_size =
-                    (uint64_t) (
+                    (uint64_t)(
                             nova::NovaConfig::config->memtable_size_mb) *
                     1024 * 1024;
         }
@@ -113,17 +113,12 @@ namespace leveldb {
             options.manifest_stoc_ids.push_back(
                     nova::NovaConfig::config->my_server_id);
         } else {
-            uint32_t stocid = nova::NovaConfig::config->my_server_id %
-                              nova::NovaConfig::config->stoc_servers.size();
-            for (int i = 0;
-                 i <
-                 nova::NovaConfig::config->number_of_sstable_replicas; i++) {
-                stocid = (stocid + i) %
-                         nova::NovaConfig::config->stoc_servers.size();
-                NOVA_LOG(rdmaio::INFO) << fmt::format("Manifest stoc id: {}",
-                                                      nova::NovaConfig::config->stoc_servers[stocid].server_id);
-                options.manifest_stoc_ids.push_back(
-                        nova::NovaConfig::config->stoc_servers[stocid].server_id);
+            uint32_t stocid = db_index % nova::NovaConfig::config->stoc_servers.size();
+            for (int i = 0; i < nova::NovaConfig::config->number_of_sstable_replicas; i++) {
+                stocid = (stocid + i) % nova::NovaConfig::config->stoc_servers.size();
+                NOVA_LOG(rdmaio::INFO)
+                    << fmt::format("Manifest stoc id: {}", nova::NovaConfig::config->stoc_servers[stocid].server_id);
+                options.manifest_stoc_ids.push_back(nova::NovaConfig::config->stoc_servers[stocid].server_id);
             }
         }
         options.num_tiny_ranges_per_subrange = nova::NovaConfig::config->num_tinyranges_per_subrange;
