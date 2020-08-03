@@ -130,6 +130,7 @@ std::atomic_int_fast32_t nova::RDMAServerImpl::fg_storage_worker_seq_id_;
 std::atomic_int_fast32_t nova::RDMAServerImpl::bg_storage_worker_seq_id_;
 std::atomic_int_fast32_t leveldb::StoCBlockClient::rdma_worker_seq_id_;
 std::atomic_int_fast32_t nova::DBMigration::migration_seq_id_;
+std::atomic_int_fast32_t leveldb::StorageSelector::stoc_for_compaction_seq_id;
 
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 std::atomic<nova::Servers *> leveldb::StorageSelector::available_stoc_servers;
@@ -315,6 +316,7 @@ int main(int argc, char *argv[]) {
     nova::StorageWorker::storage_file_number_seq = 0;
     nova::RDMAServerImpl::compaction_storage_worker_seq_id_ = 0;
     nova::DBMigration::migration_seq_id_ = 0;
+    leveldb::StorageSelector::stoc_for_compaction_seq_id = nova::NovaConfig::config->my_server_id;
     nova::NovaGlobalVariables::global.Initialize();
     auto available_stoc_servers = new Servers;
     available_stoc_servers->servers = NovaConfig::config->stoc_servers;

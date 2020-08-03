@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/august-nova-lsm-sr-zipfian-ltc-migration-$recordcount"
+exp_results_dir="$home_dir/august-nova-lsm-sr-test-ltc-migration-$recordcount"
 dryrun="$2"
 
 mkdir -p $results
@@ -124,7 +124,7 @@ function run_bench() {
 	# cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "migration" $recordcount $number_of_ltcs $cc_nreplicas_per_range $cc_nranges_per_server $zipfianconstant"
 	# echo $cmd
 	# eval $cmd
-	ltc_config_path="$config_dir/nova-migration-cc-nrecords-$recordcount-nccservers-$number_of_ltcs-nlogreplicas-$cc_nreplicas_per_range-nranges-$cc_nranges_per_server-zipfian-$zipfianconstant"
+	ltc_config_path="$config_dir/nova-test-migration-cc-nrecords-$recordcount-nccservers-$number_of_ltcs-nlogreplicas-$cc_nreplicas_per_range-nranges-$cc_nranges_per_server-zipfian-$zipfianconstant"
 	
 	db_path="/db/nova-db-$recordcount-$value_size"
 	echo "$nova_servers $ltc_config_path $db_path"
@@ -325,7 +325,7 @@ number_of_ltcs="1"
 maxexecutiontime=1200
 workload="workloadw"
 enable_load_data="false"
-mem_pool_size_gb="40"
+mem_pool_size_gb="30"
 
 major_compaction_type="sc"
 num_recovery_threads="32"
@@ -360,6 +360,7 @@ workload="workloada"
 ltc_num_stocs_scatter_data_blocks="1"
 nclients="10"
 nthreads="512"
+nclients_per_server="10"
 major_compaction_max_parallism="1"
 level="6"
 num_sstable_replicas="1"
@@ -389,7 +390,7 @@ for num_memtables in "8"
 do
 for change_cfg in "false" #"false"
 do
-for workload in "workloada" "workloadw" "workloade"
+for workload in "workloada" "workloade" "workloadw"
 do
 nservers=$((number_of_ltcs+10))
 run_bench

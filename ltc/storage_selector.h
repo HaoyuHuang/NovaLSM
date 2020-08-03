@@ -31,15 +31,16 @@ namespace leveldb {
                 uint32_t failed_replica_id, uint32_t failed_frag_id,
                 uint32_t *available_replica_id);
 
-        void SelectAvailableStoCs(std::vector<uint32_t> *selected_storages,
-                                  uint32_t nstocs);
+        void SelectAvailableStoCs(std::vector<uint32_t> *selected_storages, uint32_t nstocs);
+
+        void SelectAvailableStoCsForCompaction(std::vector<uint32_t> *selected_storages, uint32_t nstocs);
 
         void ValidateReplicas(
                 const std::vector<leveldb::FileReplicaMetaData> &replicas);
 
         std::string ReplicaDebugString(
                 const std::vector<leveldb::FileReplicaMetaData> &replicas);
-
+        static std::atomic_int_fast32_t stoc_for_compaction_seq_id;
         static std::atomic<nova::Servers *> available_stoc_servers;
     private:
         unsigned int *rand_seed_;

@@ -180,6 +180,17 @@ namespace leveldb {
         NOVA_ASSERT(selected_storages->size() == nstocs);
     }
 
+    void StorageSelector::SelectAvailableStoCsForCompaction(std::vector<uint32_t> *selected_storages, uint32_t nstocs) {
+        nova::Servers *available_stocs = available_stoc_servers;
+        for (int i = 0; i < nstocs; i++) {
+            int id = stoc_for_compaction_seq_id.fetch_add(1, std::memory_order_relaxed) %
+                     available_stocs->servers.size();
+            uint32_t sid = available_stocs->servers[id].server_id;
+            selected_storages->push_back(sid);
+        }
+        NOVA_ASSERT(selected_storages->size() == nstocs);
+    }
+
     void
     StorageSelector::SelectStorageServers(StoCBlockClient *client,
                                           nova::ScatterPolicy scatter_policy,

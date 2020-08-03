@@ -159,6 +159,8 @@ std::atomic_int_fast32_t nova::StorageWorker::storage_file_number_seq;
 std::atomic_int_fast32_t nova::DBMigration::migration_seq_id_;
 std::unordered_map<uint64_t, leveldb::FileMetaData *> leveldb::Version::last_fnfile;
 std::atomic<nova::Servers *> leveldb::StorageSelector::available_stoc_servers;
+std::atomic_int_fast32_t leveldb::StorageSelector::stoc_for_compaction_seq_id;
+
 NovaGlobalVariables NovaGlobalVariables::global;
 
 void start(NICServer *server) {

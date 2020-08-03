@@ -25,7 +25,7 @@ number_of_ltcs="5"
 num_sstable_replicas="1"
 nservers="15"
 num_memtable_partitions="1"
-dist="zipfian"
+dist="uniform"
 bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_migration_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server >> lsm_backup_out
 bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_ltc_migration.sh $recordcount $dryrun > stoc_scale_out
 

@@ -130,7 +130,9 @@ function run_bench() {
 	cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "migration" $recordcount $number_of_ltcs $cc_nreplicas_per_range $cc_nranges_per_server $zipfianconstant"
 	echo $cmd
 	eval $cmd
-	ltc_config_path="$config_dir/nova-migration-cc-nrecords-$recordcount-nccservers-$number_of_ltcs-nlogreplicas-$cc_nreplicas_per_range-nranges-$cc_nranges_per_server"
+	old_ltc_config_path="$config_dir/nova-migration-cc-nrecords-$recordcount-nccservers-$number_of_ltcs-nlogreplicas-$cc_nreplicas_per_range-nranges-$cc_nranges_per_server"
+	ltc_config_path="$config_dir/nova-migration-cc-nrecords-$recordcount-nccservers-$number_of_ltcs-nlogreplicas-$cc_nreplicas_per_range-nranges-$cc_nranges_per_server-zipfian-$zipfianconstant"
+	mv $old_ltc_config_path $ltc_config_path
 	
 	db_path="/db/nova-db-$recordcount-$value_size"
 	echo "$nova_servers $ltc_config_path $db_path"
@@ -336,6 +338,7 @@ num_memtable_partitions="$5"
 dist="$6"
 num_sstable_replicas="$7"
 cc_nranges_per_server="$8"
+zipfianconstant="$9"
 
 run_bench
 

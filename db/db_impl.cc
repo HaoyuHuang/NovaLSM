@@ -1562,20 +1562,16 @@ namespace leveldb {
                     auto client = reinterpret_cast<StoCBlockClient *> (compaction_coordinator_thread_->stoc_client());
                     std::vector<uint32_t> selected_storages;
                     StorageSelector selector(&rand_seed_);
-                    selector.SelectAvailableStoCs(&selected_storages,
-                                                  compactions.size());
+                    selector.SelectAvailableStoCsForCompaction(&selected_storages, compactions.size());
                     NOVA_ASSERT(selected_storages.size() == compactions.size());
 
                     for (int i = 0; i < compactions.size(); i++) {
                         NOVA_LOG(rdmaio::INFO) << fmt::format(
-                                    "Coordinator schedules compaction on StoC-{}",
-                                    selected_storages[i]);
-                        if (selected_storages[i] ==
-                            nova::NovaConfig::config->my_server_id) {
+                                    "Coordinator schedules compaction on StoC-{}", selected_storages[i]);
+                        if (selected_storages[i] == nova::NovaConfig::config->my_server_id) {
                             // Schedule on my server.
                             int thread_id =
-                                    EnvBGThread::bg_compaction_thread_id_seq.fetch_add(
-                                            1, std::memory_order_relaxed) %
+                                    EnvBGThread::bg_compaction_thread_id_seq.fetch_add(1, std::memory_order_relaxed) %
                                     bg_compaction_threads_.size();
                             ScheduleCompactionTask(thread_id, states[i]);
                             // A placeholder.

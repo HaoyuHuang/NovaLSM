@@ -615,10 +615,10 @@ def parse_performance(result_dir):
 					try:
 						duration = float(othp[2])
 						ops = float(othp[4])
-						if duration == 600:
+						if duration == 200:
 							basethpt = ops
-						if duration == 1200:
-							overall_thpt = (ops-basethpt) / 600
+						if duration == 700:
+							overall_thpt = (ops-basethpt) / 500
 					except:
 						print line
 						continue
@@ -725,12 +725,15 @@ def parse_exp(exp_dir):
 	exps={}
 	median_exps={}
 	for expdirname in os.listdir(exp_dir):
-		# if "-stoc-10-" not in expdirname:
+		if "nova" not in expdirname:
+			continue
+		if "-ltc-5-" not in expdirname:
+			continue
+		# if "0.99-" not in expdirname:
 		# 	continue
-		# if "-el-" not in expdirname:
+		# if "workloada-" not in expdirname:
 		# 	continue
-		# if "-f-0" not in expdirname:
-		# 	continue
+		
 		# num_wait = 0
 		result_dir = exp_dir + "/" + expdirname
 		latencies, thpt, performance, stall_time = parse_performance(result_dir)
@@ -862,6 +865,7 @@ def parse_exp(exp_dir):
 
 def print_all(exps):
 	header=""
+	print params
 	for p in params:
 		header+=param_dict[p]
 		header+=","
@@ -912,7 +916,7 @@ def print_all(exps):
 				out += ","
 
 		if float(exp_time) == 0:
-			out += "0,0"
+			out += "0,0,0"
 		else:
 			out+=str(float(exps[exp]["nwait"]))
 			out+=","
@@ -1002,22 +1006,23 @@ param_dict["f"]="failure duration"
 param_dict["el"]="Enable Lookup index"
 param_dict["try"]="Try"
 param_dict["cfg"]="Migration"
+param_dict["lr"]="Number of log record replicas"
 
 ncores = 32
 disk_metric="bandwidth"
 # disk_metric="read"
 # print_resource_servers=[0, 1, 2, 4]
-print_resource_servers=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+# print_resource_servers=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 # print_resource_servers=[0, 1, 2, 3, 4, 5]
 # print_resource_servers=[0]
 # print_resources=["cpu", "net", "disk", "rdma"]
-print_resources=["disk"]
-# print_resources=[]
-# print_resource_servers=[]
+# print_resources=["disk"]
+print_resources=[]
+print_resource_servers=[]
 
-read_resources_stats=True
+read_resources_stats=False
 print_thpt_timeline=False
-print_resources_stats=True
+print_resources_stats=False
 print_db_stats=False
 
 num_nodes=int(sys.argv[1])
