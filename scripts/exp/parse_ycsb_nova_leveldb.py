@@ -615,10 +615,10 @@ def parse_performance(result_dir):
 					try:
 						duration = float(othp[2])
 						ops = float(othp[4])
-						if duration == 200:
+						if duration == 600:
 							basethpt = ops
-						if duration == 700:
-							overall_thpt = (ops-basethpt) / 500
+						if duration == 1200:
+							overall_thpt = (ops-basethpt) / 600
 					except:
 						print line
 						continue
@@ -727,8 +727,8 @@ def parse_exp(exp_dir):
 	for expdirname in os.listdir(exp_dir):
 		if "nova" not in expdirname:
 			continue
-		if "-ltc-5-" not in expdirname:
-			continue
+		# if "-ltc-5-" not in expdirname:
+		# 	continue
 		# if "0.99-" not in expdirname:
 		# 	continue
 		# if "workloada-" not in expdirname:

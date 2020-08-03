@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/scan-nova-leveldb-ranges-2-$recordcount"
+exp_results_dir="$home_dir/august-scan-nova-leveldb-ranges-2-$recordcount"
 dryrun="$2"
 
 
@@ -34,8 +34,6 @@ ncompaction_workers="32"
 cache_size_gb="32"
 value_size="4096"
 partition="range"
-lc_index_size_mb="10"
-index_size_mb="10"
 write_buffer_size_mb="4"
 nreplicas_per_range="1"
 nranges_per_server="1"
@@ -158,7 +156,7 @@ function run_bench() {
 	do
 		echo "creating servers on $s"
 		nova_rdma_port=$((rdma_port))
-		cmd="stdbuf --output=0 --error=0 ./leveldb_main --level=$level --l0_start_compaction_mb=$l0_start_compaction_mb --l0_stop_write_mb=$l0_stop_write_mb --sstable_mode=$sstable_mode --block_cache_mb=$block_cache_mb --db_path=$db_path --write_buffer_size_mb=$write_buffer_size_mb --persist_log_records_mode=$persist_log_record --log_buf_size=$log_buf_size --servers=$nova_servers --server_id=$server_id --recordcount=$recordcount --data_partition_alg=$partition --num_conn_workers=$nconn_workers --num_async_workers=$nasync_workers --num_compaction_workers=$ncompaction_workers --cache_size_gb=$cache_size_gb --use_fixed_value_size=$value_size --index_size_mb=$index_size_mb --nindex_entry_per_bucket=4 --main_bucket_mem_percent=90 --lc_index_size_mb=$lc_index_size_mb --lc_nindex_entry_per_bucket=4 --lc_main_bucket_mem_percent=90 --rdma_port=$nova_rdma_port --rdma_max_msg_size=$rdma_max_msg_size --rdma_max_num_sends=128 --rdma_doorbell_batch_size=8 --rdma_pq_batch_size=8 --enable_rdma=$enable_rdma --config_path=$config_path --enable_load_data=true --profiler_file_path=$profiler_file_path --sstable_size_mb=$sstable_size_mb"
+		cmd="stdbuf --output=0 --error=0 ./leveldb_main --level=$level --l0_start_compaction_mb=$l0_start_compaction_mb --l0_stop_write_mb=$l0_stop_write_mb --sstable_mode=$sstable_mode --block_cache_mb=$block_cache_mb --db_path=$db_path --write_buffer_size_mb=$write_buffer_size_mb --persist_log_records_mode=$persist_log_record --log_buf_size=$log_buf_size --servers=$nova_servers --server_id=$server_id --recordcount=$recordcount --data_partition_alg=$partition --num_conn_workers=$nconn_workers --num_async_workers=$nasync_workers --num_compaction_workers=$ncompaction_workers --cache_size_gb=$cache_size_gb --use_fixed_value_size=$value_size --rdma_port=$nova_rdma_port --rdma_max_msg_size=$rdma_max_msg_size --rdma_max_num_sends=128 --rdma_doorbell_batch_size=8 --rdma_pq_batch_size=8 --enable_rdma=$enable_rdma --config_path=$config_path --enable_load_data=true --profiler_file_path=$profiler_file_path --sstable_size_mb=$sstable_size_mb"
 		echo "$cmd"
 		ssh -oStrictHostKeyChecking=no $s "rm -rf $db_path && mkdir -p $db_path && cd $cache_bin_dir && $cmd >& $results/server-$s-out &" &
 		server_id=$((server_id+1))
@@ -166,15 +164,24 @@ function run_bench() {
 		sleep 1
 	done
 
-	# sleep 120
-	# c=${clis[0]}
-	# i="1"
-	# echo "creating client on $c-$i"
-	# cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_servers $debug $partition $recordcount 180 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
-	# echo "$cmd"
-	# ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
+	echo "warmup..."
+	c=${clis[0]}
+	i="1"
+	echo "creating client on $c-$i"
+	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_servers $debug $partition $recordcount 600 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
+	echo "$cmd"
+	ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
 
-	sleep 30
+	echo "warmup complete..."
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers "drain"
+	sleep 10
+
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	sleep 10
 
 	for c in ${clis[@]}
 	do
@@ -302,7 +309,7 @@ nconn_workers="512"
 nclients_per_server="5"
 persist_log_record="none"
 nservers="1"
-nmachines="25"
+nmachines="5"
 nclients="4"
 cache_size_gb="22"
 level="6"
@@ -310,7 +317,7 @@ cardinality="10"
 
 for persist_log_record in "none" #"disk" "mem"
 do
-for nranges_per_server in "64" "1" #"16" "64"
+for nranges_per_server in "64" #"1" #"16" "64"
 do
 ncompaction_workers="$nranges_per_server"
 l0_start_compaction_mb="4096"
@@ -318,7 +325,7 @@ l0_stop_write_mb=$((10*1024))
 l0_start_compaction_mb=$((l0_start_compaction_mb/nranges_per_server))
 l0_stop_write_mb=$((l0_stop_write_mb/nranges_per_server))
 
-for dist in "zipfian" "uniform"
+for dist in "uniform" #"zipfian" 
 do
 for workload in "workloada" "workloadw" "workloade"
 do

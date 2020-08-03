@@ -1912,7 +1912,6 @@ namespace leveldb {
         }
         LookupKey lkey(key, snapshot);
         if (memtable != nullptr) {
-            number_of_memtable_hits_ += 1;
             NOVA_ASSERT(memtable->memtable_->memtableid() == memtableid);
 //            NOVA_ASSERT()
 //                << fmt::format("key:{} memtable:{} s:{}",
@@ -1923,6 +1922,7 @@ namespace leveldb {
             bool found = memtable->memtable_->Get(lkey, value, &s);
             versions_->mid_table_mapping_[memtableid]->Unref(dbname_);
             if (found) {
+                number_of_memtable_hits_ += 1;
                 return Status::OK();
             } else {
                 return Status::NotFound("");
@@ -1958,11 +1958,6 @@ namespace leveldb {
         if (!l0fns.empty()) {
             s = current->Get(options, l0fns, lkey, &latest_seq, value, &number_of_files_to_search_for_get_);
         }
-//        std::string l0fns_str;
-//        for (auto &l0 : l0fns) {
-//            l0fns_str.append(std::to_string(l0));
-//            l0fns_str += ",";
-//        }
         NOVA_ASSERT(!s.IsIOError())
             << fmt::format("v:{} status:{} mid:{} version:{}", vid, s.ToString(), memtableid, current->DebugString());
         if (s.IsNotFound()) {
