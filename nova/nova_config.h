@@ -100,6 +100,9 @@ namespace nova {
             file.open(path);
             vector<Fragment *> frags;
             while (std::getline(file, line)) {
+                if (line.find("config") != std::string::npos) {
+                    continue;
+                }
                 auto *frag = new Fragment();
                 std::vector<std::string> tokens = SplitByDelimiter(&line, ",");
                 frag->key_start = std::stoi(tokens[0]);

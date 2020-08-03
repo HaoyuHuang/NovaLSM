@@ -323,38 +323,38 @@ namespace nova {
         uint64_t hv = NovaConfig::keyhash(ckey, nkey);
         Fragment *frag = NovaConfig::home_fragment(hv);
         RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
-                        << " put fd:"
-                        << fd << ": key:" << key << " nkey:" << nkey << " nval:"
-                        << nval;
+                       << " put fd:"
+                       << fd << ": key:" << key << " nkey:" << nkey << " nval:"
+                       << nval;
 
         leveldb::Slice dbkey(ckey, nkey);
         leveldb::Slice dbval(val, nval);
 
-        bool local_write =
-                NovaConfig::config->log_record_mode == leveldb::LOG_NONE ||
-                NovaConfig::config->log_record_mode == leveldb::LOG_DISK_SYNC ||
-                NovaConfig::config->log_record_mode == leveldb::LOG_DISK_ASYNC;
+//        bool local_write =
+//                NovaConfig::config->log_record_mode == leveldb::LOG_NONE ||
+//                NovaConfig::config->log_record_mode == leveldb::LOG_DISK_SYNC ||
+//                NovaConfig::config->log_record_mode == leveldb::LOG_DISK_ASYNC;
 
-        if (local_write) {
-            leveldb::WriteOptions option;
-            option.log_record_mode = NovaConfig::config->log_record_mode;
+        leveldb::WriteOptions option;
+        option.log_record_mode = NovaConfig::config->log_record_mode;
+//        Fragment *frag = NovaConfig::home_fragment(hv);
+        leveldb::DB *db = worker->dbs_[frag->dbid];
+        leveldb::Status status = db->Put(option, dbkey, dbval);
+        RDMA_LOG(DEBUG) << "############### Async worker processed task "
+                        << fd
+                        << ":" << dbkey.ToString();
+        RDMA_ASSERT(status.ok()) << status.ToString();
 
-            Fragment *frag = NovaConfig::home_fragment(hv);
-            leveldb::DB *db = worker->dbs_[frag->dbid];
-            leveldb::Status status = db->Put(option, dbkey, dbval);
-            RDMA_LOG(DEBUG) << "############### Async worker processed task "
-                            << fd
-                            << ":" << dbkey.ToString();
-            RDMA_ASSERT(status.ok()) << status.ToString();
-
-            char *response_buf = worker->buf;
-            uint32_t cfg_size = int_to_str(response_buf, 0);
-            response_buf += cfg_size;
-            conn->response_size += cfg_size;
-            response_buf[0] = MSG_TERMINATER_CHAR;
-            conn->response_size += 1;
-            return true;
-        }
+        char *response_buf = worker->buf;
+        uint32_t response_size = 0;
+        uint32_t cfg_size = int_to_str(response_buf, 0);
+        response_buf += cfg_size;
+        response_size += cfg_size;
+        response_buf[0] = MSG_TERMINATER_CHAR;
+        response_size += 1;
+        conn->response_buf = worker->buf;
+        conn->response_size = response_size;
+        return true;
 
         // I'm the home.
 //        NovaAsyncTask task = {
@@ -366,7 +366,6 @@ namespace nova {
 //                .conn = conn
 //        };
 //        worker->AddTask(task);
-        return false;
     }
 
     bool process_socket_replicate_log_record(int fd, Connection *conn) {
