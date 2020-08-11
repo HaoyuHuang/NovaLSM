@@ -47,12 +47,13 @@ namespace nova {
         sem_post(&sem_);
     }
 
-    void StorageWorker::ReplicateSSTables(
+    std::vector<leveldb::ReplicationPair> StorageWorker::ReplicateSSTables(
             const std::string &dbname,
             const std::vector<leveldb::ReplicationPair> &replication_pairs) {
         std::vector<char *> bufs;
         std::vector<uint32_t> reqs;
         auto client = reinterpret_cast<leveldb::StoCBlockClient *>(client_);
+        std::vector<leveldb::ReplicationPair> replication_results;
         for (int i = 0; i < replication_pairs.size(); i++) {
             const auto &pair = replication_pairs[i];
             uint32_t scid = mem_manager_->slabclassid(0, pair.source_file_size);
@@ -66,11 +67,12 @@ namespace nova {
             handle.size = pair.source_file_size;
 
             leveldb::Slice result;
-            if (stoc_file_manager_->ReadDataBlockForReplication(handle, 0,
-                                                                pair.source_file_size,
-                                                                buf, &result)) {
-                NOVA_LOG(DEBUG)
-                    << fmt::format("Initiate replicate {}", pair.DebugString());
+            bool success = stoc_file_manager_->ReadDataBlockForReplication(handle, 0,
+                                                                           pair.source_file_size,
+                                                                           buf, &result);
+            NOVA_LOG(DEBUG)
+                << fmt::format("Initiate replicate {} success:{}", pair.DebugString(), success);
+            if (success) {
                 stat_read_bytes_ += pair.source_file_size;
                 NOVA_ASSERT(result.size() == pair.source_file_size)
                     << fmt::format("{} {} {}", pair.source_stoc_file_id,
@@ -86,6 +88,7 @@ namespace nova {
                         pair.source_file_size,
                         pair.is_meta_blocks);
                 reqs.push_back(req_id);
+                replication_results.push_back(pair);
             }
         }
         for (int i = 0; i < reqs.size(); i++) {
@@ -94,6 +97,12 @@ namespace nova {
         for (int i = 0; i < reqs.size(); i++) {
             leveldb::StoCResponse response;
             NOVA_ASSERT(client->IsDone(reqs[i], &response, nullptr));
+            NOVA_ASSERT(response.stoc_block_handles.size() == 1)
+                << fmt::format("{} {}", reqs[i], response.stoc_block_handles.size());
+            replication_results[i].dest_stoc_file_id = response.stoc_block_handles[0].stoc_file_id;
+            NOVA_ASSERT(response.stoc_block_handles[0].server_id == replication_results[i].dest_stoc_id);
+            NOVA_ASSERT(response.stoc_block_handles[0].offset == 0);
+            NOVA_ASSERT(response.stoc_block_handles[0].size == replication_results[i].source_file_size);
         }
 
         for (int i = 0; i < replication_pairs.size(); i++) {
@@ -102,6 +111,7 @@ namespace nova {
             mem_manager_->FreeItem(0, bufs[i], scid);
         }
         NOVA_LOG(DEBUG) << "All replications complete";
+        return replication_results;
     }
 
     void StorageWorker::Start() {
@@ -170,16 +180,14 @@ namespace nova {
                         rh.size = h.size();
                         ct.stoc_block_handles.push_back(rh);
 
-                        NOVA_ASSERT(leveldb::ParseFileName(pair.sstable_name,
-                                                           &type));
-                        if (task.is_meta_blocks ||
-                            type == leveldb::FileType::kTableFile) {
+                        NOVA_ASSERT(leveldb::ParseFileName(pair.sstable_name, &type));
+                        if (task.is_meta_blocks || type == leveldb::FileType::kTableFile) {
                             stoc_file->ForceSeal();
                         }
                     }
                 } else if (task.request_type ==
                            leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES) {
-                    ReplicateSSTables(task.dbname, task.replication_pairs);
+                    ct.replication_results = ReplicateSSTables(task.dbname, task.replication_pairs);
                 } else if (task.request_type ==
                            leveldb::StoCRequestType::STOC_COMPACTION) {
                     leveldb::TableCache table_cache(
@@ -212,9 +220,7 @@ namespace nova {
                             task.compaction_request->smallest_snapshot);
                     std::function<uint64_t(void)> fn_generator = []() {
                         uint32_t fn = storage_file_number_seq.fetch_add(1);
-                        uint64_t stocid =
-                                nova::NovaConfig::config->my_server_id +
-                                nova::NovaConfig::config->ltc_servers.size();
+                        uint64_t stocid = nova::NovaConfig::config->my_server_id + 1;
                         return (stocid << 32) | fn;
                     };
                     {

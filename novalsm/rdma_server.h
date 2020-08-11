@@ -69,6 +69,7 @@ namespace nova {
         std::vector<leveldb::StoCBlockHandle> stoc_block_handles = {};
         leveldb::CompactionState *compaction_state = nullptr;
         leveldb::CompactionRequest *compaction_request = nullptr;
+        std::vector<leveldb::ReplicationPair> replication_results = {};
     };
 
     class StorageWorker;

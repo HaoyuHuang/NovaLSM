@@ -44,10 +44,7 @@ namespace leveldb {
         options.block_cache = cache;
         options.memtable_pool = memtable_pool;
         if (nova::NovaConfig::config->memtable_size_mb > 0) {
-            options.write_buffer_size =
-                    (uint64_t)(
-                            nova::NovaConfig::config->memtable_size_mb) *
-                    1024 * 1024;
+            options.write_buffer_size = (uint64_t) (nova::NovaConfig::config->memtable_size_mb) * 1024 * 1024;
         }
         if (nova::NovaConfig::config->sstable_size > 0) {
             options.max_file_size = nova::NovaConfig::config->sstable_size;
@@ -61,18 +58,15 @@ namespace leveldb {
         options.stoc_client = stoc_client;
         options.num_memtable_partitions = nova::NovaConfig::config->num_memtable_partitions;
         options.num_memtables = nova::NovaConfig::config->num_memtables;
-        options.l0bytes_start_compaction_trigger =
-                nova::NovaConfig::config->l0_start_compaction_mb * 1024 * 1024;
-        options.l0bytes_stop_writes_trigger =
-                nova::NovaConfig::config->l0_stop_write_mb * 1024 * 1024;
+        options.l0bytes_start_compaction_trigger = nova::NovaConfig::config->l0_start_compaction_mb * 1024 * 1024;
+        options.l0bytes_stop_writes_trigger = nova::NovaConfig::config->l0_stop_write_mb * 1024 * 1024;
         options.max_open_files = 50000;
         options.enable_lookup_index = nova::NovaConfig::config->enable_lookup_index;
         options.enable_range_index = nova::NovaConfig::config->enable_range_index;
         options.num_recovery_thread = nova::NovaConfig::config->number_of_recovery_threads;
         options.num_compaction_threads = bg_flush_memtable_threads.size();
-        options.max_stoc_file_size =
-                std::max(options.write_buffer_size, options.max_file_size) +
-                LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
+        options.max_stoc_file_size = std::max(options.write_buffer_size, options.max_file_size) +
+                                     LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
         options.env = env;
         options.create_if_missing = true;
         options.compression = leveldb::kNoCompression;
@@ -107,34 +101,29 @@ namespace leveldb {
             options.major_compaction_type = leveldb::MajorCompactionType::kMajorDisabled;
         }
         options.subrange_no_flush_num_keys = nova::NovaConfig::config->subrange_num_keys_no_flush;
-        options.lower_key = nova::NovaConfig::config->cfgs[cfg_id]->fragments[db_index]->range.key_start;
-        options.upper_key = nova::NovaConfig::config->cfgs[cfg_id]->fragments[db_index]->range.key_end;
+        options.lower_key = nova::NovaConfig::config->cfgs[0]->fragments[db_index]->range.key_start;
+        options.upper_key = nova::NovaConfig::config->cfgs[0]->fragments[db_index]->range.key_end;
+        auto cfg = nova::NovaConfig::config->cfgs[0];
         if (nova::NovaConfig::config->use_local_disk) {
-            options.manifest_stoc_ids.push_back(
-                    nova::NovaConfig::config->my_server_id);
+            options.manifest_stoc_ids.push_back(nova::NovaConfig::config->my_server_id);
         } else {
-            uint32_t stocid = db_index % nova::NovaConfig::config->stoc_servers.size();
+            uint32_t stocid = db_index % cfg->stoc_servers.size();
             for (int i = 0; i < nova::NovaConfig::config->number_of_sstable_replicas; i++) {
-                stocid = (stocid + i) % nova::NovaConfig::config->stoc_servers.size();
-                NOVA_LOG(rdmaio::INFO)
-                    << fmt::format("Manifest stoc id: {}", nova::NovaConfig::config->stoc_servers[stocid].server_id);
-                options.manifest_stoc_ids.push_back(nova::NovaConfig::config->stoc_servers[stocid].server_id);
+                stocid = (stocid + i) % cfg->stoc_servers.size();
+                NOVA_LOG(rdmaio::INFO) << fmt::format("Manifest stoc id: {}", cfg->stoc_servers[stocid]);
+                options.manifest_stoc_ids.push_back(cfg->stoc_servers[stocid]);
             }
         }
         options.num_tiny_ranges_per_subrange = nova::NovaConfig::config->num_tinyranges_per_subrange;
         return options;
     }
 
-    leveldb::Options BuildStorageOptions(leveldb::MemManager *mem_manager,
-                                         leveldb::Env *env) {
+    leveldb::Options BuildStorageOptions(leveldb::MemManager *mem_manager, leveldb::Env *env) {
         leveldb::Options options;
         options.block_cache = nullptr;
         options.memtable_pool = nullptr;
         if (nova::NovaConfig::config->memtable_size_mb > 0) {
-            options.write_buffer_size =
-                    (uint64_t) (
-                            nova::NovaConfig::config->memtable_size_mb) *
-                    1024 * 1024;
+            options.write_buffer_size = (uint64_t) (nova::NovaConfig::config->memtable_size_mb) * 1024 * 1024;
         }
         if (nova::NovaConfig::config->sstable_size > 0) {
             options.max_file_size = nova::NovaConfig::config->sstable_size;
@@ -147,14 +136,12 @@ namespace leveldb {
         options.enable_lookup_index = nova::NovaConfig::config->enable_lookup_index;
         options.num_recovery_thread = nova::NovaConfig::config->number_of_recovery_threads;
         options.level = nova::NovaConfig::config->level;
-        options.max_stoc_file_size =
-                std::max(options.write_buffer_size, options.max_file_size) +
-                LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
+        options.max_stoc_file_size = std::max(options.write_buffer_size, options.max_file_size) +
+                                     LEVELDB_TABLE_PADDING_SIZE_MB * 1024 * 1024;
         options.env = env;
         options.create_if_missing = true;
         options.compression = leveldb::kNoCompression;
-        leveldb::InternalFilterPolicy *filter = new leveldb::InternalFilterPolicy(
-                leveldb::NewBloomFilterPolicy(10));
+        leveldb::InternalFilterPolicy *filter = new leveldb::InternalFilterPolicy(leveldb::NewBloomFilterPolicy(10));
         options.filter_policy = filter;
         options.enable_tracing = false;
         options.comparator = new YCSBKeyComparator();
@@ -193,15 +180,12 @@ namespace leveldb {
                                                   compaction_coord_thread,
                                                   env);
         leveldb::Logger *log = nullptr;
-        std::string db_path = nova::DBName(nova::NovaConfig::config->db_path,
-                                           db_index);
+        std::string db_path = nova::DBName(nova::NovaConfig::config->db_path, db_index);
         nova::mkdirs(db_path.c_str());
-        NOVA_ASSERT(env->NewLogger(
-                db_path + "/LOG-" + std::to_string(db_index), &log).ok());
+        NOVA_ASSERT(env->NewLogger(db_path + "/LOG-" + std::to_string(db_index), &log).ok());
         options.info_log = log;
         leveldb::Status status = leveldb::DB::Open(options, db_path, &db);
-        NOVA_ASSERT(status.ok()) << "Open leveldb failed "
-                                 << status.ToString();
+        NOVA_ASSERT(status.ok()) << "Open leveldb failed " << status.ToString();
         return db;
     }
 }

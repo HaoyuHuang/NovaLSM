@@ -32,6 +32,7 @@
 
 #include <event.h>
 #include <leveldb/write_batch.h>
+#include <ltc/storage_selector.h>
 
 namespace nova {
     using namespace rdmaio;
@@ -170,6 +171,7 @@ namespace nova {
 
         leveldb::Slice key(request_buf, nkey);
         LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
+        NOVA_ASSERT(frag) << fmt::format("cfg:{} key:{}", server_cfg_id, hv);
 
         if (!frag->is_ready_) {
             frag->is_ready_mutex_.Lock();
@@ -256,9 +258,7 @@ namespace nova {
     process_socket_query_ready_request(int fd, Connection *conn) {
         int current_cfg_id = NovaConfig::config->current_cfg_id;
         NOVA_LOG(rdmaio::INFO)
-            << fmt::format("Query configuration change. Current cfg id: {}",
-                           current_cfg_id);
-        NOVA_ASSERT(current_cfg_id == 1);
+            << fmt::format("Query configuration change. Current cfg id: {}", current_cfg_id);
         NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         int ret_val = 0;
         for (int fragid = 0;
@@ -284,44 +284,75 @@ namespace nova {
     process_socket_change_config_request(int fd, Connection *conn) {
         int current_cfg_id = NovaConfig::config->current_cfg_id;
         NOVA_LOG(rdmaio::INFO)
-            << fmt::format("Change configuration. Current cfg id: {}",
-                           current_cfg_id);
-
+            << fmt::format("Change configuration. Current cfg id: {}", current_cfg_id);
         NICClientReqWorker *worker = (NICClientReqWorker *) conn->worker;
         // Figure out the configuration change.
         std::vector<LTCFragment *> migrate_frags;
-        for (int fragid = 0; fragid < NovaConfig::config->cfgs[0]->fragments.size(); fragid++) {
-            auto old_frag = NovaConfig::config->cfgs[0]->fragments[fragid];
-            auto current_frag = NovaConfig::config->cfgs[1]->fragments[fragid];
-            current_frag->db = old_frag->db;
+
+        timeval change_start{};
+        gettimeofday(&change_start, nullptr);
+
+        int new_cfg_id = current_cfg_id + 1;
+        nova::Servers *new_stocs = new nova::Servers;
+        std::vector<uint32_t> removed_stocs;
+        for (int fragid = 0; fragid < NovaConfig::config->cfgs[current_cfg_id]->fragments.size(); fragid++) {
+            auto old_frag = NovaConfig::config->cfgs[current_cfg_id]->fragments[fragid];
+            auto current_frag = NovaConfig::config->cfgs[new_cfg_id]->fragments[fragid];
             if (old_frag->ltc_server_id != current_frag->ltc_server_id) {
                 if (old_frag->ltc_server_id == NovaConfig::config->my_server_id) {
                     NOVA_LOG(rdmaio::INFO) << fmt::format("Migrate {}", current_frag->DebugString());
-                    migrate_frags.push_back(current_frag);
+                    migrate_frags.push_back(old_frag);
                 }
             } else {
+                current_frag->db = old_frag->db;
                 current_frag->is_ready_ = true;
                 current_frag->is_complete_ = true;
             }
         }
+
+        new_stocs->servers = NovaConfig::config->cfgs[new_cfg_id]->stoc_servers;
+        new_stocs->server_ids = NovaConfig::config->cfgs[new_cfg_id]->stoc_server_ids;
+        leveldb::StorageSelector::available_stoc_servers.store(new_stocs);
+        for (int i = 0; i < NovaConfig::config->cfgs[current_cfg_id]->stoc_servers.size(); i++) {
+            auto stoc_id = NovaConfig::config->cfgs[current_cfg_id]->stoc_servers[i];
+            auto new_cfg = NovaConfig::config->cfgs[new_cfg_id];
+            if (new_cfg->stoc_server_ids.find(stoc_id) == new_cfg->stoc_server_ids.end()) {
+                removed_stocs.push_back(stoc_id);
+            }
+        }
         // Bump up cfg id.
         NovaConfig::config->current_cfg_id.fetch_add(1);
-        int frags_per_thread = migrate_frags.size() / worker->db_migration_threads_.size();
-        NOVA_LOG(rdmaio::INFO) << fmt::format("Migrate {} ranges per migration thread.", frags_per_thread);
-
-        std::vector<LTCFragment *> batch;
-        int thread_id = 0;
-        for (int i = 0; i < migrate_frags.size(); i++) {
-            if (batch.size() == frags_per_thread) {
-                worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batch);
-                batch.clear();
-                thread_id = (thread_id + 1) % worker->db_migration_threads_.size();
+        NovaConfig::config->cfgs[new_cfg_id]->start_time_us_ = change_start.tv_sec * 1000000 + change_start.tv_usec;
+        if (nova::NovaConfig::config->cfgs[current_cfg_id]->IsLTC()) {
+            int thread_id = 0;
+            std::vector<LTCFragment *> batch;
+            int frags_per_thread = migrate_frags.size() / worker->db_migration_threads_.size();
+            if (frags_per_thread == 0) {
+                frags_per_thread = 1;
             }
-            batch.push_back(migrate_frags[i]);
-        }
-        if (!batch.empty()) {
-            thread_id = (thread_id + 1) % worker->db_migration_threads_.size();
-            worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batch);
+            NOVA_LOG(rdmaio::INFO) << fmt::format("Migrate {} ranges per migration thread.", frags_per_thread);
+            for (int i = 0; i < migrate_frags.size(); i++) {
+                batch.push_back(migrate_frags[i]);
+                if (batch.size() == frags_per_thread) {
+                    thread_id = (thread_id + 1) % worker->db_migration_threads_.size();
+                    worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batch);
+                    batch.clear();
+                }
+            }
+            if (!batch.empty()) {
+                thread_id = (thread_id + 1) % worker->db_migration_threads_.size();
+                worker->db_migration_threads_[thread_id]->AddSourceMigrateDB(batch);
+            }
+            if (!removed_stocs.empty()) {
+                NOVA_ASSERT(removed_stocs.size() == 1);
+                for (int fragid = 0; fragid < NovaConfig::config->cfgs[new_cfg_id]->fragments.size(); fragid++) {
+                    auto current_frag = NovaConfig::config->cfgs[new_cfg_id]->fragments[fragid];
+                    if (current_frag->ltc_server_id == nova::NovaConfig::config->my_server_id) {
+                        thread_id = (thread_id + 1) % worker->db_migration_threads_.size();
+                        worker->db_migration_threads_[thread_id]->AddStoCMigration(current_frag, removed_stocs);
+                    }
+                }
+            }
         }
         char *response_buf = worker->buf;
         int len = int_to_str(response_buf, 1);
@@ -424,6 +455,7 @@ namespace nova {
         uint64_t hv = keyhash(startkey, nkey);
         auto cfg = NovaConfig::config->cfgs[server_cfg_id];
         LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
+        NOVA_ASSERT(frag) << fmt::format("cfg:{} key:{}", server_cfg_id, hv);
 
         leveldb::ReadOptions read_options;
         read_options.stoc_client = worker->stoc_client_;
@@ -461,6 +493,42 @@ namespace nova {
             }
 
             leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frag->db);
+//            if (frag->range.key_end - frag->range.key_start == 1) {
+//                // A range contains a single key. Perform get instead of scan.
+//                std::string value;
+//                leveldb::ReadOptions read_options;
+//                read_options.hash = frag->range.key_start;
+//                read_options.stoc_client = worker->stoc_client_;
+//                read_options.mem_manager = worker->mem_manager_;
+//                read_options.thread_id = worker->thread_id_;
+//                read_options.rdma_backing_mem = worker->rdma_backing_mem;
+//                read_options.rdma_backing_mem_size = worker->rdma_backing_mem_size;
+//                read_options.cfg_id = server_cfg_id;
+//                uint32_t len = nova::nint_to_str(frag->range.key_start) + 1;
+//                char keybuf[len];
+//                nova::int_to_str(keybuf, frag->range.key_start);
+//                leveldb::Slice key(keybuf, len - 1);
+//                leveldb::Status s = db->Get(read_options, key, &value);
+//                NOVA_ASSERT(s.ok())
+//                    << fmt::format("k:{} status:{}", key.ToString(), s.ToString());
+//
+//                scan_size += nint_to_str(key.size()) + 1;
+//                scan_size += key.size();
+//                scan_size += nint_to_str(value.size()) + 1;
+//                scan_size += value.size();
+//
+//                response_buf += int_to_str(response_buf, key.size());
+//                memcpy(response_buf, key.data(), key.size());
+//                response_buf += key.size();
+//                response_buf += int_to_str(response_buf, value.size());
+//                memcpy(response_buf, value.data(), value.size());
+//                response_buf += value.size();
+//                read_records++;
+//
+//                prior_last_key = frag->range.key_end;
+//                pivot_db_id += 1;
+//                continue;
+//            }
             leveldb::Iterator *iterator = db->NewIterator(read_options);
             iterator->Seek(startkey);
             while (iterator->Valid() && read_records < nrecords) {
@@ -517,19 +585,20 @@ namespace nova {
         leveldb::Slice dbval(val, nval);
 
         worker->ResetReplicateState();
+        worker->replicate_log_record_states[0].cfgid = server_cfg_id;
         leveldb::WriteOptions option;
         option.stoc_client = worker->stoc_client_;
         option.local_write = false;
         option.thread_id = worker->thread_id_;
         option.rand_seed = &worker->rand_seed;
         option.hash = key;
-        option.total_writes =
-                total_writes.fetch_add(1, std::memory_order_relaxed) + 1;
+        option.total_writes = total_writes.fetch_add(1, std::memory_order_relaxed) + 1;
         option.replicate_log_record_states = worker->replicate_log_record_states;
         option.rdma_backing_mem = worker->rdma_backing_mem;
         option.rdma_backing_mem_size = worker->rdma_backing_mem_size;
         option.is_loading_db = false;
         LTCFragment *frag = NovaConfig::home_fragment(hv, server_cfg_id);
+        NOVA_ASSERT(frag) << fmt::format("cfg:{} key:{}", server_cfg_id, hv);
 
         if (!frag->is_ready_) {
             frag->is_ready_mutex_.Lock();
@@ -540,7 +609,7 @@ namespace nova {
         }
 
         leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frag->db);
-        NOVA_ASSERT(db);
+        NOVA_ASSERT(db) << fmt::format("cfg:{} key:{}", server_cfg_id, hv);
 
         leveldb::Status status = db->Put(option, dbkey, dbval);
         NOVA_ASSERT(status.ok()) << status.ToString();

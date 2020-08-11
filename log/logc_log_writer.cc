@@ -92,14 +92,16 @@ namespace leveldb {
                              const std::vector<LevelDBLogRecord> &log_records,
                              uint32_t client_req_id,
                              StoCReplicateLogRecordState *replicate_log_record_states) {
-        nova::LTCFragment *frag = nova::NovaConfig::config->cfgs[0]->fragments[dbid];
+        uint32_t cfgid = replicate_log_record_states[0].cfgid;
+        auto cfg = nova::NovaConfig::config->cfgs[cfgid];
+        nova::LTCFragment *frag = cfg->fragments[dbid];
         if (frag->log_replica_stoc_ids.empty()) {
             return true;
         }
         // If one of the log buf is intializing, return false.
         Init(log_file_name, thread_id, log_records, rdma_backing_buf);
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
-            uint32_t stoc_server_id = nova::NovaConfig::config->stoc_servers[frag->log_replica_stoc_ids[i]].server_id;
+            uint32_t stoc_server_id = cfg->stoc_servers[frag->log_replica_stoc_ids[i]];
             auto &it = logfile_last_buf_[log_file_name];
             if (it.stoc_bufs[stoc_server_id].is_initializing) {
                 return false;
@@ -107,7 +109,7 @@ namespace leveldb {
         }
         uint32_t log_record_size = nova::LogRecordsSize(log_records);
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
-            uint32_t stoc_server_id = nova::NovaConfig::config->stoc_servers[frag->log_replica_stoc_ids[i]].server_id;
+            uint32_t stoc_server_id = cfg->stoc_servers[frag->log_replica_stoc_ids[i]];
             auto &it = logfile_last_buf_[log_file_name];
             if (it.stoc_bufs[stoc_server_id].base == 0) {
                 it.stoc_bufs[stoc_server_id].is_initializing = true;
@@ -147,12 +149,14 @@ namespace leveldb {
     bool LogCLogWriter::CheckCompletion(const std::string &log_file_name,
                                         uint32_t dbid,
                                         StoCReplicateLogRecordState *replicate_log_record_states) {
-        nova::LTCFragment *frag = nova::NovaConfig::config->cfgs[0]->fragments[dbid];
+        uint32_t cfg_id = replicate_log_record_states[0].cfgid;
+        auto cfg = nova::NovaConfig::config->cfgs[cfg_id];
+        nova::LTCFragment *frag = cfg->fragments[dbid];
         // Pull all pending writes.
         int acks = 0;
         int total_states = 0;
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
-            uint32_t stoc_server_id = nova::NovaConfig::config->stoc_servers[frag->log_replica_stoc_ids[i]].server_id;
+            uint32_t stoc_server_id = cfg->stoc_servers[frag->log_replica_stoc_ids[i]];
             switch (replicate_log_record_states[stoc_server_id].result) {
                 case StoCReplicateLogRecordResult::REPLICATE_LOG_RECORD_NONE:
                     break;
@@ -178,7 +182,9 @@ namespace leveldb {
     Status
     LogCLogWriter::CloseLogFiles(const std::vector<std::string> &log_file_name,
                                  uint32_t dbid, uint32_t client_req_id) {
-        nova::LTCFragment *frag = nova::NovaConfig::config->cfgs[0]->fragments[dbid];
+        auto cfgid = nova::NovaConfig::config->current_cfg_id.load();
+        auto cfg = nova::NovaConfig::config->cfgs[cfgid];
+        nova::LTCFragment *frag = nova::NovaConfig::config->cfgs[cfgid]->fragments[dbid];
         for (const auto &logfile : log_file_name) {
             LogFileMetadata *meta = &logfile_last_buf_[logfile];
             delete meta->stoc_bufs;
@@ -186,14 +192,12 @@ namespace leveldb {
         }
         log_manager_->DeleteLogBuf(log_file_name);
         for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
-            uint32_t stoc_server_id = nova::NovaConfig::config->stoc_servers[frag->log_replica_stoc_ids[i]].server_id;
-
+            uint32_t stoc_server_id = cfg->stoc_servers[frag->log_replica_stoc_ids[i]];
             char *send_buf = rdma_broker_->GetSendBuf(stoc_server_id);
             int size = 0;
             send_buf[size] = StoCRequestType::STOC_DELETE_LOG_FILE;
             size++;
-            size += leveldb::EncodeFixed32(send_buf + size,
-                                           log_file_name.size());
+            size += leveldb::EncodeFixed32(send_buf + size, log_file_name.size());
             for (auto &name : log_file_name) {
                 size += leveldb::EncodeStr(send_buf + size, name);
             }

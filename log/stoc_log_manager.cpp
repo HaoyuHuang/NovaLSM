@@ -71,7 +71,10 @@ namespace nova {
         DBLogFiles *db = db_log_files_[range_id];
         db->mutex_.Lock();
         for (const auto &it : db->logfiles_) {
-            uint64_t offset = (uint64_t) it.second->local_backing_mem;
+            if (it.second->local_backing_mems.empty()) {
+                continue;
+            }
+            uint64_t offset = (uint64_t) it.second->local_backing_mems[0];
             (*logfile_offset)[it.first] = offset;
         }
         db->mutex_.Unlock();
@@ -97,7 +100,7 @@ namespace nova {
         db->mutex_.Unlock();
 
         records->mu.lock();
-        records->local_backing_mem = local_buf;
+        records->local_backing_mems.push_back(local_buf);
         records->mu.unlock();
         NOVA_LOG(DEBUG)
             << fmt::format("Allocate log buf for file:{}", log_file);
@@ -137,11 +140,13 @@ namespace nova {
                 continue;
             }
             LogRecords *records = it->second;
-            if (records->local_backing_mem) {
+            for (auto buf : records->local_backing_mems) {
+                if (!buf) {
+                    continue;
+                }
                 uint32_t scid = mem_manager_->slabclassid(0, NovaConfig::config->log_buf_size);
-                mem_manager_->FreeItem(0, records->local_backing_mem, scid);
-                NOVA_LOG(DEBUG)
-                    << fmt::format("Free log buf for file:{}", log_file[i]);
+                mem_manager_->FreeItem(0, buf, scid);
+                NOVA_LOG(DEBUG) << fmt::format("Free log buf for file:{}", log_file[i]);
             }
             db->logfiles_.erase(log_file[i]);
         }

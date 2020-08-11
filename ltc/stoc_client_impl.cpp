@@ -41,6 +41,9 @@ namespace leveldb {
         task.sem = &sem_;
 
         uint32_t reqid = req_id_;
+        StoCResponse *response = new StoCResponse;
+        req_response[reqid] = response;
+        task.response = response;
         AddAsyncTask(task);
         IncrementReqId();
         return reqid;
@@ -280,6 +283,7 @@ namespace leveldb {
         response->is_complete = true;
         response->stoc_file_id = stored_response->stoc_file_id;
         response->stoc_block_handles = stored_response->stoc_block_handles;
+        response->replication_results = stored_response->replication_results;
         response->stoc_queue_depth = stored_response->stoc_queue_depth;
         response->stoc_pending_read_bytes = stored_response->stoc_pending_read_bytes;
         response->stoc_pending_write_bytes = stored_response->stoc_pending_write_bytes;
@@ -356,7 +360,7 @@ namespace leveldb {
         rdma_broker_->PostSend(send_buf, msg_size, stoc_server_id, req_id);
         request_context_[req_id] = context;
         IncrementReqId();
-        NOVA_LOG(INFO)
+        NOVA_LOG(DEBUG)
             << fmt::format(
                     "stocclient[{}]: Reconstruct replicas stoc:{} size:{} req:{}",
                     stoc_client_id_, stoc_server_id, pairs.size(), req_id);
@@ -789,6 +793,7 @@ namespace leveldb {
                 response->is_complete = true;
                 response->stoc_file_id = context_it->second.stoc_file_id;
                 response->stoc_block_handles = context_it->second.stoc_block_handles;
+                response->replication_results = context_it->second.replication_results;
                 response->stoc_queue_depth = context_it->second.stoc_queue_depth;
                 response->stoc_pending_read_bytes = context_it->second.stoc_pending_read_bytes;
                 response->stoc_pending_write_bytes = context_it->second.stoc_pending_write_bytes;
@@ -1034,8 +1039,15 @@ namespace leveldb {
                         context.is_ready_for_requests = is_ready;
                         context.done = true;
                         processed = true;
-                    } else if (buf[0] ==
-                               StoCRequestType::STOC_REPLICATE_SSTABLES_RESPONSE) {
+                    } else if (buf[0] == StoCRequestType::STOC_REPLICATE_SSTABLES_RESPONSE) {
+                        Slice tmp(buf + 1, nova::NovaConfig::config->max_msg_size);
+                        uint32_t size;
+                        NOVA_ASSERT(DecodeFixed32(&tmp, &size));
+                        for (int i = 0; i < size; i++) {
+                            ReplicationPair pair = {};
+                            NOVA_ASSERT(pair.Decode(&tmp));
+                            context.replication_results.push_back(pair);
+                        }
                         context.done = true;
                         processed = true;
                     }

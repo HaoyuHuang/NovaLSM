@@ -28,8 +28,9 @@ namespace nova {
     class RDMAMsgHandler;
 
     enum MigrateType {
-        SOURCE,
-        DESTINATION
+        SOURCE = 0,
+        DESTINATION = 1,
+        STOC = 2
     };
 
     class DBMigration {
@@ -49,6 +50,8 @@ namespace nova {
 
         void AddDestMigrateDB(char *buf, uint32_t msg_size);
 
+        void AddStoCMigration(nova::LTCFragment * frag, const std::vector<uint32_t>& removed_stocs);
+
         static std::atomic_int_fast32_t migration_seq_id_;
     private:
         void MigrateDB(const std::vector<nova::LTCFragment *> &migrate_frags);
@@ -58,9 +61,12 @@ namespace nova {
             nova::LTCFragment *source_fragment = nullptr;
             char *buf = nullptr;
             uint32_t msg_size = 0;
+            std::vector<uint32_t> removed_stocs;
         };
 
-        void RecoverDBMeta(DBMeta dbmeta, int cfg_id);
+        void RecoverDBMeta(DBMeta dbmeta);
+
+        void MigrateStoC(nova::LTCFragment * frag, const std::vector<uint32_t>& removed_stocs);
 
         std::mutex mu;
         std::vector<DBMeta> db_metas;

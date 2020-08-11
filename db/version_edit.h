@@ -42,6 +42,10 @@ namespace leveldb {
             compact_pointers_.emplace_back(std::make_pair(level, key));
         }
 
+        void SetUpdateReplicaLocations(bool flag) {
+            update_replica_locations_ = flag;
+        }
+
         void
         UpdateSubRange(uint32_t subrange_id,
                        const std::vector<Range> &tiny_ranges,
@@ -102,6 +106,7 @@ namespace leveldb {
         bool has_prev_log_number_;
         bool has_next_file_number_;
         bool has_last_sequence_;
+        bool update_replica_locations_ = false;
 
         std::vector<std::pair<int, InternalKey>> compact_pointers_;
         std::vector<std::pair<int, DeletedFileIdentifier>> deleted_files_;

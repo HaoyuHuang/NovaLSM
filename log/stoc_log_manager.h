@@ -36,7 +36,7 @@ namespace nova {
 
     private:
         struct LogRecords {
-            char *local_backing_mem = nullptr;
+            std::vector<char *> local_backing_mems;
             std::unordered_map<uint32_t, uint64_t> remote_backing_mems;
             std::mutex mu;
         };

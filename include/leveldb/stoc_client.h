@@ -26,6 +26,7 @@ namespace leveldb {
     };
 
     struct StoCReplicateLogRecordState {
+        uint32_t cfgid = 0;
         StoCReplicateLogRecordResult result;
         int rdma_wr_id;
     };
@@ -92,6 +93,7 @@ namespace leveldb {
         uint64_t wr_id = 0;
         uint32_t stoc_file_id = 0;
         std::vector<StoCBlockHandle> stoc_block_handles;
+        std::vector<ReplicationPair> replication_results;
 
         uint64_t stoc_queue_depth = 0;
         uint64_t stoc_pending_read_bytes = 0;
@@ -120,6 +122,7 @@ namespace leveldb {
         std::atomic_bool is_complete;
         uint32_t stoc_file_id = 0;
         std::vector<StoCBlockHandle> stoc_block_handles;
+        std::vector<ReplicationPair> replication_results;
 
         uint64_t stoc_queue_depth;
         uint64_t stoc_pending_read_bytes;

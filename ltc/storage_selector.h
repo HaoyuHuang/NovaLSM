@@ -24,12 +24,7 @@ namespace leveldb {
 
         uint32_t SelectAvailableStoCForFailedMetaBlock(
                 const std::vector<FileReplicaMetaData> &block_replica_handles,
-                uint32_t failed_replica_id, uint32_t *available_replica_id);
-
-        uint32_t SelectAvailableStoCForFailedDataBlock(
-                const std::vector<FileReplicaMetaData> &block_replica_handles,
-                uint32_t failed_replica_id, uint32_t failed_frag_id,
-                uint32_t *available_replica_id);
+                uint32_t failed_replica_id, bool is_stoc_failed, uint32_t *available_replica_id);
 
         void SelectAvailableStoCs(std::vector<uint32_t> *selected_storages, uint32_t nstocs);
 

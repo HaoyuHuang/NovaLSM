@@ -120,6 +120,7 @@ namespace nova {
 
         void ResetReplicateState() {
             for (int i = 0; i < nova::NovaConfig::config->servers.size(); i++) {
+                replicate_log_record_states[i].cfgid = 0;
                 replicate_log_record_states[i].result = leveldb::StoCReplicateLogRecordResult::REPLICATE_LOG_RECORD_NONE;
                 replicate_log_record_states[i].rdma_wr_id = -1;
             }

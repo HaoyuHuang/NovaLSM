@@ -153,6 +153,7 @@ namespace leveldb {
             // Make sure WRITEs are complete before we persist them.
             stoc_writable_file->WaitForPersistingDataBlocks();
             uint32_t new_file_size = stoc_writable_file->Finalize();
+
             meta->block_replica_handles = stoc_writable_file->replicas();
             meta->converted_file_size = new_file_size;
 

@@ -114,7 +114,7 @@ namespace nova {
         }
 
         for (auto db : dbs) {
-            db->StartCompaction();
+            db->StartCoordinatedCompaction();
         }
         // Wait until there are no SSTables at L0.
         while (NovaConfig::config->major_compaction_type != "no") {
@@ -212,12 +212,8 @@ namespace nova {
 
     void NICServer::LoadData() {
         if (!NovaConfig::config->use_local_disk) {
-            for (int i = 0;
-                 i < NovaConfig::config->stoc_servers.size(); i++) {
-                if (NovaConfig::config->my_server_id ==
-                    NovaConfig::config->stoc_servers[i].server_id) {
-                    return;
-                }
+            if (NovaConfig::config->cfgs[0]->IsStoC()) {
+                return;
             }
         }
 
@@ -295,8 +291,7 @@ namespace nova {
         log_manager = new StoCInMemoryLogFileManager(mem_manager);
         NovaConfig::config->add_tid_mapping();
         int bg_thread_id = 0;
-        for (int i = 0;
-             i < NovaConfig::config->num_compaction_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_compaction_workers; i++) {
             {
                 auto bg = new leveldb::LTCCompactionThread(mem_manager);
                 bg_flush_memtable_threads.push_back(bg);
@@ -321,8 +316,7 @@ namespace nova {
                                NovaConfig::config->block_cache_mb);
         }
         leveldb::MemTablePool *pool = new leveldb::MemTablePool;
-        pool->num_available_memtables_ =
-                NovaConfig::config->num_memtables;
+        pool->num_available_memtables_ = NovaConfig::config->num_memtables;
         pool->range_cond_vars_ = new leveldb::port::CondVar *[cfg->fragments.size()];
 
         leveldb::EnvOptions env_option;
@@ -330,29 +324,20 @@ namespace nova {
         leveldb::PosixEnv *env = new leveldb::PosixEnv;
         env->set_env_option(env_option);
 
-        uint32_t nranges = cfg->fragments.size() /
-                           NovaConfig::config->ltc_servers.size();
-
-        leveldb::StocPersistentFileManager *stoc_file_manager = new leveldb::StocPersistentFileManager(
-                env, mem_manager, NovaConfig::config->stoc_files_path,
-                NovaConfig::config->max_stoc_file_size,
-                NovaConfig::config->servers.size(),
-                NovaConfig::config->my_server_id,
-                nranges);
-
+        leveldb::StocPersistentFileManager *stoc_file_manager = new leveldb::StocPersistentFileManager(env, mem_manager,
+                                                                                                       NovaConfig::config->stoc_files_path,
+                                                                                                       NovaConfig::config->max_stoc_file_size);
         std::vector<nova::RDMAMsgCallback *> rdma_threads;
         for (int db_index = 0; db_index < cfg->fragments.size(); db_index++) {
-            if (NovaConfig::config->cfgs[0]->fragments[db_index]->ltc_server_id !=
-                NovaConfig::config->my_server_id) {
+            if (NovaConfig::config->cfgs[0]->fragments[db_index]->ltc_server_id != NovaConfig::config->my_server_id) {
                 dbs_.push_back(nullptr);
                 continue;
             }
             auto reorg = new leveldb::LTCCompactionThread(mem_manager);
             auto coord = new leveldb::LTCCompactionThread(mem_manager);
             auto client = new leveldb::StoCBlockClient(db_index, stoc_file_manager);
-            dbs_.push_back(
-                    CreateDatabase(0, db_index, block_cache, pool, mem_manager, client, bg_compaction_threads,
-                                   bg_flush_memtable_threads, reorg, coord));
+            dbs_.push_back(CreateDatabase(0, db_index, block_cache, pool, mem_manager, client, bg_compaction_threads,
+                                          bg_flush_memtable_threads, reorg, coord));
         }
         for (int db_index = 0; db_index < cfg->fragments.size(); db_index++) {
             NovaConfig::config->cfgs[0]->fragments[db_index]->db = dbs_[db_index];
@@ -371,18 +356,14 @@ namespace nova {
             << fmt::format("Request Id range {}:{}", lower_client_req_id,
                            upper_client_req_id);
         std::vector<RDMAServerImpl *> rdma_servers;
-        for (worker_id = 0;
-             worker_id <
-             NovaConfig::config->num_fg_rdma_workers; worker_id++) {
+        for (worker_id = 0; worker_id < NovaConfig::config->num_fg_rdma_workers; worker_id++) {
             RDMAAdmissionCtrl *admission_ctrl = new RDMAAdmissionCtrl;
-            RDMAMsgHandler *rdma_msg_handler = new RDMAMsgHandler(
-                    rdma_ctrl, mem_manager, admission_ctrl);
+            RDMAMsgHandler *rdma_msg_handler = new RDMAMsgHandler(rdma_ctrl, mem_manager, admission_ctrl);
             rdma_threads.push_back(rdma_msg_handler);
             fg_rdma_msg_handlers.push_back(rdma_msg_handler);
             NovaRDMABroker *broker = nullptr;
             std::vector<QPEndPoint> endpoints;
-            for (int i = 0;
-                 i < NovaConfig::config->servers.size(); i++) {
+            for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
                 if (i == NovaConfig::config->my_server_id) {
                     continue;
                 }
@@ -439,22 +420,17 @@ namespace nova {
             rdma_msg_handler->rdma_log_writer_ = log_writer;
             rdma_msg_handler->rdma_server_ = rdma_server;
 
-            buf += nrdma_buf_unit() *
-                   NovaConfig::config->servers.size();
+            buf += nrdma_buf_unit() * NovaConfig::config->servers.size();
         }
 
-        for (int i = 0;
-             i < NovaConfig::config->num_bg_rdma_workers; i++) {
+        for (int i = 0; i < NovaConfig::config->num_bg_rdma_workers; i++) {
             RDMAAdmissionCtrl *admission_ctrl = new RDMAAdmissionCtrl;
-            RDMAMsgHandler *cc = new RDMAMsgHandler(
-                    rdma_ctrl,
-                    mem_manager, admission_ctrl);
+            RDMAMsgHandler *cc = new RDMAMsgHandler(rdma_ctrl, mem_manager, admission_ctrl);
             rdma_threads.push_back(cc);
             bg_rdma_msg_handlers.push_back(cc);
             NovaRDMABroker *broker = nullptr;
             std::vector<QPEndPoint> endpoints;
-            for (int j = 0;
-                 j < NovaConfig::config->servers.size(); j++) {
+            for (int j = 0; j < NovaConfig::config->servers.size(); j++) {
                 if (j == NovaConfig::config->my_server_id) {
                     continue;
                 }
@@ -508,8 +484,7 @@ namespace nova {
             cc->rdma_log_writer_ = log_writer;
             cc->rdma_server_ = rdma_server;
             worker_id++;
-            buf += nrdma_buf_unit() *
-                   NovaConfig::config->servers.size();
+            buf += nrdma_buf_unit() * NovaConfig::config->servers.size();
         }
 
         for (int i = 0; i < NovaConfig::config->num_migration_threads; i++) {
@@ -656,6 +631,20 @@ namespace nova {
             storage_worker_threads.emplace_back(&StorageWorker::Start, compaction_storage_workers[i]);
         }
 
+        {
+            auto client = new leveldb::StoCBlockClient(0, stoc_file_manager);
+            client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
+            lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client, false);
+            db_migrate_workers.emplace_back(&leveldb::LSMTreeCleaner::Start, lsm_tree_cleaner_);
+        }
+
+        {
+            auto client = new leveldb::StoCBlockClient(0, stoc_file_manager);
+            client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
+            lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client, true);
+            db_migrate_workers.emplace_back(&leveldb::LSMTreeCleaner::Start, lsm_tree_cleaner_);
+        }
+
         // Wait for all RDMA connections to setup.
         bool all_initialized = false;
         while (!all_initialized) {
@@ -731,7 +720,7 @@ namespace nova {
             db->number_of_wait_due_to_contention_ = 0;
             db->number_of_gets_ = 0;
             db->number_of_memtable_hits_ = 0;
-            db->StartCompaction();
+            db->StartCoordinatedCompaction();
         }
 
         stat_thread_ = new NovaStatThread;
@@ -750,46 +739,35 @@ namespace nova {
             leveldb::StoCBlockClient client(0, stoc_file_manager);
             client.rdma_msg_handlers_ = bg_rdma_msg_handlers;
             std::set<int> ready_ltcs;
-            if (NovaConfig::config->use_local_disk ||
-                NovaConfig::config->my_server_id <
-                NovaConfig::config->ltc_servers.size()) {
+            if (NovaConfig::config->use_local_disk || NovaConfig::config->cfgs[0]->IsLTC()) {
                 ready_ltcs.insert(NovaConfig::config->my_server_id);
             }
             while (true) {
-                for (auto &ltc : NovaConfig::config->ltc_servers) {
-                    if (ready_ltcs.find(ltc.server_id) !=
-                        ready_ltcs.end()) {
+                for (auto &ltc : NovaConfig::config->cfgs[0]->ltc_servers) {
+                    if (ready_ltcs.find(ltc) != ready_ltcs.end()) {
                         continue;
                     }
                     leveldb::StoCResponse response;
                     uint32_t req_id = client.InitiateIsReadyForProcessingRequests(
-                            ltc.server_id);
+                            ltc);
                     client.Wait();
                     NOVA_ASSERT(client.IsDone(req_id, &response, nullptr));
                     NOVA_LOG(INFO)
-                        << fmt::format("LTC-{} is ready? {}", ltc.server_id,
+                        << fmt::format("LTC-{} is ready? {}", ltc,
                                        response.is_ready_to_process_requests);
                     if (response.is_ready_to_process_requests) {
-                        ready_ltcs.insert(ltc.server_id);
+                        ready_ltcs.insert(ltc);
                     } else {
                         break;
                     }
                 }
-                if (ready_ltcs.size() == NovaConfig::config->ltc_servers.size()) {
+                if (ready_ltcs.size() == NovaConfig::config->cfgs[0]->ltc_servers.size()) {
                     break;
                 }
                 sleep(1);
             }
         }
 
-        if (NovaConfig::config->fail_stoc_id != -1) {
-            auto stoc_client = new leveldb::StoCBlockClient(100, stoc_file_manager);
-            stoc_client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
-            monitor_ = new StoCHealthMonitor(
-                    NovaConfig::config->fail_stoc_id,
-                    NovaConfig::config->exp_seconds_to_fail_stoc, stoc_client, dbs_);
-            stats_t_.emplace_back(std::thread(&StoCHealthMonitor::Start, monitor_));
-        }
         // Start connection threads in the end after we have loaded all data.
         for (int i = 0; i < NovaConfig::config->num_conn_workers; i++) {
             conn_worker_threads.emplace_back(start, conn_workers[i]);
@@ -826,8 +804,7 @@ namespace nova {
             server->current_conn_worker_id_ = 0;
         } else {
             server->current_conn_worker_id_ =
-                    (server->current_conn_worker_id_ + 1) %
-                    NovaConfig::config->num_conn_workers;
+                    (server->current_conn_worker_id_ + 1) % NovaConfig::config->num_conn_workers;
         }
 
         store->conn_mu.lock();
@@ -840,13 +817,10 @@ namespace nova {
         struct event event{};
         struct event_config *ev_config;
         ev_config = event_config_new();
-        NOVA_ASSERT(
-                event_config_set_flag(ev_config, EVENT_BASE_FLAG_NOLOCK) == 0);
+        NOVA_ASSERT(event_config_set_flag(ev_config, EVENT_BASE_FLAG_NOLOCK) == 0);
         NOVA_ASSERT(event_config_avoid_method(ev_config, "poll") == 0);
         NOVA_ASSERT(event_config_avoid_method(ev_config, "select") == 0);
-        NOVA_ASSERT(event_config_set_flag(ev_config,
-                                          EVENT_BASE_FLAG_EPOLL_USE_CHANGELIST) ==
-                    0);
+        NOVA_ASSERT(event_config_set_flag(ev_config, EVENT_BASE_FLAG_EPOLL_USE_CHANGELIST) == 0);
         base = event_base_new_with_config(ev_config);
 
         if (!base) {
@@ -854,15 +828,13 @@ namespace nova {
             exit(1);
         }
 
-        NOVA_LOG(INFO) << "Using Libevent with backend method "
-                       << event_base_get_method(base);
+        NOVA_LOG(INFO) << "Using Libevent with backend method " << event_base_get_method(base);
         const int f = event_base_get_features(base);
         if ((f & EV_FEATURE_ET)) {
             NOVA_LOG(INFO) << "Edge-triggered events are supported.";
         }
         if ((f & EV_FEATURE_O1)) {
-            NOVA_LOG(INFO) <<
-                           "O(1) event notification is supported.";
+            NOVA_LOG(INFO) << "O(1) event notification is supported.";
         }
         if ((f & EV_FEATURE_FDS)) {
             NOVA_LOG(INFO) << "All FD types are supported.";
@@ -870,8 +842,7 @@ namespace nova {
 
         /* Listen for notifications from other threads */
         memset(&event, 0, sizeof(struct event));
-        NOVA_ASSERT(event_assign(&event, base, listen_fd_, EV_READ | EV_PERSIST,
-                                 on_accept, (void *) this) == 0);
+        NOVA_ASSERT(event_assign(&event, base, listen_fd_, EV_READ | EV_PERSIST, on_accept, (void *) this) == 0);
         NOVA_ASSERT(event_add(&event, 0) == 0) << listen_fd_;
         NOVA_ASSERT(event_base_loop(base, 0) == 0) << listen_fd_;
         NOVA_LOG(INFO) << "started";

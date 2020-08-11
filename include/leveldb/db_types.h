@@ -15,6 +15,7 @@
 #include <mutex>
 #include <set>
 #include <fmt/core.h>
+#include <atomic>
 
 #include "port/port.h"
 
@@ -131,6 +132,8 @@ namespace leveldb {
         uint64_t sstable_file_number = 0;
         uint32_t replica_id = 0;
         bool is_meta_blocks = false;
+
+        uint32_t dest_stoc_file_id = 0;
 
         uint32_t Encode(char *buf) const;
 

@@ -25,6 +25,7 @@ namespace leveldb {
     public:
         SubRangeManager(StoCWritableFileClient *manifest_file,
                         const std::string &dbname,
+                        uint32_t dbindex,
                         VersionSet *versions,
                         const Options &options,
                         const Comparator *user_comparator,
@@ -37,6 +38,8 @@ namespace leveldb {
                             const leveldb::Slice &key,
                             const leveldb::Slice &val,
                             SubRange **subrange);
+
+        void ConstructSubrangesWithUniform(const Comparator* user_comparator);
 
         void QueryDBStats(leveldb::DBStats *db_stats);
 
@@ -59,6 +62,7 @@ namespace leveldb {
         double fair_ratio_ = 0;
         VersionEdit edit_;
     private:
+        uint32_t dbindex_ = 0;
         uint64_t lower_bound_ = 0;
         uint64_t upper_bound_ = 0;
 

@@ -116,9 +116,9 @@ namespace leveldb {
     };
 
     struct MemTableL0FilesEdit {
+        uint32_t dbid_ = 0;
         std::set<uint64_t> add_fns;
         std::set<uint64_t> remove_fns;
-        uint32_t version_id;
 
         std::string DebugString() const;
     };

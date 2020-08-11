@@ -59,7 +59,9 @@ namespace leveldb {
 
         const char *backing_mem() override { return backing_mem_; }
 
-        void set_meta(const FileMetaData &meta) { meta_ = meta; }
+        void set_meta(const FileMetaData &meta) {
+            meta_ = meta;
+        }
 
         uint64_t used_size() { return used_size_; }
 

@@ -262,9 +262,10 @@ def sum_disk_stats(line):
 
 def parse_disk_stats(result_dir):
 	nodes={}
+	total_log_records=0
 	for node_id in range(num_nodes):
-		if node_id != 0:
-			continue
+		# if node_id != 0:
+		# 	continue
 		try:
 			file = open("{}/server-node-{}-out".format(result_dir, node_id), 'r')
 		except:
@@ -288,92 +289,99 @@ def parse_disk_stats(result_dir):
 		nodes[node_id]["memtable_hist"] = []
 		nodes[node_id]["db_size"] = []
 		nodes[node_id]["num_l0_tables"] = []
+		nodes[node_id]["log_records"] = 0
 
 		lines = file.readlines()
 		i = 0
 		while i < len(lines):
 			line = lines[i]
-			if "[leveldb_main_stat_thread.cpp" not in line:
-				i+=1
-				continue
+			if "log records" in line:
+				num_log_records=int(line.split(" ")[-3])
+				nodes[node_id]["log_records"] += num_log_records
+				total_log_records += num_log_records
+			i+=1
 
-			try:
-				storage = sum_disk_stats(lines[i+4]) / 10
-				storage_reads = sum_disk_stats(lines[i+5]) / 1024 / 1024 / 10
-				storage_writes = sum_disk_stats(lines[i+6]) / 1024 / 1024 / 10
+			# if "[leveldb_main_stat_thread.cpp" not in line:
+			# 	i+=1
+			# 	continue
 
-				nodes[node_id]["storage"].append(storage)
-				nodes[node_id]["storage_reads"].append(storage_reads)
-				nodes[node_id]["storage_writes"].append(storage_writes)
+			# try:
+			# 	storage = sum_disk_stats(lines[i+4]) / 10
+			# 	storage_reads = sum_disk_stats(lines[i+5]) / 1024 / 1024 / 10
+			# 	storage_writes = sum_disk_stats(lines[i+6]) / 1024 / 1024 / 10
 
-				base = 7 + 6
-				nodes[node_id]["active_memtables"].append(lines[i+base].replace("\n",""))
-				i+=1
-				nodes[node_id]["immutable_memtables"].append(lines[i+base].replace("\n",""))
-				i+=1
+			# 	nodes[node_id]["storage"].append(storage)
+			# 	nodes[node_id]["storage_reads"].append(storage_reads)
+			# 	nodes[node_id]["storage_writes"].append(storage_writes)
 
-				actives = nodes[node_id]["active_memtables"][-1].split(",")
-				immutables = nodes[node_id]["immutable_memtables"][-1].split(",")
-				all_mems = ""
-				for j in range(len(actives)):
-					all_mems += str(convert_int(actives[j]) + convert_int(immutables[j]))
-					all_mems += ","
-				nodes[node_id]["memtables"].append(all_mems)
-				nodes[node_id]["steals"] = convert_disk_stats_to_array(lines[i+base])
-				i+=1
-				nodes[node_id]["puts"] = convert_disk_stats_to_array(lines[i+base])
-				i+=1
-				nodes[node_id]["waits"] = convert_disk_stats_to_array(lines[i+base])
-				i+=1
-				nodes[node_id]["gets"] = convert_disk_stats_to_array(lines[i+base])
-				i+=1
-				nodes[node_id]["hits"] = convert_disk_stats_to_array(lines[i+base])
-				i+=1
-				nodes[node_id]["file_per_miss"] = convert_disk_stats_to_array(lines[i+base])
-				i+=1
-				nodes[node_id]["memtable_hist"] = convert_disk_stats_to_array(lines[i+base])
-				i+=1
-				nodes[node_id]["no_waits"] = convert_disk_stats_to_array(lines[i+base])
-				# print lines[i+base]
-				i += 7
-				# print lines[i+base]
-				ems = convert_disk_stats_to_array(lines[i+base])
-				i+=1
-				nodes[node_id]["db_size"].append(ems[1])
-				nodes[node_id]["num_l0_tables"].append(ems[2])
-				nodes[node_id]["total_memtable_size"] = convert_int(ems[3])
-				nodes[node_id]["written_memtable_size"] = convert_int(ems[4])
-				nodes[node_id]["total_disk_reads"] = convert_int(ems[5])
-				nodes[node_id]["total_disk_writes"] = convert_int(ems[6])
-			except:
-				# raise e
-				break
+			# 	base = 7 + 6
+			# 	nodes[node_id]["active_memtables"].append(lines[i+base].replace("\n",""))
+			# 	i+=1
+			# 	nodes[node_id]["immutable_memtables"].append(lines[i+base].replace("\n",""))
+			# 	i+=1
+
+			# 	actives = nodes[node_id]["active_memtables"][-1].split(",")
+			# 	immutables = nodes[node_id]["immutable_memtables"][-1].split(",")
+			# 	all_mems = ""
+			# 	for j in range(len(actives)):
+			# 		all_mems += str(convert_int(actives[j]) + convert_int(immutables[j]))
+			# 		all_mems += ","
+			# 	nodes[node_id]["memtables"].append(all_mems)
+			# 	nodes[node_id]["steals"] = convert_disk_stats_to_array(lines[i+base])
+			# 	i+=1
+			# 	nodes[node_id]["puts"] = convert_disk_stats_to_array(lines[i+base])
+			# 	i+=1
+			# 	nodes[node_id]["waits"] = convert_disk_stats_to_array(lines[i+base])
+			# 	i+=1
+			# 	nodes[node_id]["gets"] = convert_disk_stats_to_array(lines[i+base])
+			# 	i+=1
+			# 	nodes[node_id]["hits"] = convert_disk_stats_to_array(lines[i+base])
+			# 	i+=1
+			# 	nodes[node_id]["file_per_miss"] = convert_disk_stats_to_array(lines[i+base])
+			# 	i+=1
+			# 	nodes[node_id]["memtable_hist"] = convert_disk_stats_to_array(lines[i+base])
+			# 	i+=1
+			# 	nodes[node_id]["no_waits"] = convert_disk_stats_to_array(lines[i+base])
+			# 	# print lines[i+base]
+			# 	i += 7
+			# 	# print lines[i+base]
+			# 	ems = convert_disk_stats_to_array(lines[i+base])
+			# 	i+=1
+			# 	nodes[node_id]["db_size"].append(ems[1])
+			# 	nodes[node_id]["num_l0_tables"].append(ems[2])
+			# 	nodes[node_id]["total_memtable_size"] = convert_int(ems[3])
+			# 	nodes[node_id]["written_memtable_size"] = convert_int(ems[4])
+			# 	nodes[node_id]["total_disk_reads"] = convert_int(ems[5])
+			# 	nodes[node_id]["total_disk_writes"] = convert_int(ems[6])
+			# except:
+			# 	# raise e
+			# 	break
 			
 
-	total_gets=0
-	total_hits=0
-	for node_id in nodes:
-		for i in range(len(nodes[node_id]["gets"])):
-			total_gets+=convert_int(nodes[node_id]["gets"][i])
-			total_hits+=convert_int(nodes[node_id]["hits"][i])
-			nodes[node_id]["hit_rate"].append(safe_divide(nodes[node_id]["hits"][i], nodes[node_id]["gets"][i]))
-		for i in range(len(nodes[node_id]["puts"])):
-			nodes[node_id]["wait_rate"].append(safe_divide(nodes[node_id]["waits"][i], nodes[node_id]["puts"][i]))
-			nodes[node_id]["no_wait_rate"].append(safe_divide(nodes[node_id]["no_waits"][i], nodes[node_id]["puts"][i]))
+	# total_gets=0
+	# total_hits=0
+	# for node_id in nodes:
+	# 	for i in range(len(nodes[node_id]["gets"])):
+	# 		total_gets+=convert_int(nodes[node_id]["gets"][i])
+	# 		total_hits+=convert_int(nodes[node_id]["hits"][i])
+	# 		nodes[node_id]["hit_rate"].append(safe_divide(nodes[node_id]["hits"][i], nodes[node_id]["gets"][i]))
+	# 	for i in range(len(nodes[node_id]["puts"])):
+	# 		nodes[node_id]["wait_rate"].append(safe_divide(nodes[node_id]["waits"][i], nodes[node_id]["puts"][i]))
+	# 		nodes[node_id]["no_wait_rate"].append(safe_divide(nodes[node_id]["no_waits"][i], nodes[node_id]["puts"][i]))
 
-	if print_db_stats:
-		for metric in ["db_size", "num_l0_tables"]:
-		# for metric in ["db_size", "num_l0_tables", "storage_reads", "storage_writes", "storage", "steals", "hit_rate", "no_wait_rate", "memtable_hist"]:
-			print metric
-			for node_id in range(num_nodes):
-				if node_id not in nodes:
-					continue
-				# out = str(node_id)
-				out = ""
-				for i in range(len(nodes[node_id][metric])):
-					out += str(nodes[node_id][metric][i])
-					out += ","
-				print out
+	# if print_db_stats:
+	# 	for metric in ["db_size", "num_l0_tables"]:
+	# 	# for metric in ["db_size", "num_l0_tables", "storage_reads", "storage_writes", "storage", "steals", "hit_rate", "no_wait_rate", "memtable_hist"]:
+	# 		print metric
+	# 		for node_id in range(num_nodes):
+	# 			if node_id not in nodes:
+	# 				continue
+	# 			# out = str(node_id)
+	# 			out = ""
+	# 			for i in range(len(nodes[node_id][metric])):
+	# 				out += str(nodes[node_id][metric][i])
+	# 				out += ","
+	# 			print out
 
 		# for metric in ["immutable_memtables"]:
 		# 	print metric
@@ -393,7 +401,8 @@ def parse_disk_stats(result_dir):
 		# 			out += "\n"
 		# 		print out
 	# print nodes
-	return nodes, safe_divide(total_hits, total_gets)
+	hit_rate=0
+	return nodes, hit_rate, total_log_records #safe_divide(total_hits, total_gets)
 
 def parse_date(line):
 	ems = line.split(".")
@@ -727,8 +736,8 @@ def parse_exp(exp_dir):
 	for expdirname in os.listdir(exp_dir):
 		if "nova" not in expdirname:
 			continue
-		# if "-ltc-5-" not in expdirname:
-		# 	continue
+		if "-np-4-" not in expdirname:
+			continue
 		# if "0.99-" not in expdirname:
 		# 	continue
 		# if "workloada-" not in expdirname:
@@ -744,7 +753,7 @@ def parse_exp(exp_dir):
 		cpu_resources = parse_cpu_resource(result_dir)
 
 		disk_resources = parse_disk_resource(result_dir)
-		disk_spaces, hit_rate = parse_disk_stats(result_dir)
+		disk_spaces, hit_rate, total_log_records = parse_disk_stats(result_dir)
 		disk_space_timeline = []
 		disk_space = 0
 		num_l0_tables = 0
@@ -834,6 +843,7 @@ def parse_exp(exp_dir):
 		exps[exp]["disk_timeline"] = {}
 		exps[exp]["rdma_timeline"] = {}
 		exps[exp]["hit_rate"] = hit_rate
+		exps[exp]["total_log_records"] = total_log_records
 		for node_id in cpu_resources:
 			exps[exp]["cpu_timeline"][node_id] = cpu_resources[node_id]["CPU"]
 		for node_id in cpu_resources:
@@ -860,7 +870,7 @@ def parse_exp(exp_dir):
 			exps[exp]["coll"][node_id]["[IB]OutGbps"] = median(rdma_resources[node_id]["[IB]OutGbps"])
 
 	for exp in exps:
-		print exp, exps[exp]["thpt"], exps[exp]["disk_space"], exps[exp]["hit_rate"], exps[exp]["nwait"], exps[exp]["wait_time"]
+		print exp, exps[exp]["thpt"], exps[exp]["total_log_records"], exps[exp]["disk_space"], exps[exp]["hit_rate"], exps[exp]["nwait"], exps[exp]["wait_time"]
 	return exps
 
 def print_all(exps):
@@ -872,7 +882,7 @@ def print_all(exps):
 	for r in print_resources:
 		header+=str(r)
 		header+=","
-	header+="Number of waits,Wait duration,Stall duration,number of L0 SSTables,database size (MB),memtable hit rate,Total MemTable Size,Written MemTable Size,Reduction,Total Disk Reads,Total Disk Writes,Average throughput,peak_thpt,read_avg,read_p95,read_p99,write_avg,write_p95,write_p99,"
+	header+="Fetched log records,Number of waits,Wait duration,Stall duration,number of L0 SSTables,database size (MB),memtable hit rate,Total MemTable Size,Written MemTable Size,Reduction,Total Disk Reads,Total Disk Writes,Average throughput,peak_thpt,read_avg,read_p95,read_p99,write_avg,write_p95,write_p99,"
 	for resource in print_resources:
 		for node_id in print_resource_servers:
 			header+="{}-{}".format(resource, node_id)
@@ -915,6 +925,8 @@ def print_all(exps):
 				out += str(resource_nodes[resource]["SUM"])
 				out += ","
 
+		out+=str(exps[exp]["total_log_records"])
+		out+=","
 		if float(exp_time) == 0:
 			out += "0,0,0"
 		else:
@@ -1012,7 +1024,7 @@ ncores = 32
 disk_metric="bandwidth"
 # disk_metric="read"
 # print_resource_servers=[0, 1, 2, 4]
-# print_resource_servers=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+# print_resource_servers=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 # print_resource_servers=[0, 1, 2, 3, 4, 5]
 # print_resource_servers=[0]
 # print_resources=["cpu", "net", "disk", "rdma"]

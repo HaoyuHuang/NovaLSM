@@ -209,50 +209,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->number_of_sstable_replicas = FLAGS_num_sstable_replicas;
 
     NovaConfig::config->servers = convert_hosts(FLAGS_all_servers);
-    if (FLAGS_use_local_disk) {
-        for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
-            NovaConfig::config->ltc_servers.push_back(
-                    NovaConfig::config->servers[i]);
-            NovaConfig::config->stoc_servers.push_back(
-                    NovaConfig::config->servers[i]);
-        }
-    } else {
-        for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
-            if (i < FLAGS_number_of_ltcs) {
-                NovaConfig::config->ltc_servers.push_back(
-                        NovaConfig::config->servers[i]);
-            } else {
-                NovaConfig::config->stoc_servers.push_back(
-                        NovaConfig::config->servers[i]);
-            }
-        }
-    }
-
-    for (int i = 0; i < NovaConfig::config->ltc_servers.size(); i++) {
-        Host host = NovaConfig::config->ltc_servers[i];
-        NOVA_LOG(INFO)
-            << fmt::format("ltc: {}:{}:{}", host.server_id, host.ip, host.port);
-    }
-    for (int i = 0; i < NovaConfig::config->stoc_servers.size(); i++) {
-        Host host = NovaConfig::config->stoc_servers[i];
-        NOVA_LOG(INFO)
-            << fmt::format("stoc: {}:{}:{}", host.server_id, host.ip,
-                           host.port);
-    }
-    NOVA_ASSERT(FLAGS_num_log_replicas <=
-                NovaConfig::config->stoc_servers.size());
-
     NovaConfig::config->my_server_id = FLAGS_server_id;
-
-    NovaConfig::ReadFragments(FLAGS_ltc_config_path);
-    if (FLAGS_num_log_replicas > 0) {
-        NovaConfig::ComputeLogReplicaLocations(FLAGS_num_log_replicas);
-    }
-    NOVA_LOG(INFO) << fmt::format("{} configurations", NovaConfig::config->cfgs.size());
-    for (auto c : NovaConfig::config->cfgs) {
-        NOVA_LOG(INFO) << c->DebugString();
-    }
-
     NovaConfig::config->num_conn_workers = FLAGS_ltc_num_client_workers;
     NovaConfig::config->num_fg_rdma_workers = FLAGS_num_rdma_fg_workers;
     NovaConfig::config->num_storage_workers = FLAGS_num_storage_workers;
@@ -298,15 +255,24 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->l0_start_compaction_mb = FLAGS_l0_start_compaction_mb;
     NovaConfig::config->level = FLAGS_level;
     NovaConfig::config->enable_subrange_reorg = FLAGS_enable_subrange_reorg;
-    NovaConfig::config->fail_stoc_id = FLAGS_fail_stoc_id;
-    NovaConfig::config->exp_seconds_to_fail_stoc = FLAGS_exp_seconds_to_fail_stoc;
-    NovaConfig::config->failure_duration = FLAGS_failure_duration;
     NovaConfig::config->num_migration_threads = FLAGS_num_migration_threads;
 
     if (FLAGS_ltc_migration_policy == "immediate") {
         NovaConfig::config->ltc_migration_policy = LTCMigrationPolicy::IMMEDIATE;
     } else {
         NovaConfig::config->ltc_migration_policy = LTCMigrationPolicy::PROCESS_UNTIL_MIGRATION_COMPLETE;
+    }
+
+    NovaConfig::ReadFragments(FLAGS_ltc_config_path);
+    if (FLAGS_num_log_replicas > 0) {
+        for (int i = 0; i < NovaConfig::config->cfgs.size(); i++) {
+            NOVA_ASSERT(FLAGS_num_log_replicas <= NovaConfig::config->cfgs[i]->stoc_servers.size());
+        }
+        NovaConfig::ComputeLogReplicaLocations(FLAGS_num_log_replicas);
+    }
+    NOVA_LOG(INFO) << fmt::format("{} configurations", NovaConfig::config->cfgs.size());
+    for (auto c : NovaConfig::config->cfgs) {
+        NOVA_LOG(INFO) << c->DebugString();
     }
 
     leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq = 0;
@@ -319,24 +285,21 @@ int main(int argc, char *argv[]) {
     leveldb::StorageSelector::stoc_for_compaction_seq_id = nova::NovaConfig::config->my_server_id;
     nova::NovaGlobalVariables::global.Initialize();
     auto available_stoc_servers = new Servers;
-    available_stoc_servers->servers = NovaConfig::config->stoc_servers;
+    available_stoc_servers->servers = NovaConfig::config->cfgs[0]->stoc_servers;
     for (int i = 0; i < available_stoc_servers->servers.size(); i++) {
-        available_stoc_servers->server_ids.insert(
-                available_stoc_servers->servers[i].server_id);
+        available_stoc_servers->server_ids.insert(available_stoc_servers->servers[i]);
     }
-    leveldb::StorageSelector::available_stoc_servers.store(
-            available_stoc_servers);
+    leveldb::StorageSelector::available_stoc_servers.store(available_stoc_servers);
 
-    NOVA_ASSERT(FLAGS_ltc_num_stocs_scatter_data_blocks <=
-                NovaConfig::config->stoc_servers.size()) << fmt::format(
-                "Not enough stoc to scatter. Scatter width: {} Num StoCs: {}",
-                FLAGS_ltc_num_stocs_scatter_data_blocks,
-                NovaConfig::config->stoc_servers.size());
-    NOVA_ASSERT(FLAGS_num_sstable_replicas <=
-                NovaConfig::config->stoc_servers.size()) << fmt::format(
-                "Not enough stoc to replicate sstables. Replication factor: {} Num StoCs: {}",
-                FLAGS_num_sstable_replicas,
-                NovaConfig::config->stoc_servers.size());
+    for (int i = 0; i < NovaConfig::config->cfgs.size(); i++) {
+        auto cfg = NovaConfig::config->cfgs[i];
+        NOVA_ASSERT(FLAGS_ltc_num_stocs_scatter_data_blocks <= cfg->stoc_servers.size()) << fmt::format(
+                    "Not enough stoc to scatter. Scatter width: {} Num StoCs: {}",
+                    FLAGS_ltc_num_stocs_scatter_data_blocks, cfg->stoc_servers.size());
+        NOVA_ASSERT(FLAGS_num_sstable_replicas <= cfg->stoc_servers.size()) << fmt::format(
+                    "Not enough stoc to replicate sstables. Replication factor: {} Num StoCs: {}",
+                    FLAGS_num_sstable_replicas, cfg->stoc_servers.size());
+    }
     StartServer();
     return 0;
 }

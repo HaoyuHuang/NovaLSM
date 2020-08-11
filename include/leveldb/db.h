@@ -107,8 +107,12 @@ namespace leveldb {
         virtual const std::string &dbname() = 0;
 
         virtual void QueryFailedReplicas(uint32_t failed_stoc_id,
+                                         bool is_stoc_failed,
                                          std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_repl_pairs,
                                          int level, ReconstructReplicasStats* stats) = 0;
+
+        virtual void UpdateFileMetaReplicaLocations(
+                const std::vector<leveldb::ReplicationPair> &results, uint32_t stoc_server_id, int level) = 0;
 
         virtual Status Recover() = 0;
 
@@ -227,7 +231,7 @@ namespace leveldb {
 
         virtual void PerformSubRangeReorganization() = 0;
 
-        virtual void StartCompaction() = 0;
+        virtual void StartCoordinatedCompaction() = 0;
 
 //        std::vector<DB *> dbs_;
 //        std::vector<nova::RDMAMsgCallback *> rdma_threads_;

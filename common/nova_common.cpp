@@ -83,6 +83,10 @@ namespace nova {
         return (g_seed >> 16) & 0x7FFF;
     }
 
+    std::string Host::DebugString() const {
+        return fmt::format("{}:{}:{}", server_id, ip, port);
+    }
+
 
     uint64_t tab_hash(const char *key, size_t len) {
         // a large prime number
@@ -177,8 +181,24 @@ namespace nova {
         return tokens;
     }
 
+    std::vector<uint32_t>
+    SplitByDelimiterToInt(std::string *s, std::string delimiter) {
+        size_t pos = 0;
+        std::string token;
+        std::vector<uint32_t> tokens;
+        while ((pos = s->find(delimiter)) != std::string::npos) {
+            token = s->substr(0, pos);
+            tokens.push_back(std::stoi(token));
+            s->erase(0, pos + delimiter.length());
+        }
+        if (!s->empty()) {
+            tokens.push_back(std::stoi(*s));
+        }
+        return tokens;
+    }
+
     std::string ToString(const std::vector<uint32_t> &x) {
-        std::string  str;
+        std::string str;
         for (int i = 0; i < x.size(); i++) {
             str += std::to_string(x[i]);
             str += ",";
@@ -187,6 +207,7 @@ namespace nova {
     }
 
     LTCFragment::LTCFragment() : is_ready_(false),
+                                 is_stoc_migrated_(false),
                                  is_ready_signal_(&is_ready_mutex_), is_complete_(false) {
     }
 

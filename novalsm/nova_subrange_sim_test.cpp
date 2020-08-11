@@ -302,26 +302,26 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->enable_load_data = true;
 
     NovaConfig::config->servers = convert_hosts("localhost:11222");
-    for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
-        if (i < 1) {
-            NovaConfig::config->ltc_servers.push_back(
-                    NovaConfig::config->servers[i]);
-        } else {
-            NovaConfig::config->stoc_servers.push_back(
-                    NovaConfig::config->servers[i]);
-        }
-    }
+//    for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
+//        if (i < 1) {
+//            NovaConfig::config->ltc_servers.push_back(
+//                    NovaConfig::config->servers[i]);
+//        } else {
+//            NovaConfig::config->stoc_servers.push_back(
+//                    NovaConfig::config->servers[i]);
+//        }
+//    }
 
-    for (int i = 0; i < NovaConfig::config->ltc_servers.size(); i++) {
-        Host host = NovaConfig::config->ltc_servers[i];
-        NOVA_LOG(INFO)
-            << fmt::format("ltc: {}:{}:{}", host.server_id, host.ip, host.port);
-    }
-    for (int i = 0; i < NovaConfig::config->stoc_servers.size(); i++) {
-        Host host = NovaConfig::config->stoc_servers[i];
-        NOVA_LOG(INFO)
-            << fmt::format("dc: {}:{}:{}", host.server_id, host.ip, host.port);
-    }
+//    for (int i = 0; i < NovaConfig::config->ltc_servers.size(); i++) {
+//        Host host = NovaConfig::config->ltc_servers[i];
+//        NOVA_LOG(INFO)
+//            << fmt::format("ltc: {}:{}:{}", host.server_id, host.ip, host.port);
+//    }
+//    for (int i = 0; i < NovaConfig::config->stoc_servers.size(); i++) {
+//        Host host = NovaConfig::config->stoc_servers[i];
+//        NOVA_LOG(INFO)
+//            << fmt::format("dc: {}:{}:{}", host.server_id, host.ip, host.port);
+//    }
 
     NovaConfig::config->my_server_id = 0;
 
@@ -331,10 +331,8 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < NovaConfig::config->cfgs[0]->fragments.size(); i++) {
         NovaConfig::config->cfgs[0]->fragments[i]->log_replica_stoc_ids.clear();
         for (int r = 0; r < 0; r++) {
-            NovaConfig::config->cfgs[0]->fragments[i]->log_replica_stoc_ids.push_back(
-                    start_stoc_id);
-            start_stoc_id = (start_stoc_id + 1) %
-                            NovaConfig::config->stoc_servers.size();
+            NovaConfig::config->cfgs[0]->fragments[i]->log_replica_stoc_ids.push_back(start_stoc_id);
+            start_stoc_id = (start_stoc_id + 1) % NovaConfig::config->cfgs[0]->stoc_servers.size();
         }
     }
 

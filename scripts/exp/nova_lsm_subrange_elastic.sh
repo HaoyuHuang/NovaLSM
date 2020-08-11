@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/august-11-nova-lsm-sr-zipfian-ltc-migration-$recordcount"
+exp_results_dir="$home_dir/august-11-nova-lsm-sr-zipfian-ltc-elastic-$recordcount"
 dryrun="$2"
 
 mkdir -p $results
@@ -72,7 +72,7 @@ function run_bench() {
 	n=0
 	while [ $n -lt $nservers ]
 	do
-		# if [[ $i == "9" ]]; then
+		# if [[ $i == "10" ]]; then
 		# 	i=$((i+1))
 		# 	continue	
 		# fi
@@ -86,7 +86,7 @@ function run_bench() {
 	while [ $n -lt $nclients ]
 	do
 		id=$((nmachines-1-i))
-		# if [[ $id == "9" ]]; then
+		# if [[ $id == "10" ]]; then
 		# 	i=$((i+1))
 		# 	continue	
 		# fi
@@ -137,7 +137,8 @@ function run_bench() {
 	# echo $cmd
 	# eval $cmd
 	# number_of_stocs=$((nservers-number_of_ltcs))
-	ltc_config_path="$config_dir/nova-migration-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$nstoc-nranges-$cc_nranges_per_server-zipfian-$zipfianconstant-read-$cardinality"
+	# arch="simpleelastic"
+	ltc_config_path="$config_dir/nova-$arch-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$nstoc-nranges-$cc_nranges_per_server-zipfian-$zipfianconstant-read-1"
 	
 	db_path="/db/nova-db-$recordcount-$value_size"
 	echo "$nova_servers $ltc_config_path $db_path"
@@ -157,7 +158,7 @@ function run_bench() {
 	for s in ${servers[@]}
 	do
 		echo "restore database image $s"
-		ssh -oStrictHostKeyChecking=no $s "rm -rf /db/nova-db-$recordcount-1024/ && cp -r /db/snapshot-$cc_nranges_per_server-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas-$cardinality/nova-db-$recordcount-1024/ /db/ &" &
+		ssh -oStrictHostKeyChecking=no $s "rm -rf /db/nova-db-$recordcount-1024/ && cp -r /db/snapshot-$cc_nranges_per_server-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas/nova-db-$recordcount-1024/ /db/ &" &
 	done
 
 	sleep 10
@@ -218,7 +219,7 @@ function run_bench() {
 	done
 
 	if [[ $change_cfg == "true" ]]; then
-		java -jar $cache_bin_dir/nova_coordinator.jar $nova_servers $ltc_config_path
+		java -jar $cache_bin_dir/nova_coordinator.jar $nova_servers $ltc_config_path >& elastic_coord_${workload}_output &
 	fi
 
 	port=$((port+1))
@@ -338,7 +339,7 @@ number_of_ltcs="1"
 maxexecutiontime=1200
 workload="workloadw"
 enable_load_data="false"
-mem_pool_size_gb="40"
+mem_pool_size_gb="20"
 
 major_compaction_type="sc"
 num_recovery_threads="32"
@@ -365,13 +366,13 @@ num_memtable_partitions="1"
 num_memtables="2"
 
 nservers="13"
-nmachines="24"
+nmachines="16"
 workload="workloadw"
 dist="zipfian"
 scatter_policy="power_of_two"
 workload="workloada"
 ltc_num_stocs_scatter_data_blocks="1"
-nclients="9"
+nclients="5"
 nthreads="512"
 major_compaction_max_parallism="1"
 level="6"
@@ -381,87 +382,47 @@ workload="workloadw"
 number_of_ltcs="3"
 enable_range_index="true"
 
+ltc_migration_policy="immediate"
+cc_nranges_per_server="64"
+try="1"
+dist="uniform"
 
-# for cc_nranges_per_server in "16"
-# do
-# l0_start_compaction_mb=$((4*1024))
-# l0_stop_write_mb=$((10*1024))
-# l0_start_compaction_mb=$((l0_start_compaction_mb/number_of_ltcs/cc_nranges_per_server))
-# l0_stop_write_mb=$((l0_stop_write_mb/number_of_ltcs/cc_nranges_per_server))
-# ltc_migration_policy="immediate"
 
-# elapsed_seconds_to_trigger_change="60"
-# num_memtable_partitions="4"
+nmachines="16"
+nclients="6"
+number_of_ltcs="3"
+nservers="8"
+cc_nranges_per_server="64"
+change_cfg="true"
+num_log_replicas="1"
+arch="elastic"
+maxexecutiontime=$((80*60))
 
-# try="1"
+# nmachines="5"
+# nclients="1"
+# number_of_ltcs="2"
+# nservers="4"
+# cc_nranges_per_server="16"
 # change_cfg="true"
-# dist="zipfian"
-# for zipfianconstant in "0.99" "0.73" "0.27"
-# do
-# for number_of_ltcs in "5" #"3"
-# do
-# for num_log_replicas in  "3" #"1"
-# do
-# for num_memtables in "16"
-# do
-# for change_cfg in "true" "false"
-# do
-# for workload in "workloada" "workloadw" "workloade"
-# do
+# num_log_replicas="1"
+# arch="simpleelastic"
+# maxexecutiontime=$((10*60))
 
-# nservers=$((number_of_ltcs+10))
-# run_bench
-# done
-# done
-# done
-# done
-# done
-# done
 
-# done
-
-for cc_nranges_per_server in "64"
-do
-number_of_ltcs="5"
 l0_start_compaction_mb=$((4*1024))
 l0_stop_write_mb=$((10*1024))
 l0_start_compaction_mb=$((l0_start_compaction_mb/number_of_ltcs/cc_nranges_per_server))
 l0_stop_write_mb=$((l0_stop_write_mb/number_of_ltcs/cc_nranges_per_server))
-ltc_migration_policy="immediate"
 
-elapsed_seconds_to_trigger_change="60"
 num_memtable_partitions="4"
+num_memtables="8"
 
-try="1"
-change_cfg="true"
-dist="zipfian"
+
 for workload in "workloade" "workloada" "workloadw"
 do
-for zipfianconstant in "0.73" "0.99" "0.27"
-do
-for number_of_ltcs in "5"
-do
-for num_log_replicas in  "3"
-do
-for num_memtables in "8"
-do
-for change_cfg in "true"
-do
-
-if [[ $workload == "workloade" ]]; then
-	cardinality="10"
-else
-	cardinality="1"
-fi
-nservers=$((number_of_ltcs+10))
 run_bench
 done
-done
-done
-done
-done
-done
 
-done
 
-python /proj/bg-PG0/haoyu/scripts/parse_ycsb_nova_leveldb.py $nmachines $exp_results_dir > stats_ltc_migration_out
+cp elastic_coord_* $exp_results_dir/
+python /proj/bg-PG0/haoyu/scripts/parse_ycsb_nova_leveldb.py $nmachines $exp_results_dir > stats_ltc_elastic_out

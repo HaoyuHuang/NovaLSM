@@ -371,14 +371,14 @@ namespace leveldb {
             }
         }
 
-        std::vector<uint32_t> stocs;
-        if (replica_status_.size() > 1) {
-            // ensure the metablock of a sstable is stored on the same StoC with its data blocks.
-            stocs = stocs_to_store_fragments_;
-        } else {
-            StorageSelector selector(rand_seed_);
-            selector.SelectAvailableStoCs(&stocs, 1);
-        }
+//        std::vector<uint32_t> stocs;
+//        if (replica_status_.size() > 1) {
+//            // ensure the metablock of a sstable is stored on the same StoC with its data blocks.
+//            stocs = stocs_to_store_fragments_;
+//        } else {
+//            StorageSelector selector(rand_seed_);
+//            selector.SelectAvailableStoCs(&stocs, 1);
+//        }
         struct MetaBlockStatus {
             char *backing_mem = nullptr;
             uint32_t scid = 0;
@@ -387,10 +387,9 @@ namespace leveldb {
         };
 
         std::vector<MetaBlockStatus> metablock_replica_status;
-        for (int replica_id = 0;
-             replica_id < replica_status_.size(); replica_id++) {
+        for (int replica_id = 0; replica_id < replica_status_.size(); replica_id++) {
             MetaBlockStatus status = {};
-            status.new_file_size = WriteMetaDataBlock(stocs[replica_id],
+            status.new_file_size = WriteMetaDataBlock(stocs_to_store_fragments_[replica_id],
                                                       replica_id,
                                                       &status.backing_mem,
                                                       &status.scid,
@@ -398,17 +397,14 @@ namespace leveldb {
             metablock_replica_status.push_back(status);
         }
 
-        for (int replica_id = 0;
-             replica_id < replica_status_.size(); replica_id++) {
+        for (int replica_id = 0; replica_id < replica_status_.size(); replica_id++) {
             client->Wait();
         }
         uint64_t new_file_size = 0;
         for (int replica_id = 0;
              replica_id < replica_status_.size(); replica_id++) {
             StoCResponse response = {};
-            NOVA_ASSERT(
-                    client->IsDone(metablock_replica_status[replica_id].req_id,
-                                   &response, nullptr));
+            NOVA_ASSERT(client->IsDone(metablock_replica_status[replica_id].req_id, &response, nullptr));
             NOVA_ASSERT(response.stoc_block_handles.size() == 1)
                 << fmt::format("{} {}",
                                metablock_replica_status[replica_id].req_id,
@@ -679,7 +675,7 @@ namespace leveldb {
             if (!env_->FileExists(metafile)) {
                 NOVA_ASSERT(env_->LockFile(metafile, file_number).ok());
                 if (!env_->FileExists(metafile)) {
-                    NOVA_LOG(rdmaio::INFO)
+                    NOVA_LOG(rdmaio::DEBUG)
                         << fmt::format("Fetch missing metadata db:{} fd:{} file {}", dbname, file_number,
                                        meta->DebugString());
                     std::vector<const FileMetaData *> files;

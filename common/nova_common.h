@@ -95,6 +95,7 @@ namespace nova {
         std::vector<uint32_t> log_replica_stoc_ids;
         void *db = nullptr;
 
+        std::atomic_bool is_stoc_migrated_;
         std::atomic_bool is_complete_;
         std::atomic_bool is_ready_;
         leveldb::port::Mutex is_ready_mutex_;
@@ -181,6 +182,9 @@ namespace nova {
 
     std::vector<std::string>
     SplitByDelimiter(std::string *s, std::string delimiter);
+
+    std::vector<uint32_t>
+    SplitByDelimiterToInt(std::string *s, std::string delimiter);
 
     std::string ToString(const std::vector<uint32_t> &x);
 
@@ -362,10 +366,12 @@ namespace nova {
         uint32_t server_id;
         string ip;
         int port;
+
+        std::string DebugString() const;
     };
 
     struct Servers {
-        std::vector<Host> servers;
+        std::vector<uint32_t> servers;
         std::set<uint32_t> server_ids;
     };
 

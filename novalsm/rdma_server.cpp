@@ -210,10 +210,12 @@ namespace nova {
                        leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES) {
                 char *sendbuf = rdma_broker_->GetSendBuf(task.remote_server_id);
                 uint32_t msg_size = 1;
-                sendbuf[0] =
-                        leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES_RESPONSE;
-                rdma_broker_->PostSend(sendbuf, msg_size, task.remote_server_id,
-                                       task.stoc_req_id);
+                sendbuf[0] = leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES_RESPONSE;
+                msg_size += leveldb::EncodeFixed32(sendbuf + msg_size, task.replication_results.size());
+                for (auto result : task.replication_results) {
+                    msg_size += result.Encode(sendbuf + msg_size);
+                }
+                rdma_broker_->PostSend(sendbuf, msg_size, task.remote_server_id, task.stoc_req_id);
                 NOVA_LOG(rdmaio::DEBUG) << "rdma replication complete";
             } else {
                 NOVA_ASSERT(false) << task.request_type;

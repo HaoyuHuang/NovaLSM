@@ -43,8 +43,10 @@ namespace leveldb {
     }
 
     void MemTable::SetReadyToProcessRequests() {
+        is_ready_mutex_.Lock();
         is_ready_ = true;
         is_ready_signal_.SignalAll();
+        is_ready_mutex_.Unlock();
     }
 
     MemTable::~MemTable() { assert(refs_ == 0); }
@@ -274,7 +276,7 @@ namespace leveldb {
             removed += std::to_string(rm);
             removed += ",";
         }
-        std::string output = fmt::format("vid: {} add:[{}] rm:[{}]", version_id,
+        std::string output = fmt::format("dbid: {} add:[{}] rm:[{}]", dbid_,
                                          added,
                                          removed);
         return output;
@@ -333,11 +335,10 @@ namespace leveldb {
         return memtable_exists;
     }
 
-    void AtomicMemTable::UpdateL0Files(uint32_t version_id,
-                                       const MemTableL0FilesEdit &edit) {
-        NOVA_ASSERT(is_immutable_);
-        NOVA_ASSERT(is_flushed_);
+    void AtomicMemTable::UpdateL0Files(uint32_t version_id, const MemTableL0FilesEdit &edit) {
         mutex_.lock();
+        NOVA_ASSERT(is_immutable_) << fmt::format("{}:{},{}", memtable_id_, memtable_size_, edit.DebugString());
+        NOVA_ASSERT(is_flushed_);
         last_version_id_ = std::max(last_version_id_, version_id);
         for (auto add : edit.add_fns) {
             l0_file_numbers_.insert(add);

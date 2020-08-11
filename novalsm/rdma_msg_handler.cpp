@@ -67,7 +67,7 @@ namespace nova {
                 // A log record request.
                 nova::LTCFragment *frag = nova::NovaConfig::config->cfgs[0]->fragments[task.dbid];
                 for (int i = 0; i < frag->log_replica_stoc_ids.size(); i++) {
-                    uint32_t stoc_server_id = nova::NovaConfig::config->stoc_servers[frag->log_replica_stoc_ids[i]].server_id;
+                    uint32_t stoc_server_id = nova::NovaConfig::config->cfgs[0]->stoc_servers[frag->log_replica_stoc_ids[i]];
                     serverids.push_back(stoc_server_id);
                 }
                 if (!admission_control_->CanIssueRequest(serverids)) {

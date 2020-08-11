@@ -203,9 +203,9 @@ namespace leveldb {
             assert(Valid());
             FileMetaData &meta = *(*flist_)[index_];
             EncodeFixed64(value_buf_, meta.number);
-            if (scan_stats_) {
-                scan_stats_->number_of_scan_sstables_ += 1;
-            }
+//            if (scan_stats_) {
+//                scan_stats_->number_of_scan_sstables_ += 1;
+//            }
             return Slice(value_buf_, 8);
         }
 
@@ -850,6 +850,8 @@ namespace leveldb {
         VersionSet *vset_;
         Version *base_;
         std::vector<LevelState> levels_;
+        std::unordered_map<uint64_t, FileMetaData *> added_files_map;
+        bool update_replica_locations_ = false;
 
     public:
         // Initialize a builder with the files from *base and other info from *vset
@@ -894,7 +896,7 @@ namespace leveldb {
 //                vset_->compact_pointer_[level] =
 //                        edit->compact_pointers_[i].second.Encode().ToString();
 //            }
-
+            update_replica_locations_ = edit->update_replica_locations_;
             // Delete files
             for (const auto &deleted_file_set_kvp : edit->deleted_files_) {
                 const int level = deleted_file_set_kvp.first;
@@ -926,6 +928,7 @@ namespace leveldb {
 
                 levels_[level].deleted_files.erase(f->number);
                 levels_[level].added_files->insert(f);
+                added_files_map[f->number] = f;
             }
         }
 
@@ -940,27 +943,39 @@ namespace leveldb {
                 std::vector<FileMetaData *>::const_iterator base_iter = base_files.begin();
                 std::vector<FileMetaData *>::const_iterator base_end = base_files.end();
                 const FileSet *added_files = levels_[level].added_files;
-                v->files_[level].reserve(
-                        base_files.size() + added_files->size());
-                for (const auto &added_file : *added_files) {
-                    // Add all smaller files listed in base_
-                    for (std::vector<FileMetaData *>::const_iterator bpos =
-                            std::upper_bound(base_iter, base_end, added_file,
-                                             cmp);
-                         base_iter != bpos; ++base_iter) {
+
+                if (update_replica_locations_) {
+                    v->files_[level].reserve(base_files.size());
+                    // Add all files
+                    for (; base_iter != base_end; ++base_iter) {
+                        auto meta = *base_iter;
+                        auto new_f = added_files_map.find(meta->number);
+                        if (new_f == added_files_map.end()) {
+                            MaybeAddFile(v, level, *base_iter);
+                        } else {
+                            MaybeAddFile(v, level, new_f->second);
+                        }
+                    }
+                } else {
+                    v->files_[level].reserve(base_files.size() + added_files->size());
+                    for (const auto &added_file : *added_files) {
+                        // Add all smaller files listed in base_
+                        for (std::vector<FileMetaData *>::const_iterator bpos =
+                                std::upper_bound(base_iter, base_end, added_file, cmp);
+                             base_iter != bpos; ++base_iter) {
+                            MaybeAddFile(v, level, *base_iter);
+                        }
+                        NOVA_ASSERT(added_file->compaction_status !=
+                                    FileCompactionStatus::COMPACTING)
+                            << fmt::format("{}@{}", added_file->number, level);
+                        MaybeAddFile(v, level, added_file);
+                    }
+
+                    // Add remaining base files
+                    for (; base_iter != base_end; ++base_iter) {
                         MaybeAddFile(v, level, *base_iter);
                     }
-                    NOVA_ASSERT(added_file->compaction_status !=
-                                FileCompactionStatus::COMPACTING)
-                        << fmt::format("{}@{}", added_file->number, level);
-                    MaybeAddFile(v, level, added_file);
                 }
-
-                // Add remaining base files
-                for (; base_iter != base_end; ++base_iter) {
-                    MaybeAddFile(v, level, *base_iter);
-                }
-
 #ifndef NDEBUG
                 // Make sure there is no overlap in levels > 0
                 if (level > 0) {
@@ -1252,8 +1267,7 @@ namespace leveldb {
                                   uint32_t compacting_version_id) {
         NOVA_LOG(rdmaio::DEBUG)
             << fmt::format("Skipping {}", compacting_version_id);
-        for (Version *v = dummy_versions_.next_; v != &dummy_versions_;
-             v = v->next_) {
+        for (Version *v = dummy_versions_.next_; v != &dummy_versions_; v = v->next_) {
             if (v->version_id_ == compacting_version_id) {
                 continue;
             }
@@ -1327,11 +1341,14 @@ namespace leveldb {
         uint32_t msg_size = 0;
         for (int i = 0; i < latest_memtableid; i++) {
             auto atomic_memtable = mid_table_mapping_[i];
+            atomic_memtable->mutex_.lock();
             if (atomic_memtable->memtable_ == nullptr && atomic_memtable->l0_file_numbers_.empty()) {
+                atomic_memtable->mutex_.unlock();
                 continue;
             }
             msg_size += EncodeFixed32(buf + msg_size, atomic_memtable->memtable_id_);
             msg_size += atomic_memtable->Encode(buf + msg_size);
+            atomic_memtable->mutex_.unlock();
             NOVA_LOG(rdmaio::INFO) << fmt::format("tableid mapping: {}", atomic_memtable->memtable_id_);
         }
         msg_size += EncodeFixed32(buf + msg_size, 0);

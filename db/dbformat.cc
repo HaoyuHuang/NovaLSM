@@ -197,14 +197,15 @@ namespace leveldb {
         msg_size += EncodeFixed32(buf + msg_size, dest_stoc_id);
         msg_size += EncodeFixed64(buf + msg_size, sstable_file_number);
         msg_size += EncodeFixed32(buf + msg_size, replica_id);
+        msg_size += EncodeFixed32(buf + msg_size, dest_stoc_file_id);
         return msg_size;
     }
 
     std::string ReplicationPair::DebugString() const {
-        return fmt::format("stocfid:{}-meta:{}-fs:{}-dest:{}-fn:{}-rid:{}",
+        return fmt::format("stocfid:{}-meta:{}-fs:{}-dest:{}-fn:{}-rid:{}-destfid:{}",
                            source_stoc_file_id, is_meta_blocks,
                            source_file_size, dest_stoc_id, sstable_file_number,
-                           replica_id);
+                           replica_id, dest_stoc_file_id);
     }
 
     bool ReplicationPair::Decode(Slice *ptr) {
@@ -213,7 +214,7 @@ namespace leveldb {
                DecodeFixed32(ptr, &source_file_size) &&
                DecodeFixed32(ptr, &dest_stoc_id) &&
                DecodeFixed64(ptr, &sstable_file_number) &&
-               DecodeFixed32(ptr, &replica_id);
+               DecodeFixed32(ptr, &replica_id) && DecodeFixed32(ptr, &dest_stoc_file_id);
     }
 
     int FileMetaData::SelectReplica() const {
@@ -223,8 +224,7 @@ namespace leveldb {
         int replica_id = -1;
         auto servers = leveldb::StorageSelector::available_stoc_servers.load();
         for (int i = 0; i < block_replica_handles.size(); i++) {
-            if (servers->server_ids.find(
-                    block_replica_handles[i].meta_block_handle.server_id) !=
+            if (servers->server_ids.find(block_replica_handles[i].meta_block_handle.server_id) !=
                 servers->server_ids.end()) {
                 replica_id = i;
                 break;

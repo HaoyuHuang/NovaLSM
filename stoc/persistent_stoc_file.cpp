@@ -80,10 +80,10 @@ namespace leveldb {
         allocated_mem_size_ = file_size;
 
         NOVA_LOG(rdmaio::DEBUG)
-                << fmt::format(
-                        "StoC file {} created with t:{} file size {} allocated size {}",
-                        file_id_, thread_id,
-                        file_size_, allocated_mem_size_);
+            << fmt::format(
+                    "StoC file {} created with t:{} file size {} allocated size {}",
+                    file_id_, thread_id,
+                    file_size_, allocated_mem_size_);
 
         NOVA_ASSERT(backing_mem_) << "Running out of memory";
     }
@@ -113,7 +113,7 @@ namespace leveldb {
             waiting_to_be_deleted = false;
             deleted_ = true;
             NOVA_LOG(rdmaio::DEBUG) << fmt::format(
-                    "Delete  Stoc File {}.", stoc_file_name_);
+                        "Delete  Stoc File {}.", stoc_file_name_);
             NOVA_ASSERT(file_);
             Status s = file_->Close();
             NOVA_ASSERT(s.ok()) << fmt::format("{}", s.ToString());
@@ -147,10 +147,10 @@ namespace leveldb {
             uint32_t given_file_id_for_assertion,
             uint64_t offset) {
         NOVA_ASSERT(given_file_id_for_assertion == file_id_)
-                << fmt::format("{} {}", given_file_id_for_assertion, file_id_);
+            << fmt::format("{} {}", given_file_id_for_assertion, file_id_);
         bool found = false;
         mutex_.lock();
-        uint64_t relative_off = offset - (uint64_t)(backing_mem_);
+        uint64_t relative_off = offset - (uint64_t) (backing_mem_);
         for (auto it = allocated_bufs_.rbegin();
              it != allocated_bufs_.rend(); it++) {
             if (it->offset == relative_off) {
@@ -162,8 +162,8 @@ namespace leveldb {
         mutex_.unlock();
         if (!found) {
             NOVA_LOG(rdmaio::INFO)
-                    << fmt::format("stocfile:{} id:{}", stoc_file_name_,
-                                   file_id_);
+                << fmt::format("stocfile:{} id:{}", stoc_file_name_,
+                               file_id_);
         }
         return found;
     }
@@ -172,9 +172,9 @@ namespace leveldb {
                                              uint32_t size,
                                              bool is_meta_blocks) {
         NOVA_ASSERT(current_mem_offset_ + size <= allocated_mem_size_)
-                << "exceed maximum stoc file size "
-                << size << ","
-                << allocated_mem_size_;
+            << "exceed maximum stoc file size "
+            << size << ","
+            << allocated_mem_size_;
         leveldb::FileType type = leveldb::FileType::kCurrentFile;
         NOVA_ASSERT(ParseFileName(filename, &type));
         mutex_.lock();
@@ -207,13 +207,13 @@ namespace leveldb {
         allocated_bufs_.push_back(allocated_buf);
         file_size_ += size;
         mutex_.unlock();
-        return (uint64_t)(backing_mem_) + off;
+        return (uint64_t) (backing_mem_) + off;
     }
 
     uint64_t
     StoCPersistentFile::Persist(uint32_t given_file_id_for_assertion) {
         NOVA_ASSERT(given_file_id_for_assertion == file_id_)
-                << fmt::format("{} {}", given_file_id_for_assertion, file_id_);
+            << fmt::format("{} {}", given_file_id_for_assertion, file_id_);
 
         uint64_t persisted_bytes = 0;
         mutex_.lock();
@@ -384,7 +384,7 @@ namespace leveldb {
     StoCPersistentFile::DeleteSSTable(uint32_t given_fileid_for_assertion,
                                       const std::string &filename) {
         NOVA_ASSERT(given_fileid_for_assertion == file_id_)
-                << fmt::format("{} {}", given_fileid_for_assertion, file_id_);
+            << fmt::format("{} {}", given_fileid_for_assertion, file_id_);
         bool delete_file = false;
 
         mutex_.lock();
@@ -479,10 +479,10 @@ namespace leveldb {
         }
 
         NOVA_LOG(rdmaio::DEBUG)
-                << fmt::format(
-                        "StoC file {} closed with t:{} file size {} allocated size {}",
-                        file_id_, thread_id_,
-                        file_size_, allocated_mem_size_);
+            << fmt::format(
+                    "StoC file {} closed with t:{} file size {} allocated size {}",
+                    file_id_, thread_id_,
+                    file_size_, allocated_mem_size_);
         NOVA_ASSERT(backing_mem_);
         uint32_t scid = mem_manager_->slabclassid(thread_id_,
                                                   allocated_mem_size_);
@@ -529,8 +529,7 @@ namespace leveldb {
     bool StocPersistentFileManager::ReadDataBlockForReplication(
             const StoCBlockHandle &stoc_block_handle, uint64_t offset,
             uint32_t size, char *scratch, Slice *result) {
-        StoCPersistentFile *stoc_file = FindStoCFile(
-                stoc_block_handle.stoc_file_id);
+        StoCPersistentFile *stoc_file = FindStoCFile(stoc_block_handle.stoc_file_id);
         if (!stoc_file) {
             return false;
         }
@@ -539,26 +538,25 @@ namespace leveldb {
             leveldb::FileType type;
             NOVA_ASSERT(ParseFileName(stoc_file->stoc_file_name_, &type));
             NOVA_LOG(rdmaio::DEBUG)
-                    << fmt::format("Read {} from stoc file {} offset:{} size:{}",
-                                   stoc_block_handle.DebugString(),
-                                   stoc_file->file_id(), offset, size);
-            auto status = stoc_file->ReadForReplication(offset, size, scratch,
-                                                        result);
+                << fmt::format("Read {} from stoc file {} offset:{} size:{}",
+                               stoc_block_handle.DebugString(),
+                               stoc_file->file_id(), offset, size);
+            auto status = stoc_file->ReadForReplication(offset, size, scratch, result);
             if (status.IsNotFound()) {
                 return false;
             }
             NOVA_ASSERT(status.ok()) << status.ToString();
             NOVA_ASSERT(type == leveldb::FileType::kTableFile);
             NOVA_ASSERT(result->size() == size)
-                    << fmt::format("fn:{} given size:{} read size:{}",
-                                   stoc_file->stoc_file_name_,
-                                   size,
-                                   result->size());
+                << fmt::format("fn:{} given size:{} read size:{}",
+                               stoc_file->stoc_file_name_,
+                               size,
+                               result->size());
             NOVA_ASSERT(scratch[size - 1] != 0)
-                    << fmt::format(
-                            "Read {} from stoc file {} offset:{} size:{}",
-                            stoc_block_handle.DebugString(),
-                            stoc_file->file_id(), offset, size);
+                << fmt::format(
+                        "Read {} from stoc file {} offset:{} size:{}",
+                        stoc_block_handle.DebugString(),
+                        stoc_file->file_id(), offset, size);
             return true;
         }
 
@@ -591,13 +589,13 @@ namespace leveldb {
             leveldb::FileType type;
             NOVA_ASSERT(ParseFileName(stoc_file->stoc_file_name_, &type));
             NOVA_LOG(rdmaio::DEBUG)
-                    << fmt::format("Read {} from stoc file {} offset:{} size:{}",
-                                   stoc_block_handle.DebugString(), stoc_file->file_id(), offset, size);
+                << fmt::format("Read {} from stoc file {} offset:{} size:{}",
+                               stoc_block_handle.DebugString(), stoc_file->file_id(), offset, size);
             NOVA_ASSERT(stoc_file->Read(offset, size, scratch, result).ok());
             if (type == leveldb::FileType::kTableFile) {
                 NOVA_ASSERT(result->size() == size)
-                        << fmt::format("fn:{} given size:{} read size:{}",
-                                       stoc_file->stoc_file_name_, size, result->size());
+                    << fmt::format("fn:{} given size:{} read size:{}",
+                                   stoc_file->stoc_file_name_, size, result->size());
                 NOVA_ASSERT(stoc_file->sealed()) << fmt::format("Read but not sealed {}", stoc_file->stoc_file_name_);
 //                NOVA_ASSERT(scratch[size - 1] != 0)
 //                    << fmt::format(
@@ -605,8 +603,8 @@ namespace leveldb {
 //                            stoc_block_handle.DebugString(), stoc_file->file_id(), offset, size, result->size());
             } else {
                 NOVA_LOG(rdmaio::DEBUG)
-                        << fmt::format("Read file {} read size {}:{}", stoc_file->stoc_file_name_, size,
-                                       result->size());
+                    << fmt::format("Read file {} read size {}:{}", stoc_file->stoc_file_name_, size,
+                                   result->size());
             }
             return;
         }
@@ -637,7 +635,7 @@ namespace leveldb {
             const auto &fn = it.first;
             const auto &fileid = it.second;
             NOVA_LOG(rdmaio::DEBUG)
-                    << fmt::format("Open StoC file {} for file {}", fileid, fn);
+                << fmt::format("Open StoC file {} for file {}", fileid, fn);
             StoCPersistentFile *stoc_file = new StoCPersistentFile(
                     fileid, env_,
                     fn,
@@ -645,8 +643,8 @@ namespace leveldb {
                     0, stoc_file_size_);
             stoc_file->ForceSeal();
             NOVA_ASSERT(stoc_files_[fileid] == nullptr)
-                    << fmt::format("{} {} {}", fileid, it.first,
-                                   stoc_files_[fileid]->stoc_file_name_);
+                << fmt::format("{} {} {}", fileid, it.first,
+                               stoc_files_[fileid]->stoc_file_name_);
             stoc_files_[fileid] = stoc_file;
             fn_stoc_file_map_[fn] = stoc_file;
             current_stoc_file_id_ = std::max(current_stoc_file_id_, fileid);
@@ -679,8 +677,8 @@ namespace leveldb {
             current_stoc_file_id_ += 1;
         }
         NOVA_LOG(rdmaio::DEBUG)
-                << fmt::format("Create a new stoc file {} for thread {} fn:{}", id,
-                               thread_id, filename);
+            << fmt::format("Create a new stoc file {} for thread {} fn:{}", id,
+                           thread_id, filename);
         mutex_.unlock();
 
 
@@ -716,11 +714,9 @@ namespace leveldb {
     StocPersistentFileManager::FindStoCFile(uint32_t stoc_file_id) {
         mutex_.lock();
         StoCPersistentFile *stoc_file = stoc_files_[stoc_file_id];
-        NOVA_ASSERT(stoc_file)
-                << fmt::format("stoc file {} is null.", stoc_file_id);
+        NOVA_ASSERT(stoc_file) << fmt::format("stoc file {} is null.", stoc_file_id);
         NOVA_ASSERT(stoc_file->file_id() == stoc_file_id)
-                << fmt::format("stoc file {} {}.", stoc_file->file_id(),
-                               stoc_file_id);
+            << fmt::format("stoc file {} {}.", stoc_file->file_id(), stoc_file_id);
         mutex_.unlock();
         return stoc_file;
     }
@@ -729,10 +725,7 @@ namespace leveldb {
             leveldb::Env *env,
             leveldb::MemManager *mem_manager,
             const std::string &stoc_file_path,
-            uint32_t stoc_file_size,
-            uint32_t nservers,
-            uint32_t server_id,
-            uint32_t nranges) :
+            uint32_t stoc_file_size) :
             env_(env), mem_manager_(mem_manager),
             stoc_file_path_(stoc_file_path),
             stoc_file_size_(stoc_file_size) {

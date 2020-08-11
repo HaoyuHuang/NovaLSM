@@ -60,6 +60,7 @@ namespace leveldb {
         ~DBImpl() override;
 
         void QueryFailedReplicas(uint32_t failed_stoc_id,
+                                 bool is_stoc_failed,
                                  std::unordered_map<uint32_t, std::vector<ReplicationPair>> *stoc_repl_pairs,
                                  int level,
                                  ReconstructReplicasStats *stats) override;
@@ -131,17 +132,20 @@ namespace leveldb {
                                const std::vector<LevelDBLogRecord> &log_records,
                                uint32_t memtable_id);
 
-        void StartCompaction();
+        void StartCoordinatedCompaction();
+
+        void StopCoordinatedCompaction();
 
         void StopCompaction();
 
         uint32_t EncodeMemTablePartitions(char *buf);
 
-        void DecodeMemTablePartitions(Slice *buf, std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map);
+        void
+        DecodeMemTablePartitions(Slice *buf, std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map);
 
         const std::string &dbname() override;
 
-        uint32_t EncodeDBMetadata(char *buf, nova::StoCInMemoryLogFileManager *log_manager);
+        uint32_t EncodeDBMetadata(char *buf, nova::StoCInMemoryLogFileManager *log_manager, uint32_t cfg_id);
 
         void
         RecoverDBMetadata(const Slice &buf, uint32_t version_id, uint64_t last_sequence, uint64_t next_file_number,
@@ -156,8 +160,13 @@ namespace leveldb {
         const Options options_;  // options_.comparator == &internal_comparator_
         nova::StoCInMemoryLogFileManager *log_manager_ = nullptr;
         std::vector<EnvBGThread *> bg_flush_memtable_threads_;
-    private:
 
+        void ScheduleFileDeletionTask();
+
+        void UpdateFileMetaReplicaLocations(
+                const std::vector<leveldb::ReplicationPair> &results, uint32_t stoc_server_id, int level) override ;
+
+    private:
         Status GetWithLookupIndex(const ReadOptions &options, const Slice &key,
                                   std::string *value);
 
@@ -165,7 +174,8 @@ namespace leveldb {
                                  std::string *value);
 
         std::atomic_bool start_compaction_;
-        bool is_ready_to_process_request = false;
+        std::atomic_bool start_coordinated_compaction_;
+        std::atomic_bool terminate_coordinated_compaction_;
 
         void CleanupLSMCompaction(CompactionState *state,
                                   VersionEdit &edit,
@@ -256,15 +266,13 @@ namespace leveldb {
                                const std::unordered_map<uint32_t, MemTableL0FilesEdit> &edits);
 
         void
-        DeleteObsoleteVersions(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(
-                mutex_);
+        DeleteObsoleteVersions(EnvBGThread *bg_thread) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         // Compact the in-memory write buffer to disk.  Switches to a new
         // log-file/memtable and writes a new descriptor iff successful.
         // Errors are recorded in bg_error_.
         bool CompactMemTable(EnvBGThread *bg_thread,
-                             const std::vector<EnvBGTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(
-                mutex_);
+                             const std::vector<EnvBGTask> &tasks) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
         void RecordBackgroundError(const Status &s);
 
@@ -273,8 +281,7 @@ namespace leveldb {
         void ScheduleFileDeletionTask(int thread_id);
 
         Status
-        InstallCompactionResults(CompactionState *compact, VersionEdit *edit,
-                                 int target_level);
+        InstallCompactionResults(CompactionState *compact, VersionEdit *edit, int target_level);
 
         const Comparator *user_comparator() const {
             return internal_comparator_.user_comparator();
@@ -346,8 +353,7 @@ namespace leveldb {
         Status bg_error_ GUARDED_BY(mutex_);
 
         std::string current_log_file_name_ GUARDED_BY(mutex_);
-        std::vector<uint32_t> closed_memtable_log_files_  GUARDED_BY(
-                range_lock_);
+        std::vector<uint32_t> closed_memtable_log_files_  GUARDED_BY(range_lock_);
 
         bool WriteStaticPartition(const leveldb::WriteOptions &options,
                                   const leveldb::Slice &key,

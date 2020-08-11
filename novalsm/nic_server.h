@@ -18,8 +18,8 @@
 #include "ltc/stoc_file_client_impl.h"
 #include "ltc/compaction_thread.h"
 #include "ltc/stat_thread.h"
-#include "novalsm/stoc_health_monitor.h"
 #include "ltc/db_migration.h"
+#include "lsm_tree_cleaner.h"
 
 namespace nova {
     class NICClientReqWorker;
@@ -66,6 +66,7 @@ namespace nova {
         std::vector<NICClientReqWorker *> conn_workers;
         std::vector<RDMAMsgHandler *> fg_rdma_msg_handlers;
         std::vector<RDMAMsgHandler *> bg_rdma_msg_handlers;
+        leveldb::LSMTreeCleaner *lsm_tree_cleaner_;
 
         std::vector<StorageWorker *> fg_storage_workers;
         std::vector<StorageWorker *> bg_storage_workers;
@@ -75,7 +76,6 @@ namespace nova {
         std::vector<DBMigration *> db_migration_threads;
 
         NovaStatThread *stat_thread_;
-        nova::StoCHealthMonitor *monitor_ = nullptr;
 
         vector<std::thread> stats_t_;
         struct event_base *base;

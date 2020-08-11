@@ -113,9 +113,7 @@ namespace leveldb {
         StocPersistentFileManager(Env *env,
                                   MemManager *mem_manager,
                                   const std::string &stoc_file_path,
-                                  uint32_t stoc_file_size,
-                                  uint32_t server_id,
-                                  uint32_t nservers, uint32_t nranges);
+                                  uint32_t stoc_file_size);
 
         StoCPersistentFile *FindStoCFile(uint32_t stoc_file_id);
 

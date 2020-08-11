@@ -73,7 +73,7 @@ function run_bench() {
 	n=0
 	while [ $n -lt $nservers ]
 	do
-		# if [[ $i == "9" ]]; then
+		# if [[ $i == "10" ]]; then
 		# 	i=$((i+1))
 		# 	continue	
 		# fi
@@ -87,7 +87,7 @@ function run_bench() {
 	while [ $n -lt $nclients ]
 	do
 		id=$((nmachines-1-i))
-		# if [[ $id == "9" ]]; then
+		# if [[ $id == "10" ]]; then
 		# 	i=$((i+1))
 		# 	continue	
 		# fi
@@ -142,14 +142,16 @@ function run_bench() {
 	# 	eval $cmd
 	# fi
 
-    
-    number_of_stocs=$((nservers-number_of_ltcs))
-	# cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "migration" $recordcount $number_of_ltcs $number_of_stocs $cc_nranges_per_server $zipfianconstant $cardinality"
+    # arch="simpleelastic"
+ #    number_of_stocs=$((nservers-number_of_ltcs))
+	# cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir $arch $recordcount $number_of_ltcs $number_of_stocs $cc_nranges_per_server $zipfianconstant 1"
 	# echo $cmd
 	# if [[ $dryrun == "false" ]]; then
 	# 	eval $cmd
 	# fi
-	ltc_config_path="$config_dir/nova-migration-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server-zipfian-$zipfianconstant-read-$cardinality"
+
+	# old_ltc_config_path="$config_dir/nova-$arch-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server"
+	ltc_config_path="$config_dir/nova-$arch-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server-zipfian-$zipfianconstant-read-1"
 	# mv $old_ltc_config_path $ltc_config_path
 	
 	db_path="/db/nova-db-$recordcount-$value_size"
@@ -247,7 +249,7 @@ function run_bench() {
 
     for s in ${servers[@]}
     do
-    	snapshotname="/db/snapshot-$cc_nranges_per_server-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas-$cardinality"
+    	snapshotname="/db/snapshot-$cc_nranges_per_server-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas"
     	ssh -oStrictHostKeyChecking=no $s "rm -rf $snapshotname && mkdir $snapshotname && cp -r $db_path $snapshotname"
     done
 
@@ -345,11 +347,12 @@ number_of_ltcs="1"
 nclients="1"
 nservers="6"
 level="6"
-nmachines="24"
+nmachines="16"
 
 exp_seconds_to_fail_stoc="-1"
 fail_stoc_id="-1"
 
+cardinality="10"
 number_of_ltcs="$3"
 nservers="$4"
 num_memtable_partitions="$5"
@@ -357,7 +360,10 @@ dist="$6"
 num_sstable_replicas="$7"
 cc_nranges_per_server="$8"
 zipfianconstant="$9"
-cardinality="${10}"
+arch="elastic"
+
+# nmachines="5"
+# arch="simpleelastic"
 
 run_bench
 

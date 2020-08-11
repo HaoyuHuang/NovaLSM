@@ -20,16 +20,55 @@ nranges_per_server="1"
 
 # bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_replication.sh $recordcount $dryrun > stoc_scale_out
 
-nranges_per_server="64"
+nranges_per_server="16"
 number_of_ltcs="5"
 num_sstable_replicas="1"
 nservers="15"
-num_memtable_partitions="1"
-dist="uniform"
+num_memtable_partitions="4"
+dist="zipfian"
 zipfianconstant="0.99"
-bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_migration_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server $zipfianconstant >> lsm_backup_out
-bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_ltc_migration.sh $recordcount $dryrun > stoc_scale_out
 
+# for zipfianconstant in "0.99" "0.73" "0.27"
+# do
+# for nranges_per_server in "16" #"64" #"0.27"
+# do
+# bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_migration_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server $zipfianconstant >> lsm_backup_out
+# done
+# done
+
+
+
+dist="uniform"
+nservers="8"
+number_of_ltcs="3"
+zipfianconstant="0.99"
+nranges_per_server="64"
+bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_elastic_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server $zipfianconstant > lsm_backup_out
+bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_elastic.sh $recordcount $dryrun > elastic_out
+
+dist="zipfian"
+nranges_per_server="64"
+zipfianconstant="0.99"
+nservers="15"
+number_of_ltcs="5"
+cardinality="10"
+# for zipfianconstant in "0.99" "0.73" "0.27"
+# do
+# for cardinality in "1" "10"
+# do
+# bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_migration_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server $zipfianconstant $cardinality >> lsm_backup_out
+# done
+# done
+# bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_ltc_migration.sh $recordcount $dryrun > stoc_scale_out
+
+
+# dist="uniform"
+# nservers="10"
+# number_of_ltcs="3"
+# zipfianconstant="0.99"
+# nranges_per_server="64"
+# bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_elastic_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server $zipfianconstant > lsm_backup_out
+# bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_elastic.sh $recordcount $dryrun > elastic_out
 
 # number_of_ltcs="1"
 # num_sstable_replicas="1"

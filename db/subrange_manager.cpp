@@ -10,12 +10,13 @@
 namespace leveldb {
     SubRangeManager::SubRangeManager(leveldb::StoCWritableFileClient *manifest_file,
                                      const std::string &dbname,
+                                     uint32_t dbindex,
                                      leveldb::VersionSet *versions,
                                      const leveldb::Options &options,
                                      const leveldb::Comparator *user_comparator,
                                      std::vector<leveldb::MemTablePartition *> *partitioned_active_memtables,
                                      std::vector<uint32_t> *partitioned_imms)
-            : manifest_file_(manifest_file), dbname_(dbname),
+            : manifest_file_(manifest_file), dbname_(dbname), dbindex_(dbindex),
               versions_(versions), options_(options),
               user_comparator_(user_comparator),
               partitioned_active_memtables_(partitioned_active_memtables),
@@ -23,7 +24,42 @@ namespace leveldb {
         lower_bound_ = options.lower_key;
         upper_bound_ = options.upper_key;
         auto sr = new SubRanges;
-        {
+
+        uint32_t cfgid = nova::NovaConfig::config->current_cfg_id;
+        auto range = nova::NovaConfig::config->cfgs[cfgid]->fragments[dbindex_];
+        if (range->range.key_end - range->range.key_start <= options_.num_memtable_partitions) {
+            int nkeys = range->range.key_end - range->range.key_start;
+            int num_duplicates = options_.num_memtable_partitions / nkeys;
+            int cdup = 0;
+            int lower = range->range.key_start;
+            int upper = range->range.key_start + 1;
+
+            for (int i = 0; i < options_.num_memtable_partitions; i++) {
+                SubRange nsr;
+                Range r;
+                r.lower = std::to_string(lower);
+                r.upper = std::to_string(upper);
+                if (num_duplicates == 1) {
+                    r.num_duplicates = 0;
+                    nsr.num_duplicates = 0;
+                } else {
+                    r.num_duplicates = num_duplicates;
+                    nsr.num_duplicates = num_duplicates;
+                }
+                nsr.tiny_ranges.push_back(r);
+                sr->subranges.push_back(nsr);
+                cdup++;
+                if (cdup == num_duplicates) {
+                    lower = upper;
+                    upper = lower + 1;
+                    cdup = 0;
+                }
+                if (upper > range->range.key_end) {
+                    break;
+                }
+            }
+        } else {
+            // Construct one subrange.
             SubRange nsr;
             Range r;
             r.lower = std::to_string(lower_bound_);
@@ -31,6 +67,7 @@ namespace leveldb {
             nsr.tiny_ranges.push_back(r);
             sr->subranges.push_back(nsr);
         }
+        sr->AssertSubrangeBoundary(user_comparator);
         ComputeCompactionThreadsAssignment(sr);
         latest_subranges_.store(sr);
         NOVA_LOG(rdmaio::INFO)
@@ -43,7 +80,7 @@ namespace leveldb {
                                          leveldb::SubRange **subrange) {
         SubRanges *ref = latest_subranges_;
         int subrange_id = -1;
-        if (ref->subranges.size() == options_.num_memtable_partitions) {
+        if (ref->subranges.size() == options_.num_memtable_partitions || !options_.enable_subrange_reorg) {
             // steady state.
             bool found = ref->BinarySearchWithDuplicate(key,
                                                         options.rand_seed,
@@ -1025,6 +1062,12 @@ namespace leveldb {
 
     void
     SubRangeManager::ReorganizeSubranges() {
+        uint32_t cfgid = nova::NovaConfig::config->current_cfg_id;
+        auto range = nova::NovaConfig::config->cfgs[cfgid]->fragments[dbindex_];
+        if (range->range.key_end - range->range.key_start <= options_.num_memtable_partitions) {
+            return;
+        }
+
         if (options_.enable_detailed_stats) {
             NOVA_LOG(rdmaio::INFO) << "Perform subrange reorg";
         }
@@ -1160,6 +1203,70 @@ namespace leveldb {
             delete latest_;
             latest_ = nullptr;
         }
+    }
+
+    void SubRangeManager::ConstructSubrangesWithUniform(const Comparator *user_comparator) {
+        auto sr = new SubRanges;
+        uint32_t cfgid = nova::NovaConfig::config->current_cfg_id;
+        auto range = nova::NovaConfig::config->cfgs[cfgid]->fragments[dbindex_];
+        int nkeys = range->range.key_end - range->range.key_start;
+
+        if (nkeys < options_.num_memtable_partitions) {
+            int num_duplicates = options_.num_memtable_partitions / nkeys;
+            int cdup = 0;
+            int lower = range->range.key_start;
+            int upper = range->range.key_start + 1;
+
+            for (int i = 0; i < options_.num_memtable_partitions; i++) {
+                SubRange nsr;
+                Range r;
+                r.lower = std::to_string(lower);
+                r.upper = std::to_string(upper);
+                if (num_duplicates == 1) {
+                    r.num_duplicates = 0;
+                    nsr.num_duplicates = 0;
+                } else {
+                    r.num_duplicates = num_duplicates;
+                    nsr.num_duplicates = num_duplicates;
+                }
+                nsr.tiny_ranges.push_back(r);
+                sr->subranges.push_back(nsr);
+                cdup++;
+                if (cdup == num_duplicates) {
+                    lower = upper;
+                    upper = lower + 1;
+                    cdup = 0;
+                }
+                if (upper > range->range.key_end) {
+                    break;
+                }
+            }
+        } else {
+            int nkeys_per_range = nkeys / options_.num_memtable_partitions;
+            int lower = range->range.key_start;
+            int upper = range->range.key_start + nkeys_per_range;
+
+            for (int i = 0; i < options_.num_memtable_partitions; i++) {
+                if (i == options_.num_memtable_partitions - 1) {
+                    upper = range->range.key_end;
+                }
+                SubRange nsr;
+                Range r;
+                r.lower = std::to_string(lower);
+                r.upper = std::to_string(upper);
+                nsr.tiny_ranges.push_back(r);
+                sr->subranges.push_back(nsr);
+                lower = upper;
+                upper = lower + nkeys_per_range;
+            }
+        }
+        sr->AssertSubrangeBoundary(user_comparator);
+        NOVA_ASSERT(sr->first().first().lower_int() == range->range.key_start) << sr->DebugString();
+        NOVA_ASSERT(sr->last().last().upper_int() == range->range.key_end) << sr->DebugString();
+        ComputeCompactionThreadsAssignment(sr);
+        latest_subranges_.store(sr);
+        NOVA_LOG(rdmaio::INFO)
+            << fmt::format("keys:{},{}", lower_bound_, upper_bound_);
     }
 
     void

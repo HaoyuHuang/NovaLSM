@@ -119,53 +119,27 @@ namespace leveldb {
 
     uint32_t StorageSelector::SelectAvailableStoCForFailedMetaBlock(
             const std::vector<FileReplicaMetaData> &block_replica_handles,
-            uint32_t failed_replica_id, uint32_t *available_replica_id) {
-        *available_replica_id =
-                (failed_replica_id + 1) % block_replica_handles.size();
+            uint32_t failed_replica_id, bool is_stoc_failed, uint32_t *available_replica_id) {
+        *available_replica_id = rand_r(rand_seed_) % block_replica_handles.size();
+        if (is_stoc_failed &&
+            block_replica_handles[*available_replica_id].meta_block_handle.server_id == failed_replica_id) {
+            *available_replica_id = (failed_replica_id + 1) % block_replica_handles.size();
+        }
         nova::Servers *available_stocs = available_stoc_servers;
         std::set<uint32_t> used_replicas;
         for (int i = 0; i < block_replica_handles.size(); i++) {
-            used_replicas.insert(
-                    block_replica_handles[i].meta_block_handle.server_id);
+            used_replicas.insert(block_replica_handles[i].meta_block_handle.server_id);
         }
         std::vector<uint32_t> candidate_stocs;
         for (int i = 0; i < available_stocs->servers.size(); i++) {
-            if (used_replicas.find(available_stocs->servers[i].server_id) ==
-                used_replicas.end()) {
-                candidate_stocs.push_back(
-                        available_stocs->servers[i].server_id);
+            if (used_replicas.find(available_stocs->servers[i]) == used_replicas.end()) {
+                candidate_stocs.push_back(available_stocs->servers[i]);
             }
         }
         NOVA_ASSERT(!candidate_stocs.empty())
-            << fmt::format("{}-{}", available_stocs->servers.size(),
-                           used_replicas.size());
+            << fmt::format("{}-{}", available_stocs->servers.size(), used_replicas.size());
         uint32_t index = rand_r(rand_seed_) % candidate_stocs.size();
         return candidate_stocs[index];
-    }
-
-    uint32_t StorageSelector::SelectAvailableStoCForFailedDataBlock(
-            const std::vector<FileReplicaMetaData> &block_replica_handles,
-            uint32_t failed_replica_id, uint32_t failed_frag_id,
-            uint32_t *available_replica_id) {
-        int new_stoc_id = 0;
-        *available_replica_id =
-                (failed_replica_id + 1) % block_replica_handles.size();
-        std::set<uint32_t> used_replicas;
-        for (int i = 0; i < block_replica_handles.size(); i++) {
-            used_replicas.insert(
-                    block_replica_handles[i].data_block_group_handles[failed_frag_id].server_id);
-        }
-        std::vector<uint32_t> candidate_stocs;
-        nova::Servers *available_stocs = available_stoc_servers;
-        for (int i = 0; i < available_stocs->servers.size(); i++) {
-            if (used_replicas.find(available_stocs->servers[i].server_id) ==
-                used_replicas.end()) {
-                candidate_stocs.push_back(
-                        available_stocs->servers[i].server_id);
-            }
-        }
-        NOVA_ASSERT(new_stoc_id != -1);
-        return new_stoc_id;
     }
 
     void StorageSelector::SelectAvailableStoCs(
@@ -174,7 +148,7 @@ namespace leveldb {
         int startid = rand_r(rand_seed_) % available_stocs->servers.size();
         for (int i = 0; i < nstocs; i++) {
             int id = (startid + i) % available_stocs->servers.size();
-            uint32_t sid = available_stocs->servers[id].server_id;
+            uint32_t sid = available_stocs->servers[id];
             selected_storages->push_back(sid);
         }
         NOVA_ASSERT(selected_storages->size() == nstocs);
@@ -185,7 +159,7 @@ namespace leveldb {
         for (int i = 0; i < nstocs; i++) {
             int id = stoc_for_compaction_seq_id.fetch_add(1, std::memory_order_relaxed) %
                      available_stocs->servers.size();
-            uint32_t sid = available_stocs->servers[id].server_id;
+            uint32_t sid = available_stocs->servers[id];
             selected_storages->push_back(sid);
         }
         NOVA_ASSERT(selected_storages->size() == nstocs);
@@ -203,7 +177,7 @@ namespace leveldb {
 
         if (num_storage_to_select == available_stocs->servers.size()) {
             for (int i = 0; i < num_storage_to_select; i++) {
-                (*selected_storage)[i] = available_stocs->servers[i].server_id;
+                (*selected_storage)[i] = available_stocs->servers[i];
             }
             return;
         }
@@ -227,16 +201,14 @@ namespace leveldb {
             uint32_t start_storage_id =
                     rand_r(rand_seed_) % available_stocs->servers.size();
             for (int i = 0; i < num_storage_to_select; i++) {
-                (*selected_storage)[i] = available_stocs->servers[start_storage_id].server_id;
-                start_storage_id = (start_storage_id + 1) %
-                                   available_stocs->servers.size();
+                (*selected_storage)[i] = available_stocs->servers[start_storage_id];
+                start_storage_id = (start_storage_id + 1) % available_stocs->servers.size();
             }
         }
         if (!candidate_storage_ids.empty()) {
             std::vector<StoCStatsStatus> storage_stats;
-            for (int i = 0;
-                 i < candidate_storage_ids.size(); i++) {
-                uint32_t server_id = available_stocs->servers[candidate_storage_ids[i]].server_id;;
+            for (int i = 0; i < candidate_storage_ids.size(); i++) {
+                uint32_t server_id = available_stocs->servers[candidate_storage_ids[i]];
                 uint32_t req_id = client->InitiateReadStoCStats(server_id);
                 StoCStatsStatus status;
                 status.remote_stoc_id = server_id;
@@ -248,13 +220,10 @@ namespace leveldb {
                 client->Wait();
             }
             for (int i = 0; i < storage_stats.size(); i++) {
-                NOVA_ASSERT(client->IsDone(storage_stats[i].req_id,
-                                           storage_stats[i].response,
-                                           nullptr));
+                NOVA_ASSERT(client->IsDone(storage_stats[i].req_id, storage_stats[i].response, nullptr));
             }
             // sort the stoc stats.
-            std::sort(storage_stats.begin(), storage_stats.end(),
-                      stoc_stats_comparator);
+            std::sort(storage_stats.begin(), storage_stats.end(), stoc_stats_comparator);
             for (int i = 0; i < num_storage_to_select; i++) {
                 (*selected_storage)[i] = storage_stats[i].remote_stoc_id;
             }

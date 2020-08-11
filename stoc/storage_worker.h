@@ -69,8 +69,8 @@ namespace nova {
             return &rand_seed_;
         };
 
-        void ReplicateSSTables(
-                const std::string& dbname,
+        std::vector<leveldb::ReplicationPair> ReplicateSSTables(
+                const std::string &dbname,
                 const std::vector<leveldb::ReplicationPair> &replication_pairs);
 
         static std::atomic_int_fast32_t storage_file_number_seq;
