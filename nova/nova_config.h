@@ -101,6 +101,13 @@ namespace nova {
             vector<Fragment *> frags;
             while (std::getline(file, line)) {
                 if (line.find("config") != std::string::npos) {
+                    // These fields are not used for leveldb.
+                    // LTC
+                    assert(std::getline(file, line));
+                    // StoC
+                    assert(std::getline(file, line));
+                    // Start time
+                    assert(std::getline(file, line));
                     continue;
                 }
                 auto *frag = new Fragment();
