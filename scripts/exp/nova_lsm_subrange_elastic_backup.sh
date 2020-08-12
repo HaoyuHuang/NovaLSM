@@ -143,7 +143,7 @@ function run_bench() {
 	# fi
 
     # arch="simpleelastic"
- #    number_of_stocs=$((nservers-number_of_ltcs))
+    number_of_stocs=$((nservers-number_of_ltcs))
 	# cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir $arch $recordcount $number_of_ltcs $number_of_stocs $cc_nranges_per_server $zipfianconstant 1"
 	# echo $cmd
 	# if [[ $dryrun == "false" ]]; then

@@ -397,6 +397,7 @@ change_cfg="true"
 num_log_replicas="1"
 arch="elastic"
 maxexecutiontime=$((80*60))
+zipfianconstant="0.00"
 
 # nmachines="5"
 # nclients="1"
