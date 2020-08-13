@@ -57,13 +57,13 @@ namespace leveldb {
                   uint64_t file_number,
                   uint32_t replica_id,
                   uint64_t file_size,
-                  int level, Cache::Handle **);
+                  int level, Cache::Handle **, bool force_insert = false);
 
+        Cache *cache_;
     private:
         Env *const env_;
         const std::string dbname_;
         const Options options_;
-        Cache *cache_;
         DBProfiler *db_profiler_ = nullptr;
     };
 

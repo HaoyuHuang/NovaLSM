@@ -435,7 +435,7 @@ num_memtable_partitions="4"
 try="1"
 change_cfg="true"
 dist="zipfian"
-for workload in "workloade" #"workloada" "workloadw"
+for workload in "workloadw" #"workloada" "workloadw"
 do
 for zipfianconstant in "0.99" #"0.73" "0.27"
 do

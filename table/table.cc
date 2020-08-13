@@ -107,7 +107,6 @@ namespace leveldb {
                                                  : 0);
             rep->filter_data = nullptr;
             rep->file_number = file_number;
-            rep->db_index =
             rep->level = level;
             rep->filter = nullptr;
             (*table)->rep_ = rep;
@@ -313,13 +312,13 @@ namespace leveldb {
                 options);
     }
 
-    uint64_t Table::TranslateToDataBlockOffset(
-            const leveldb::StoCBlockHandle &handle) {
+    uint64_t Table::TranslateToDataBlockOffset(const leveldb::StoCBlockHandle &handle) {
         uint64_t sid = handle.server_id;
         uint64_t id = (sid << 32) | handle.stoc_file_id;
         auto it = rep_->stoc_file_data_relative_offset.find(id);
         NOVA_ASSERT(it != rep_->stoc_file_data_relative_offset.end())
-            << rep_->meta->DebugString();
+            << fmt::format("DB[{}]: handle:{} meta:{}", rep_->db_index, handle.DebugString(),
+                           rep_->meta->DebugString());
         return it->second + handle.offset;
     }
 
@@ -341,8 +340,7 @@ namespace leveldb {
         }
 
         Status s;
-        Iterator *iiter = rep_->index_block->NewIterator(
-                rep_->options.comparator);
+        Iterator *iiter = rep_->index_block->NewIterator(rep_->options.comparator);
         iiter->Seek(k);
         if (iiter->Valid()) {
             Slice handle_value = iiter->value();

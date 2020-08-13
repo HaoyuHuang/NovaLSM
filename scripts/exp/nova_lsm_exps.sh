@@ -58,7 +58,7 @@ nservers="8"
 number_of_ltcs="3"
 zipfianconstant="0.00"
 nranges_per_server="64"
-bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_elastic_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server $zipfianconstant > lsm_backup_out
+# bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_elastic_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server $zipfianconstant > lsm_backup_out
 bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_elastic.sh $recordcount $dryrun > elastic_out
 
 

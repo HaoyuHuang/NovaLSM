@@ -112,7 +112,7 @@ namespace leveldb {
                                          int level, ReconstructReplicasStats* stats) = 0;
 
         virtual void UpdateFileMetaReplicaLocations(
-                const std::vector<leveldb::ReplicationPair> &results, uint32_t stoc_server_id, int level) = 0;
+                const std::vector<leveldb::ReplicationPair> &results, uint32_t stoc_server_id, int level, StoCClient* client) = 0;
 
         virtual Status Recover() = 0;
 

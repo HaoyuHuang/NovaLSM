@@ -230,7 +230,9 @@ namespace leveldb {
     }
 
     void DBImpl::UpdateFileMetaReplicaLocations(
-            const std::vector<leveldb::ReplicationPair> &results, uint32_t stoc_server_id, int level) {
+            const std::vector<leveldb::ReplicationPair> &results, uint32_t stoc_server_id, int level,
+            StoCClient *client) {
+        std::unordered_map<uint64_t, FileMetaData> fn_meta_to_update;
         mutex_.Lock();
         Version *current = versions_->current();
         NOVA_ASSERT(current);
@@ -245,10 +247,13 @@ namespace leveldb {
             }
             updated_fns += 1;
             auto metadata = current->fn_files_[result.sstable_file_number];
-            std::vector<FileReplicaMetaData> new_replicas = metadata->block_replica_handles;
+            if (fn_meta_to_update.find(metadata->number) == fn_meta_to_update.end()) {
+                fn_meta_to_update[metadata->number] = *metadata;
+            }
+            FileMetaData &new_meta = fn_meta_to_update[metadata->number];
             // Update.
-            NOVA_ASSERT(result.replica_id < new_replicas.size());
-            FileReplicaMetaData &replica = new_replicas[result.replica_id];
+            NOVA_ASSERT(result.replica_id < new_meta.block_replica_handles.size());
+            FileReplicaMetaData &replica = new_meta.block_replica_handles[result.replica_id];
             if (result.is_meta_blocks) {
                 replica.meta_block_handle.server_id = result.dest_stoc_id;
                 replica.meta_block_handle.stoc_file_id = result.dest_stoc_file_id;
@@ -256,16 +261,21 @@ namespace leveldb {
                 replica.data_block_group_handles[0].server_id = result.dest_stoc_id;
                 replica.data_block_group_handles[0].stoc_file_id = result.dest_stoc_file_id;
             }
-            edit.AddFile(level, metadata->memtable_ids, metadata->number, metadata->file_size,
-                         metadata->converted_file_size, metadata->flush_timestamp, metadata->smallest,
-                         metadata->largest, new_replicas);
         }
+
+        for (const auto &it : fn_meta_to_update) {
+            auto metadata = it.second;
+            edit.AddFile(level, metadata.memtable_ids, metadata.number, metadata.file_size,
+                         metadata.converted_file_size, metadata.flush_timestamp, metadata.smallest,
+                         metadata.largest, metadata.block_replica_handles);
+        }
+
         NOVA_LOG(rdmaio::INFO)
             << fmt::format("DB[{}]: Update replica location: missing:{}. Updated:{}", dbid_, missing_fns, updated_fns);
         // Include the latest version.
         Version *v = new Version(&internal_comparator_, table_cache_, &options_,
                                  versions_->version_id_seq_.fetch_add(1), versions_);
-        Status s = versions_->LogAndApply(&edit, v, true);
+        Status s = versions_->LogAndApply(&edit, v, true, client);
         NOVA_ASSERT(s.ok());
 
         if (range_index_manager_) {

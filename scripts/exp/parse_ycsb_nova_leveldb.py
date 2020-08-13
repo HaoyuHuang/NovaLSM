@@ -738,10 +738,12 @@ def parse_exp(exp_dir):
 			continue
 		if "-np-4-" not in expdirname:
 			continue
-		# if "0.99-" not in expdirname:
-		# 	continue
-		# if "workloada-" not in expdirname:
-		# 	continue
+		if "0.00-" not in expdirname:
+			continue
+		if "workloadw-" not in expdirname:
+			continue
+		if "try-2-" not in expdirname:
+			continue
 		
 		# num_wait = 0
 		result_dir = exp_dir + "/" + expdirname
@@ -1033,7 +1035,7 @@ print_resources=[]
 print_resource_servers=[]
 
 read_resources_stats=False
-print_thpt_timeline=False
+print_thpt_timeline=True
 print_resources_stats=False
 print_db_stats=False
 

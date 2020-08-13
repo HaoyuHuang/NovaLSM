@@ -1092,18 +1092,40 @@ namespace leveldb {
         manifest_lock_.unlock();
     }
 
-    Status VersionSet::LogAndApply(VersionEdit *edit, Version *v,
-                                   bool install_new_version) {
+    Status VersionSet::LogAndApply(VersionEdit *edit, Version *v, bool normal_update, StoCClient *client) {
         {
             Builder builder(this, current_);
             builder.Apply(edit);
             builder.SaveTo(v);
         }
         Finalize(v);
-        NOVA_LOG(rdmaio::DEBUG) << v->DebugString();
-        if (install_new_version) {
-            AppendVersion(v);
+        if (edit->update_replica_locations_) {
+            ReadOptions options;
+            options.verify_checksums = options_->paranoid_checks;
+            options.fill_cache = false;
+            options.thread_id = 0;
+            options.mem_manager = options_->mem_manager;
+            options.stoc_client = client;
+
+            for (auto &file : edit->new_files_) {
+                auto fname = TableFileName(dbname_, file.second.number, false, 0);
+                NOVA_ASSERT(env_->LockFile(fname, file.second.number).ok());
+                env_->DeleteFile(fname);
+                auto new_meta = v->fn_files_.find(file.second.number);
+                NOVA_LOG(rdmaio::INFO)
+                    << fmt::format("db[{}]: Update table cache {}", dbname_, file.second.DebugString());
+                NOVA_ASSERT(new_meta != v->fn_files_.end());
+                Cache::Handle *handle = nullptr;
+                Status s = table_cache_->FindTable(AccessCaller::kUserGet, options, new_meta->second,
+                                                   new_meta->second->number, 0, new_meta->second->converted_file_size,
+                                                   file.first, &handle, true);
+                NOVA_ASSERT(s.ok()) << s.ToString();
+                table_cache_->cache_->Release(handle);
+                NOVA_ASSERT(env_->UnlockFile(fname, file.second.number).ok());
+            }
         }
+        NOVA_LOG(rdmaio::DEBUG) << v->DebugString();
+        AppendVersion(v);
         return Status::OK();
     }
 

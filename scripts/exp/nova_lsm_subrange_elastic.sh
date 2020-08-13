@@ -339,7 +339,7 @@ number_of_ltcs="1"
 maxexecutiontime=1200
 workload="workloadw"
 enable_load_data="false"
-mem_pool_size_gb="20"
+mem_pool_size_gb="30"
 
 major_compaction_type="sc"
 num_recovery_threads="32"
@@ -418,12 +418,13 @@ l0_stop_write_mb=$((l0_stop_write_mb/number_of_ltcs/cc_nranges_per_server))
 num_memtable_partitions="4"
 num_memtables="8"
 
-
-for workload in "workloade" "workloada" "workloadw"
+for try in "2" #"3" "4" "5"
+do 
+for workload in "workloada" #"workloadw"
 do
 run_bench
 done
-
+done
 
 cp elastic_coord_* $exp_results_dir/
 python /proj/bg-PG0/haoyu/scripts/parse_ycsb_nova_leveldb.py $nmachines $exp_results_dir > stats_ltc_elastic_out

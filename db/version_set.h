@@ -322,7 +322,7 @@ namespace leveldb {
         // REQUIRES: *mu is held on entry.
         // REQUIRES: no other thread concurrently calls LogAndApply()
         Status LogAndApply(VersionEdit *edit, Version *new_version,
-                           bool install_new_version);
+                           bool install_new_version, StoCClient* client = nullptr);
 
         void AppendChangesToManifest(VersionEdit *edit,
                                      StoCWritableFileClient *manifest_file,

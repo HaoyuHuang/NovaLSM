@@ -65,7 +65,7 @@ namespace leveldb {
                           const FileMetaData *meta,
                           uint64_t file_number, uint32_t replica_id,
                           uint64_t file_size, int level,
-                          Cache::Handle **handle) {
+                          Cache::Handle **handle, bool force_insert) {
         Status s;
         char buf[1 + 8 + 4];
         if (caller == AccessCaller::kCompaction) {
@@ -76,11 +76,48 @@ namespace leveldb {
         EncodeFixed64(buf + 1, file_number);
         EncodeFixed32(buf + 9, replica_id);
         Slice key(buf, 1 + 8 + 4);
-        *handle = cache_->Lookup(key);
-
-        bool cache_hit = true;
         StoCRandomAccessFileClientImpl *file = nullptr;
+        if (force_insert) {
+            Table *table = nullptr;
+            bool prefetch_all = false;
+            if (caller == AccessCaller::kCompaction) {
+                prefetch_all = true;
+            }
+            std::string filename = TableFileName(dbname_, file_number, false,
+                                                 replica_id);
+            file = new StoCRandomAccessFileClientImpl(env_, options_, dbname_,
+                                                      file_number,
+                                                      replica_id,
+                                                      meta,
+                                                      options.stoc_client,
+                                                      options.mem_manager,
+                                                      options.thread_id,
+                                                      prefetch_all,
+                                                      filename);
+            s = Table::Open(options_, options, meta, file, file_size, level,
+                            file_number, replica_id, &table, db_profiler_);
+            NOVA_ASSERT(s.ok())
+                << fmt::format("file:{} status:{}", meta->DebugString(),
+                               s.ToString());
 
+            if (!s.ok()) {
+                assert(table == nullptr);
+                delete file;
+                // We do not cache error results so that if the error is transient,
+                // or somebody repairs the file, we recover automatically.
+            } else {
+                TableAndFile *tf = new TableAndFile;
+                tf->file = file;
+                tf->table = table;
+                *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
+            }
+            return s;
+        }
+
+        auto fname = TableFileName(dbname_, file_number, false, 0);
+        NOVA_ASSERT(env_->LockFile(fname, file_number).ok());
+        *handle = cache_->Lookup(key);
+        bool cache_hit = true;
         if (*handle) {
             cache_hit = true;
             // Check if the file is deleted.
@@ -129,6 +166,7 @@ namespace leveldb {
             << fmt::format("table cache hit {} fn:{} cs:{} ltc:{}", cache_hit,
                            file_number, cache_->TotalCharge(),
                            cache_->TotalCapacity());
+        NOVA_ASSERT(env_->UnlockFile(fname, file_number).ok());
         return s;
     }
 

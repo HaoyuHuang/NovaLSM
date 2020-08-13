@@ -164,7 +164,7 @@ namespace leveldb {
         void ScheduleFileDeletionTask();
 
         void UpdateFileMetaReplicaLocations(
-                const std::vector<leveldb::ReplicationPair> &results, uint32_t stoc_server_id, int level) override ;
+                const std::vector<leveldb::ReplicationPair> &results, uint32_t stoc_server_id, int level, StoCClient* client) override ;
 
     private:
         Status GetWithLookupIndex(const ReadOptions &options, const Slice &key,

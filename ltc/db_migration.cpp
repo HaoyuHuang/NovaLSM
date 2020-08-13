@@ -93,8 +93,9 @@ namespace nova {
                 std::vector<leveldb::ReplicationPair> batch;
                 int i = 0;
                 while (i < pairs.second.size()) {
-                    NOVA_LOG(rdmaio::DEBUG)
-                        << fmt::format("Level {} stoc:{} Replicate {}", level, stoc_id, pairs.second[i].DebugString());
+                    NOVA_LOG(rdmaio::INFO)
+                        << fmt::format("DB[{}]: Level {} stoc:{} Replicate {}", frag->dbid, level, stoc_id,
+                                       pairs.second[i].DebugString());
                     batch.push_back(pairs.second[i]);
                     i++;
                     if (batch.size() == MAX_RESTORE_REPLICATION_BATCH_SIZE) {
@@ -122,7 +123,7 @@ namespace nova {
                     result.push_back(r);
                 }
             }
-            db->UpdateFileMetaReplicaLocations(result, failed_stoc_server_id, level);
+            db->UpdateFileMetaReplicaLocations(result, failed_stoc_server_id, level, client_);
             total_replicated += stoc_repl_pairs.size();
             timeval end{};
             gettimeofday(&end, nullptr);
@@ -152,7 +153,7 @@ namespace nova {
         if (all_complete) {
             NOVA_LOG(rdmaio::INFO) << fmt::format(
                         "!!!!Migrate StoC complete took {}",
-                        repl_end.tv_sec * 1000000   + repl_end.tv_usec - cfg->start_time_us_);
+                        repl_end.tv_sec * 1000000 + repl_end.tv_usec - cfg->start_time_us_);
         }
     }
 
