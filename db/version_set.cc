@@ -1087,8 +1087,16 @@ namespace leveldb {
             NOVA_ASSERT(decode.DecodeFrom(Slice(edit_str, msg_size)).ok());
             NOVA_LOG(rdmaio::DEBUG) << decode.DebugString();
         }
-        NOVA_ASSERT(manifest_file->SyncAppend(Slice(edit_str, msg_size),
-                                              stoc_id).ok());
+        current_manifest_file_size_ += msg_size;
+        if (current_manifest_file_size_ < options_->max_file_size) {
+            NOVA_ASSERT(manifest_file->SyncAppend(Slice(edit_str, msg_size),
+                                                  stoc_id).ok());
+        } else {
+            if (log_error_) {
+                NOVA_LOG(rdmaio::INFO) << fmt::format("size %s too large", current_manifest_file_size_);
+                log_error_ = false;
+            }
+        }
         manifest_lock_.unlock();
     }
 
@@ -1158,6 +1166,8 @@ namespace leveldb {
                     << fmt::format("Read manifest file {} bytes",
                                    (uint64_t) (next.data()) -
                                    (uint64_t) (record.data()));
+                current_manifest_file_size_ = (uint64_t) (next.data()) -
+                                              (uint64_t) (record.data());
                 break;
             }
             NOVA_LOG(rdmaio::DEBUG)

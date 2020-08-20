@@ -328,6 +328,9 @@ namespace leveldb {
                                      StoCWritableFileClient *manifest_file,
                                      const std::vector<uint32_t>& stoc_id);
 
+        uint32_t current_manifest_file_size_ = 0;
+        bool log_error_ = false;
+
         // Recover the last saved descriptor from persistent storage.
         Status Recover(Slice manifest_file,
                        std::vector<SubRange> *subrange_edits);
