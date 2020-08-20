@@ -114,12 +114,8 @@ namespace nova {
                 std::vector<std::string> tokens = SplitByDelimiter(&line, ",");
                 frag->key_start = std::stoi(tokens[0]);
                 frag->key_end = std::stoi(tokens[1]);
+                frag->server_ids.push_back(std::stoi(tokens[2]));
                 frag->dbid = std::stoi(tokens[3]);
-
-                int nreplicas = (tokens.size() - 4);
-                for (int i = 0; i < nreplicas; i++) {
-                    frag->server_ids.push_back(std::stoi(tokens[i + 4]));
-                }
                 frags.push_back(frag);
             }
             nfragments = static_cast<uint32_t>(frags.size());

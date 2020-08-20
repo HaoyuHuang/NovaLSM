@@ -31,6 +31,7 @@ namespace nova {
             // Insert cold keys first so that hot keys will be at the top level.
             std::vector<std::string *> pointers;
             leveldb::DB *db = dbs_[frags[i]->dbid];
+            RDMA_ASSERT(db);
             RDMA_LOG(INFO) << fmt::format("DB-{} Insert {} {}", frags[i]->dbid,
                                           frags[i]->key_start,
                                           frags[i]->key_end);
@@ -116,12 +117,18 @@ namespace nova {
 //        LoadDataWithRangePartition();
 //        LoadDataWithRangePartition();
         for (auto &db : dbs_) {
+            if (!db) {
+                continue;
+            }
             db->SetL0StartCompactionBytes(0);
             db->FlushMemTable(NovaConfig::config->log_record_mode);
         }
         while (true) {
             bool stop = true;
             for (auto &db : dbs_) {
+                if (!db) {
+                    continue;
+                }
                 uint64_t bytes = db->L0CurrentBytes();
                 if (bytes > 0) {
                     RDMA_LOG(INFO)
@@ -134,6 +141,9 @@ namespace nova {
                 break;
             }
             for (int i = 0; i < dbs_.size(); i++) {
+                if (!dbs_[i]) {
+                    continue;
+                }
                 RDMA_LOG(INFO) << "Database " << i;
                 std::string value;
                 dbs_[i]->GetProperty("leveldb.sstables", &value);
@@ -147,6 +157,9 @@ namespace nova {
         }
 
         for (int i = 0; i < dbs_.size(); i++) {
+            if (!dbs_[i]) {
+                continue;
+            }
             dbs_[i]->SetL0StartCompactionBytes(
                     NovaConfig::config->l0_start_compaction_bytes);
             RDMA_LOG(INFO) << "Database " << i;
@@ -180,6 +193,9 @@ namespace nova {
             LoadData();
         }
         for (auto db : dbs) {
+            if (!db) {
+                continue;
+            }
             db->StartTracing();
         }
         NovaAsyncCompleteQueue **async_cq = new NovaAsyncCompleteQueue *[NovaConfig::config->num_conn_workers];

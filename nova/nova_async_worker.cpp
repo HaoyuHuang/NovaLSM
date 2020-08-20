@@ -93,12 +93,18 @@ namespace nova {
 
     void NovaAsyncWorker::Drain(const NovaAsyncTask &task) {
         for (const auto &db : task.dbs) {
+            if (!db) {
+                continue;
+            }
             db->SetL0StartCompactionBytes(0);
             db->FlushMemTable(NovaConfig::config->log_record_mode);
         }
         while (true) {
             bool stop = true;
             for (auto &db : task.dbs) {
+                if (!db) {
+                    continue;
+                }
                 uint64_t bytes = db->L0CurrentBytes();
                 if (bytes > 0) {
                     RDMA_LOG(INFO)
@@ -113,6 +119,9 @@ namespace nova {
             sleep(1);
         }
         for (int i = 0; i < task.dbs.size(); i++) {
+            if (!task.dbs[i]) {
+                continue;
+            }
             task.dbs[i]->SetL0StartCompactionBytes(
                     NovaConfig::config->l0_start_compaction_bytes);
             RDMA_LOG(INFO) << "Database " << i;

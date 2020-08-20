@@ -286,16 +286,17 @@ int main(int argc, char *argv[]) {
         cache = leveldb::NewLRUCache(
                 FLAGS_block_cache_mb * 1024 * 1024);
     }
-    int ndbs = NovaConfig::config->ParseNumberOfDatabases(
-            NovaConfig::config->my_server_id);
     std::vector<leveldb::DB *> dbs;
-
     int bg_thread_id = 0;
     std::vector<leveldb::EnvBGThread *> bgs;
     for (int i = 0; i < FLAGS_num_compaction_workers; i++) {
         bgs.push_back(new leveldb::PosixEnvBGThread);
     }
-    for (int db_index = 0; db_index < ndbs; db_index++) {
+    for (int db_index = 0; db_index < NovaConfig::config->nfragments; db_index++) {
+        if (NovaConfig::config->my_server_id != NovaConfig::config->fragments[db_index]->server_ids[0]) {
+            dbs.push_back(nullptr);
+            continue;
+        }
         std::vector<leveldb::EnvBGThread *> bg_threads;
         bg_threads.push_back(bgs[bg_thread_id]);
         dbs.push_back(CreateDatabase(NovaConfig::config->my_server_id, db_index,

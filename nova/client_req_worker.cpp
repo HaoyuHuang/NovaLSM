@@ -185,6 +185,7 @@ namespace nova {
                                           key.size());
         Fragment *frag = NovaConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
+        RDMA_ASSERT(db);
         std::string value;
         leveldb::Status s = db->Get(
                 leveldb::ReadOptions(), key, &value);
@@ -264,6 +265,9 @@ namespace nova {
         msg_size += cfg_size;
 
         while (read_records < nrecords && pivot_db_id < worker->dbs_.size()) {
+            if (!worker->dbs_[pivot_db_id]) {
+                break;
+            }
             leveldb::Iterator *iterator = worker->dbs_[pivot_db_id]->NewIterator(
                     leveldb::ReadOptions());
 //            RDMA_LOG(INFO) << fmt::format("Open iterator on {}", pivot_db_id);
@@ -339,6 +343,7 @@ namespace nova {
         option.log_record_mode = NovaConfig::config->log_record_mode;
 //        Fragment *frag = NovaConfig::home_fragment(hv);
         leveldb::DB *db = worker->dbs_[frag->dbid];
+        RDMA_ASSERT(db);
         leveldb::Status status = db->Put(option, dbkey, dbval);
         RDMA_LOG(DEBUG) << "############### Async worker processed task "
                         << fd
@@ -452,6 +457,9 @@ namespace nova {
         int num_l0_sstables = 0;
         bool needs_compaction = false;
         for (auto db : worker->dbs_) {
+            if (!db) {
+                continue;
+            }
             leveldb::DBStats stats;
             db->QueryDBStats(&stats);
             if (!needs_compaction) {

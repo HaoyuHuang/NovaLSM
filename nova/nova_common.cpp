@@ -188,6 +188,9 @@ namespace nova {
     }
 
     std::string ToString(const std::vector<uint32_t> &x) {
+        if (x.empty()) {
+            return "";
+        }
         stringstream result;
         auto it = x.begin();
         result << *it;
