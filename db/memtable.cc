@@ -5,6 +5,7 @@
 #include <leveldb/db_profiler.h>
 #include <common/nova_console_logging.h>
 #include <fmt/core.h>
+#include "common/nova_config.h"
 #include "db/memtable.h"
 #include "db/dbformat.h"
 #include "leveldb/comparator.h"
@@ -32,7 +33,7 @@ namespace leveldb {
     }
 
     void MemTable::WaitUntilReady() {
-        if (is_ready_) {
+        if (nova::NovaConfig::config->cfgs.size() == 1 || is_ready_) {
             return;
         }
         is_ready_mutex_.Lock();

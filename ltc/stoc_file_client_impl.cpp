@@ -673,14 +673,12 @@ namespace leveldb {
         {
             auto metafile = TableFileName(dbname, file_number, false, replica_id);
             if (!env_->FileExists(metafile)) {
-                if (!env_->FileExists(metafile)) {
-                    NOVA_LOG(rdmaio::DEBUG)
-                        << fmt::format("Fetch missing metadata db:{} fd:{} file {}", dbname, file_number,
-                                       meta->DebugString());
-                    std::vector<const FileMetaData *> files;
-                    files.push_back(meta);
-                    FetchMetadataFiles(files, dbname, options, stoc_block_client, env_);
-                }
+                NOVA_LOG(rdmaio::DEBUG)
+                    << fmt::format("Fetch missing metadata db:{} fd:{} file {}", dbname, file_number,
+                                   meta->DebugString());
+                std::vector<const FileMetaData *> files;
+                files.push_back(meta);
+                FetchMetadataFiles(files, dbname, options, stoc_block_client, env_);
             }
             s = env_->NewRandomAccessFile(metafile, &local_ra_file_);
         }

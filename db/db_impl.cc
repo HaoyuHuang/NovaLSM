@@ -134,6 +134,7 @@ namespace leveldb {
               memtable_available_signal_(&range_lock_),
               l0_stop_write_signal_(&l0_stop_write_mutex_),
               user_comparator_(raw_options.comparator) {
+        is_loading_db_ = false;
         memtable_id_seq_ = 100;
         start_coordinated_compaction_ = false;
         terminate_coordinated_compaction_ = false;
@@ -591,23 +592,24 @@ namespace leveldb {
         uint32_t stoc_id = options_.manifest_stoc_ids[0];
         std::string manifest = DescriptorFileName(dbname_, 0, 0);
         auto client = reinterpret_cast<StoCBlockClient *> (options_.stoc_client);
-        uint32_t scid = options_.mem_manager->slabclassid(0, nova::NovaConfig::config->max_stoc_file_size);
+        uint32_t manifest_file_size = nova::NovaConfig::config->max_stoc_file_size * 2;
+        uint32_t scid = options_.mem_manager->slabclassid(0, manifest_file_size);
         char *buf = options_.mem_manager->ItemAlloc(0, scid);
         NOVA_ASSERT(buf);
-        memset(buf, 0, nova::NovaConfig::config->max_stoc_file_size);
+        memset(buf, 0, manifest_file_size);
         StoCBlockHandle handle = {};
         handle.server_id = stoc_id;
         handle.stoc_file_id = 0;
         handle.offset = 0;
-        handle.size = nova::NovaConfig::config->max_stoc_file_size;
+        handle.size = manifest_file_size;
 
         NOVA_LOG(rdmaio::INFO) << fmt::format(
                     "Recover the latest verion from manifest file {} at StoC-{}, off:{}",
                     manifest, stoc_id, (uint64_t) buf);
         uint32_t req_id = client->InitiateReadDataBlock(handle, 0,
-                                                        nova::NovaConfig::config->max_stoc_file_size,
+                                                        manifest_file_size,
                                                         buf,
-                                                        nova::NovaConfig::config->max_stoc_file_size,
+                                                        manifest_file_size,
                                                         manifest, false);
         client->Wait();
         StoCResponse response;
@@ -630,7 +632,7 @@ namespace leveldb {
         }
         // Recover log records.
         std::vector<SubRange> subrange_edits;
-        NOVA_ASSERT(versions_->Recover(Slice(buf, nova::NovaConfig::config->max_stoc_file_size), &subrange_edits).ok());
+        NOVA_ASSERT(versions_->Recover(Slice(buf, manifest_file_size), &subrange_edits).ok());
         NOVA_LOG(rdmaio::INFO) << fmt::format("Recovered Version: {}", versions_->current()->DebugString());
         NOVA_LOG(rdmaio::INFO)
             << fmt::format("Recovered lsn:{} lfn:{}", versions_->last_sequence_, versions_->NextFileNumber());
@@ -659,8 +661,21 @@ namespace leveldb {
         for (const auto &mapping : stoc_fn_stocfileid) {
             NOVA_LOG(rdmaio::INFO)
                 << fmt::format("Recover Install FileStoCFile mapping {} size:{}", mapping.first, mapping.second.size());
-            client->InitiateInstallFileNameStoCFileMapping(mapping.first, mapping.second);
-            client->Wait();
+            auto all_mapping_it = mapping.second.begin();
+            std::unordered_map<std::string, uint32_t> fnstocfid;
+            while (all_mapping_it != mapping.second.end()) {
+                if (fnstocfid.size() == 2000) {
+                    client->InitiateInstallFileNameStoCFileMapping(mapping.first, fnstocfid);
+                    client->Wait();
+                    fnstocfid.clear();
+                }
+                fnstocfid[all_mapping_it->first] = all_mapping_it->second;
+                all_mapping_it++;
+            }
+            if (!fnstocfid.empty()) {
+                client->InitiateInstallFileNameStoCFileMapping(mapping.first, fnstocfid);
+                client->Wait();
+            }
         }
 
         // Fetch metadata blocks.
@@ -1081,6 +1096,17 @@ namespace leveldb {
         std::vector<LevelDBLogRecord> log_records;
         auto fn_add_to_memtable = [&](const ParsedInternalKey &ikey, const Slice &value) {
             output_memtable->Add(ikey.sequence, ValueType::kTypeValue, ikey.user_key, value);
+            if (nova::NovaConfig::config->cfgs.size() == 1) {
+                uint64_t key;
+                nova::str_to_int(ikey.user_key.data(), &key,
+                                 ikey.user_key.size());
+                uint32_t current_mid = lookup_index_->Lookup(ikey.user_key,
+                                                             key);
+                if (immids.find(current_mid) != immids.end()) {
+                    lookup_index_->CAS(ikey.user_key, key, current_mid,
+                                       memtable_id);
+                }
+            }
             LevelDBLogRecord log_record = {};
             log_record.sequence_number = ikey.sequence;
             log_record.key = ikey.user_key;
@@ -1114,26 +1140,28 @@ namespace leveldb {
         // Add output memtable to the memtable partition.
         MemTablePartition *p = partitioned_active_memtables_[partition_id];
         int start_id = 0;
-        p->mutex.Lock();
-        {
-            if (lookup_index_) {
-                auto new_memtable_it = output_memtable->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
-                                                                    AccessCaller::kCompaction);
-                while (new_memtable_it->Valid()) {
-                    Slice ukey = ExtractUserKey(new_memtable_it->key());
-                    // Update lookup index.
-                    uint64_t key;
-                    nova::str_to_int(ukey.data(), &key, ukey.size());
-                    uint32_t current_mid = lookup_index_->Lookup(ukey, key);
-                    if (immids.find(current_mid) != immids.end()) {
-                        lookup_index_->CAS(ukey, key, current_mid, memtable_id);
+
+        if (nova::NovaConfig::config->cfgs.size() > 1) {
+            p->mutex.Lock();
+            {
+                if (lookup_index_) {
+                    auto new_memtable_it = output_memtable->NewIterator(TraceType::IMMUTABLE_MEMTABLE,
+                                                                        AccessCaller::kCompaction);
+                    while (new_memtable_it->Valid()) {
+                        Slice ukey = ExtractUserKey(new_memtable_it->key());
+                        // Update lookup index.
+                        uint64_t key;
+                        nova::str_to_int(ukey.data(), &key, ukey.size());
+                        uint32_t current_mid = lookup_index_->Lookup(ukey, key);
+                        if (immids.find(current_mid) != immids.end()) {
+                            lookup_index_->CAS(ukey, key, current_mid, memtable_id);
+                        }
+                        new_memtable_it->Next();
                     }
-                    new_memtable_it->Next();
+                    delete new_memtable_it;
                 }
-                delete new_memtable_it;
             }
         }
-
         // Update range index.
         if (range_index_manager_) {
             RangeIndexVersionEdit range_edit;
@@ -1153,6 +1181,9 @@ namespace leveldb {
             atomic_imm->SetFlushed(dbname_, {}, 0);
         }
 
+        if (nova::NovaConfig::config->cfgs.size() == 1) {
+            p->mutex.Lock();
+        }
         if (!p->active_memtable) {
             p->active_memtable = output_memtable;
         } else {
@@ -1448,9 +1479,9 @@ namespace leveldb {
                 ObtainObsoleteFiles(bg_thread,
                                     &files_to_delete, &server_pairs, 0);
             }
-//            if (!compacted_tables_.empty()) {
-//                ScheduleFileDeletionTask(bg_thread->thread_id());
-//            }
+            if (nova::NovaConfig::config->cfgs.size() == 1 && !compacted_tables_.empty()) {
+                ScheduleFileDeletionTask(bg_thread->thread_id());
+            }
             mutex_.Unlock();
         }
         DeleteFiles(bg_thread, files_to_delete, server_pairs);
@@ -1484,9 +1515,53 @@ namespace leveldb {
                                     std::vector<leveldb::Compaction *> *compactions,
                                     VersionEdit *edit,
                                     RangeIndexVersionEdit *range_edit,
+                                    bool *delete_due_to_low_overlap,
                                     std::unordered_map<uint32_t, leveldb::MemTableL0FilesEdit> *memtableid_l0fns) {
         bool moves = false;
-        current->ComputeNonOverlappingSet(compactions);
+        auto frags = nova::NovaConfig::config->cfgs[0];
+        if (nova::NovaConfig::config->cfgs.size() == 1 && frags->fragments.size() == 1 &&
+            frags->fragments[frags->fragments.size() - 1]->range.key_end == 1000000000 && is_loading_db_) {
+            // 1 TB database with one range.
+            std::vector<uint64_t> level_size;
+            std::vector<uint64_t> max_level_size;
+            level_size.resize(options_.level);
+            max_level_size.resize(options_.level);
+            std::vector<FileMetaData *> l0_files;
+            for (int level = 0; level < options_.level; level++) {
+                level_size[level] = 0;
+            }
+            for (int level = 0; level < options_.level; level++) {
+                max_level_size[level] = MaxBytesForLevel(options_, level);
+                if (level == 0) {
+                    max_level_size[level] = 0;
+                }
+                if (level == options_.level - 1) {
+                    max_level_size[level] = UINT64_MAX;
+                }
+                for (auto file : current->files_[level]) {
+                    if (level == 0) {
+                        l0_files.push_back(file);
+                    }
+                    level_size[level] += file->file_size;
+                }
+            }
+            if (!l0_files.empty()) {
+                for (int level = 1; level < options_.level; level++) {
+                    // move to 'level'.
+                    while (!l0_files.empty() && level_size[level] + l0_files[0]->file_size < max_level_size[level]) {
+                        level_size[level] += l0_files[0]->file_size;
+                        auto file = l0_files[0];
+                        Compaction *compact = new Compaction(current, &internal_comparator_, &options_, 0, level);
+                        compact->inputs_[0].push_back(file);
+                        compactions->push_back(compact);
+                        l0_files.erase(l0_files.begin());
+                    }
+                }
+            }
+        } else {
+            current->ComputeNonOverlappingSet(compactions, delete_due_to_low_overlap);
+        }
+
         if (NOVA_LOG_LEVEL == rdmaio::DEBUG) {
             std::string debug = "Coordinated compaction picks compaction sets: ";
             for (int i = 0; i < compactions->size(); i++) {
@@ -1594,17 +1669,19 @@ namespace leveldb {
             sem_t completion_signal;
             std::vector<bool> cleaned;
             sem_init(&completion_signal, 0, 0);
+            bool delete_due_to_low_overlap = false;
             {
                 VersionEdit edit;
                 RangeIndexVersionEdit range_edit;
                 std::unordered_map<uint32_t, MemTableL0FilesEdit> edits;
-                if (ComputeCompactions(current, &compactions, &edit, &range_edit, &edits)) {
+                if (ComputeCompactions(current, &compactions, &edit, &range_edit, &delete_due_to_low_overlap, &edits)) {
                     // Contain moves. Cleanup LSM immediately.
                     CleanupLSMCompaction(nullptr, edit, range_edit, edits, nullptr, current->version_id_);
                 }
             }
-            cleaned.resize(compactions.size());
-
+            if (!compactions.empty()) {
+                cleaned.resize(compactions.size());
+            }
             mutex_compacting_tables.Lock();
             for (int i = 0; i < compactions.size(); i++) {
                 for (int which = 0; which < 2; which++) {
@@ -1670,7 +1747,9 @@ namespace leveldb {
 
                     for (int i = 0; i < compactions.size(); i++) {
                         NOVA_LOG(rdmaio::INFO) << fmt::format(
-                                    "Coordinator schedules compaction on StoC-{}", selected_storages[i]);
+                                    "Coordinator schedules compaction on StoC-{} {}@{} + {}@{}", selected_storages[i],
+                                    compactions[i]->inputs_[0].size(), compactions[i]->level(),
+                                    compactions[i]->inputs_[1].size(), compactions[i]->target_level());
                         if (selected_storages[i] == nova::NovaConfig::config->my_server_id) {
                             // Schedule on my server.
                             int thread_id =
@@ -1811,6 +1890,10 @@ namespace leveldb {
             for (auto req : requests) {
                 req->FreeMemoryLTC();
                 delete req;
+            }
+
+            if (delete_due_to_low_overlap && compactions.empty()) {
+                sleep(1);
             }
         }
     }
@@ -3165,7 +3248,7 @@ namespace leveldb {
                                                               options.mem_manager,
                                                               options.stoc_client,
                                                               impl->dbname_, 0,
-                                                              nova::NovaConfig::config->max_stoc_file_size,
+                                                              nova::NovaConfig::config->max_stoc_file_size * 2,
                                                               &impl->rand_seed_,
                                                               manifest_file_name);
         }

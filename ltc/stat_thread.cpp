@@ -212,7 +212,7 @@ namespace nova {
             output += "searched_file_per_miss,";
             for (int i = 0; i < dbs.size(); i++) {
                 double miss = dbs[i]->number_of_gets_ -
-                        dbs[i]->number_of_memtable_hits_;
+                              dbs[i]->number_of_memtable_hits_;
                 double files = dbs[i]->number_of_files_to_search_for_get_;
                 output += std::to_string(files / miss);
                 output += ",";
@@ -258,101 +258,101 @@ namespace nova {
                 size_dist[j] = 0;
             }
 
-//            for (int i = 0; i < dbs.size(); i++) {
-//                output += "db-overlapping-sstable-stats-" + std::to_string(i) +
-//                          ",";
-//                leveldb::DBStats stats = {};
-//                uint32_t size_dist[BUCKET_SIZE];
-//                for (int j = 0; j < BUCKET_SIZE; j++) {
-//                    size_dist[j] = 0;
-//                }
-//                stats.sstable_size_dist = size_dist;
-//                dbs[i]->QueryDBStats(&stats);
-//
-//                aggregated_stats.dbsize += stats.dbsize;
-//                aggregated_stats.num_l0_sstables += stats.num_l0_sstables;
-//                output += std::to_string(stats.num_l0_sstables);
-//                output += ",";
-//                uint32_t ideal_nsstables = stats.num_l0_sstables;
-//                if (nova::NovaConfig::config->enable_subrange) {
-//                    ideal_nsstables = stats.num_l0_sstables /
-//                                      nova::NovaConfig::config->num_memtable_partitions;
-//                    ideal_nsstables = std::max(ideal_nsstables, (uint32_t) 1);
-//                }
-//                output += std::to_string(ideal_nsstables);
-//                output += ",";
-//
-//                Stats ostats = compute_stats(
-//                        stats.num_overlapping_sstables_per_table);
-//                output += ostats.DebugString();
-//                output += ",";
-//
-//                uint32_t ideal_nsstables_since_last_query = stats.new_l0_sstables_since_last_query;
-//                if (nova::NovaConfig::config->enable_subrange) {
-//                    ideal_nsstables_since_last_query =
-//                            stats.new_l0_sstables_since_last_query /
-//                            nova::NovaConfig::config->num_memtable_partitions;
-//                    ideal_nsstables_since_last_query = std::max(
-//                            ideal_nsstables_since_last_query, (uint32_t) 1);
-//                }
-//                output += std::to_string(
-//                        stats.new_l0_sstables_since_last_query);
-//                output += ",";
-//                output += std::to_string(ideal_nsstables_since_last_query);
-//                output += ",";
-//
-//                ostats = compute_stats(
-//                        stats.num_overlapping_sstables_per_table_since_last_query);
-//                output += ostats.DebugString();
-//                output += ",";
-//                output += std::to_string(
-//                        stats.load_imbalance.maximum_load_imbalance);
-//                output += ",";
-//                output += std::to_string(stats.load_imbalance.stdev);
-//                output += ",";
-//                // ideal load imbalance is 0.
-//                output += std::to_string(0);
-//                output += ",";
-//                output += std::to_string(stats.num_major_reorgs);
-//                output += ",";
-//                output += std::to_string(stats.num_skipped_major_reorgs);
-//                output += ",";
-//                output += std::to_string(stats.num_minor_reorgs);
-//                output += ",";
-//                output += std::to_string(stats.num_minor_reorgs_samples);
-//                output += ",";
-//                output += std::to_string(stats.num_minor_reorgs_for_dup);
-//                output += ",";
-//                output += std::to_string(stats.num_skipped_minor_reorgs);
-//
-//                output += "\n";
-//
-//                output += "db-size-stats-" + std::to_string(i) + ",";
-//                output += std::to_string(stats.dbsize / 1024 / 1024);
-//                output += ",";
-//                output += std::to_string(stats.num_l0_sstables);
-//                output += ",";
-//                for (int j = 0; j < BUCKET_SIZE; j++) {
-//                    size_dist[j] += stats.sstable_size_dist[j];
-//                    output += std::to_string(stats.sstable_size_dist[j]);
-//                    output += ",";
-//                }
-//                output += "\n";
-//
-//                output += "db-overlap-overall-" + std::to_string(i) + ",";
-//                for (auto &overlap : stats.num_overlapping_sstables) {
-//                    output += overlap.DebugString();
-//                    output += ",";
-//                }
-//                output += "\n";
-//
-//                output += "db-overlap-" + std::to_string(i) + ",";
-//                for (auto &overlap : stats.num_overlapping_sstables_since_last_query) {
-//                    output += overlap.DebugString();
-//                    output += ",";
-//                }
-//                output += "\n";
-//            }
+            for (int i = 0; i < dbs.size(); i++) {
+                output += "db-overlapping-sstable-stats-" + std::to_string(i) +
+                          ",";
+                leveldb::DBStats stats = {};
+                uint32_t size_dist[BUCKET_SIZE];
+                for (int j = 0; j < BUCKET_SIZE; j++) {
+                    size_dist[j] = 0;
+                }
+                stats.sstable_size_dist = size_dist;
+                dbs[i]->QueryDBStats(&stats);
+
+                aggregated_stats.dbsize += stats.dbsize;
+                aggregated_stats.num_l0_sstables += stats.num_l0_sstables;
+                output += std::to_string(stats.num_l0_sstables);
+                output += ",";
+                uint32_t ideal_nsstables = stats.num_l0_sstables;
+                if (nova::NovaConfig::config->enable_subrange) {
+                    ideal_nsstables = stats.num_l0_sstables /
+                                      nova::NovaConfig::config->num_memtable_partitions;
+                    ideal_nsstables = std::max(ideal_nsstables, (uint32_t) 1);
+                }
+                output += std::to_string(ideal_nsstables);
+                output += ",";
+
+                Stats ostats = compute_stats(
+                        stats.num_overlapping_sstables_per_table);
+                output += ostats.DebugString();
+                output += ",";
+
+                uint32_t ideal_nsstables_since_last_query = stats.new_l0_sstables_since_last_query;
+                if (nova::NovaConfig::config->enable_subrange) {
+                    ideal_nsstables_since_last_query =
+                            stats.new_l0_sstables_since_last_query /
+                            nova::NovaConfig::config->num_memtable_partitions;
+                    ideal_nsstables_since_last_query = std::max(
+                            ideal_nsstables_since_last_query, (uint32_t) 1);
+                }
+                output += std::to_string(
+                        stats.new_l0_sstables_since_last_query);
+                output += ",";
+                output += std::to_string(ideal_nsstables_since_last_query);
+                output += ",";
+
+                ostats = compute_stats(
+                        stats.num_overlapping_sstables_per_table_since_last_query);
+                output += ostats.DebugString();
+                output += ",";
+                output += std::to_string(
+                        stats.load_imbalance.maximum_load_imbalance);
+                output += ",";
+                output += std::to_string(stats.load_imbalance.stdev);
+                output += ",";
+                // ideal load imbalance is 0.
+                output += std::to_string(0);
+                output += ",";
+                output += std::to_string(stats.num_major_reorgs);
+                output += ",";
+                output += std::to_string(stats.num_skipped_major_reorgs);
+                output += ",";
+                output += std::to_string(stats.num_minor_reorgs);
+                output += ",";
+                output += std::to_string(stats.num_minor_reorgs_samples);
+                output += ",";
+                output += std::to_string(stats.num_minor_reorgs_for_dup);
+                output += ",";
+                output += std::to_string(stats.num_skipped_minor_reorgs);
+
+                output += "\n";
+
+                output += "db-size-stats-" + std::to_string(i) + ",";
+                output += std::to_string(stats.dbsize / 1024 / 1024);
+                output += ",";
+                output += std::to_string(stats.num_l0_sstables);
+                output += ",";
+                for (int j = 0; j < BUCKET_SIZE; j++) {
+                    size_dist[j] += stats.sstable_size_dist[j];
+                    output += std::to_string(stats.sstable_size_dist[j]);
+                    output += ",";
+                }
+                output += "\n";
+
+                output += "db-overlap-overall-" + std::to_string(i) + ",";
+                for (auto &overlap : stats.num_overlapping_sstables) {
+                    output += overlap.DebugString();
+                    output += ",";
+                }
+                output += "\n";
+
+                output += "db-overlap-" + std::to_string(i) + ",";
+                for (auto &overlap : stats.num_overlapping_sstables_since_last_query) {
+                    output += overlap.DebugString();
+                    output += ",";
+                }
+                output += "\n";
+            }
             output += "db," + std::to_string(
                     aggregated_stats.dbsize / 1024 / 1024);
             output += ",";

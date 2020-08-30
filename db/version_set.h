@@ -31,7 +31,7 @@
 
 // Maintain this many live memtables.
 // The program exits when the number of memtables exceeds this threshold.
-#define MAX_LIVE_MEMTABLES 100000
+#define MAX_LIVE_MEMTABLES 1000000
 
 namespace leveldb {
 
@@ -175,7 +175,7 @@ namespace leveldb {
                 std::unordered_map<uint64_t, FileMetaData *> *files,
                 std::vector<OverlappingStats> *num_overlapping);
 
-        void ComputeNonOverlappingSet(std::vector<Compaction *> *compactions);
+        void ComputeNonOverlappingSet(std::vector<Compaction *> *compactions, bool *delete_due_to_low_overlap);
 
         bool
         AssertNonOverlappingSet(const std::vector<Compaction *> &compactions,

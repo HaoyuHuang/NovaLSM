@@ -582,7 +582,8 @@ namespace leveldb {
 //        CreateFileMetaData(version, 1, 3457756, 4147918);
 
         std::vector<Compaction *> compactions;
-        version->ComputeNonOverlappingSet(&compactions);
+        bool delete_due_to_low_overlap;
+        version->ComputeNonOverlappingSet(&compactions, &delete_due_to_low_overlap);
         PrintCompactions(icmp.user_comparator(), compactions);
         std::string reason;
         ASSERT_TRUE(version->AssertNonOverlappingSet(compactions, &reason));

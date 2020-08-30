@@ -60,7 +60,7 @@ namespace leveldb {
         options.num_memtables = nova::NovaConfig::config->num_memtables;
         options.l0bytes_start_compaction_trigger = nova::NovaConfig::config->l0_start_compaction_mb * 1024 * 1024;
         options.l0bytes_stop_writes_trigger = nova::NovaConfig::config->l0_stop_write_mb * 1024 * 1024;
-        options.max_open_files = 50000;
+        options.max_open_files = 100000;
         options.enable_lookup_index = nova::NovaConfig::config->enable_lookup_index;
         options.enable_range_index = nova::NovaConfig::config->enable_range_index;
         options.num_recovery_thread = nova::NovaConfig::config->number_of_recovery_threads;
@@ -132,7 +132,7 @@ namespace leveldb {
         options.stoc_client = nullptr;
         options.num_memtable_partitions = nova::NovaConfig::config->num_memtable_partitions;
         options.num_memtables = nova::NovaConfig::config->num_memtables;
-        options.max_open_files = 50000;
+        options.max_open_files = 100000;
         options.enable_lookup_index = nova::NovaConfig::config->enable_lookup_index;
         options.num_recovery_thread = nova::NovaConfig::config->number_of_recovery_threads;
         options.level = nova::NovaConfig::config->level;

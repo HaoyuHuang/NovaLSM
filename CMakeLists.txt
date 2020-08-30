@@ -363,8 +363,8 @@ target_link_libraries(nova_subrange_sim -lgflags leveldb -pg)
 add_executable(scatter_bench "benchmarks/scatter_bench.cpp")
 target_link_libraries(scatter_bench -lgflags leveldb)
 
-add_executable(memtable_bench "bench_memtable/memtable_bench.cpp")
-target_link_libraries(memtable_bench -lgflags leveldb)
+#add_executable(memtable_bench "bench_memtable/memtable_bench.cpp")
+#target_link_libraries(memtable_bench -lgflags leveldb)
 
 add_executable(version_set_test "db/version_set_test.cc")
 target_link_libraries(version_set_test -lgflags leveldb)

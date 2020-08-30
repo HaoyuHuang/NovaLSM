@@ -166,6 +166,8 @@ namespace leveldb {
         void UpdateFileMetaReplicaLocations(
                 const std::vector<leveldb::ReplicationPair> &results, uint32_t stoc_server_id, int level, StoCClient* client) override ;
 
+        std::atomic_bool is_loading_db_;
+
     private:
         Status GetWithLookupIndex(const ReadOptions &options, const Slice &key,
                                   std::string *value);
@@ -188,6 +190,7 @@ namespace leveldb {
                                 std::vector<Compaction *> *compactions,
                                 VersionEdit *edit,
                                 RangeIndexVersionEdit *range_edit,
+                                bool *delete_due_to_low_overlap,
                                 std::unordered_map<uint32_t, leveldb::MemTableL0FilesEdit> *memtableid_l0fns);
 
         class NovaCCRecoveryThread {

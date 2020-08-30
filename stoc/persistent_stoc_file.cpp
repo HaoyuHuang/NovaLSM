@@ -680,13 +680,16 @@ namespace leveldb {
             << fmt::format("Create a new stoc file {} for thread {} fn:{}", id,
                            thread_id, filename);
         mutex_.unlock();
-
+        uint32_t file_size = stoc_file_size_;
+        if (type == FileType::kDescriptorFile) {
+            file_size = stoc_file_size_ * 2;
+        }
 
         StoCPersistentFile *stoc_file = new StoCPersistentFile(id, env_,
                                                                filename,
                                                                mem_manager_,
                                                                thread_id,
-                                                               stoc_file_size_);
+                                                               file_size);
         mutex_.lock();
         NOVA_ASSERT(stoc_files_[id] == nullptr);
         stoc_files_[id] = stoc_file;

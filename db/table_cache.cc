@@ -114,8 +114,10 @@ namespace leveldb {
             return s;
         }
 
-//        auto fname = TableFileName(dbname_, file_number, false, 0);
-//        NOVA_ASSERT(env_->LockFile(fname, file_number).ok());
+        auto fname = TableFileName(dbname_, file_number, false, 0);
+        if (nova::NovaConfig::config->cfgs.size() > 1) {
+            NOVA_ASSERT(env_->LockFile(fname, file_number).ok());
+        }
         *handle = cache_->Lookup(key);
         bool cache_hit = true;
         if (*handle) {
@@ -166,7 +168,9 @@ namespace leveldb {
             << fmt::format("table cache hit {} fn:{} cs:{} ltc:{}", cache_hit,
                            file_number, cache_->TotalCharge(),
                            cache_->TotalCapacity());
-  //      NOVA_ASSERT(env_->UnlockFile(fname, file_number).ok());
+        if (nova::NovaConfig::config->cfgs.size() > 1) {
+            NOVA_ASSERT(env_->UnlockFile(fname, file_number).ok());
+        }
         return s;
     }
 

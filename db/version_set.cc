@@ -358,9 +358,6 @@ namespace leveldb {
                     // All of "f" is past any data for user_key
                 } else {
                     (*func)(arg, level, f);
-//                    if (!) {
-//                        return;
-//                    }
                 }
             }
         }
@@ -1088,7 +1085,7 @@ namespace leveldb {
             NOVA_LOG(rdmaio::DEBUG) << decode.DebugString();
         }
         current_manifest_file_size_ += msg_size;
-        if (current_manifest_file_size_ < options_->max_file_size) {
+        if (current_manifest_file_size_ < options_->max_file_size * 2) {
             NOVA_ASSERT(manifest_file->SyncAppend(Slice(edit_str, msg_size),
                                                   stoc_id).ok());
         } else {
@@ -1569,7 +1566,7 @@ namespace leveldb {
     }
 
     void Version::ComputeNonOverlappingSet(
-            std::vector<leveldb::Compaction *> *compactions_result) {
+            std::vector<leveldb::Compaction *> *compactions_result, bool *delete_due_to_low_overlap) {
         std::vector<FileMetaData *> l0files;
         std::vector<FileMetaData *> l1files;
         std::vector<Compaction *> compactions;
@@ -1588,7 +1585,9 @@ namespace leveldb {
         NOVA_LOG(rdmaio::INFO)
             << fmt::format("Compacting level {} {}:{}", level, l0files.size(), l1files.size());
         int set_index = 0;
-        while (!l0files.empty() && compactions.size() < 64) {
+        uint64_t input_size = 64;
+        uint64_t compaction_size = options_->max_num_coordinated_compaction_nonoverlapping_sets;
+        while (!l0files.empty() && compactions.size() < input_size) {
             auto compaction = new Compaction(this, icmp_, options_, level, level + 1);
             // Make a copy.
             {
@@ -1689,6 +1688,15 @@ namespace leveldb {
             RemoveTables(&l0files, compaction->inputs_[0]);
             RemoveTables(&l1files, compaction->inputs_[1]);
             set_index++;
+//            if (!nova::NovaConfig::config->enable_subrange_reorg && level > 0 &&
+//                compaction->inputs_[0].size() * 6 < compaction->inputs_[1].size()) {
+//                NOVA_LOG(rdmaio::DEBUG) << fmt::format("Delete compaction due to too few overlaps {}:{}", level,
+//                                                       compaction->DebugString(icmp_->user_comparator()));
+//                *delete_due_to_low_overlap = true;
+//                // too few overlaps.
+//                delete compaction;
+//                continue;
+//            }
 
             std::sort(compaction->inputs_[1].begin(),
                       compaction->inputs_[1].end(),
@@ -1698,22 +1706,21 @@ namespace leveldb {
             compactions.push_back(compaction);
         }
 
-        if (compactions.size() >
-            options_->max_num_coordinated_compaction_nonoverlapping_sets) {
+        if (compactions.size() > compaction_size) {
             std::sort(compactions.begin(), compactions.end(),
                       [](Compaction *c1, Compaction *c2) {
                           return c1->inputs_[0].size() > c2->inputs_[0].size();
                       });
-            for (int i = options_->max_num_coordinated_compaction_nonoverlapping_sets;
-                 i < compactions.size(); i++) {
+            for (int i = compaction_size; i < compactions.size(); i++) {
                 delete compactions[i];
                 compactions[i] = nullptr;
             }
-            compactions.resize(
-                    options_->max_num_coordinated_compaction_nonoverlapping_sets);
+            compactions.resize(compaction_size);
         }
-        compactions_result->insert(compactions_result->begin(),
-                                   compactions.begin(), compactions.end());
+        if (!compactions.empty()) {
+            compactions_result->insert(compactions_result->begin(),
+                                       compactions.begin(), compactions.end());
+        }
     }
 
     void Version::GetOverlappingInputs(

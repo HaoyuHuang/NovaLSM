@@ -114,6 +114,8 @@ namespace nova {
         }
 
         for (auto db : dbs) {
+            auto dbimpl = reinterpret_cast<leveldb::DBImpl *>(db);
+            dbimpl->is_loading_db_ = true;
             db->StartCoordinatedCompaction();
         }
         // Wait until there are no SSTables at L0.
@@ -140,7 +142,10 @@ namespace nova {
             }
             sleep(1);
         }
-
+        for (auto db : dbs) {
+            auto dbimpl = reinterpret_cast<leveldb::DBImpl *>(db);
+            dbimpl->is_loading_db_ = false;
+        }
         NOVA_LOG(INFO)
             << fmt::format("t[{}]: Completed loading data {}", tid_,
                            loaded_keys);
@@ -283,7 +288,7 @@ namespace nova {
         uint32_t num_mem_partitions = 1;
         NovaConfig::config->num_mem_partitions = num_mem_partitions;
         uint64_t slab_size_mb =
-                NovaConfig::config->max_stoc_file_size / 1024 / 1024;
+                NovaConfig::config->max_stoc_file_size * 2 / 1024 / 1024;
         mem_manager = new NovaMemManager(cache_buf,
                                          num_mem_partitions,
                                          NovaConfig::config->mem_pool_size_gb,
@@ -631,14 +636,14 @@ namespace nova {
             storage_worker_threads.emplace_back(&StorageWorker::Start, compaction_storage_workers[i]);
         }
 
-        {
+        if (NovaConfig::config->cfgs.size() > 1) {
             auto client = new leveldb::StoCBlockClient(0, stoc_file_manager);
             client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client, false);
             db_migrate_workers.emplace_back(&leveldb::LSMTreeCleaner::Start, lsm_tree_cleaner_);
         }
 
-        {
+        if (NovaConfig::config->cfgs.size() > 1) {
             auto client = new leveldb::StoCBlockClient(0, stoc_file_manager);
             client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
             lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client, true);

@@ -142,6 +142,10 @@ void StartServer() {
     int port = NovaConfig::config->servers[NovaConfig::config->my_server_id].port;
     uint64_t nrdmatotal = nrdma_buf_server();
     uint64_t ntotal = nrdmatotal;
+//    if (NovaConfig::config->cfgs[0]->IsLTC()) {
+//        NovaConfig::config->mem_pool_size_gb = 5;
+//    }
+
     ntotal += NovaConfig::config->mem_pool_size_gb * 1024 * 1024 * 1024;
     NOVA_LOG(INFO) << "Allocated buffer size in bytes: " << ntotal;
 
