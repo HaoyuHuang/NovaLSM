@@ -106,7 +106,7 @@ namespace leveldb {
             uint32_t stoc_id, uint32_t thread_id, uint32_t *stoc_file_id,
             char *buf, const std::string &dbname, uint64_t file_number,
             uint32_t replica_id,
-            uint32_t size, bool is_meta_blocks) {
+            uint32_t size, FileInternalType internal_type) {
         if (stoc_id == nova::NovaConfig::config->my_server_id) {
             std::string filename;
             if (file_number == 0) {
@@ -114,13 +114,12 @@ namespace leveldb {
             } else {
                 filename = leveldb::TableFileName(dbname,
                                                   file_number,
-                                                  is_meta_blocks, replica_id);
+                                                  internal_type, replica_id);
             }
             leveldb::StoCPersistentFile *stoc_file = stoc_file_manager_->OpenStoCFile(
                     thread_id, filename);
             NOVA_ASSERT(stoc_file);
-            uint64_t stoc_file_off = stoc_file->AllocateBuf(filename, size,
-                                                            is_meta_blocks);
+            uint64_t stoc_file_off = stoc_file->AllocateBuf(filename, size, internal_type);
             NOVA_ASSERT(stoc_file_off != UINT64_MAX)
                 << fmt::format("{} {}", filename, size);
             char *stoc_file_buf = (char *) stoc_file_off;
@@ -132,8 +131,7 @@ namespace leveldb {
             NOVA_ASSERT(persisted_bytes == size)
                 << fmt::format("persisted bytes:{} written bytes:{}",
                                persisted_bytes, size);
-            leveldb::BlockHandle h = stoc_file->Handle(
-                    filename, is_meta_blocks);
+            leveldb::BlockHandle h = stoc_file->Handle(filename, internal_type);
             leveldb::StoCBlockHandle rh = {};
             rh.server_id = nova::NovaConfig::config->my_server_id;
             rh.stoc_file_id = stoc_file->file_id();
@@ -166,7 +164,7 @@ namespace leveldb {
         task.replica_id = replica_id;
         task.write_size = size;
         task.sem = &sem_;
-        task.is_meta_blocks = is_meta_blocks;
+        task.internal_type = internal_type;
 
         uint32_t reqid = req_id_;
         StoCResponse *response = new StoCResponse;
@@ -691,7 +689,7 @@ namespace leveldb {
                                                  uint64_t file_number,
                                                  uint32_t replica_id,
                                                  uint32_t size,
-                                                 bool is_meta_blocks) {
+                                                 FileInternalType internal_type) {
         NOVA_ASSERT(stoc_id != nova::NovaConfig::config->my_server_id);
         uint32_t req_id = current_req_id_;
         StoCRequestContext context = {};
@@ -701,11 +699,7 @@ namespace leveldb {
         char *send_buf = rdma_broker_->GetSendBuf(stoc_id);
         uint32_t msg_size = 2;
         send_buf[0] = StoCRequestType::STOC_WRITE_SSTABLE;
-        if (is_meta_blocks) {
-            send_buf[1] = 'm';
-        } else {
-            send_buf[1] = 'd';
-        }
+        send_buf[1] = internal_type;
         msg_size += EncodeStr(send_buf + msg_size, dbname);
         EncodeFixed64(send_buf + msg_size, file_number);
         msg_size += 8;

@@ -84,7 +84,7 @@ namespace leveldb {
                             uint64_t file_number,
                             uint32_t replica_id,
                             uint32_t size,
-                            bool is_meta_blocks) override;
+                            FileInternalType internal_type) override;
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,
@@ -197,7 +197,7 @@ namespace leveldb {
                             uint64_t file_number,
                             uint32_t replica_id,
                             uint32_t size,
-                            bool is_meta_blocks) override;
+                            FileInternalType internal_type) override;
 
         uint32_t
         InitiateReplicateLogRecords(const std::string &log_file_name,

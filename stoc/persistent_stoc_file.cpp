@@ -170,7 +170,7 @@ namespace leveldb {
 
     uint64_t StoCPersistentFile::AllocateBuf(const std::string &filename,
                                              uint32_t size,
-                                             bool is_meta_blocks) {
+                                             FileInternalType internal_type) {
         NOVA_ASSERT(current_mem_offset_ + size <= allocated_mem_size_)
             << "exceed maximum stoc file size "
             << size << ","
@@ -189,12 +189,12 @@ namespace leveldb {
         handle.set_offset(off);
         handle.set_size(size);
 
-        if (is_meta_blocks) {
-            NOVA_ASSERT(file_meta_block_offset_.find(filename) ==
-                        file_meta_block_offset_.end());
+        if (internal_type == FileInternalType::kFileMetadata) {
+            NOVA_ASSERT(file_meta_block_offset_.find(filename) == file_meta_block_offset_.end());
+        } else if (internal_type == FileInternalType::kFileParity) {
+            NOVA_ASSERT(file_parity_block_offset_.find(filename) == file_parity_block_offset_.end());
         } else if (type == leveldb::FileType::kTableFile) {
-            NOVA_ASSERT(file_block_offset_.find(filename) ==
-                        file_block_offset_.end());
+            NOVA_ASSERT(file_block_offset_.find(filename) == file_block_offset_.end());
         }
 
         current_mem_offset_ += size;
@@ -203,7 +203,7 @@ namespace leveldb {
         allocated_buf.offset = off;
         allocated_buf.size = size;
         allocated_buf.written_to_mem = false;
-        allocated_buf.is_meta_blocks = is_meta_blocks;
+        allocated_buf.internal_type = internal_type;
         allocated_bufs_.push_back(allocated_buf);
         file_size_ += size;
         mutex_.unlock();
@@ -234,11 +234,19 @@ namespace leveldb {
             leveldb::FileType type = leveldb::FileType::kCurrentFile;
             NOVA_ASSERT(leveldb::ParseFileName(buf->filename, &type));
 
-            if (buf->is_meta_blocks) {
+            if (buf->internal_type == FileInternalType::kFileMetadata) {
                 NOVA_ASSERT(
                         file_meta_block_offset_.find(buf->filename) ==
                         file_meta_block_offset_.end());
                 StoCPersistStatus &s = file_meta_block_offset_[buf->filename];
+                s.disk_handle.set_offset(current_disk_offset_);
+                s.disk_handle.set_size(buf->size);
+                s.persisted = false;
+            } else if (buf->internal_type == FileInternalType::kFileParity) {
+                NOVA_ASSERT(
+                        file_parity_block_offset_.find(buf->filename) ==
+                        file_parity_block_offset_.end());
+                StoCPersistStatus &s = file_parity_block_offset_[buf->filename];
                 s.disk_handle.set_offset(current_disk_offset_);
                 s.disk_handle.set_size(buf->size);
                 s.persisted = false;
@@ -257,8 +265,6 @@ namespace leveldb {
             BlockHandle mem_handle = {};
             mem_handle.set_offset(buf->offset);
             mem_handle.set_size(buf->size);
-//            diskoff_memoff_[current_disk_offset_] = mem_handle;
-
             persisting_cnt += 1;
             current_disk_offset_ += buf->size;
 
@@ -266,7 +272,7 @@ namespace leveldb {
             bw.mem_handle.set_offset(buf->offset);
             bw.mem_handle.set_size(buf->size);
             bw.sstable = buf->filename;
-            bw.is_meta_blocks = buf->is_meta_blocks;
+            bw.internal_type = buf->internal_type;
             written_mem_blocks_.push_back(bw);
             buf = allocated_bufs_.erase(buf);
         }
@@ -319,17 +325,14 @@ namespace leveldb {
 
             mutex_.lock();
             for (int j = persisted_i; j < i; j++) {
-                if (writes[j].is_meta_blocks) {
-                    NOVA_ASSERT(
-                            file_meta_block_offset_.find(
-                                    writes[j].sstable) !=
-                            file_meta_block_offset_.end());
+                if (writes[j].internal_type == FileInternalType::kFileMetadata) {
+                    NOVA_ASSERT(file_meta_block_offset_.find(writes[j].sstable) != file_meta_block_offset_.end());
                     file_meta_block_offset_[writes[j].sstable].persisted = true;
+                } else if (writes[j].internal_type == FileInternalType::kFileParity) {
+                    NOVA_ASSERT(file_parity_block_offset_.find(writes[j].sstable) != file_parity_block_offset_.end());
+                    file_parity_block_offset_[writes[j].sstable].persisted = true;
                 } else {
-                    NOVA_ASSERT(
-                            file_block_offset_.find(
-                                    writes[j].sstable) !=
-                            file_block_offset_.end());
+                    NOVA_ASSERT(file_block_offset_.find(writes[j].sstable) != file_block_offset_.end());
                     file_block_offset_[writes[j].sstable].persisted = true;
                 }
                 persisting_cnt -= 1;
@@ -356,15 +359,14 @@ namespace leveldb {
 
         mutex_.lock();
         for (int j = persisted_i; j < writes.size(); j++) {
-            if (writes[j].is_meta_blocks) {
-                NOVA_ASSERT(
-                        file_meta_block_offset_.find(writes[j].sstable) !=
-                        file_meta_block_offset_.end());
+            if (writes[j].internal_type == FileInternalType::kFileMetadata) {
+                NOVA_ASSERT(file_meta_block_offset_.find(writes[j].sstable) != file_meta_block_offset_.end());
                 file_meta_block_offset_[writes[j].sstable].persisted = true;
+            } else if (writes[j].internal_type == FileInternalType::kFileParity) {
+                NOVA_ASSERT(file_parity_block_offset_.find(writes[j].sstable) != file_parity_block_offset_.end());
+                file_parity_block_offset_[writes[j].sstable].persisted = true;
             } else {
-                NOVA_ASSERT(
-                        file_block_offset_.find(writes[j].sstable) !=
-                        file_block_offset_.end());
+                NOVA_ASSERT(file_block_offset_.find(writes[j].sstable) != file_block_offset_.end());
                 file_block_offset_[writes[j].sstable].persisted = true;
             }
             persisting_cnt -= 1;
@@ -405,8 +407,16 @@ namespace leveldb {
                 NOVA_ASSERT(n == 1);
             }
         }
-        if (file_block_offset_.empty() &&
-            file_meta_block_offset_.empty() && is_full_ &&
+        {
+            auto it = file_parity_block_offset_.find(filename);
+            if (it != file_parity_block_offset_.end()) {
+                NOVA_ASSERT(it->second.persisted);
+                int n = file_parity_block_offset_.erase(filename);
+                NOVA_ASSERT(n == 1);
+            }
+        }
+        if (file_block_offset_.empty() && file_meta_block_offset_.empty() && file_parity_block_offset_.empty() &&
+            is_full_ &&
             allocated_bufs_.empty() &&
             persisting_cnt == 0 && sealed_) {
 
@@ -492,13 +502,22 @@ namespace leveldb {
 
     BlockHandle
     StoCPersistentFile::Handle(const std::string &filename,
-                               bool is_meta_blocks) {
+                               FileInternalType internal_type) {
         BlockHandle handle = {};
         while (true) {
             mutex_.lock();
-            if (is_meta_blocks) {
+            if (internal_type == FileInternalType::kFileMetadata) {
                 auto it = file_meta_block_offset_.find(filename);
                 NOVA_ASSERT(it != file_meta_block_offset_.end());
+                StoCPersistStatus &s = it->second;
+                if (s.persisted) {
+                    handle = s.disk_handle;
+                    mutex_.unlock();
+                    break;
+                }
+            } else if (internal_type == FileInternalType::kFileParity) {
+                auto it = file_parity_block_offset_.find(filename);
+                NOVA_ASSERT(it != file_parity_block_offset_.end());
                 StoCPersistStatus &s = it->second;
                 if (s.persisted) {
                     handle = s.disk_handle;
@@ -682,7 +701,7 @@ namespace leveldb {
         mutex_.unlock();
         uint32_t file_size = stoc_file_size_;
         if (type == FileType::kDescriptorFile) {
-            file_size = stoc_file_size_ * 2;
+            file_size = nova::NovaConfig::config->manifest_file_size;
         }
 
         StoCPersistentFile *stoc_file = new StoCPersistentFile(id, env_,

@@ -32,12 +32,12 @@ namespace leveldb {
         uint64_t Persist(uint32_t given_file_id_for_assertion);
 
         uint64_t AllocateBuf(const std::string &filename,
-                             uint32_t size, bool is_meta_blocks);
+                             uint32_t size, FileInternalType internal_type);
 
         bool MarkOffsetAsWritten(uint32_t given_file_id_for_assertion,
                                  uint64_t offset);
 
-        BlockHandle Handle(const std::string &filename, bool is_meta_blocks);
+        BlockHandle Handle(const std::string &filename, FileInternalType internal_type);
 
         bool DeleteSSTable(uint32_t given_fileid_for_assertion,
                            const std::string &filename);
@@ -64,7 +64,7 @@ namespace leveldb {
             uint64_t offset;
             uint32_t size;
             bool written_to_mem;
-            bool is_meta_blocks;
+            FileInternalType internal_type;
         };
 
         struct StoCPersistStatus {
@@ -75,7 +75,7 @@ namespace leveldb {
         struct BatchWrite {
             BlockHandle mem_handle = {};
             std::string sstable;
-            bool is_meta_blocks;
+            FileInternalType internal_type;
         };
 
         Env *env_ = nullptr;
@@ -83,6 +83,7 @@ namespace leveldb {
 
         std::unordered_map<std::string, StoCPersistStatus> file_block_offset_;
         std::unordered_map<std::string, StoCPersistStatus> file_meta_block_offset_;
+        std::unordered_map<std::string, StoCPersistStatus> file_parity_block_offset_;
 
         std::list<AllocatedBuf> allocated_bufs_;
         bool is_full_ = false;

@@ -348,7 +348,6 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->memtable_type = "static_partition";
 
     NovaConfig::config->num_stocs_scatter_data_blocks = 1;
-    NovaConfig::config->log_buf_size = 18 * 1024 * 1024;
     NovaConfig::config->max_stoc_file_size = 18 * 1024 * 1024;
     NovaConfig::config->sstable_size = 18 * 1024 * 1024;
     NovaConfig::config->use_local_disk = false;
@@ -417,7 +416,7 @@ int main(int argc, char *argv[]) {
         replica.data_block_group_handles.push_back(data_handle);
         replicas.push_back(replica);
         edit.AddFile(0, {4}, 333, 102400, 10240, 99999, smallest, largest,
-                     replicas);
+                     replicas, {});
     }
     {
         std::vector<leveldb::FileReplicaMetaData> replicas;
@@ -426,7 +425,7 @@ int main(int argc, char *argv[]) {
         replica.data_block_group_handles.push_back(data_handle2);
         replicas.push_back(replica);
         edit.AddFile(0, {5}, 444, 232323, 45464, 32341, smallest, largest,
-                     replicas);
+                     replicas, {});
     }
     edit.SetNextFile(45555);
     edit.SetLastSequence(9999999);

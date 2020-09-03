@@ -108,7 +108,7 @@ namespace leveldb {
             options.manifest_stoc_ids.push_back(nova::NovaConfig::config->my_server_id);
         } else {
             uint32_t stocid = db_index % cfg->stoc_servers.size();
-            for (int i = 0; i < nova::NovaConfig::config->number_of_sstable_replicas; i++) {
+            for (int i = 0; i < nova::NovaConfig::config->number_of_manifest_replicas; i++) {
                 stocid = (stocid + i) % cfg->stoc_servers.size();
                 NOVA_LOG(rdmaio::INFO) << fmt::format("Manifest stoc id: {}", cfg->stoc_servers[stocid]);
                 options.manifest_stoc_ids.push_back(cfg->stoc_servers[stocid]);

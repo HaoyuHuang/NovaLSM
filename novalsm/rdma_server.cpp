@@ -116,7 +116,7 @@ namespace nova {
                 send_buf[0] = leveldb::StoCRequestType::STOC_ALLOCATE_LOG_BUFFER_SUCC;
                 leveldb::EncodeFixed64(send_buf + 1, (uint64_t) task.rdma_buf);
                 leveldb::EncodeFixed64(send_buf + 9,
-                                       NovaConfig::config->log_buf_size);
+                                       NovaConfig::config->max_stoc_file_size);
                 rdma_broker_->PostSend(send_buf, 1 + 8 + 8,
                                        task.remote_server_id,
                                        task.stoc_req_id);
@@ -310,7 +310,7 @@ namespace nova {
                             task.remote_server_id = remote_server_id;
                             task.rdma_server_thread_id = thread_id_;
                             task.stoc_req_id = stoc_req_id;
-                            task.is_meta_blocks = context.is_meta_blocks;
+                            task.internal_type = context.internal_type;
                             leveldb::SSTableStoCFilePair pair = {};
                             pair.stoc_file_id = context.stoc_file_id;
                             pair.sstable_name = context.sstable_name;
@@ -416,13 +416,14 @@ namespace nova {
                     uint64_t file_number;
                     uint32_t replica_id;
                     uint32_t size;
-                    bool is_meta_blocks = false;
-
+                    leveldb::FileInternalType internal_type;
                     if (buf[1] == 'm') {
-                        is_meta_blocks = true;
+                        internal_type = leveldb::FileInternalType::kFileMetadata;
+                    } else if (buf[1] == 'p') {
+                        internal_type = leveldb::FileInternalType::kFileParity;
                     } else {
                         NOVA_ASSERT(buf[1] == 'd');
-                        is_meta_blocks = false;
+                        internal_type = leveldb::FileInternalType::kFileData;
                     }
 
                     msg_size += leveldb::DecodeStr(buf + msg_size, &dbname);
@@ -440,14 +441,14 @@ namespace nova {
                     } else {
                         filename = leveldb::TableFileName(dbname,
                                                           file_number,
-                                                          is_meta_blocks,
+                                                          internal_type,
                                                           replica_id);
                     }
 
                     leveldb::StoCPersistentFile *stoc_file = stoc_file_manager_->OpenStoCFile(
                             thread_id_, filename);
                     uint64_t stoc_file_off = stoc_file->AllocateBuf(
-                            filename, size, is_meta_blocks);
+                            filename, size, internal_type);
                     NOVA_ASSERT(stoc_file_off != UINT64_MAX)
                         << fmt::format("rdma-server{}: {} {}", thread_id_,
                                        filename,
@@ -470,7 +471,7 @@ namespace nova {
                     context.stoc_file_id = stoc_file->file_id();
                     context.stoc_file_buf_offset = stoc_file_off;
                     context.sstable_name = filename;
-                    context.is_meta_blocks = is_meta_blocks;
+                    context.internal_type = internal_type;
                     context.size = size;
                     request_context_map_[req_id] = context;
 
@@ -484,7 +485,7 @@ namespace nova {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);
                     std::string log_file(buf + 5, size);
                     uint32_t slabclassid = mem_manager_->slabclassid(thread_id_,
-                                                                     nova::NovaConfig::config->log_buf_size);
+                                                                     nova::NovaConfig::config->max_stoc_file_size);
                     char *rdma_buf = mem_manager_->ItemAlloc(thread_id_, slabclassid);
                     NOVA_ASSERT(rdma_buf) << "Running out of memory";
                     log_manager_->AddLocalBuf(log_file, rdma_buf);

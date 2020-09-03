@@ -37,12 +37,12 @@ namespace leveldb {
                        const std::string &dbname, const Options &options,
                        StoCBlockClient *client, Env *env) {
         // Fetch all metadata files in parallel.
-        char *backing_mems[files.size() * nova::NovaConfig::config->number_of_sstable_replicas];
+        char *backing_mems[files.size() * nova::NovaConfig::config->number_of_sstable_metadata_replicas];
         int index = 0;
         for (int i = 0; i < files.size(); i++) {
             auto meta = files[i];
             for (int replica_id = 0; replica_id < meta->block_replica_handles.size(); replica_id++) {
-                std::string filename = TableFileName(dbname, meta->number, true, replica_id);
+                std::string filename = TableFileName(dbname, meta->number, FileInternalType::kFileMetadata, replica_id);
                 const StoCBlockHandle &meta_handle = meta->block_replica_handles[replica_id].meta_block_handle;
                 uint32_t backing_scid = options.mem_manager->slabclassid(0, meta_handle.size);
                 char *backing_buf = options.mem_manager->ItemAlloc(0, backing_scid);
@@ -71,7 +71,7 @@ namespace leveldb {
                 uint32_t backing_scid = options.mem_manager->slabclassid(0, meta_handle.size);
                 WritableFile *writable_file;
                 EnvFileMetadata env_meta = {};
-                auto sstablename = TableFileName(dbname, meta->number, false, replica_id);
+                auto sstablename = TableFileName(dbname, meta->number, FileInternalType::kFileData, replica_id);
                 Status s = env->NewWritableFile(sstablename, env_meta, &writable_file);
                 NOVA_ASSERT(s.ok());
                 Slice sstable_meta(backing_buf, meta_handle.size);
@@ -230,7 +230,7 @@ namespace leveldb {
         }
         // Make the output file
         MemManager *mem_manager = bg_thread_->mem_manager();
-        std::string filename = TableFileName(dbname_, file_number, false, 0);
+        std::string filename = TableFileName(dbname_, file_number, FileInternalType::kFileData, 0);
         StoCWritableFileClient *stoc_writable_file = new StoCWritableFileClient(
                 options_.env,
                 options_,
@@ -296,6 +296,8 @@ namespace leveldb {
             FileMetaData *output = compact->current_output();
             output->converted_file_size = mem_file->Finalize();
             output->block_replica_handles = mem_file->replicas();
+            output->parity_block_handle = mem_file->parity_block_handle();
+            mem_file->Validate(output->block_replica_handles, output->parity_block_handle);
             delete mem_file;
             mem_file = nullptr;
             delete compact->outfile;

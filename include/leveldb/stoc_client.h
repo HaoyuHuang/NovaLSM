@@ -185,7 +185,7 @@ namespace leveldb {
         uint64_t file_number = 0;
         uint32_t replica_id = 0;
         uint32_t write_size = 0;
-        bool is_meta_blocks = false;
+        FileInternalType internal_type;
 
         std::vector<leveldb::ReplicationPair> missing_replicas;
 
@@ -240,7 +240,7 @@ namespace leveldb {
                             uint64_t file_number,
                             uint32_t replica_id,
                             uint32_t size,
-                            bool is_meta_blocks) = 0;
+                            FileInternalType internal_type) = 0;
 
         virtual uint32_t
         InitiateDeleteTables(uint32_t stoc_file_id,

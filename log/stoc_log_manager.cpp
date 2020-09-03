@@ -144,7 +144,7 @@ namespace nova {
                 if (!buf) {
                     continue;
                 }
-                uint32_t scid = mem_manager_->slabclassid(0, NovaConfig::config->log_buf_size);
+                uint32_t scid = mem_manager_->slabclassid(0, NovaConfig::config->max_stoc_file_size);
                 mem_manager_->FreeItem(0, buf, scid);
                 NOVA_LOG(DEBUG) << fmt::format("Free log buf for file:{}", log_file[i]);
             }

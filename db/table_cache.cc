@@ -83,7 +83,7 @@ namespace leveldb {
             if (caller == AccessCaller::kCompaction) {
                 prefetch_all = true;
             }
-            std::string filename = TableFileName(dbname_, file_number, false,
+            std::string filename = TableFileName(dbname_, file_number, FileInternalType::kFileData,
                                                  replica_id);
             file = new StoCRandomAccessFileClientImpl(env_, options_, dbname_,
                                                       file_number,
@@ -114,7 +114,7 @@ namespace leveldb {
             return s;
         }
 
-        auto fname = TableFileName(dbname_, file_number, false, 0);
+        auto fname = TableFileName(dbname_, file_number, FileInternalType::kFileData, 0);
         if (nova::NovaConfig::config->cfgs.size() > 1) {
             NOVA_ASSERT(env_->LockFile(fname, file_number).ok());
         }
@@ -135,8 +135,7 @@ namespace leveldb {
             if (caller == AccessCaller::kCompaction) {
                 prefetch_all = true;
             }
-            std::string filename = TableFileName(dbname_, file_number, false,
-                                                 replica_id);
+            std::string filename = TableFileName(dbname_, file_number, FileInternalType::kFileData, replica_id);
             file = new StoCRandomAccessFileClientImpl(env_, options_, dbname_,
                                                       file_number,
                                                       replica_id,
@@ -222,7 +221,7 @@ namespace leveldb {
         char buf[1 + 8 + 4];
         buf[0] = 'c';
         for (int replica_id = 0; replica_id <
-                                 nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
+                                 nova::NovaConfig::config->number_of_sstable_metadata_replicas; replica_id++) {
             EncodeFixed64(buf + 1, file_number);
             EncodeFixed32(buf + 9, replica_id);
             cache_->Erase(Slice(buf, 1 + 8 + 4));
@@ -234,7 +233,7 @@ namespace leveldb {
 
         buf[0] = 'u';
         for (int replica_id = 0; replica_id <
-                                 nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
+                                 nova::NovaConfig::config->number_of_sstable_metadata_replicas; replica_id++) {
             EncodeFixed64(buf + 1, file_number);
             EncodeFixed32(buf + 9, replica_id);
             cache_->Erase(Slice(buf, 1 + 8 + 4));

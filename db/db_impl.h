@@ -169,6 +169,10 @@ namespace leveldb {
         std::atomic_bool is_loading_db_;
 
     private:
+        void ObtainStoCFilesOfSSTable(std::vector<std::string> *files_to_delete,
+                                      std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> *server_pairs,
+                                      const FileMetaData &meta) const;
+
         Status GetWithLookupIndex(const ReadOptions &options, const Slice &key,
                                   std::string *value);
 

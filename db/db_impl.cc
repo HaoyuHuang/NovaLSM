@@ -255,7 +255,7 @@ namespace leveldb {
             // Update.
             NOVA_ASSERT(result.replica_id < new_meta.block_replica_handles.size());
             FileReplicaMetaData &replica = new_meta.block_replica_handles[result.replica_id];
-            if (result.is_meta_blocks) {
+            if (result.internal_type == FileInternalType::kFileMetadata) {
                 replica.meta_block_handle.server_id = result.dest_stoc_id;
                 replica.meta_block_handle.stoc_file_id = result.dest_stoc_file_id;
             } else {
@@ -268,7 +268,7 @@ namespace leveldb {
             auto metadata = it.second;
             edit.AddFile(level, metadata.memtable_ids, metadata.number, metadata.file_size,
                          metadata.converted_file_size, metadata.flush_timestamp, metadata.smallest,
-                         metadata.largest, metadata.block_replica_handles);
+                         metadata.largest, metadata.block_replica_handles, metadata.parity_block_handle);
         }
 
         NOVA_LOG(rdmaio::INFO)
@@ -500,38 +500,7 @@ namespace leveldb {
             }
             // The file can be deleted.
             table_cache_->Evict(meta.number, false);
-
-            // Delete data files.
-            for (int replica_id = 0; replica_id <
-                                     nova::NovaConfig::config->number_of_sstable_replicas; replica_id++) {
-                auto handles = meta.block_replica_handles[replica_id].data_block_group_handles;
-                for (int i = 0; i < handles.size(); i++) {
-                    SSTableStoCFilePair pair = {};
-                    pair.sstable_name = TableFileName(dbname_, meta.number, false, replica_id);
-                    pair.stoc_file_id = handles[i].stoc_file_id;
-                    (*server_pairs)[handles[i].server_id].push_back(pair);
-                }
-                files_to_delete->push_back(TableFileName(dbname_, meta.number, false, replica_id));
-                // Delete metadata file.
-                {
-                    auto &it = (*server_pairs)[meta.block_replica_handles[replica_id].meta_block_handle.server_id];
-                    bool found = false;
-                    for (auto &stoc_block_handle : it) {
-                        if (stoc_block_handle.stoc_file_id ==
-                            meta.block_replica_handles[replica_id].meta_block_handle.stoc_file_id ||
-                            meta.block_replica_handles[replica_id].meta_block_handle.stoc_file_id == 0) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        SSTableStoCFilePair pair = {};
-                        pair.sstable_name = TableFileName(dbname_, meta.number, true, replica_id);
-                        pair.stoc_file_id = meta.block_replica_handles[replica_id].meta_block_handle.stoc_file_id;
-                        it.push_back(pair);
-                    }
-                }
-            }
+            ObtainStoCFilesOfSSTable(files_to_delete, server_pairs, meta);
             success += 1;
             it = compacted_tables_.erase(it);
         }
@@ -539,6 +508,40 @@ namespace leveldb {
             NOVA_LOG(rdmaio::INFO)
                 << fmt::format("Delete files. Success:{} Failed:{}", success,
                                compacted_tables_.size());
+        }
+    }
+
+    void DBImpl::ObtainStoCFilesOfSSTable(std::vector<std::string> *files_to_delete,
+                                          std::unordered_map<uint32_t, std::vector<SSTableStoCFilePair>> *server_pairs,
+                                          const FileMetaData &meta) const {
+        // Delete metadata file.
+        for (int replica_id = 0; replica_id <
+                                 nova::NovaConfig::config->number_of_sstable_metadata_replicas; replica_id++) {
+            SSTableStoCFilePair pair = {};
+            pair.sstable_name = TableFileName(this->dbname_, meta.number, FileInternalType::kFileMetadata, replica_id);
+            pair.stoc_file_id = meta.block_replica_handles[replica_id].meta_block_handle.stoc_file_id;
+            (*server_pairs)[meta.block_replica_handles[replica_id].meta_block_handle.server_id].push_back(pair);
+        }
+        // Delete data files.
+        for (int replica_id = 0; replica_id <
+                                 nova::NovaConfig::config->number_of_sstable_data_replicas; replica_id++) {
+            auto handles = meta.block_replica_handles[replica_id].data_block_group_handles;
+            for (int i = 0; i < handles.size(); i++) {
+                SSTableStoCFilePair pair = {};
+                pair.sstable_name = TableFileName(this->dbname_, meta.number, FileInternalType::kFileData, replica_id);
+                pair.stoc_file_id = handles[i].stoc_file_id;
+                (*server_pairs)[handles[i].server_id].push_back(pair);
+            }
+            files_to_delete->push_back(
+                    TableFileName(this->dbname_, meta.number, FileInternalType::kFileData, replica_id));
+        }
+        // Delete parity file.
+        if (nova::NovaConfig::config->use_parity_for_sstable_data_blocks) {
+            auto handle = meta.parity_block_handle;
+            SSTableStoCFilePair pair = {};
+            pair.sstable_name = TableFileName(this->dbname_, meta.number, FileInternalType::kFileParity, 0);
+            pair.stoc_file_id = handle.stoc_file_id;
+            (*server_pairs)[handle.server_id].push_back(pair);
         }
     }
 
@@ -592,7 +595,7 @@ namespace leveldb {
         uint32_t stoc_id = options_.manifest_stoc_ids[0];
         std::string manifest = DescriptorFileName(dbname_, 0, 0);
         auto client = reinterpret_cast<StoCBlockClient *> (options_.stoc_client);
-        uint32_t manifest_file_size = nova::NovaConfig::config->max_stoc_file_size * 2;
+        uint32_t manifest_file_size = nova::NovaConfig::config->manifest_file_size;
         uint32_t scid = options_.mem_manager->slabclassid(0, manifest_file_size);
         char *buf = options_.mem_manager->ItemAlloc(0, scid);
         NOVA_ASSERT(buf);
@@ -645,13 +648,28 @@ namespace leveldb {
             for (int i = 0; i < files[level].size(); i++) {
                 auto meta = files[level][i];
                 for (int replica_id = 0; replica_id < meta->block_replica_handles.size(); replica_id++) {
-                    std::string metafilename = TableFileName(dbname_, meta->number, true, replica_id);
-                    std::string filename = TableFileName(dbname_, meta->number, false, replica_id);
+                    std::string metafilename = TableFileName(dbname_, meta->number, FileInternalType::kFileMetadata,
+                                                             replica_id);
                     auto meta_handle = meta->block_replica_handles[replica_id].meta_block_handle;
                     stoc_fn_stocfileid[meta_handle.server_id][metafilename] = meta_handle.stoc_file_id;
-                    for (auto &data_block : meta->block_replica_handles[replica_id].data_block_group_handles) {
+                }
+
+                if (nova::NovaConfig::config->number_of_sstable_data_replicas == 1) {
+                    std::string filename = TableFileName(dbname_, meta->number, FileInternalType::kFileData, 0);
+                    for (auto &data_block : meta->block_replica_handles[0].data_block_group_handles) {
                         stoc_fn_stocfileid[data_block.server_id][filename] = data_block.stoc_file_id;
                     }
+                } else {
+                    for (int replica_id = 0; replica_id < meta->block_replica_handles.size(); replica_id++) {
+                        std::string filename = TableFileName(dbname_, meta->number, FileInternalType::kFileData, replica_id);
+                        for (auto &data_block : meta->block_replica_handles[replica_id].data_block_group_handles) {
+                            stoc_fn_stocfileid[data_block.server_id][filename] = data_block.stoc_file_id;
+                        }
+                    }
+                }
+                if (meta->parity_block_handle.stoc_file_id != 0) {
+                    std::string filename = TableFileName(dbname_, meta->number, FileInternalType::kFileParity, 0);
+                    stoc_fn_stocfileid[meta->parity_block_handle.server_id][filename] = meta->parity_block_handle.stoc_file_id;
                 }
             }
         }
@@ -985,7 +1003,7 @@ namespace leveldb {
                              meta.flush_timestamp,
                              meta.smallest,
                              meta.largest,
-                             meta.block_replica_handles);
+                             meta.block_replica_handles, meta.parity_block_handle);
             }
         }
         versions_->AppendChangesToManifest(&edit, manifest_file_,
@@ -1056,7 +1074,7 @@ namespace leveldb {
                           meta.flush_timestamp,
                           meta.smallest,
                           meta.largest,
-                          meta.block_replica_handles);
+                          meta.block_replica_handles, meta.parity_block_handle);
             nova::NovaGlobalVariables::global.written_memtable_sizes += meta.file_size;
         }
     }
@@ -1098,13 +1116,10 @@ namespace leveldb {
             output_memtable->Add(ikey.sequence, ValueType::kTypeValue, ikey.user_key, value);
             if (nova::NovaConfig::config->cfgs.size() == 1) {
                 uint64_t key;
-                nova::str_to_int(ikey.user_key.data(), &key,
-                                 ikey.user_key.size());
-                uint32_t current_mid = lookup_index_->Lookup(ikey.user_key,
-                                                             key);
+                nova::str_to_int(ikey.user_key.data(), &key, ikey.user_key.size());
+                uint32_t current_mid = lookup_index_->Lookup(ikey.user_key, key);
                 if (immids.find(current_mid) != immids.end()) {
-                    lookup_index_->CAS(ikey.user_key, key, current_mid,
-                                       memtable_id);
+                    lookup_index_->CAS(ikey.user_key, key, current_mid, memtable_id);
                 }
             }
             LevelDBLogRecord log_record = {};
@@ -1247,7 +1262,7 @@ namespace leveldb {
                              meta.flush_timestamp,
                              meta.smallest,
                              meta.largest,
-                             meta.block_replica_handles);
+                             meta.block_replica_handles, meta.parity_block_handle);
             }
             NOVA_LOG(rdmaio::DEBUG)
                 << fmt::format(
@@ -1598,7 +1613,7 @@ namespace leveldb {
                           f->flush_timestamp,
                           f->smallest,
                           f->largest,
-                          f->block_replica_handles);
+                          f->block_replica_handles, f->parity_block_handle);
             std::string output = fmt::format(
                     "Moved #{}@{} to level-{} {} bytes\n",
                     f->number, c->level(), c->target_level(), f->file_size);
@@ -1991,7 +2006,8 @@ namespace leveldb {
                           out.converted_file_size,
                           versions_->last_sequence_,
                           out.smallest, out.largest,
-                          out.block_replica_handles);
+                          out.block_replica_handles,
+                          out.parity_block_handle);
         }
         return Status::OK();
     }
@@ -3122,7 +3138,7 @@ namespace leveldb {
                     pair.dest_stoc_id = dest_stoc_id;
                     const auto &available_replica = it->block_replica_handles[available_replica_id];
                     pair.source_stoc_file_id = available_replica.meta_block_handle.stoc_file_id;
-                    pair.is_meta_blocks = true;
+                    pair.internal_type = FileInternalType::kFileMetadata;
                     pair.sstable_file_number = it->number;
                     if (is_stoc_failed) {
                         pair.replica_id = it->block_replica_handles.size();
@@ -3136,7 +3152,7 @@ namespace leveldb {
                         ReplicationPair pair = {};
                         pair.dest_stoc_id = dest_stoc_id;
                         pair.source_stoc_file_id = available_replica.data_block_group_handles[0].stoc_file_id;
-                        pair.is_meta_blocks = false;
+                        pair.internal_type = FileInternalType::kFileData;
                         pair.sstable_file_number = it->number;
                         if (is_stoc_failed) {
                             pair.replica_id = it->block_replica_handles.size();
@@ -3248,7 +3264,7 @@ namespace leveldb {
                                                               options.mem_manager,
                                                               options.stoc_client,
                                                               impl->dbname_, 0,
-                                                              nova::NovaConfig::config->max_stoc_file_size * 2,
+                                                              nova::NovaConfig::config->manifest_file_size,
                                                               &impl->rand_seed_,
                                                               manifest_file_name);
         }

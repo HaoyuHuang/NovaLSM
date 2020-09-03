@@ -69,7 +69,8 @@ namespace leveldb {
                 uint64_t flush_timestamp,
                 const InternalKey &smallest,
                 const InternalKey &largest,
-                const std::vector<FileReplicaMetaData>& replicas) {
+                const std::vector<FileReplicaMetaData>& replicas,
+                StoCBlockHandle parity_block_handle) {
             FileMetaData f;
             f.level = level;
             f.memtable_ids = memtable_ids;
@@ -80,6 +81,7 @@ namespace leveldb {
             f.smallest = smallest;
             f.largest = largest;
             f.block_replica_handles = replicas;
+            f.parity_block_handle = parity_block_handle;
             new_files_.emplace_back(std::make_pair(level, f));
         }
 

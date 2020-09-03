@@ -287,8 +287,7 @@ namespace nova {
 
         uint32_t num_mem_partitions = 1;
         NovaConfig::config->num_mem_partitions = num_mem_partitions;
-        uint64_t slab_size_mb =
-                NovaConfig::config->max_stoc_file_size * 2 / 1024 / 1024;
+        uint64_t slab_size_mb = NovaConfig::config->manifest_file_size / 1024 / 1024;
         mem_manager = new NovaMemManager(cache_buf,
                                          num_mem_partitions,
                                          NovaConfig::config->mem_pool_size_gb,

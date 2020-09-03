@@ -113,6 +113,10 @@ DEFINE_uint32(major_compaction_max_parallism, 1,
 DEFINE_uint32(major_compaction_max_tables_in_a_set, 15,
               "The maximum number of SSTables in a compaction job.");
 DEFINE_uint32(num_sstable_replicas, 1, "Number of replicas for SSTables.");
+DEFINE_uint32(num_sstable_metadata_replicas, 1, "Number of replicas for meta blocks of SSTables.");
+DEFINE_bool(use_parity_for_sstable_data_blocks, false, "");
+DEFINE_uint32(num_manifest_replicas, 1, "Number of replicas for manifest file.");
+
 DEFINE_int32(fail_stoc_id, -1, "The StoC to fail.");
 DEFINE_int32(exp_seconds_to_fail_stoc, -1,
              "Number of seconds elapsed to fail the stoc.");
@@ -142,10 +146,6 @@ void StartServer() {
     int port = NovaConfig::config->servers[NovaConfig::config->my_server_id].port;
     uint64_t nrdmatotal = nrdma_buf_server();
     uint64_t ntotal = nrdmatotal;
-//    if (NovaConfig::config->cfgs[0]->IsLTC()) {
-//        NovaConfig::config->mem_pool_size_gb = 5;
-//    }
-
     ntotal += NovaConfig::config->mem_pool_size_gb * 1024 * 1024 * 1024;
     NOVA_LOG(INFO) << "Allocated buffer size in bytes: " << ntotal;
 
@@ -210,7 +210,10 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config->number_of_recovery_threads = FLAGS_num_recovery_threads;
     NovaConfig::config->recover_dbs = FLAGS_recover_dbs;
-    NovaConfig::config->number_of_sstable_replicas = FLAGS_num_sstable_replicas;
+    NovaConfig::config->number_of_sstable_data_replicas = FLAGS_num_sstable_replicas;
+    NovaConfig::config->number_of_sstable_metadata_replicas = FLAGS_num_sstable_metadata_replicas;
+    NovaConfig::config->number_of_manifest_replicas = FLAGS_num_manifest_replicas;
+    NovaConfig::config->use_parity_for_sstable_data_blocks = FLAGS_use_parity_for_sstable_data_blocks;
 
     NovaConfig::config->servers = convert_hosts(FLAGS_all_servers);
     NovaConfig::config->my_server_id = FLAGS_server_id;
@@ -225,8 +228,8 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->memtable_type = FLAGS_memtable_type;
 
     NovaConfig::config->num_stocs_scatter_data_blocks = FLAGS_ltc_num_stocs_scatter_data_blocks;
-    NovaConfig::config->log_buf_size = FLAGS_max_stoc_file_size_mb * 1024;
     NovaConfig::config->max_stoc_file_size = FLAGS_max_stoc_file_size_mb * 1024;
+    NovaConfig::config->manifest_file_size = NovaConfig::config->max_stoc_file_size;
     NovaConfig::config->sstable_size = FLAGS_sstable_size_mb * 1024 * 1024;
     NovaConfig::config->use_local_disk = FLAGS_use_local_disk;
     NovaConfig::config->num_tinyranges_per_subrange = FLAGS_num_tinyranges_per_subrange;
@@ -295,6 +298,21 @@ int main(int argc, char *argv[]) {
     }
     leveldb::StorageSelector::available_stoc_servers.store(available_stoc_servers);
 
+    // Sanity checks.
+    if (NovaConfig::config->number_of_sstable_data_replicas > 1) {
+        NOVA_ASSERT(NovaConfig::config->number_of_sstable_data_replicas ==
+                    NovaConfig::config->number_of_sstable_metadata_replicas);
+        NOVA_ASSERT(NovaConfig::config->num_stocs_scatter_data_blocks == 1);
+        NOVA_ASSERT(!NovaConfig::config->use_parity_for_sstable_data_blocks);
+    }
+
+    if (NovaConfig::config->use_parity_for_sstable_data_blocks) {
+        NOVA_ASSERT(NovaConfig::config->number_of_sstable_data_replicas == 1);
+        NOVA_ASSERT(NovaConfig::config->num_stocs_scatter_data_blocks > 1);
+        NOVA_ASSERT(NovaConfig::config->num_stocs_scatter_data_blocks +
+                    NovaConfig::config->number_of_sstable_metadata_replicas + 1 <=
+                    NovaConfig::config->cfgs[0]->stoc_servers.size());
+    }
     for (int i = 0; i < NovaConfig::config->cfgs.size(); i++) {
         auto cfg = NovaConfig::config->cfgs[i];
         NOVA_ASSERT(FLAGS_ltc_num_stocs_scatter_data_blocks <= cfg->stoc_servers.size()) << fmt::format(

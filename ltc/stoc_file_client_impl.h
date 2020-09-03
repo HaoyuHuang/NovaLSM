@@ -77,6 +77,10 @@ namespace leveldb {
 
         std::vector<leveldb::FileReplicaMetaData> replicas();
 
+        StoCBlockHandle parity_block_handle();
+
+        void Validate(const std::vector<leveldb::FileReplicaMetaData>& replicas, const StoCBlockHandle& parity_block_handle);
+
     private:
         struct PersistStatus {
             uint32_t remote_server_id = 0;
@@ -119,16 +123,20 @@ namespace leveldb {
         const uint64_t allocated_size_;
         uint64_t used_size_ = 0;
         std::vector<int> nblocks_in_group_;
+        char *parity_block_backing_mem_ = nullptr;
+        uint64_t parity_block_size_ = 0;
+
+        PersistStatus parity_persist_status_;
 
         struct FileReplicaPersistStatus {
             std::vector<PersistStatus> persist_statuses;
-            StoCBlockHandle meta_block_handle;
         };
 
         // 1 replica: scatter across.
         // > 1 replicas: all replicas of a sstable is stored on the same stoc.
         std::vector<uint32_t> stocs_to_store_fragments_;
-        std::vector<FileReplicaPersistStatus> replica_status_;
+        std::vector<StoCBlockHandle> meta_block_handles_;
+        std::vector<FileReplicaPersistStatus> data_replica_status_;
     };
 
     class StoCRandomAccessFileClientImpl : public StoCRandomAccessFileClient {

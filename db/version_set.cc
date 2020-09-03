@@ -1085,7 +1085,7 @@ namespace leveldb {
             NOVA_LOG(rdmaio::DEBUG) << decode.DebugString();
         }
         current_manifest_file_size_ += msg_size;
-        if (current_manifest_file_size_ < options_->max_file_size * 2) {
+        if (current_manifest_file_size_ < nova::NovaConfig::config->manifest_file_size) {
             NOVA_ASSERT(manifest_file->SyncAppend(Slice(edit_str, msg_size),
                                                   stoc_id).ok());
         } else {
@@ -1113,7 +1113,7 @@ namespace leveldb {
             options.stoc_client = client;
 
             for (auto &file : edit->new_files_) {
-                auto fname = TableFileName(dbname_, file.second.number, false, 0);
+                auto fname = TableFileName(dbname_, file.second.number, FileInternalType::kFileData, 0);
                 NOVA_ASSERT(env_->LockFile(fname, file.second.number).ok());
                 env_->DeleteFile(fname);
                 auto new_meta = v->fn_files_.find(file.second.number);

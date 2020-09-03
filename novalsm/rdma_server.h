@@ -39,7 +39,7 @@ namespace nova {
         leveldb::StoCBlockHandle stoc_block_handle = {};
         char *rdma_buf = nullptr;
         uint64_t ltc_mr_offset = 0;
-        bool is_meta_blocks;
+        leveldb::FileInternalType internal_type;
 
         // Persist request
         std::vector<leveldb::SSTableStoCFilePair> persist_pairs;
@@ -82,7 +82,7 @@ namespace nova {
         uint64_t stoc_file_buf_offset;
         uint32_t size;
         std::string sstable_name;
-        bool is_meta_blocks;
+        leveldb::FileInternalType internal_type;
     };
 
     class RDMAWriteHandler {

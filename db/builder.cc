@@ -25,7 +25,7 @@ namespace leveldb {
         Status s;
         meta->file_size = 0;
         iter->SeekToFirst();
-        std::string fname = TableFileName(dbname, meta->number, false, 0);
+        std::string fname = TableFileName(dbname, meta->number, FileInternalType::kFileData, 0);
         if (iter->Valid()) {
             MemManager *mem_manager = bg_thread->mem_manager();
             uint64_t key = bg_thread->thread_id();
@@ -85,11 +85,10 @@ namespace leveldb {
         Status s;
         meta->file_size = 0;
         iter->SeekToFirst();
-        std::string fname = TableFileName(dbname, meta->number, false, 0);
+        std::string filename = TableFileName(dbname, meta->number, FileInternalType::kFileData, 0);
         if (iter->Valid()) {
             const Comparator *user_comp = reinterpret_cast<const InternalKeyComparator *>(options.comparator)->user_comparator();
             MemManager *mem_manager = bg_thread->mem_manager();
-            std::string filename = TableFileName(dbname, meta->number, false, 0);
             StoCWritableFileClient *stoc_writable_file = new StoCWritableFileClient(
                     env,
                     options,
@@ -155,7 +154,9 @@ namespace leveldb {
             uint32_t new_file_size = stoc_writable_file->Finalize();
 
             meta->block_replica_handles = stoc_writable_file->replicas();
+            meta->parity_block_handle = stoc_writable_file->parity_block_handle();
             meta->converted_file_size = new_file_size;
+            stoc_writable_file->Validate(meta->block_replica_handles, meta->parity_block_handle);
 
             delete stoc_writable_file;
             stoc_writable_file = nullptr;
@@ -171,7 +172,7 @@ namespace leveldb {
         if (s.ok() && meta->file_size > 0) {
             // Keep it
         } else {
-            env->DeleteFile(fname);
+            env->DeleteFile(filename);
         }
         return s;
     }

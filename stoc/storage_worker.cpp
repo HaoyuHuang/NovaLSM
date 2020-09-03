@@ -86,7 +86,7 @@ namespace nova {
                         pair.sstable_file_number,
                         pair.replica_id,
                         pair.source_file_size,
-                        pair.is_meta_blocks);
+                        pair.internal_type);
                 reqs.push_back(req_id);
                 replication_results.push_back(pair);
             }
@@ -171,17 +171,15 @@ namespace nova {
                                     "Persisting stoc file {} for sstable {}",
                                     pair.stoc_file_id, pair.sstable_name);
 
-                        leveldb::BlockHandle h = stoc_file->Handle(
-                                pair.sstable_name, task.is_meta_blocks);
+                        leveldb::BlockHandle h = stoc_file->Handle(pair.sstable_name, task.internal_type);
                         leveldb::StoCBlockHandle rh = {};
                         rh.server_id = NovaConfig::config->my_server_id;
                         rh.stoc_file_id = pair.stoc_file_id;
                         rh.offset = h.offset();
                         rh.size = h.size();
                         ct.stoc_block_handles.push_back(rh);
-
                         NOVA_ASSERT(leveldb::ParseFileName(pair.sstable_name, &type));
-                        if (task.is_meta_blocks || type == leveldb::FileType::kTableFile) {
+                        if (type == leveldb::FileType::kTableFile) {
                             stoc_file->ForceSeal();
                         }
                     }

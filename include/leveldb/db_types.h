@@ -125,13 +125,21 @@ namespace leveldb {
         uint64_t fnumber = 0;
     };
 
+    enum FileInternalType : char {
+        kFileMetadata = 'm',
+        kFileData = 'd',
+        kFileParity = 'p'
+    };
+
+    bool DecodeInternalFileType(Slice *ptr, FileInternalType *internal_type);
+
     struct ReplicationPair {
         uint32_t source_stoc_file_id = 0;
         uint32_t source_file_size = 0;
         uint32_t dest_stoc_id = 0;
         uint64_t sstable_file_number = 0;
         uint32_t replica_id = 0;
-        bool is_meta_blocks = false;
+        FileInternalType internal_type;
 
         uint32_t dest_stoc_file_id = 0;
 
@@ -140,12 +148,16 @@ namespace leveldb {
         std::string DebugString() const;
 
         bool Decode(Slice *ptr);
+
+
     };
 
     struct FileReplicaMetaData {
         StoCBlockHandle meta_block_handle;
         std::vector<StoCBlockHandle> data_block_group_handles;
     };
+
+
 
     struct FileMetaData {
         FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0),
@@ -179,6 +191,7 @@ namespace leveldb {
         InternalKey largest;   // Largest internal key served by table
         FileCompactionStatus compaction_status;
         std::vector<FileReplicaMetaData> block_replica_handles = {};
+        StoCBlockHandle parity_block_handle;
     };
 
     class LEVELDB_EXPORT MemManager {

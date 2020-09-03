@@ -178,9 +178,9 @@ namespace nova {
         int rdma_max_num_sends = 0;
         int rdma_doorbell_batch_size = 0;
 
-        uint64_t log_buf_size = 0;
         uint64_t max_stoc_file_size = 0;
         uint64_t sstable_size = 0;
+        uint64_t manifest_file_size = 0;
         std::string stoc_files_path;
 
         bool use_local_disk = false;
@@ -201,7 +201,10 @@ namespace nova {
         NovaLogRecordMode log_record_mode = NovaLogRecordMode::LOG_NONE;
         bool recover_dbs = false;
         uint32_t number_of_recovery_threads = 0;
-        uint32_t number_of_sstable_replicas = 0;
+        uint32_t number_of_sstable_metadata_replicas = 0;
+        uint32_t number_of_sstable_data_replicas = 0;
+        uint32_t number_of_manifest_replicas = 0;
+        bool use_parity_for_sstable_data_blocks = false;
 
         double subrange_sampling_ratio = 0;
         std::string zipfian_dist_file_path;

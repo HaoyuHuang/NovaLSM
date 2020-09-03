@@ -132,6 +132,8 @@ namespace leveldb {
                 msg_size += StoCBlockHandle::HandleSize();
             }
         }
+        parity_block_handle.EncodeHandle(dst + msg_size);
+        msg_size += StoCBlockHandle::HandleSize();
         return msg_size;
     }
 
@@ -186,13 +188,15 @@ namespace leveldb {
                GetInternalKey(input, &smallest, copy) &&
                GetInternalKey(input, &largest, copy) &&
                DecodeFixed64(input, &flush_timestamp) &&
-               DecodeFixed32(input, &level) && DecodeMemTableIds(input) && DecodeReplicas(input);
+               DecodeFixed32(input, &level) && DecodeMemTableIds(input) && DecodeReplicas(input) &&
+               StoCBlockHandle::DecodeHandle(input, &parity_block_handle);
     }
 
     uint32_t ReplicationPair::Encode(char *buf) const {
         uint32_t msg_size = 0;
         msg_size += EncodeFixed32(buf, source_stoc_file_id);
-        msg_size += EncodeBool(buf + msg_size, is_meta_blocks);
+        buf[msg_size] = internal_type;
+        msg_size += 1;
         msg_size += EncodeFixed32(buf + msg_size, source_file_size);
         msg_size += EncodeFixed32(buf + msg_size, dest_stoc_id);
         msg_size += EncodeFixed64(buf + msg_size, sstable_file_number);
@@ -203,14 +207,32 @@ namespace leveldb {
 
     std::string ReplicationPair::DebugString() const {
         return fmt::format("stocfid:{}-meta:{}-fs:{}-dest:{}-fn:{}-rid:{}-destfid:{}",
-                           source_stoc_file_id, is_meta_blocks,
+                           source_stoc_file_id, internal_type,
                            source_file_size, dest_stoc_id, sstable_file_number,
                            replica_id, dest_stoc_file_id);
     }
 
+    bool DecodeInternalFileType(Slice *ptr, FileInternalType *internal_type) {
+        char type = (*ptr)[0];
+        bool success = true;
+        if (type == 'm') {
+            *internal_type = FileInternalType::kFileMetadata;
+        } else if (type == 'd') {
+            *internal_type = FileInternalType::kFileData;
+        } else if (type == 'p') {
+            *internal_type = FileInternalType::kFileParity;
+        } else {
+            success = false;
+        }
+        if (success) {
+            *ptr = Slice(ptr->data() + 1, ptr->size() - 1);
+        }
+        return success;
+    }
+
     bool ReplicationPair::Decode(Slice *ptr) {
         return DecodeFixed32(ptr, &source_stoc_file_id) &&
-               DecodeBool(ptr, &is_meta_blocks) &&
+               DecodeInternalFileType(ptr, &internal_type) &&
                DecodeFixed32(ptr, &source_file_size) &&
                DecodeFixed32(ptr, &dest_stoc_id) &&
                DecodeFixed64(ptr, &sstable_file_number) &&
@@ -282,6 +304,8 @@ namespace leveldb {
                 r.append(" ");
             }
         }
+        r.append(" parity:");
+        r.append(parity_block_handle.DebugString());
         return r;
     }
 

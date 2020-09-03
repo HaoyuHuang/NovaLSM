@@ -33,10 +33,12 @@ namespace leveldb {
     }
 
     std::string TableFileName(const std::string &dbname, uint64_t number,
-                              bool is_metadata, uint32_t replica_id) {
+                              FileInternalType internal_type, uint32_t replica_id) {
         assert(number > 0);
-        if (is_metadata) {
+        if (internal_type == FileInternalType::kFileMetadata) {
             return MakeFileName(dbname, number, replica_id, "ldb-meta");
+        } else if (internal_type == FileInternalType::kFileParity) {
+            return MakeFileName(dbname, number, replica_id, "ldb-parity");
         }
         return MakeFileName(dbname, number, replica_id, "ldb");
     }
@@ -120,7 +122,7 @@ namespace leveldb {
             Slice suffix = rest;
             if (suffix == Slice(".log")) {
                 *type = kLogFile;
-            } else if (suffix == Slice(".sst") || suffix == Slice(".ldb") ||
+            } else if (suffix == Slice(".sst") || suffix == Slice(".ldb") || suffix == Slice(".ldb-parity") ||
                        suffix == Slice(".ldb-meta")) {
                 *type = kTableFile;
             } else if (suffix == Slice(".dbtmp")) {

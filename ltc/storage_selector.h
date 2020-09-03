@@ -31,7 +31,7 @@ namespace leveldb {
         void SelectAvailableStoCsForCompaction(std::vector<uint32_t> *selected_storages, uint32_t nstocs);
 
         void ValidateReplicas(
-                const std::vector<leveldb::FileReplicaMetaData> &replicas);
+                const std::vector<leveldb::FileReplicaMetaData> &replicas, const leveldb::StoCBlockHandle& parity_block_handle);
 
         std::string ReplicaDebugString(
                 const std::vector<leveldb::FileReplicaMetaData> &replicas);
