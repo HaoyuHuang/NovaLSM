@@ -171,8 +171,10 @@ bool process_leveldb_get(NovaConnWorker *worker, Connection *conn,
   uint64_t hv = NovaConfig::keyhash(key.data(), key.size());
   Fragment *frag = NovaConfig::home_fragment(hv);
   rocksdb::DB *db = worker->dbs_[frag->dbid];
+  RDMA_ASSERT(db);
   std::string value;
   rocksdb::ReadOptions ro;
+  ro.verify_checksums = false;
   rocksdb::Status s = db->Get(ro, key, &value);
   RDMA_ASSERT(s.ok());
 
@@ -206,9 +208,8 @@ bool process_socket_get(int fd, Connection *conn, char *buf) {
   Fragment *frag = NovaConfig::home_fragment(hv);
   RDMA_LOG(DEBUG) << "memstore[" << worker->thread_id_ << "]: "
                   << " Get fd:" << fd << " key:" << int_key << " nkey:" << nkey
-                  << " hv:" << hv << " home:" << frag->server_ids[0]
+                  << " hv:" << hv << " home:" << frag->server_id
                   << " db:" << frag->dbid;
-  int home_server = frag->server_ids[0];
   worker->stats.nget_hits++;
 
   rocksdb::Slice key(buf, nkey);
@@ -244,9 +245,13 @@ bool process_socket_scan(int fd, Connection *conn, char *buf) {
   msg_size += cfg_size;
 
   while (read_records < nrecords && pivot_db_id < worker->dbs_.size()) {
-    rocksdb::Iterator *iterator =
-        worker->dbs_[pivot_db_id]->NewIterator(rocksdb::ReadOptions());
-    iterator->Seek(startkey);
+    if (!worker->dbs_[pivot_db_id]) {
+      break;
+    }
+    rocksdb::ReadOptions options;
+    options.verify_checksums = false;
+    rocksdb::Iterator *iterator = worker->dbs_[pivot_db_id]->NewIterator(options);
+    iterator->Seek(skey);
     while (iterator->Valid() && read_records < nrecords) {
       rocksdb::Slice key = iterator->key();
       rocksdb::Slice value = iterator->value();
@@ -254,10 +259,6 @@ bool process_socket_scan(int fd, Connection *conn, char *buf) {
       msg_size += key.size();
       msg_size += nint_to_str(value.size()) + 1;
       msg_size += value.size();
-      //                RDMA_LOG(INFO) << fmt::format("Scan key {} value:{}:{}",
-      //                                              key.ToString(),
-      //                                              value.size(),
-      //                                              value.data()[0]);
       response_buf += int_to_str(response_buf, key.size());
       memcpy(response_buf, key.data(), key.size());
       response_buf += key.size();
@@ -265,6 +266,9 @@ bool process_socket_scan(int fd, Connection *conn, char *buf) {
       memcpy(response_buf, value.data(), value.size());
       response_buf += value.size();
       read_records++;
+      if (read_records == nrecords) {
+        break;
+      }
       iterator->Next();
     }
     delete iterator;
@@ -307,6 +311,7 @@ bool process_socket_put(int fd, Connection *conn, char *buf) {
   option.disableWAL = true;
   option.sync = false;
   rocksdb::DB *db = worker->dbs_[frag->dbid];
+  RDMA_ASSERT(db);
   rocksdb::Status status = db->Put(option, dbkey, dbval);
   RDMA_LOG(DEBUG) << "############### Async worker processed task " << fd << ":"
                   << dbkey.ToString();
@@ -346,6 +351,9 @@ bool process_socket_stats_request(int fd, Connection *conn) {
   int num_l0_sstables = 0;
   bool needs_compaction = false;
   for (auto db : worker->dbs_) {
+    if (!db) {
+      continue;
+    }
     rocksdb::ColumnFamilyMetaData metadata;
     db->GetColumnFamilyMetaData(&metadata);
     std::string value;

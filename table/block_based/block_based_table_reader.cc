@@ -16,7 +16,6 @@
 #include <vector>
 
 #include "cache/sharded_cache.h"
-
 #include "db/dbformat.h"
 #include "db/pinned_iterators_manager.h"
 #include "file/file_prefetch_buffer.h"
@@ -24,6 +23,7 @@
 #include "file/random_access_file_reader.h"
 #include "monitoring/perf_context_imp.h"
 #include "options/options_helper.h"
+#include "port/lang.h"
 #include "rocksdb/cache.h"
 #include "rocksdb/comparator.h"
 #include "rocksdb/env.h"
@@ -54,9 +54,6 @@
 #include "table/persistent_cache_helper.h"
 #include "table/sst_file_writer_collectors.h"
 #include "table/two_level_iterator.h"
-
-#include "monitoring/perf_context_imp.h"
-#include "port/lang.h"
 #include "test_util/sync_point.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
@@ -76,9 +73,7 @@ typedef BlockBasedTable::IndexReader IndexReader;
 // experiments, for auto readahead. Experiment data is in PR #3282.
 const size_t BlockBasedTable::kMaxAutoReadaheadSize = 256 * 1024;
 
-BlockBasedTable::~BlockBasedTable() {
-  delete rep_;
-}
+BlockBasedTable::~BlockBasedTable() { delete rep_; }
 
 std::atomic<uint64_t> BlockBasedTable::next_cache_key_id_(0);
 
@@ -605,9 +600,8 @@ Status BlockBasedTable::Open(
   ro.io_timeout = read_options.io_timeout;
 
   // prefetch both index and filters, down to all partitions
-  const bool prefetch_all = prefetch_index_and_filter_in_cache || level == 0;
+  const bool prefetch_all = true;  // prefetch_index_and_filter_in_cache || level == 0;
   const bool preload_all = !table_options.cache_index_and_filter_blocks;
-
   if (!ioptions.allow_mmap_reads) {
     s = PrefetchTail(ro, file.get(), file_size, force_direct_prefetch,
                      tail_prefetch_stats, prefetch_all, preload_all,
@@ -987,9 +981,9 @@ Status BlockBasedTable::PrefetchIndexAndFilterBlocks(
   const bool use_cache = table_options.cache_index_and_filter_blocks;
 
   // pin both index and filters, down to all partitions.
-  const bool pin_all =
-      rep_->table_options.pin_l0_filter_and_index_blocks_in_cache &&
-      level == 0 && file_size <= max_file_size_for_l0_meta_pin;
+  const bool pin_all = true;
+  //      rep_->table_options.pin_l0_filter_and_index_blocks_in_cache &&
+  //      level == 0 && file_size <= max_file_size_for_l0_meta_pin;
 
   // prefetch the first level of index
   const bool prefetch_index =
@@ -2074,7 +2068,6 @@ bool BlockBasedTable::PrefixMayMatch(
 
   return may_match;
 }
-
 
 InternalIterator* BlockBasedTable::NewIterator(
     const ReadOptions& read_options, const SliceTransform* prefix_extractor,

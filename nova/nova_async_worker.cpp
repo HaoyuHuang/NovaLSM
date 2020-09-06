@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "logging.hpp"
+#include "logging/logging.h"
 #include "nova_common.h"
 #include "nova_config.h"
 
@@ -18,6 +19,7 @@ void NovaAsyncWorker::AddTask(const NovaAsyncTask &task) {
   mutex_.Lock();
   queue_.push_back(task);
   mutex_.Unlock();
+  sem_post(&sem_);
 }
 
 int NovaAsyncWorker::size() {
@@ -28,26 +30,59 @@ int NovaAsyncWorker::size() {
 }
 
 void NovaAsyncWorker::Drain(const NovaAsyncTask &task) {
+  RDMA_LOG(INFO) << "Drain memtables and SSTables at Level 0";
+  for (uint32_t i = 0; i < dbs_.size(); i++) {
+    if (!dbs_[i]) {
+      continue;
+    }
+    RDMA_LOG(rdmaio::INFO) << "Database " << i;
+    std::string value;
+    dbs_[i]->GetProperty("rocksdb.levelstats", &value);
+    RDMA_LOG(rdmaio::INFO) << "\n" << value;
+    value.clear();
+    dbs_[i]->GetProperty("leveldb.stats", &value);
+    RDMA_LOG(rdmaio::INFO) << "\n"
+                           << "rocksdb stats " << value;
+  }
+
   std::vector<rocksdb::Options> options;
   for (const auto &db : task.dbs) {
+    if (!db) {
+      continue;
+    }
     options.push_back(db->GetOptions());
     std::unordered_map<std::string, std::string> new_options;
     new_options["level0_file_num_compaction_trigger"] = "0";
     db->SetOptions(new_options);
+
+    ROCKS_LOG_INFO(db->GetOptions().info_log, "%s", "Update options");
+    db->GetOptions().Dump(db->GetOptions().info_log.get());
+
     rocksdb::FlushOptions fo;
     fo.wait = true;
-    fo.allow_write_stall = true;
-    db->Flush(fo);
+    fo.allow_write_stall = false;
+    rocksdb::Status s = db->Flush(fo);
+    RDMA_ASSERT(s.ok()) << s.ToString();
   }
 
   while (true) {
     bool stop = true;
     for (auto &db : task.dbs) {
+      if (!db) {
+        continue;
+      }
       rocksdb::ColumnFamilyMetaData metadata;
       db->GetColumnFamilyMetaData(&metadata);
       uint64_t bytes = metadata.levels[0].size;
-      if (bytes > 0) {
-        RDMA_LOG(INFO) << fmt::format("Waiting for {} bytes at L0", bytes);
+      std::string value;
+      bool need_compaction = false;
+      RDMA_ASSERT(db->GetProperty("rocksdb.compaction-pending", &value));
+      if (std::stoi(value) == 1) {
+        need_compaction = true;
+      }
+      if (bytes > 0 || need_compaction) {
+        RDMA_LOG(INFO) << fmt::format("Waiting for {} bytes at L0. {}", bytes,
+                                      need_compaction);
         stop = false;
       }
     }
@@ -57,16 +92,22 @@ void NovaAsyncWorker::Drain(const NovaAsyncTask &task) {
     sleep(1);
   }
   for (uint32_t i = 0; i < task.dbs.size(); i++) {
+    if (!task.dbs[i]) {
+      continue;
+    }
     std::unordered_map<std::string, std::string> new_options;
     new_options["level0_file_num_compaction_trigger"] =
         std::to_string(options[i].level0_file_num_compaction_trigger);
     task.dbs[i]->SetOptions(new_options);
     RDMA_LOG(rdmaio::INFO) << "Database " << i;
+    ROCKS_LOG_INFO(dbs_[i]->GetOptions().info_log, "%s",
+                   "Revert to original options");
+    dbs_[i]->GetOptions().Dump(dbs_[i]->GetOptions().info_log.get());
     std::string value;
     dbs_[i]->GetProperty("rocksdb.levelstats", &value);
     RDMA_LOG(rdmaio::INFO) << "\n" << value;
     value.clear();
-    dbs_[i]->GetProperty("leveldb.stats", &value);
+    dbs_[i]->GetProperty("rocksdb.stats", &value);
     RDMA_LOG(rdmaio::INFO) << "\n"
                            << "rocksdb stats " << value;
   }
@@ -105,15 +146,10 @@ bool NovaAsyncWorker::IsInitialized() {
 
 void NovaAsyncWorker::Start() {
   RDMA_LOG(rdmaio::INFO) << "Async worker started";
-
-  RDMA_LOG(rdmaio::INFO) << "Async worker connected to other servers";
-
   mutex_.Lock();
   is_running_ = true;
   mutex_.Unlock();
 
-  bool should_sleep = true;
-  uint32_t timeout = RDMA_POLL_MIN_TIMEOUT_US;
   while (is_running_) {
     sem_wait(&sem_);
     ProcessQueue();

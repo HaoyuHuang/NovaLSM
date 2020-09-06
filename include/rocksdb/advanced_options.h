@@ -537,6 +537,7 @@ struct AdvancedColumnFamilyOptions {
   //
   // Dynamically changeable through SetOptions() API
   uint64_t max_compaction_bytes = 0;
+  
 
   // All writes will be slowed down to at least delayed_write_rate if estimated
   // bytes needed to be compaction exceed this threshold.

@@ -811,7 +811,7 @@ set(NOVA_SOURCES
         nova/nova_async_worker.h
         nova/nova_common.cpp
         nova/nova_common.h
-        nova/nova_config.h)
+        nova/nova_config.h nova/db_stats.cpp nova/db_stats.h)
 
 if(HAVE_SSE42 AND NOT MSVC)
   set_source_files_properties(
@@ -923,7 +923,7 @@ endif()
 
 option(WITH_JNI "build with JNI" OFF)
 # Tests are excluded from Release builds
-CMAKE_DEPENDENT_OPTION(WITH_TESTS "build with tests" ON
+CMAKE_DEPENDENT_OPTION(WITH_TESTS "build with tests" OFF
   "CMAKE_BUILD_TYPE STREQUAL Debug" OFF)
 option(WITH_BENCHMARK_TOOLS "build with benchmarks" OFF)
 option(WITH_CORE_TOOLS "build with ldb and sst_dump" OFF)
@@ -1256,9 +1256,9 @@ endif()
 
 add_library(libnova STATIC ${NOVA_SOURCES})
 set_target_properties(libnova PROPERTIES LINKER_LANGUAGE CXX)
-target_link_libraries(libnova -lpthread event ${ROCKSDB_LIB} fmt)
+target_link_libraries(libnova -lpthread event ${ROCKSDB_STATIC_LIB} fmt)
 add_executable(rocksdb_main "nova/rocksdb_main.cpp")
-target_link_libraries(rocksdb_main libnova ${ROCKSDB_LIB} -lgflags fmt)
+target_link_libraries(rocksdb_main libnova ${ROCKSDB_STATIC_LIB} -lgflags fmt)
 #
 if(WITH_BENCHMARK_TOOLS)
   add_executable(db_bench

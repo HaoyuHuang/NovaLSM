@@ -67,7 +67,7 @@ class BlockBasedTable : public TableReader {
   // Found that 256 KB readahead size provides the best performance, based on
   // experiments, for auto readahead. Experiment data is in PR #3282.
   static const size_t kMaxAutoReadaheadSize;
-  static const int kMinNumFileReadsToStartAutoReadahead = 2;
+  static const int kMinNumFileReadsToStartAutoReadahead = 10000000;
 
   // Attempt to open the table that is stored in bytes [0..file_size)
   // of "file", and read the metadata entries necessary to allow

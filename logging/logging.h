@@ -34,7 +34,7 @@ inline const char* RocksLogShorterFileName(const char* file)
                          RocksLogShorterFileName(__FILE__), ##__VA_ARGS__)
 
 #define ROCKS_LOG_INFO(LGR, FMT, ...)                      \
-  ROCKSDB_NAMESPACE::Log(InfoLogLevel::INFO_LEVEL, LGR,    \
+  ROCKSDB_NAMESPACE::Log(ROCKSDB_NAMESPACE::InfoLogLevel::INFO_LEVEL, LGR,    \
                          ROCKS_LOG_PREPEND_FILE_LINE(FMT), \
                          RocksLogShorterFileName(__FILE__), ##__VA_ARGS__)
 

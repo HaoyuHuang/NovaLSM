@@ -8,12 +8,12 @@
 #define RLIB_NOVA_MEM_CONFIG_H
 
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <string>
-#include <set>
 
-#include "rocksdb/options.h"
 #include "nova_common.h"
+#include "rocksdb/options.h"
 
 namespace nova {
 using namespace std;
@@ -25,7 +25,7 @@ struct Fragment {
   // for range partition only.
   uint64_t key_start;
   uint64_t key_end;
-  std::vector<uint32_t> server_ids;
+  uint32_t server_id;
   uint32_t dbid;
 };
 
@@ -59,8 +59,8 @@ class NovaConfig {
         else
           r = m - 1;
       }
-      RDMA_ASSERT(home->server_ids[0] == config->my_server_id)
-          << key << ":" << ToString(home->server_ids) << ":"
+      RDMA_ASSERT(home->server_id == config->my_server_id)
+          << key << ":" << home->server_id << ":"
           << config->my_server_id;
       return home;
     }
@@ -70,13 +70,13 @@ class NovaConfig {
   int ParseNumberOfDatabases(uint32_t server_id) {
     std::set<uint32_t> ndbs;
     for (uint32_t i = 0; i < nfragments; i++) {
-      if (fragments[i]->server_ids[0] == server_id) {
+      if (fragments[i]->server_id == server_id) {
         ndbs.insert(fragments[i]->dbid);
       }
     }
     db_fragment = (Fragment **)malloc(ndbs.size() * sizeof(Fragment *));
     for (uint32_t i = 0; i < nfragments; i++) {
-      if (fragments[i]->server_ids[0] == server_id) {
+      if (fragments[i]->server_id == server_id) {
         db_fragment[fragments[i]->dbid] = fragments[i];
       }
     }
@@ -103,12 +103,12 @@ class NovaConfig {
       std::vector<std::string> tokens = SplitByDelimiter(&line, ",");
       frag->key_start = std::stoi(tokens[0]);
       frag->key_end = std::stoi(tokens[1]);
+      frag->server_id = std::stoi(tokens[2]);
       frag->dbid = std::stoi(tokens[3]);
-
-      int nreplicas = (tokens.size() - 4);
-      for (int i = 0; i < nreplicas; i++) {
-        frag->server_ids.push_back(std::stoi(tokens[i + 4]));
-      }
+      //      int nreplicas = (tokens.size() - 4);
+      //      for (int i = 0; i < nreplicas; i++) {
+      //        frag->server_ids.push_back(std::stoi(tokens[i + 4]));
+      //      }
       frags.push_back(frag);
     }
     nfragments = static_cast<uint32_t>(frags.size());
@@ -120,15 +120,12 @@ class NovaConfig {
                    << " fragments.";
     for (uint32_t i = 0; i < nfragments; i++) {
       RDMA_LOG(INFO) << "frag[" << i << "]: " << fragments[i]->key_start << "-"
-                     << fragments[i]->key_end << "-"
-                     << ToString(fragments[i]->server_ids) << "-"
-                     << fragments[i]->dbid;
+                     << fragments[i]->key_end << "-" << fragments[i]->server_id
+                     << "-" << fragments[i]->dbid;
     }
   }
 
-  string to_string() {
-    return "";
-  }
+  string to_string() { return ""; }
 
   bool enable_load_data;
   uint64_t l0_start_compaction_bytes;

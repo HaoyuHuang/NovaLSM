@@ -40,6 +40,7 @@ DEFINE_uint64(max_msg_size, 0, "Maximum message size");
 DEFINE_uint32(num_async_workers, 0, "Number of async worker threads.");
 DEFINE_uint32(num_compaction_workers, 0,
               "Number of compaction worker threads.");
+DEFINE_uint32(num_max_subcompactions, 1, "");
 DEFINE_string(profiler_file_path, "", "profiler file path.");
 DEFINE_string(servers, "localhost:11211", "A list of peer servers");
 DEFINE_int64(server_id, -1, "Server id.");
@@ -56,6 +57,7 @@ DEFINE_string(config_path, "/tmp/uniform-3-32-10000000-frags.txt",
 DEFINE_uint32(l0_start_compaction_mb, 0, "");
 DEFINE_uint32(l0_stop_write_mb, 0, "");
 DEFINE_int32(level, 0, "");
+DEFINE_double(size_ratio, 3.4, "");
 
 namespace {
 class YCSBKeyComparator : public rocksdb::Comparator {
@@ -110,17 +112,23 @@ rocksdb::DB *CreateDatabase(int sid, int db_index) {
   rocksdb::DB *db = nullptr;
   rocksdb::Options options;
   // Optimize RocksDB. This is the easiest way to get RocksDB to perform well
-  options.IncreaseParallelism();
+  //  options.IncreaseParallelism();
   // create the DB if it's not already present
+  options.max_background_jobs = FLAGS_num_compaction_workers;
+  options.max_subcompactions = FLAGS_num_max_subcompactions;
+  options.env->SetBackgroundThreads(FLAGS_num_compaction_workers,
+                                    rocksdb::Env::LOW);
+  options.env->SetBackgroundThreads(FLAGS_num_compaction_workers,
+                                    rocksdb::Env::HIGH);
   options.create_if_missing = true;
   options.min_write_buffer_number_to_merge = 1;
   options.max_write_buffer_number = FLAGS_num_memtables;
   options.target_file_size_base = FLAGS_write_buffer_size_mb * 1024 * 1024;
   options.target_file_size_multiplier = 1;
-  options.max_bytes_for_level_base =
-      FLAGS_write_buffer_size_mb * 1024 * 1024 * FLAGS_num_memtables;
-  options.max_bytes_for_level_multiplier = 3.4;
+  options.max_open_files = -1;
+  options.max_bytes_for_level_multiplier = FLAGS_size_ratio;
   options.compaction_style = rocksdb::kCompactionStyleLevel;
+  options.compaction_readahead_size = 4 * 1024 * 1024;
   // open DB
   std::string db_path = DBName(NovaConfig::config->db_path, sid, db_index);
   _mkdir(db_path.c_str());
@@ -128,6 +136,16 @@ rocksdb::DB *CreateDatabase(int sid, int db_index) {
   options.write_buffer_size = FLAGS_write_buffer_size_mb * 1024 * 1024;
   options.compression = rocksdb::CompressionType::kNoCompression;
   rocksdb::BlockBasedTableOptions table_options;
+  table_options.enable_index_compression = false;
+  table_options.no_block_cache = true;
+//  auto frag = nova::NovaConfig::config->fragments[db_index];
+//  uint64_t capacity = (frag->key_end - frag->key_start) * 1024 / 16;
+//  RDMA_LOG(rdmaio::INFO) << "Block cache capacity " << capacity;
+//  table_options.block_cache = rocksdb::NewLRUCache(capacity, 0);
+//  table_options.cache_index_and_filter_blocks = true;
+//  table_options.cache_index_and_filter_blocks_with_high_priority = true;
+//  table_options.pin_l0_filter_and_index_blocks_in_cache = true;
+//  table_options.pin_top_level_index_and_filter = true;
   table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10, false));
   options.table_factory.reset(
       rocksdb::NewBlockBasedTableFactory(table_options));
@@ -136,7 +154,10 @@ rocksdb::DB *CreateDatabase(int sid, int db_index) {
   options.level0_stop_writes_trigger =
       FLAGS_l0_stop_write_mb / FLAGS_write_buffer_size_mb;
   options.level0_slowdown_writes_trigger = -1;
+  options.max_bytes_for_level_base =
+      FLAGS_l0_start_compaction_mb * FLAGS_size_ratio * 1024 * 1024;
   options.num_levels = FLAGS_level;
+  options.stats_dump_period_sec = 0;
   options.comparator = new YCSBKeyComparator();
   RDMA_ASSERT(rocksdb::Env::Default()
                   ->NewLogger(db_path + "/LOG-" + std::to_string(db_index),
@@ -144,6 +165,9 @@ rocksdb::DB *CreateDatabase(int sid, int db_index) {
                   .ok());
   rocksdb::Status status = rocksdb::DB::Open(options, db_path, &db);
   RDMA_ASSERT(status.ok()) << "Open leveldb failed " << status.ToString();
+
+  ROCKS_LOG_INFO(db->GetOptions().info_log, "%s", "RocksDB options");
+  db->GetOptions().Dump(db->GetOptions().info_log.get());
   return db;
 }
 
@@ -203,11 +227,14 @@ int main(int argc, char *argv[]) {
   memset(buf, 0, ntotal);
   RDMA_ASSERT(buf != NULL) << "Not enough memory";
 
-  int ndbs = NovaConfig::config->ParseNumberOfDatabases(
-      NovaConfig::config->my_server_id);
   std::vector<rocksdb::DB *> dbs;
-
-  for (int db_index = 0; db_index < ndbs; db_index++) {
+  for (uint32_t db_index = 0; db_index < NovaConfig::config->nfragments;
+       db_index++) {
+    if (NovaConfig::config->fragments[db_index]->server_id !=
+        NovaConfig::config->my_server_id) {
+      dbs.push_back(nullptr);
+      continue;
+    }
     dbs.push_back(CreateDatabase(NovaConfig::config->my_server_id, db_index));
   }
   int port = NovaConfig::config->servers[NovaConfig::config->my_server_id].port;

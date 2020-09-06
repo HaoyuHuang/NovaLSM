@@ -1414,34 +1414,34 @@ Status DBImpl::DelayWrite(uint64_t num_bytes,
   {
     StopWatch sw(env_, stats_, WRITE_STALL, &time_delayed);
     uint64_t delay = write_controller_.GetDelay(env_, num_bytes);
-    if (delay > 0) {
-      if (write_options.no_slowdown) {
-        return Status::Incomplete("Write stall");
-      }
-      TEST_SYNC_POINT("DBImpl::DelayWrite:Sleep");
+//    if (delay > 0) {
+//      if (write_options.no_slowdown) {
+//        return Status::Incomplete("Write stall");
+//      }
+//      TEST_SYNC_POINT("DBImpl::DelayWrite:Sleep");
 
       // Notify write_thread_ about the stall so it can setup a barrier and
       // fail any pending writers with no_slowdown
-      write_thread_.BeginWriteStall();
-      TEST_SYNC_POINT("DBImpl::DelayWrite:BeginWriteStallDone");
-      mutex_.Unlock();
+//      write_thread_.BeginWriteStall();
+//      TEST_SYNC_POINT("DBImpl::DelayWrite:BeginWriteStallDone");
+//      mutex_.Unlock();
       // We will delay the write until we have slept for delay ms or
       // we don't need a delay anymore
-      const uint64_t kDelayInterval = 1000;
-      uint64_t stall_end = sw.start_time() + delay;
-      while (write_controller_.NeedsDelay()) {
-        if (env_->NowMicros() >= stall_end) {
-          // We already delayed this write `delay` microseconds
-          break;
-        }
-
-        delayed = true;
-        // Sleep for 0.001 seconds
-        env_->SleepForMicroseconds(kDelayInterval);
-      }
-      mutex_.Lock();
-      write_thread_.EndWriteStall();
-    }
+//      const uint64_t kDelayInterval = 1000;
+//      uint64_t stall_end = sw.start_time() + delay;
+//      while (write_controller_.NeedsDelay()) {
+//        if (env_->NowMicros() >= stall_end) {
+//          // We already delayed this write `delay` microseconds
+//          break;
+//        }
+//
+//        delayed = true;
+//        // Sleep for 0.001 seconds
+//        env_->SleepForMicroseconds(kDelayInterval);
+//      }
+//      mutex_.Lock();
+//      write_thread_.EndWriteStall();
+//    }
 
     // Don't wait if there's a background error, even if its a soft error. We
     // might wait here indefinitely as the background compaction may never
