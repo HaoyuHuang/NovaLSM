@@ -628,7 +628,7 @@ namespace leveldb {
 //            client->InitiateQueryLogFile(stoc_server_id,
 //                                         rdma::NovaConfig::config->my_server_id,
 //                                         dbid_, &logfile_buf);
-//            client->Wait();
+//            client->Wait();UpdateFileMetaReplicaLocations
 //        }
         for (auto &it : logfile_buf) {
             NOVA_LOG(rdmaio::INFO) << fmt::format("log file {}:{}", it.first, it.second);
@@ -661,7 +661,8 @@ namespace leveldb {
                     }
                 } else {
                     for (int replica_id = 0; replica_id < meta->block_replica_handles.size(); replica_id++) {
-                        std::string filename = TableFileName(dbname_, meta->number, FileInternalType::kFileData, replica_id);
+                        std::string filename = TableFileName(dbname_, meta->number, FileInternalType::kFileData,
+                                                             replica_id);
                         for (auto &data_block : meta->block_replica_handles[replica_id].data_block_group_handles) {
                             stoc_fn_stocfileid[data_block.server_id][filename] = data_block.stoc_file_id;
                         }
@@ -1494,7 +1495,8 @@ namespace leveldb {
                 ObtainObsoleteFiles(bg_thread,
                                     &files_to_delete, &server_pairs, 0);
             }
-            if (nova::NovaConfig::config->cfgs.size() == 1 && !compacted_tables_.empty()) {
+            if (nova::NovaConfig::config->log_record_mode == nova::NovaLogRecordMode::LOG_NONE &&
+                !compacted_tables_.empty()) {
                 ScheduleFileDeletionTask(bg_thread->thread_id());
             }
             mutex_.Unlock();

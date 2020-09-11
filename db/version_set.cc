@@ -1118,9 +1118,10 @@ namespace leveldb {
                 env_->DeleteFile(fname);
                 auto new_meta = v->fn_files_.find(file.second.number);
                 NOVA_LOG(rdmaio::INFO)
-                    << fmt::format("db[{}]: Update table cache {}", dbname_, file.second.DebugString());
+                    << fmt::format("db[{}]: Update table cache new:{}", dbname_, file.second.DebugString());
                 NOVA_ASSERT(new_meta != v->fn_files_.end());
                 Cache::Handle *handle = nullptr;
+                table_cache_->Evict(file.second.number, false);
                 Status s = table_cache_->FindTable(AccessCaller::kUserGet, options, new_meta->second,
                                                    new_meta->second->number, 0, new_meta->second->converted_file_size,
                                                    file.first, &handle, true);

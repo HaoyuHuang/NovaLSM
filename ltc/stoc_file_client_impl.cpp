@@ -738,7 +738,7 @@ namespace leveldb {
         {
             auto metafile = TableFileName(dbname, file_number, FileInternalType::kFileData, replica_id);
             if (!env_->FileExists(metafile)) {
-                NOVA_LOG(rdmaio::DEBUG)
+                NOVA_LOG(rdmaio::INFO)
                     << fmt::format("Fetch missing metadata db:{} fd:{} file {}", dbname, file_number,
                                    meta->DebugString());
                 std::vector<const FileMetaData *> files;

@@ -99,18 +99,10 @@ namespace leveldb {
             NOVA_ASSERT(s.ok())
                 << fmt::format("file:{} status:{}", meta->DebugString(),
                                s.ToString());
-
-            if (!s.ok()) {
-                assert(table == nullptr);
-                delete file;
-                // We do not cache error results so that if the error is transient,
-                // or somebody repairs the file, we recover automatically.
-            } else {
-                TableAndFile *tf = new TableAndFile;
-                tf->file = file;
-                tf->table = table;
-                *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
-            }
+            TableAndFile *tf = new TableAndFile;
+            tf->file = file;
+            tf->table = table;
+            *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
             return s;
         }
 
@@ -150,18 +142,10 @@ namespace leveldb {
             NOVA_ASSERT(s.ok())
                 << fmt::format("file:{} status:{}", meta->DebugString(),
                                s.ToString());
-
-            if (!s.ok()) {
-                assert(table == nullptr);
-                delete file;
-                // We do not cache error results so that if the error is transient,
-                // or somebody repairs the file, we recover automatically.
-            } else {
-                TableAndFile *tf = new TableAndFile;
-                tf->file = file;
-                tf->table = table;
-                *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
-            }
+            TableAndFile *tf = new TableAndFile;
+            tf->file = file;
+            tf->table = table;
+            *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
         }
         NOVA_LOG(rdmaio::DEBUG)
             << fmt::format("table cache hit {} fn:{} cs:{} ltc:{}", cache_hit,

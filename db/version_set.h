@@ -31,7 +31,7 @@
 
 // Maintain this many live memtables.
 // The program exits when the number of memtables exceeds this threshold.
-#define MAX_LIVE_MEMTABLES 1000000
+#define MAX_LIVE_MEMTABLES 100000
 
 namespace leveldb {
 

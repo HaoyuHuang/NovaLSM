@@ -209,6 +209,14 @@ namespace leveldb {
         Slice input = index_value;
         Status s;
         stoc_block_handle.DecodeHandle(input.data());
+        // One replica with one data fragment.
+        // Overwrite with latest server id and stoc file id.
+        if (table->rep_->meta->block_replica_handles.size() == 1 &&
+            table->rep_->meta->block_replica_handles[0].data_block_group_handles.size() == 1) {
+            stoc_block_handle.server_id = table->rep_->meta->block_replica_handles[0].data_block_group_handles[0].server_id;
+            stoc_block_handle.stoc_file_id = table->rep_->meta->block_replica_handles[0].data_block_group_handles[0].stoc_file_id;
+        }
+
         // We intentionally allow extra stuff in index_value so that we
         // can add more features in the future.
         bool cache_hit = false;
@@ -313,6 +321,9 @@ namespace leveldb {
     }
 
     uint64_t Table::TranslateToDataBlockOffset(const leveldb::StoCBlockHandle &handle) {
+        if (rep_->stoc_file_data_relative_offset.size() == 1) {
+            return handle.offset;
+        }
         uint64_t sid = handle.server_id;
         uint64_t id = (sid << 32) | handle.stoc_file_id;
         auto it = rep_->stoc_file_data_relative_offset.find(id);

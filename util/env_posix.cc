@@ -434,7 +434,6 @@ namespace leveldb {
     }
 
     void PosixLockTable::Lock(const std::string &fname, uint64_t fd) {
-//        NOVA_LOG(rdmaio::INFO) << fmt::format("!!!!!!!!!Lock {}:{}", fname, fd);
         PosixFileLock *lock = nullptr;
         mu_.Lock();
         auto pair = fd_lock_.find(fd);
