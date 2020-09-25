@@ -277,20 +277,16 @@ namespace leveldb {
         std::vector<SubRange> &subranges = latest_->subranges;
         // Perform major reorg.
         std::vector<std::vector<AtomicMemTable *>> subrange_imms;
-        uint32_t nslots = options_.num_memtables /
-                          options_.num_memtable_partitions;
-        uint32_t remainder = options_.num_memtables %
-                             options_.num_memtable_partitions;
+        uint32_t nslots = options_.num_memtables / options_.num_memtable_partitions;
+        uint32_t remainder = options_.num_memtables % options_.num_memtable_partitions;
         uint32_t slot_id = 0;
         for (int i = 0; i < options_.num_memtable_partitions; i++) {
             std::vector<AtomicMemTable *> memtables;
             (*partitioned_active_memtables_)[i]->mutex.Lock();
             MemTable *m = (*partitioned_active_memtables_)[i]->active_memtable;
             if (m) {
-                NOVA_ASSERT(
-                        versions_->mid_table_mapping_[m->memtableid()]->RefMemTable());
-                memtables.push_back(
-                        versions_->mid_table_mapping_[m->memtableid()]);
+                NOVA_ASSERT(versions_->mid_table_mapping_[m->memtableid()]->RefMemTable());
+                memtables.push_back(versions_->mid_table_mapping_[m->memtableid()]);
             }
             uint32_t slots = nslots;
             if (remainder > 0) {
@@ -321,22 +317,19 @@ namespace leveldb {
             uint32_t nputs = 0;
             std::vector<uint32_t> ns;
             for (int j = 0; j < subrange_imms[i].size(); j++) {
-                uint32_t n = subrange_imms[i][j]->nentries_.load(
-                        std::memory_order_relaxed);
+                uint32_t n = subrange_imms[i][j]->nentries_.load(std::memory_order_relaxed);
                 ns.push_back(n);
                 nputs += n;
             }
             subrange_mem_nputs.push_back(ns);
             subrange_nputs.push_back(nputs);
             if (nputs > 100) {
-                sample_size_per_subrange = std::min(sample_size_per_subrange,
-                                                    nputs);
+                sample_size_per_subrange = std::min(sample_size_per_subrange, nputs);
             }
         }
 
         // Sample from each memtable.
-        sample_size_per_subrange = (double) (sample_size_per_subrange) *
-                                   options_.subrange_reorg_sampling_ratio;
+        sample_size_per_subrange = (double) (sample_size_per_subrange) * options_.subrange_reorg_sampling_ratio;
         std::map<uint64_t, double> userkey_rate;
         double total_rate = 0;
         for (int i = 0; i < subrange_imms.size(); i++) {
@@ -351,14 +344,11 @@ namespace leveldb {
                     // sample everything.
                     sample_size = sample_size_per_subrange;
                 } else {
-                    sample_size = ((double) subrange_mem_nputs[i][j] /
-                                   (double) total_puts) *
-                                  sample_size_per_subrange;
+                    sample_size = ((double) subrange_mem_nputs[i][j] / (double) total_puts) * sample_size_per_subrange;
                 }
                 uint32_t samples = 0;
                 leveldb::Iterator *it = mem->memtable_->NewIterator(
-                        TraceType::MEMTABLE, AccessCaller::kUncategorized,
-                        sample_size);
+                        TraceType::MEMTABLE, AccessCaller::kUncategorized, sample_size);
                 it->SeekToFirst();
                 while (it->Valid() && samples < sample_size) {
                     Slice userkey = ExtractUserKey(it->key());
@@ -833,49 +823,18 @@ namespace leveldb {
                 }
 
                 if (stopWhenBelowFair) {
-//                    if (first.prior_subrange_id == left) {
-//                        // the left pushed this tiny range to me in the
-//                        // last reorg.
-//                        if (right_ratio != 1.0) {
-//                            push_left = false;
-//                        } else {
-//                            // I cannot push anything to the right.
-//                        }
-//                    }
-//                    if (last.prior_subrange_id == right) {
-//                        // the right pushed this tiny range to me in the
-//                        // last reorg.
-//                        if (left_ratio != 1.0) {
-//                            push_left = true;
-//                        } else {
-//                            // I cannot push anything to the left.
-//                        }
-//                    }
                     if (push_left) {
                         if (min_sr->insertion_ratio
                             - first.insertion_ratio < fair_ratio_ &&
                             moved > 0) {
                             return moved;
                         }
-//                        *updated_prior = true;
-//                        if (first.prior_subrange_id == left) {
-//                            first.prior_subrange_id = -1;
-//                            return moved;
-//
-//                        }
-//                        first.prior_subrange_id = subrangeId;
                     } else {
                         if (min_sr->insertion_ratio - last.insertion_ratio <
                             fair_ratio_
                             && moved > 0) {
                             return moved;
                         }
-//                        *updated_prior = true;
-//                        if (last.prior_subrange_id == right) {
-//                            last.prior_subrange_id = -1;
-//                            return moved;
-//                        }
-//                        last.prior_subrange_id = subrangeId;
                     }
                 }
 
@@ -896,8 +855,7 @@ namespace leveldb {
                     right_sr->ninserts += last.ninserts;
                     min_sr->insertion_ratio -= last.insertion_ratio;
                     min_sr->ninserts -= last.ninserts;
-                    right_sr->tiny_ranges.insert(right_sr->tiny_ranges.begin(),
-                                                 std::move(last));
+                    right_sr->tiny_ranges.insert(right_sr->tiny_ranges.begin(), std::move(last));
                     min_sr->tiny_ranges.resize(min_sr->tiny_ranges.size() - 1);
                 }
                 moved++;
@@ -916,8 +874,7 @@ namespace leveldb {
         uint32_t unfair_ranges = 0;
         for (int i = 0; i < sr.tiny_ranges.size(); i++) {
             Range &r = sr.tiny_ranges[i];
-            double diff =
-                    (r.insertion_ratio - fair) * 100.0 / fair;
+            double diff = (r.insertion_ratio - fair) * 100.0 / fair;
             if (std::abs(diff) > SUBRANGE_REORG_DIFF_FROM_FAIR_THRESHOLD) {
                 unfair_ranges += 1;
             }
@@ -927,10 +884,8 @@ namespace leveldb {
             SUBRANGE_MAJOR_REORG_THRESHOLD) {
             // higher share.
             // Perform major reorg.
-            uint32_t nslots = options_.num_memtables /
-                              options_.num_memtable_partitions;
-            uint32_t remainder = options_.num_memtables %
-                                 options_.num_memtable_partitions;
+            uint32_t nslots = options_.num_memtables / options_.num_memtable_partitions;
+            uint32_t remainder = options_.num_memtables % options_.num_memtable_partitions;
             uint32_t slot_id = 0;
             uint32_t slots = 0;
             for (int i = 0; i < subrange_id; i++) {
@@ -948,10 +903,8 @@ namespace leveldb {
             (*partitioned_active_memtables_)[subrange_id]->mutex.Lock();
             MemTable *m = (*partitioned_active_memtables_)[subrange_id]->active_memtable;
             if (m) {
-                NOVA_ASSERT(
-                        versions_->mid_table_mapping_[m->memtableid()]->RefMemTable());
-                subrange_imms.push_back(
-                        versions_->mid_table_mapping_[m->memtableid()]);
+                NOVA_ASSERT(versions_->mid_table_mapping_[m->memtableid()]->RefMemTable());
+                subrange_imms.push_back(versions_->mid_table_mapping_[m->memtableid()]);
             }
             for (int j = 0; j < slots; j++) {
                 NOVA_ASSERT(slot_id + j < (*partitioned_imms_).size());
@@ -961,8 +914,7 @@ namespace leveldb {
                 }
                 auto *imm = versions_->mid_table_mapping_[imm_id]->RefMemTable();
                 if (imm) {
-                    subrange_imms.push_back(
-                            versions_->mid_table_mapping_[imm_id]);
+                    subrange_imms.push_back(versions_->mid_table_mapping_[imm_id]);
                 }
             }
             (*partitioned_active_memtables_)[subrange_id]->mutex.Unlock();
@@ -971,8 +923,7 @@ namespace leveldb {
             double total_accesses = 0;
             for (int i = 0; i < subrange_imms.size(); i++) {
                 AtomicMemTable *mem = subrange_imms[i];
-                Iterator *it = mem->memtable_->NewIterator(
-                        MEMTABLE, kUncategorized, 0);
+                Iterator *it = mem->memtable_->NewIterator(MEMTABLE, kUncategorized, 0);
                 it->SeekToFirst();
                 while (it->Valid()) {
                     Slice uk = ExtractUserKey(it->key());
@@ -1003,8 +954,7 @@ namespace leveldb {
                 ConstructRanges(userkey_freq, total_accesses,
                                 sr.first().lower_int(),
                                 sr.last().upper_int(),
-                                options_.num_tiny_ranges_per_subrange, false,
-                                &ranges);
+                                options_.num_tiny_ranges_per_subrange, false, &ranges);
                 for (auto &range : ranges) {
                     range.ninserts = range.insertion_ratio * sr.ninserts;
                 }
@@ -1012,8 +962,7 @@ namespace leveldb {
                 sr.tiny_ranges = ranges;
                 sr.UpdateStats(total_num_inserts_since_last_major_);
                 NOVA_LOG(rdmaio::INFO)
-                    << fmt::format("Minor sampling {} {}", total_accesses,
-                                   sr.DebugString());
+                    << fmt::format("Minor sampling {} {}", total_accesses, sr.DebugString());
             }
         }
         return subrange_imms;
@@ -1022,8 +971,7 @@ namespace leveldb {
     bool
     SubRangeManager::MinorRebalancePush(int subrange_id, bool *updated_prior) {
         SubRange &sr = latest_->subranges[subrange_id];
-        double totalRemoveInserts = (sr.insertion_ratio - fair_ratio_)
-                                    * total_num_inserts_since_last_major_;
+        double totalRemoveInserts = (sr.insertion_ratio - fair_ratio_) * total_num_inserts_since_last_major_;
 
         if (totalRemoveInserts >= sr.ninserts) {
             return false;
@@ -1032,16 +980,12 @@ namespace leveldb {
         if (sr.tiny_ranges.size() == 1) {
             return false;
         }
-
         NOVA_ASSERT(sr.insertion_ratio > fair_ratio_);
-
         if (options_.enable_detailed_stats) {
             NOVA_LOG(rdmaio::INFO)
-                << fmt::format("{} push minor before {}", subrange_id,
-                               sr.DebugString());
+                << fmt::format("{} push minor before {}", subrange_id, sr.DebugString());
         }
-        std::vector<AtomicMemTable *> subrange_imms = MinorSampling(
-                subrange_id);
+        std::vector<AtomicMemTable *> subrange_imms = MinorSampling(subrange_id);
         // Distribute the load across adjacent subranges.
         bool success = PushTinyRanges(subrange_id, true, updated_prior) > 0;
         // push tiny ranges.
@@ -1049,8 +993,7 @@ namespace leveldb {
             num_minor_reorgs++;
             if (options_.enable_detailed_stats) {
                 NOVA_LOG(rdmaio::INFO)
-                    << fmt::format("{} push minor after {}", subrange_id,
-                                   sr.DebugString());
+                    << fmt::format("{} push minor after {}", subrange_id, sr.DebugString());
             }
         }
         // Unref all immutable memtables.
@@ -1097,16 +1040,12 @@ namespace leveldb {
         for (int i = 0; i < subranges.size(); i++) {
             SubRange &sr = subranges[i];
             for (int j = 0; j < sr.tiny_ranges.size(); j++) {
-                sr.tiny_ranges[j].insertion_ratio =
-                        sr.tiny_ranges[j].ninserts /
-                        total_num_inserts_since_last_major_;
+                sr.tiny_ranges[j].insertion_ratio = sr.tiny_ranges[j].ninserts / total_num_inserts_since_last_major_;
             }
-            sr.insertion_ratio =
-                    sr.ninserts / total_num_inserts_since_last_major_;
+            sr.insertion_ratio = sr.ninserts / total_num_inserts_since_last_major_;
         }
 
-        if (latest_seq_number - last_minor_reorg_seq_ >
-            SUBRANGE_MINOR_REORG_INTERVAL) {
+        if (latest_seq_number - last_minor_reorg_seq_ > SUBRANGE_MINOR_REORG_INTERVAL) {
             int pivot = 0;
             bool success = false;
             while (pivot < subranges.size()) {
@@ -1141,16 +1080,13 @@ namespace leveldb {
         int most_unfair_subrange = -1;
         for (int i = 0; i < subranges.size(); i++) {
             SubRange &sr = subranges[i];
-            double diff =
-                    (sr.insertion_ratio - fair_ratio_) * 100.0 / fair_ratio_;
+            double diff = (sr.insertion_ratio - fair_ratio_) * 100.0 / fair_ratio_;
             if (std::abs(diff) > SUBRANGE_REORG_DIFF_FROM_FAIR_THRESHOLD &&
                 !sr.IsAPoint(user_comparator_)) {
                 unfair_subranges += 1;
             }
-
-            bool eligble_for_minor = sr.ninserts > 100 &&
-                                     latest_seq_number - last_minor_reorg_seq_ >
-                                     SUBRANGE_MINOR_REORG_INTERVAL;
+            bool eligble_for_minor =
+                    sr.ninserts > 100 && latest_seq_number - last_minor_reorg_seq_ > SUBRANGE_MINOR_REORG_INTERVAL;
             if (eligble_for_minor) {
                 if (diff > SUBRANGE_REORG_DIFF_FROM_FAIR_THRESHOLD &&
                     diff > most_unfair) {
@@ -1159,10 +1095,8 @@ namespace leveldb {
                 }
             }
         }
-        if (unfair_subranges / (double) subranges.size() >
-            SUBRANGE_MAJOR_REORG_THRESHOLD &&
-            latest_seq_number - last_major_reorg_seq_ >
-            SUBRANGE_MAJOR_REORG_INTERVAL) {
+        if (unfair_subranges / (double) subranges.size() > SUBRANGE_MAJOR_REORG_THRESHOLD &&
+            latest_seq_number - last_major_reorg_seq_ > SUBRANGE_MAJOR_REORG_INTERVAL) {
             subrange_reorged = MajorReorg();
             update_latest_subrange = subrange_reorged;
 
@@ -1174,8 +1108,7 @@ namespace leveldb {
         } else if (most_unfair != 0) {
             // Perform minor.
             bool updated_prior = false;
-            subrange_reorged = MinorRebalancePush(most_unfair_subrange,
-                                                  &updated_prior);
+            subrange_reorged = MinorRebalancePush(most_unfair_subrange, &updated_prior);
             if (subrange_reorged || updated_prior) {
                 update_latest_subrange = true;
             }
@@ -1188,11 +1121,9 @@ namespace leveldb {
         if (subrange_reorged) {
             ComputeCompactionThreadsAssignment(latest_);
             for (int i = 0; i < latest_->subranges.size(); i++) {
-                edit_.UpdateSubRange(i, latest_->subranges[i].tiny_ranges,
-                                     latest_->subranges[i].num_duplicates);
+                edit_.UpdateSubRange(i, latest_->subranges[i].tiny_ranges, latest_->subranges[i].num_duplicates);
             }
-            versions_->AppendChangesToManifest(&edit_, manifest_file_,
-                                               options_.manifest_stoc_ids);
+            versions_->AppendChangesToManifest(&edit_, manifest_file_, options_.manifest_stoc_ids);
         }
         if (update_latest_subrange) {
             range_lock_.Lock();
@@ -1316,13 +1247,8 @@ namespace leveldb {
             double diff = (load - fair) * 100.0;
             stdev += std::pow(diff, 2);
         }
-//        RDMA_ASSERT(std::abs(sum - 1.0) <= 0.01) << fmt::format("{} {}", sum,
-//                                                                latest_subranges_.load()->DebugString());
-        db_stats->load_imbalance.maximum_load_imbalance =
-                (highest_load - fair) * 100.0 / fair;
-        db_stats->load_imbalance.stdev =
-                std::sqrt(stdev / (double) loads.size())
-                / 100.0;
+        db_stats->load_imbalance.maximum_load_imbalance = (highest_load - fair) * 100.0 / fair;
+        db_stats->load_imbalance.stdev = std::sqrt(stdev / (double) loads.size()) / 100.0;
     }
 
     void SubRangeManager::QueryDBStats(leveldb::DBStats *db_stats) {
@@ -1366,15 +1292,12 @@ namespace leveldb {
                 for (uint64_t key = lower; key < upper; key++) {
                     if (duplicated_keys.find(key) !=
                         duplicated_keys.end()) {
-                        accesses +=
-                                nova::NovaConfig::config->zipfian_dist.accesses[key] /
-                                duplicated_keys[key];
+                        accesses += nova::NovaConfig::config->zipfian_dist.accesses[key] / duplicated_keys[key];
                     } else {
                         accesses += nova::NovaConfig::config->zipfian_dist.accesses[key];
                     }
                 }
-                loads.push_back((double) (accesses) /
-                                (double) (nova::NovaConfig::config->zipfian_dist.sum));
+                loads.push_back((double) (accesses) / (double) (nova::NovaConfig::config->zipfian_dist.sum));
             }
         }
         if (loads.size() != options_.num_memtable_partitions) {
@@ -1382,6 +1305,4 @@ namespace leveldb {
         }
         ComputeLoadImbalance(loads, db_stats);
     }
-
-
 }

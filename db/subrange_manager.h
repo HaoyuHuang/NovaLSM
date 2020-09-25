@@ -11,6 +11,7 @@
 #include "leveldb/subrange.h"
 #include "memtable.h"
 #include "version_set.h"
+#include "flush_order.h"
 
 #define SUBRANGE_WARMUP_NPUTS 1000000
 #define SUBRANGE_MAJOR_REORG_INTERVAL 1000000
@@ -90,6 +91,7 @@ namespace leveldb {
 
         bool CreateDuplicates(int subrange_id);
 
+        FlushOrder *flush_order_;
         port::Mutex range_lock_;
         StoCWritableFileClient *manifest_file_ = nullptr;
         std::string dbname_;

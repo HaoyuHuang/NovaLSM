@@ -17,6 +17,7 @@
 #include "leveldb/table_builder.h"
 #include "util/coding.h"
 #include "util/logging.h"
+#include "common/nova_config.h"
 
 namespace leveldb {
 
@@ -36,7 +37,7 @@ namespace leveldb {
     static double MaxBytesForLevel(const Options &options, int level) {
         double result = options.l0bytes_start_compaction_trigger;
         if (result == 0) {
-            result = 4.0 * 1024 * 1024 * 1024;
+            result = 4.0 * 1024 * 1024 * 1024 / nova::NovaConfig::config->cfgs[0]->fragments.size();
         }
         while (level > 0) {
             result *= 3.2;

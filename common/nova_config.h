@@ -165,6 +165,7 @@ namespace nova {
 
         bool enable_load_data = false;
         bool enable_rdma = false;
+        bool use_ordered_flush = false;
 
         vector<Host> servers;
         int my_server_id = 0;

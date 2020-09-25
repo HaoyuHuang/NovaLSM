@@ -357,7 +357,14 @@ namespace leveldb {
                 if (ucmp->Compare(user_key, f->smallest.user_key()) < 0) {
                     // All of "f" is past any data for user_key
                 } else {
-                    (*func)(arg, level, f);
+                    if (nova::NovaConfig::config->use_ordered_flush) {
+                        // Return immediately when we find the value.
+                        if (!(*func)(arg, level, f)) {
+                            break;
+                        }
+                    } else {
+                        (*func)(arg, level, f);
+                    }
                 }
             }
         }

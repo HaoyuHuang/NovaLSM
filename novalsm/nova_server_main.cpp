@@ -123,6 +123,7 @@ DEFINE_int32(exp_seconds_to_fail_stoc, -1,
 DEFINE_int32(failure_duration, -1, "Failure duration");
 DEFINE_int32(num_migration_threads, 1, "Number of migration threads");
 DEFINE_string(ltc_migration_policy, "base", "immediate/base");
+DEFINE_bool(use_ordered_flush, false, "use ordered flush");
 
 NovaConfig *NovaConfig::config;
 std::atomic_int_fast32_t leveldb::EnvBGThread::bg_flush_memtable_thread_id_seq;
@@ -266,6 +267,7 @@ int main(int argc, char *argv[]) {
     NovaConfig::config->level = FLAGS_level;
     NovaConfig::config->enable_subrange_reorg = FLAGS_enable_subrange_reorg;
     NovaConfig::config->num_migration_threads = FLAGS_num_migration_threads;
+    NovaConfig::config->use_ordered_flush = FLAGS_use_ordered_flush;
 
     if (FLAGS_ltc_migration_policy == "immediate") {
         NovaConfig::config->ltc_migration_policy = LTCMigrationPolicy::IMMEDIATE;

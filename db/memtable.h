@@ -146,6 +146,8 @@ namespace leveldb {
         uint32_t last_version_id_ = 0;
         uint32_t memtable_id_ = 0;
 
+        uint64_t generation_id_= 0;
+
         std::set<uint64_t> l0_file_numbers_;
 
         std::mutex mutex_;
@@ -171,6 +173,8 @@ namespace leveldb {
         };
         MemTable *active_memtable = nullptr;
         port::Mutex mutex;
+        std::map<uint64_t, uint32_t> generation_num_memtables_;
+
         uint32_t partition_id = 0;
         std::vector<uint32_t> imm_slots;
         std::queue<uint32_t> available_slots;

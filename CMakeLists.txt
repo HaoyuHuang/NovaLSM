@@ -83,7 +83,7 @@ endif (BUILD_SHARED_LIBS)
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
 
-add_library(leveldb "" novalsm/file_reader.cpp novalsm/lsm_tree_cleaner.cpp novalsm/lsm_tree_cleaner.h)
+add_library(leveldb "" novalsm/lsm_tree_cleaner.cpp novalsm/lsm_tree_cleaner.h db/flush_order.cpp db/flush_order.h)
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
@@ -342,14 +342,38 @@ endif (HAVE_SNAPPY)
 #    target_link_libraries(leveldb tcmalloc)
 #endif (HAVE_TCMALLOC)
 
+function(find_static_library LIB_NAME OUT)
+
+    if (WIN32 OR MSVC)
+        set(CMAKE_FIND_LIBRARY_SUFFIXES ".lib")
+    elseif (UNIX)
+        set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    endif()
+
+    find_library(
+            FOUND_${LIB_NAME}_STATIC
+            ${LIB_NAME}
+    )
+
+    if (FOUND_${LIB_NAME}_STATIC)
+        get_filename_component(ABS_FILE ${FOUND_${LIB_NAME}_STATIC} ABSOLUTE)
+    else()
+        message(SEND_ERROR "Unable to find library ${LIB_NAME}")
+    endif()
+
+    set(${OUT} ${ABS_FILE} PARENT_SCOPE)
+
+endfunction()
+
+find_static_library(gflags GFLAGS)
+
 # Needed by port_stdcxx.h
 find_package(Threads REQUIRED)
 target_link_libraries(leveldb Threads::Threads -lpthread)
 target_link_libraries(leveldb ibverbs event fmt)
 
 add_executable(nova_server_main "novalsm/nova_server_main.cpp")
-target_link_libraries(nova_server_main -lgflags leveldb)
-
+target_link_libraries(nova_server_main ${GFLAGS} leveldb)
 
 add_executable(file_reader "novalsm/file_reader.cpp")
 target_link_libraries(file_reader -lgflags leveldb)
@@ -363,8 +387,8 @@ target_link_libraries(nova_subrange_sim -lgflags leveldb -pg)
 add_executable(scatter_bench "benchmarks/scatter_bench.cpp")
 target_link_libraries(scatter_bench -lgflags leveldb)
 
-#add_executable(memtable_bench "bench_memtable/memtable_bench.cpp")
-#target_link_libraries(memtable_bench -lgflags leveldb)
+add_executable(memtable_bench "bench_memtable/memtable_bench.cpp")
+target_link_libraries(memtable_bench -lgflags leveldb)
 
 add_executable(version_set_test "db/version_set_test.cc")
 target_link_libraries(version_set_test -lgflags leveldb)

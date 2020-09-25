@@ -34,6 +34,7 @@ DEFINE_uint64(memtable_size_mb, 0, "");
 DEFINE_uint32(npartitions, 0, "");
 DEFINE_uint64(max_ops, 0, "");
 
+NovaConfig *NovaConfig::config;
 NovaGlobalVariables NovaGlobalVariables::global;
 std::atomic<nova::Servers *> leveldb::StorageSelector::available_stoc_servers;
 
