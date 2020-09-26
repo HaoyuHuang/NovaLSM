@@ -131,6 +131,8 @@ namespace leveldb {
 
         bool Equals(const SubRange &other, const Comparator *comparator) const;
 
+        bool RangeEquals(const SubRange &other, const Comparator *comparator) const;
+
         bool
         IsSmallerThanLower(const Slice &key,
                            const Comparator *comparator) const;

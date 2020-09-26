@@ -71,7 +71,7 @@ namespace leveldb {
 
         void EvictFileFromCache(uint64_t file_number) override;
 
-        uint32_t FlushMemTables() override;
+        uint32_t FlushMemTables(bool flush_active_memtable) override;
 
         Status Delete(const WriteOptions &, const Slice &key) override;
 
@@ -293,6 +293,8 @@ namespace leveldb {
         const Comparator *user_comparator() const {
             return internal_comparator_.user_comparator();
         }
+
+        FlushOrder *flush_order_;
 
         // Constant after construction
         Env *const env_;

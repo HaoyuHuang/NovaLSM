@@ -25,11 +25,14 @@ namespace leveldb {
     class SubRangeManager {
     public:
         SubRangeManager(StoCWritableFileClient *manifest_file,
+                        FlushOrder *flush_order,
                         const std::string &dbname,
                         uint32_t dbindex,
                         VersionSet *versions,
                         const Options &options,
+                        const InternalKeyComparator *internal_comparator,
                         const Comparator *user_comparator,
+                        std::atomic_int_fast32_t *memtable_id_seq,
                         std::vector<MemTablePartition *> *partitioned_active_memtables,
                         std::vector<uint32_t> *partitioned_imms);
 
@@ -40,7 +43,7 @@ namespace leveldb {
                             const leveldb::Slice &val,
                             SubRange **subrange);
 
-        void ConstructSubrangesWithUniform(const Comparator* user_comparator);
+        void ConstructSubrangesWithUniform(const Comparator *user_comparator);
 
         void QueryDBStats(leveldb::DBStats *db_stats);
 
@@ -97,7 +100,9 @@ namespace leveldb {
         std::string dbname_;
         VersionSet *versions_ = nullptr;
         const Options options_;
+        const InternalKeyComparator *internal_comparator_ = nullptr;
         const Comparator *user_comparator_ = nullptr;
+        std::atomic_int_fast32_t *memtable_id_seq_;
         std::vector<MemTablePartition *> *partitioned_active_memtables_ = nullptr;
         std::vector<uint32_t> *partitioned_imms_ = nullptr;
     };

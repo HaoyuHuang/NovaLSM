@@ -13,10 +13,12 @@
 #include "memtable.h"
 #include "version_set.h"
 
+#define  INIT_GEN_ID 1
+
 namespace leveldb {
     struct ImpactedDranges {
-        uint32_t lower_drange_index;
-        uint32_t upper_drange_index;
+        uint32_t lower_drange_index = 0;
+        uint32_t upper_drange_index = 0;
         uint64_t generation_id;
     };
 
@@ -26,11 +28,14 @@ namespace leveldb {
 
     class FlushOrder {
     public:
+        FlushOrder(std::vector<MemTablePartition *> *partitioned_active_memtables);
+
         void UpdateImpactedDranges(const ImpactedDranges& impacted_dranges);
 
-        bool IsSafeToFlush(uint32_t drange_idx, AtomicMemTable* memtable);
+        bool IsSafeToFlush(uint32_t drange_idx, MemTable* memtable);
+
+        std::atomic_uint_fast64_t latest_generation_id;
     private:
-        uint64_t generation_sed_iq;
         std::vector<MemTablePartition *> *partitioned_active_memtables_ = nullptr;
         std::atomic<ImpactedDrangeCollection *> impacted_dranges_;
     };

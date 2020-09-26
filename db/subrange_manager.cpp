@@ -9,16 +9,21 @@
 
 namespace leveldb {
     SubRangeManager::SubRangeManager(leveldb::StoCWritableFileClient *manifest_file,
+                                     FlushOrder *flush_order,
                                      const std::string &dbname,
                                      uint32_t dbindex,
                                      leveldb::VersionSet *versions,
                                      const leveldb::Options &options,
+                                     const InternalKeyComparator *internal_comparator,
                                      const leveldb::Comparator *user_comparator,
+                                     std::atomic_int_fast32_t *memtable_id_seq,
                                      std::vector<leveldb::MemTablePartition *> *partitioned_active_memtables,
                                      std::vector<uint32_t> *partitioned_imms)
-            : manifest_file_(manifest_file), dbname_(dbname), dbindex_(dbindex),
+            : manifest_file_(manifest_file), flush_order_(flush_order), dbname_(dbname), dbindex_(dbindex),
               versions_(versions), options_(options),
+              internal_comparator_(internal_comparator),
               user_comparator_(user_comparator),
+              memtable_id_seq_(memtable_id_seq),
               partitioned_active_memtables_(partitioned_active_memtables),
               partitioned_imms_(partitioned_imms) {
         lower_bound_ = options.lower_key;
@@ -1095,11 +1100,15 @@ namespace leveldb {
                 }
             }
         }
+
+        ImpactedDranges impacted_dranges;
+        impacted_dranges.generation_id = flush_order_ ? flush_order_->latest_generation_id.load() + 1 : 0;
         if (unfair_subranges / (double) subranges.size() > SUBRANGE_MAJOR_REORG_THRESHOLD &&
             latest_seq_number - last_major_reorg_seq_ > SUBRANGE_MAJOR_REORG_INTERVAL) {
             subrange_reorged = MajorReorg();
             update_latest_subrange = subrange_reorged;
-
+            impacted_dranges.lower_drange_index = 0;
+            impacted_dranges.upper_drange_index = partitioned_active_memtables_->size() - 1;
             if (subrange_reorged) {
                 uint64_t now = versions_->last_sequence_;
                 last_major_reorg_seq_ = now;
@@ -1126,6 +1135,62 @@ namespace leveldb {
             versions_->AppendChangesToManifest(&edit_, manifest_file_, options_.manifest_stoc_ids);
         }
         if (update_latest_subrange) {
+            for (int i = 0; i < ref->subranges.size(); i++) {
+                const auto &current = ref->subranges[i];
+                const auto &updated = latest_->subranges[i];
+                if (!current.RangeEquals(updated, user_comparator_)) {
+                    impacted_dranges.lower_drange_index = i;
+                    break;
+                }
+            }
+
+            for (int i = ref->subranges.size() - 1; i >= 0; i--) {
+                const auto &current = ref->subranges[i];
+                const auto &updated = latest_->subranges[i];
+                if (!current.RangeEquals(updated, user_comparator_)) {
+                    impacted_dranges.upper_drange_index = i;
+                    break;
+                }
+            }
+
+            if (flush_order_ && impacted_dranges.upper_drange_index > 0) {
+                // Mark all active memtable of impacted dranges as immutable.
+                for (uint32_t drange_id = impacted_dranges.lower_drange_index;
+                     drange_id < impacted_dranges.upper_drange_index; drange_id++) {
+                    MemTablePartition *partition = (*partitioned_active_memtables_)[drange_id];
+                    uint32_t next_imm_slot = -1;
+                    partition->mutex.Lock();
+                    MemTable *table = partition->active_memtable;
+                    if (table) {
+                        if (versions_->mid_table_mapping_[table->memtableid()]->nentries_ == 0) {
+                            table->generation_id_ = impacted_dranges.generation_id;
+                        } else {
+                            if (!partition->available_slots.empty()) {
+                                next_imm_slot = partition->available_slots.front();
+                                partition->available_slots.pop();
+                            }
+                            if (next_imm_slot != -1) {
+                                // Create a new table.
+                                NOVA_ASSERT((*partitioned_imms_)[next_imm_slot] == 0);
+                                (*partitioned_imms_)[next_imm_slot] = table->memtableid();
+                                uint32_t memtable_id = memtable_id_seq_->fetch_add(1);
+                                partition->immutable_memtable_ids.push_back(table->memtableid());
+                                table = new MemTable(*internal_comparator_, memtable_id, nullptr,
+                                                     impacted_dranges.generation_id);
+                                NOVA_ASSERT(memtable_id < MAX_LIVE_MEMTABLES);
+                                versions_->mid_table_mapping_[memtable_id]->SetMemTable(table);
+                                partition->active_memtable = table;
+                                partition->AddMemTable(table);
+                            } else {
+                                table->generation_id_ = impacted_dranges.generation_id;
+                            }
+                        }
+                    }
+                    partition->mutex.Unlock();
+                }
+                flush_order_->UpdateImpactedDranges(impacted_dranges);
+            }
+
             range_lock_.Lock();
             latest_->AssertSubrangeBoundary(user_comparator_);
             latest_subranges_.store(latest_);

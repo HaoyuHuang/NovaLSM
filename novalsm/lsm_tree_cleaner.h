@@ -11,16 +11,17 @@
 namespace leveldb {
     class LSMTreeCleaner {
     public:
-        LSMTreeCleaner(nova::StoCInMemoryLogFileManager* log_manager, leveldb::StoCBlockClient* client, bool delete_obsolete_files);
+        LSMTreeCleaner(nova::StoCInMemoryLogFileManager *log_manager, leveldb::StoCBlockClient *client);
 
-        void Start();
-    private:
-        bool delete_obsolete_files_ = false;
-        nova::StoCInMemoryLogFileManager* log_manager_;
-        leveldb::StoCBlockClient* client_;
+        void FlushingMemTables() const;
 
         void CleanLSM() const;
+
         void CleanLSMAfterCfgChange() const;
+
+    private:
+        nova::StoCInMemoryLogFileManager *log_manager_;
+        leveldb::StoCBlockClient *client_;
     };
 }
 

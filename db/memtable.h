@@ -28,6 +28,7 @@ namespace leveldb {
         explicit MemTable(const InternalKeyComparator &comparator,
                           uint32_t memtable_id,
                           DBProfiler *db_profiler,
+                          uint64_t generation_id,
                           bool is_ready = true);
 
         MemTable(const MemTable &) = delete;
@@ -85,6 +86,7 @@ namespace leveldb {
         ~MemTable();  // Private since only Unref() should be used to delete it
 
         bool is_pinned_ = false;
+        uint64_t generation_id_;
     private:
         void WaitUntilReady();
 
@@ -104,7 +106,6 @@ namespace leveldb {
         std::atomic_bool is_ready_;
         port::Mutex is_ready_mutex_;
         port::CondVar is_ready_signal_;
-
         typedef SkipList<const char *, KeyComparator> Table;
         DBProfiler *db_profiler_ = nullptr;
         KeyComparator comparator_;
@@ -143,10 +144,9 @@ namespace leveldb {
 
         bool is_immutable_ = false;
         bool is_flushed_ = false;
+        std::atomic_bool is_scheduled_for_flushing;
         uint32_t last_version_id_ = 0;
         uint32_t memtable_id_ = 0;
-
-        uint64_t generation_id_= 0;
 
         std::set<uint64_t> l0_file_numbers_;
 
@@ -174,6 +174,10 @@ namespace leveldb {
         MemTable *active_memtable = nullptr;
         port::Mutex mutex;
         std::map<uint64_t, uint32_t> generation_num_memtables_;
+
+        void AddMemTable(MemTable* memtable);
+
+        void RemoveMemTable(MemTable* imm);
 
         uint32_t partition_id = 0;
         std::vector<uint32_t> imm_slots;

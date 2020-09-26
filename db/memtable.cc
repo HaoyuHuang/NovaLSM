@@ -26,10 +26,12 @@ namespace leveldb {
     MemTable::MemTable(const InternalKeyComparator &comparator,
                        uint32_t memtable_id,
                        DBProfiler *db_profiler,
+                       uint64_t generation_id,
                        bool is_ready)
             : comparator_(comparator), memtable_id_(memtable_id), refs_(0),
               table_(comparator_, &arena_),
-              db_profiler_(db_profiler), is_ready_(is_ready), is_ready_signal_(&is_ready_mutex_) {
+              db_profiler_(db_profiler), generation_id_(generation_id), is_ready_(is_ready),
+              is_ready_signal_(&is_ready_mutex_) {
     }
 
     void MemTable::WaitUntilReady() {
@@ -48,6 +50,25 @@ namespace leveldb {
         is_ready_ = true;
         is_ready_signal_.SignalAll();
         is_ready_mutex_.Unlock();
+    }
+
+    void MemTablePartition::AddMemTable(MemTable *memtable) {
+//        auto it = generation_num_memtables_.find(memtable->generation_id_);
+//        if (it == generation_num_memtables_.end()) {
+//            generation_num_memtables_[memtable->generation_id_] = 1;
+//        } else {
+//            generation_num_memtables_[memtable->generation_id_] += 1;
+//        }
+    }
+
+    void MemTablePartition::RemoveMemTable(MemTable *imm) {
+//        auto it = generation_num_memtables_.find(imm->generation_id_);
+//        NOVA_ASSERT(it != generation_num_memtables_.end());
+//        if (it->second == 1) {
+//            generation_num_memtables_.erase(imm->generation_id_);
+//        } else {
+//            generation_num_memtables_[imm->generation_id_] -= 1;
+//        }
     }
 
     MemTable::~MemTable() { assert(refs_ == 0); }
@@ -236,6 +257,7 @@ namespace leveldb {
         l0_file_numbers_.clear();
         is_flushed_ = false;
         is_immutable_ = false;
+        is_scheduled_for_flushing = false;
         memtable_id_ = mem->memtableid();
 
 //        NOVA_ASSERT(!memtable_);
@@ -311,7 +333,7 @@ namespace leveldb {
         return msg_size;
     }
 
-    bool AtomicMemTable::Decode(Slice *buf, const InternalKeyComparator& cmp) {
+    bool AtomicMemTable::Decode(Slice *buf, const InternalKeyComparator &cmp) {
         NOVA_ASSERT(DecodeBool(buf, &is_immutable_));
         NOVA_ASSERT(DecodeBool(buf, &is_flushed_));
         NOVA_ASSERT(DecodeFixed32(buf, &last_version_id_));

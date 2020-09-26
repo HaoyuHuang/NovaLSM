@@ -144,9 +144,9 @@ NovaGlobalVariables NovaGlobalVariables::global;
 void StartServer() {
     RdmaCtrl *rdma_ctrl = new RdmaCtrl(NovaConfig::config->my_server_id,
                                        NovaConfig::config->rdma_port);
-    if (NovaConfig::config->my_server_id < FLAGS_number_of_ltcs) {
-        NovaConfig::config->mem_pool_size_gb = 10;
-    }
+//    if (NovaConfig::config->my_server_id < FLAGS_number_of_ltcs) {
+//        NovaConfig::config->mem_pool_size_gb = 10;
+//    }
     int port = NovaConfig::config->servers[NovaConfig::config->my_server_id].port;
     uint64_t nrdmatotal = nrdma_buf_server();
     uint64_t ntotal = nrdmatotal;

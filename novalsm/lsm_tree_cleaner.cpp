@@ -9,18 +9,9 @@
 #include "log/stoc_log_manager.h"
 
 namespace leveldb {
-    LSMTreeCleaner::LSMTreeCleaner(nova::StoCInMemoryLogFileManager *log_manager, leveldb::StoCBlockClient *client,
-                                   bool delete_obsolete_files)
-            : log_manager_(log_manager), client_(client), delete_obsolete_files_(delete_obsolete_files) {
+    LSMTreeCleaner::LSMTreeCleaner(nova::StoCInMemoryLogFileManager *log_manager, leveldb::StoCBlockClient *client)
+            : log_manager_(log_manager), client_(client) {
 
-    }
-
-    void LSMTreeCleaner::Start() {
-        if (delete_obsolete_files_) {
-            CleanLSM();
-        } else {
-            CleanLSMAfterCfgChange();
-        }
     }
 
     void LSMTreeCleaner::CleanLSM() const {
@@ -34,6 +25,22 @@ namespace leveldb {
                     auto db = reinterpret_cast<DBImpl *>(current_frag->db);
                     NOVA_ASSERT(db);
                     db->ScheduleFileDeletionTask();
+                }
+            }
+        }
+    }
+
+    void LSMTreeCleaner::FlushingMemTables() const {
+        while (true) {
+            sleep(1);
+            int current_cfg_id = nova::NovaConfig::config->current_cfg_id;
+            for (int fragid = 0; fragid < nova::NovaConfig::config->cfgs[current_cfg_id]->fragments.size(); fragid++) {
+                auto current_frag = nova::NovaConfig::config->cfgs[current_cfg_id]->fragments[fragid];
+                if (current_frag->is_complete_ &&
+                    current_frag->ltc_server_id == nova::NovaConfig::config->my_server_id) {
+                    auto db = reinterpret_cast<DBImpl *>(current_frag->db);
+                    NOVA_ASSERT(db);
+                    db->FlushMemTables(false);
                 }
             }
         }

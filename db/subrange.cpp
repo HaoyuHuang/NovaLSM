@@ -215,6 +215,17 @@ namespace leveldb {
                tiny_ranges[0].lower_int();
     }
 
+    bool SubRange::RangeEquals(const SubRange &other, const Comparator *comparator) const {
+        if (tiny_ranges[0].lower_int() != other.tiny_ranges[0].lower_int()) {
+            return false;
+        }
+        if (tiny_ranges[tiny_ranges.size() - 1].upper_int() !=
+            other.tiny_ranges[other.tiny_ranges.size() - 1].upper_int()) {
+            return false;
+        }
+        return true;
+    }
+
     bool SubRange::Equals(const SubRange &other,
                           const Comparator *comparator) const {
         if (num_duplicates != other.num_duplicates) {

@@ -131,7 +131,7 @@ namespace nova {
                     needs_compaction = stats.needs_compaction;
                 }
                 l0tables += stats.num_l0_sstables;
-                nmemtables += db->FlushMemTables();
+                nmemtables += db->FlushMemTables(true);
                 delete stats.sstable_size_dist;
             }
             NOVA_LOG(rdmaio::INFO) << fmt::format(
@@ -635,18 +635,25 @@ namespace nova {
             storage_worker_threads.emplace_back(&StorageWorker::Start, compaction_storage_workers[i]);
         }
 
-        if (NovaConfig::config->cfgs.size() > 1) {
+        if (NovaConfig::config->enable_subrange_reorg) {
             auto client = new leveldb::StoCBlockClient(0, stoc_file_manager);
             client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
-            lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client, false);
-            db_migrate_workers.emplace_back(&leveldb::LSMTreeCleaner::Start, lsm_tree_cleaner_);
+            lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client);
+            db_migrate_workers.emplace_back(&leveldb::LSMTreeCleaner::FlushingMemTables, lsm_tree_cleaner_);
         }
 
         if (NovaConfig::config->cfgs.size() > 1) {
             auto client = new leveldb::StoCBlockClient(0, stoc_file_manager);
             client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
-            lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client, true);
-            db_migrate_workers.emplace_back(&leveldb::LSMTreeCleaner::Start, lsm_tree_cleaner_);
+            lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client);
+            db_migrate_workers.emplace_back(&leveldb::LSMTreeCleaner::CleanLSM, lsm_tree_cleaner_);
+        }
+
+        if (NovaConfig::config->cfgs.size() > 1) {
+            auto client = new leveldb::StoCBlockClient(0, stoc_file_manager);
+            client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
+            lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client);
+            db_migrate_workers.emplace_back(&leveldb::LSMTreeCleaner::CleanLSMAfterCfgChange, lsm_tree_cleaner_);
         }
 
         // Wait for all RDMA connections to setup.
