@@ -212,15 +212,12 @@ namespace leveldb {
         index_block_ = new Block(index_block_contents,
                                  file_number_,
                                  footer.index_handle().offset(), true);
-        if (num_data_blocks_ >=
-            nova::NovaConfig::config->num_stocs_scatter_data_blocks) {
-            int min_num_data_blocks_in_group = num_data_blocks_ /
-                                               nova::NovaConfig::config->num_stocs_scatter_data_blocks;
-            int remaining = num_data_blocks_ %
-                            nova::NovaConfig::config->num_stocs_scatter_data_blocks;
+        if (num_data_blocks_ >= nova::NovaConfig::config->num_stocs_scatter_data_blocks) {
+            int min_num_data_blocks_in_group =
+                    num_data_blocks_ / nova::NovaConfig::config->num_stocs_scatter_data_blocks;
+            int remaining = num_data_blocks_ % nova::NovaConfig::config->num_stocs_scatter_data_blocks;
             uint32_t assigned_blocks = 0;
-            for (int i = 0; i <
-                            nova::NovaConfig::config->num_stocs_scatter_data_blocks; i++) {
+            for (int i = 0; i < nova::NovaConfig::config->num_stocs_scatter_data_blocks; i++) {
                 int nblocks = min_num_data_blocks_in_group;
                 if (remaining > 0) {
                     nblocks += 1;
@@ -450,16 +447,26 @@ namespace leveldb {
             uint64_t new_file_size = 0;
         };
         std::vector<MetaBlockStatus> metablock_replica_status;
+        std::vector<uint32_t> random_metablock_stocs;
+        StorageSelector selector(rand_seed_);
+        selector.SelectStorageServers(client,
+                                      nova::ScatterPolicy::RANDOM,
+                                      meta_block_handles_.size(),
+                                      &random_metablock_stocs);
+
         for (int replica_id = 0; replica_id < meta_block_handles_.size(); replica_id++) {
+            uint32_t stoc_id = stocs_to_store_fragments_[replica_id];
+            if (nova::NovaConfig::config->number_of_sstable_data_replicas == 1) {
+                stoc_id = random_metablock_stocs[replica_id];
+            }
             MetaBlockStatus status = {};
-            status.new_file_size = WriteMetaDataBlock(stocs_to_store_fragments_[replica_id],
+            status.new_file_size = WriteMetaDataBlock(stoc_id,
                                                       replica_id,
                                                       &status.backing_mem,
                                                       &status.scid,
                                                       &status.req_id);
             metablock_replica_status.push_back(status);
         }
-
         for (int replica_id = 0; replica_id < meta_block_handles_.size(); replica_id++) {
             client->Wait();
         }
