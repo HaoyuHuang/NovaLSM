@@ -338,8 +338,8 @@ namespace leveldb {
                 }
             }
             for (uint32_t i = 0; i < tmp.size(); i++) {
-                if (!(*func)(arg, 0, tmp[i])) {
-
+                if (nova::NovaConfig::config->use_ordered_flush && !(*func)(arg, 0, tmp[i])) {
+                    return;
                 }
             }
         }
@@ -1040,6 +1040,8 @@ namespace leveldb {
               current_(nullptr) {
         for (int i = 0; i < MAX_LIVE_MEMTABLES; i++) {
             mid_table_mapping_[i] = new AtomicMemTable;
+            mid_table_mapping_[i]->generation_id_ = 0;
+            mid_table_mapping_[i]->is_scheduled_for_flushing = false;
             mid_table_mapping_[i]->nentries_ = 0;
             versions_[i] = new AtomicVersion;
         }

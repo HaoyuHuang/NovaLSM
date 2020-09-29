@@ -94,7 +94,7 @@ namespace leveldb {
 
         bool CreateDuplicates(int subrange_id);
 
-        FlushOrder *flush_order_;
+        FlushOrder *flush_order_ = nullptr;
         port::Mutex range_lock_;
         StoCWritableFileClient *manifest_file_ = nullptr;
         std::string dbname_;

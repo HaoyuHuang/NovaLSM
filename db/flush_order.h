@@ -20,10 +20,13 @@ namespace leveldb {
         uint32_t lower_drange_index = 0;
         uint32_t upper_drange_index = 0;
         uint64_t generation_id;
+
+        std::string DebugString() const;
     };
 
     struct ImpactedDrangeCollection {
         std::vector<ImpactedDranges> impacted_dranges;
+        std::string DebugString() const;
     };
 
     class FlushOrder {
@@ -32,7 +35,7 @@ namespace leveldb {
 
         void UpdateImpactedDranges(const ImpactedDranges& impacted_dranges);
 
-        bool IsSafeToFlush(uint32_t drange_idx, MemTable* memtable);
+        bool IsSafeToFlush(uint32_t drange_idx, uint64_t generation_id);
 
         std::atomic_uint_fast64_t latest_generation_id;
     private:

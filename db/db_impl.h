@@ -153,7 +153,9 @@ namespace leveldb {
                           std::unordered_map<uint32_t, leveldb::MemTableLogFilePair> *mid_table_map);
 
         void ScheduleFlushMemTableTask(
-                int thread_id, MemTable *imm,
+                int thread_id,
+                uint32_t memtable_id,
+                MemTable *imm,
                 uint32_t partition_id, uint32_t imm_slot,
                 unsigned int *rand_seed, bool merge_memtables_without_flushing);
 

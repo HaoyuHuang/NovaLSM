@@ -28,8 +28,7 @@ namespace leveldb {
         explicit MemTable(const InternalKeyComparator &comparator,
                           uint32_t memtable_id,
                           DBProfiler *db_profiler,
-                          uint64_t generation_id,
-                          bool is_ready = true);
+                          bool is_ready);
 
         MemTable(const MemTable &) = delete;
 
@@ -86,7 +85,6 @@ namespace leveldb {
         ~MemTable();  // Private since only Unref() should be used to delete it
 
         bool is_pinned_ = false;
-        uint64_t generation_id_;
     private:
         void WaitUntilReady();
 
@@ -126,7 +124,7 @@ namespace leveldb {
 
     class AtomicMemTable {
     public:
-        void SetMemTable(MemTable *mem);
+        void SetMemTable(uint64_t generation_id, MemTable *mem);
 
         void SetFlushed(const std::string &dbname,
                         const std::vector<uint64_t> &l0_file_numbers,
@@ -144,6 +142,7 @@ namespace leveldb {
 
         bool is_immutable_ = false;
         bool is_flushed_ = false;
+        std::atomic_uint_fast64_t generation_id_;
         std::atomic_bool is_scheduled_for_flushing;
         uint32_t last_version_id_ = 0;
         uint32_t memtable_id_ = 0;
@@ -171,18 +170,22 @@ namespace leveldb {
     struct MemTablePartition {
         MemTablePartition() : background_work_finished_signal_(&mutex) {
         };
+
+        std::string DebugString() const;
+
         MemTable *active_memtable = nullptr;
         port::Mutex mutex;
-        std::map<uint64_t, uint32_t> generation_num_memtables_;
+        std::map<uint64_t, std::set<uint32_t>> generation_num_memtables_;
 
-        void AddMemTable(MemTable* memtable);
+        void AddMemTable(uint64_t generation_id, uint32_t memtableid);
 
-        void RemoveMemTable(MemTable* imm);
+        void RemoveMemTable(uint64_t generation_id, uint32_t memtableid);
 
         uint32_t partition_id = 0;
         std::vector<uint32_t> imm_slots;
         std::queue<uint32_t> available_slots;
         std::vector<uint32_t> immutable_memtable_ids;
+        std::map<uint32_t, uint32_t> slot_imm_id;
         port::CondVar background_work_finished_signal_ GUARDED_BY(mutex);
     };
 }  // namespace leveldb

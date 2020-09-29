@@ -635,12 +635,12 @@ namespace nova {
             storage_worker_threads.emplace_back(&StorageWorker::Start, compaction_storage_workers[i]);
         }
 
-//        if (NovaConfig::config->enable_subrange_reorg) {
-//            auto client = new leveldb::StoCBlockClient(0, stoc_file_manager);
-//            client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
-//            lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client);
-//            db_migrate_workers.emplace_back(&leveldb::LSMTreeCleaner::FlushingMemTables, lsm_tree_cleaner_);
-//        }
+        if (NovaConfig::config->enable_subrange_reorg && NovaConfig::config->use_ordered_flush) {
+            auto client = new leveldb::StoCBlockClient(0, stoc_file_manager);
+            client->rdma_msg_handlers_ = bg_rdma_msg_handlers;
+            lsm_tree_cleaner_ = new leveldb::LSMTreeCleaner(log_manager, client);
+            db_migrate_workers.emplace_back(&leveldb::LSMTreeCleaner::FlushingMemTables, lsm_tree_cleaner_);
+        }
 
         if (NovaConfig::config->cfgs.size() > 1) {
             auto client = new leveldb::StoCBlockClient(0, stoc_file_manager);

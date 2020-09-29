@@ -26,11 +26,10 @@ namespace leveldb {
     MemTable::MemTable(const InternalKeyComparator &comparator,
                        uint32_t memtable_id,
                        DBProfiler *db_profiler,
-                       uint64_t generation_id,
                        bool is_ready)
             : comparator_(comparator), memtable_id_(memtable_id), refs_(0),
               table_(comparator_, &arena_),
-              db_profiler_(db_profiler), generation_id_(generation_id), is_ready_(is_ready),
+              db_profiler_(db_profiler), is_ready_(is_ready),
               is_ready_signal_(&is_ready_mutex_) {
     }
 
@@ -52,23 +51,20 @@ namespace leveldb {
         is_ready_mutex_.Unlock();
     }
 
-    void MemTablePartition::AddMemTable(MemTable *memtable) {
-//        auto it = generation_num_memtables_.find(memtable->generation_id_);
-//        if (it == generation_num_memtables_.end()) {
-//            generation_num_memtables_[memtable->generation_id_] = 1;
-//        } else {
-//            generation_num_memtables_[memtable->generation_id_] += 1;
-//        }
+    void MemTablePartition::AddMemTable(uint64_t generation_id, uint32_t memtableid) {
+        NOVA_LOG(rdmaio::DEBUG) << fmt::format("Add memtable {}:{}", generation_id, memtableid);
+        auto it = generation_num_memtables_.find(generation_id);
+        generation_num_memtables_[generation_id].insert(memtableid);
     }
 
-    void MemTablePartition::RemoveMemTable(MemTable *imm) {
-//        auto it = generation_num_memtables_.find(imm->generation_id_);
-//        NOVA_ASSERT(it != generation_num_memtables_.end());
-//        if (it->second == 1) {
-//            generation_num_memtables_.erase(imm->generation_id_);
-//        } else {
-//            generation_num_memtables_[imm->generation_id_] -= 1;
-//        }
+    void MemTablePartition::RemoveMemTable(uint64_t generation_id, uint32_t memtableid) {
+        NOVA_LOG(rdmaio::DEBUG) << fmt::format("Remove memtable {}:{}", generation_id, memtableid);
+        auto it = generation_num_memtables_.find(generation_id);
+        NOVA_ASSERT(it != generation_num_memtables_.end());
+        it->second.erase(memtableid);
+        if (it->second.empty()) {
+            generation_num_memtables_.erase(generation_id);
+        }
     }
 
     MemTable::~MemTable() { assert(refs_ == 0); }
@@ -252,12 +248,13 @@ namespace leveldb {
         return false;
     }
 
-    void AtomicMemTable::SetMemTable(leveldb::MemTable *mem) {
+    void AtomicMemTable::SetMemTable(uint64_t generation_id, leveldb::MemTable *mem) {
         mutex_.lock();
         l0_file_numbers_.clear();
         is_flushed_ = false;
         is_immutable_ = false;
         is_scheduled_for_flushing = false;
+        generation_id_ = generation_id;
         memtable_id_ = mem->memtableid();
 
 //        NOVA_ASSERT(!memtable_);
@@ -276,7 +273,8 @@ namespace leveldb {
         last_version_id_ = std::max(last_version_id_, version_id);
         l0_file_numbers_.insert(l0_file_numbers.begin(), l0_file_numbers.end());
         is_flushed_ = true;
-        NOVA_ASSERT(memtable_);
+        NOVA_ASSERT(memtable_)
+            << fmt::format("{}:{}:{}", memtable_id_, l0_file_numbers.empty() ? 0 : l0_file_numbers[0], version_id);
         uint32_t mid = memtable_->memtableid();
         uint32_t refs = memtable_->Unref();
         if (refs <= 0) {
@@ -384,5 +382,27 @@ namespace leveldb {
             memtable_ = nullptr;
         }
         mutex_.unlock();
+    }
+
+    std::string MemTablePartition::DebugString() const {
+        std::string msg = fmt::format("p-{}:", partition_id);
+        for (auto gen : generation_num_memtables_) {
+            std::string m;
+            for (auto id : gen.second) {
+                m += fmt::format(",{}", id);
+            }
+            msg += fmt::format("gen-{}:{},", gen.first, m);
+        }
+        msg += "\n";
+        msg += "immutable slots:";
+        for (auto slots : immutable_memtable_ids) {
+            msg += fmt::format("{},", slots);
+        }
+        msg += "\n";
+        msg += "slot-id-map:";
+        for (auto slots : slot_imm_id) {
+            msg += fmt::format("s-{}:{},", slots.first, slots.second);
+        }
+        return msg;
     }
 }  // namespace leveldb

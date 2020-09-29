@@ -36,8 +36,7 @@ namespace leveldb {
             int current_cfg_id = nova::NovaConfig::config->current_cfg_id;
             for (int fragid = 0; fragid < nova::NovaConfig::config->cfgs[current_cfg_id]->fragments.size(); fragid++) {
                 auto current_frag = nova::NovaConfig::config->cfgs[current_cfg_id]->fragments[fragid];
-                if (current_frag->is_complete_ &&
-                    current_frag->ltc_server_id == nova::NovaConfig::config->my_server_id) {
+                if (current_frag->ltc_server_id == nova::NovaConfig::config->my_server_id) {
                     auto db = reinterpret_cast<DBImpl *>(current_frag->db);
                     NOVA_ASSERT(db);
                     db->FlushMemTables(false);

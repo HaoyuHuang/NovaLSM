@@ -90,7 +90,7 @@ namespace leveldb {
                                     1, std::memory_order_relaxed) %
                             dbimpl->bg_flush_memtable_threads_.size();
                 }
-                dbimpl->ScheduleFlushMemTableTask(thread_id, memtable, replica.second.partition_id,
+                dbimpl->ScheduleFlushMemTableTask(thread_id, memtable->memtableid(), memtable, replica.second.partition_id,
                                                   replica.second.imm_slot, &rand_seed,
                                                   merge_memtables_without_flushing);
             }
