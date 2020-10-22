@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/nova-lsm-sr-scatter-read-workloads-$recordcount"
+exp_results_dir="$home_dir/high-load-nova-lsm-sr-offload-$recordcount"
 dryrun="$2"
 
 mkdir -p $results
@@ -53,7 +53,7 @@ cc_log_max_file_size_mb="18"
 
 port=$((10000+RANDOM%1000))
 rdma_port=$((20000+RANDOM%1000))
-rdma_max_msg_size=$((512*1024))
+rdma_max_msg_size=$((256*1024))
 rdma_max_num_sends="32"
 rdma_doorbell_batch_size="8"
 enable_load_data="true"
@@ -115,7 +115,7 @@ function run_bench() {
 
 	current_time=$(date "+%Y-%m-%d-%H-%M-%S")
 	nstoc=$((nservers-number_of_ltcs))
-	result_dir_name="nova-d-$dist-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$l0_stop_write_mb-np-$num_memtable_partitions-ss-$sstable_size_mb-p-$ltc_num_stocs_scatter_data_blocks-sp-$scatter_policy"
+	result_dir_name="nova-d-$dist-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$l0_stop_write_mb-np-$num_memtable_partitions-ss-$sstable_size_mb-p-$ltc_num_stocs_scatter_data_blocks-sp-$scatter_policy-mc-$major_compaction_type"
 	echo "running experiment $result_dir_name"
 
 	# Copy the files over local node
@@ -149,18 +149,7 @@ function run_bench() {
 	for s in ${servers[@]}
 	do
 		echo "restore database image $s"
-		ssh -oStrictHostKeyChecking=no $s "rm -rf /db/nova-db-$recordcount-1024/ && cp -r /db/snapshot-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas/nova-db-$recordcount-1024/ /db/ &" &
-	done
-
-	sleep 10
-
-	for m in ${machines[@]}
-	do
-		while ssh -oStrictHostKeyChecking=no $m "ps -ef | grep -v grep | grep -v ssh | grep -v bash | grep -c \"cp -r\""
-		do
-			sleep 10
-			echo "waiting for $m"
-		done
+		ssh -oStrictHostKeyChecking=no $s "rm -rf /db/nova-db-$recordcount-1024/ && cp -r /db/snapshot-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas/nova-db-$recordcount-1024/ /db/"
 	done
 	
 	# start stats
@@ -189,7 +178,7 @@ function run_bench() {
 	do
 		echo "creating server on $s"
 		nova_rdma_port=$((rdma_port))
-		cmd="stdbuf --output=0 --error=0 ./nova_server_main --enable_range_index=$enable_range_index --num_sstable_replicas=$num_sstable_replicas --level=$level --l0_start_compaction_mb=$l0_start_compaction_mb --subrange_no_flush_num_keys=$subrange_no_flush_num_keys --enable_detailed_db_stats=$enable_detailed_db_stats --major_compaction_type=$major_compaction_type --major_compaction_max_parallism=$major_compaction_max_parallism --major_compaction_max_tables_in_a_set=$major_compaction_max_tables_in_a_set --enable_flush_multiple_memtables=$enable_flush_multiple_memtables --recover_dbs=$recover_dbs --num_recovery_threads=$num_recovery_threads  --sampling_ratio=1 --zipfian_dist_ref_counts=$zipfian_dist_file_path --client_access_pattern=$dist  --memtable_type=static_partition --enable_subrange=$enable_subrange --num_log_replicas=$num_log_replicas --log_record_mode=$log_record_mode --scatter_policy=$scatter_policy --number_of_ltcs=$number_of_ltcs --enable_lookup_index=$enable_lookup_index --l0_stop_write_mb=$l0_stop_write_mb --num_memtable_partitions=$num_memtable_partitions --num_memtables=$num_memtables --num_rdma_bg_workers=$num_rdma_bg_workers --db_path=$db_path --num_storage_workers=$num_storage_workers --stoc_files_path=$cc_stoc_files_path --max_stoc_file_size_mb=$max_stoc_file_size_mb --sstable_size_mb=$sstable_size_mb --ltc_num_stocs_scatter_data_blocks=$ltc_num_stocs_scatter_data_blocks --all_servers=$nova_servers --server_id=$server_id --mem_pool_size_gb=$mem_pool_size_gb --use_fixed_value_size=$value_size --ltc_config_path=$ltc_config_path --ltc_num_client_workers=$cc_nconn_workers --num_rdma_fg_workers=$num_rdma_fg_workers --num_compaction_workers=$num_compaction_workers --block_cache_mb=$block_cache_mb --row_cache_mb=$row_cache_mb --memtable_size_mb=$memtable_size_mb --cc_log_buf_size=$cc_log_buf_size --rdma_port=$rdma_port --rdma_max_msg_size=$rdma_max_msg_size --rdma_max_num_sends=$rdma_max_num_sends --rdma_doorbell_batch_size=$rdma_doorbell_batch_size --enable_rdma=$enable_rdma --enable_load_data=$enable_load_data --use_local_disk=$use_local_disk"
+		cmd="stdbuf --output=0 --error=0 ./nova_server_main --num_sstable_replicas=$num_sstable_replicas --level=$level --l0_start_compaction_mb=$l0_start_compaction_mb --subrange_no_flush_num_keys=$subrange_no_flush_num_keys --enable_detailed_db_stats=$enable_detailed_db_stats --major_compaction_type=$major_compaction_type --major_compaction_max_parallism=$major_compaction_max_parallism --major_compaction_max_tables_in_a_set=$major_compaction_max_tables_in_a_set --enable_flush_multiple_memtables=$enable_flush_multiple_memtables --recover_dbs=$recover_dbs --num_recovery_threads=$num_recovery_threads  --sampling_ratio=1 --zipfian_dist_ref_counts=$zipfian_dist_file_path --client_access_pattern=$dist  --memtable_type=static_partition --enable_subrange=$enable_subrange --num_log_replicas=$num_log_replicas --log_record_mode=$log_record_mode --scatter_policy=$scatter_policy --number_of_ltcs=$number_of_ltcs --enable_lookup_index=$enable_lookup_index --enable_range_index=$enable_range_index --l0_stop_write_mb=$l0_stop_write_mb --num_memtable_partitions=$num_memtable_partitions --num_memtables=$num_memtables --num_rdma_bg_workers=$num_rdma_bg_workers --db_path=$db_path --num_storage_workers=$num_storage_workers --stoc_files_path=$cc_stoc_files_path --max_stoc_file_size_mb=$max_stoc_file_size_mb --sstable_size_mb=$sstable_size_mb --ltc_num_stocs_scatter_data_blocks=$ltc_num_stocs_scatter_data_blocks --all_servers=$nova_servers --server_id=$server_id --mem_pool_size_gb=$mem_pool_size_gb --use_fixed_value_size=$value_size --ltc_config_path=$ltc_config_path --ltc_num_client_workers=$cc_nconn_workers --num_rdma_fg_workers=$num_rdma_fg_workers --num_compaction_workers=$num_compaction_workers --block_cache_mb=$block_cache_mb --row_cache_mb=$row_cache_mb --memtable_size_mb=$memtable_size_mb --cc_log_buf_size=$cc_log_buf_size --rdma_port=$rdma_port --rdma_max_msg_size=$rdma_max_msg_size --rdma_max_num_sends=$rdma_max_num_sends --rdma_doorbell_batch_size=$rdma_doorbell_batch_size --enable_rdma=$enable_rdma --enable_load_data=$enable_load_data --use_local_disk=$use_local_disk"
 		echo "$cmd"
 		ssh -oStrictHostKeyChecking=no $s "mkdir -p $cc_stoc_files_path && mkdir -p $db_path && cd $cache_bin_dir && $cmd >& $results/server-$s-out &" &
 		server_id=$((server_id+1))
@@ -280,7 +269,7 @@ function run_bench() {
 value_size="1024"
 mem_pool_size_gb="30"
 partition="range"
-zipfianconstant="0.99"
+zipfianconstant="0.00"
 
 block_cache_mb="0"
 cc_nreplicas_per_range="1"
@@ -326,7 +315,7 @@ number_of_ltcs="1"
 maxexecutiontime=1200
 workload="workloadw"
 enable_load_data="false"
-mem_pool_size_gb="20"
+mem_pool_size_gb="30"
 
 major_compaction_type="sc"
 num_recovery_threads="32"
@@ -351,32 +340,41 @@ major_compaction_type="sc"
 major_compaction_max_parallism="64"
 major_compaction_max_tables_in_a_set="50"
 enable_load_data="false"
-num_memtable_partitions="1"
-num_memtables="2"
+num_memtable_partitions="64"
+num_memtables="256"
 l0_stop_write_mb=$((10*1024))
 nservers="11"
 nclients="4"
 workload="workloadw"
 dist="uniform"
-nmachines="20"
+nmachines="15"
 scatter_policy="power_of_two"
-level="7"
+level="6"
 num_sstable_replicas="1"
-enable_range_index="true"
-for workload in "workloada" "workloade"
+scatter_policy="power_of_two"
+ltc_num_stocs_scatter_data_blocks="1"
+zipfianconstant="0.99"
+enable_range_index="false"
+
+for workload in "workloadw" "workloada"
 do
-for num_memtable_partitions in "64" #"64"
+for dist in "uniform" #"zipfian"
 do
-for scatter_policy in "power_of_two" #"random" 
+for major_compaction_type in "lc"
 do
-for ltc_num_stocs_scatter_data_blocks in "10" "3" #"1"
-do
-num_memtables="128"
-if [[ $num_memtable_partitions == "1" ]]; then
-	num_memtables="2"
-fi
 run_bench
 done
+done
+done
+
+enable_range_index="true"
+for workload in "workloade" #"workloada"
+do
+for dist in "uniform" "zipfian"
+do
+for major_compaction_type in "lc" "sc"
+do
+run_bench
 done
 done
 done

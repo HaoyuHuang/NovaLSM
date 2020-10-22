@@ -73,7 +73,7 @@ function run_bench() {
 	n=0
 	while [ $n -lt $nservers ]
 	do
-		# if [[ $i == "2" ]]; then
+		# if [[ $i == "3" ]]; then
 		# 	i=$((i+1))
 		# 	continue
 		# fi
@@ -133,10 +133,11 @@ function run_bench() {
     mkdir -p $dir
     chmod -R 777 $dir
 
-	cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "shared" $recordcount $number_of_ltcs $cc_nreplicas_per_range $cc_nranges_per_server"
-	echo $cmd
-	eval $cmd
-	ltc_config_path="$config_dir/nova-shared-cc-nrecords-$recordcount-nccservers-$number_of_ltcs-nlogreplicas-$cc_nreplicas_per_range-nranges-$cc_nranges_per_server"
+	number_of_stocs=$((nservers))
+	# cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "shared" $recordcount $number_of_ltcs $number_of_stocs $cc_nranges_per_server"
+	# echo $cmd
+	# eval $cmd
+	ltc_config_path="$config_dir/nova-shared-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server-zipfian-0.00-read-1"
 	
 	db_path="/db/nova-db-$recordcount-$value_size"
 	echo "$nova_servers $ltc_config_path $db_path"
@@ -312,7 +313,7 @@ memtable_size_mb="16"
 sstable_size_mb="16"
 use_local_disk="true"
 
-ltc_num_stocs_scatter_data_blocks="1"
+ltc_num_stocs_scatter_data_blocks="3"
 max_stoc_file_size_mb="18432"
 
 nclients_per_server="5"
@@ -349,17 +350,23 @@ num_log_replicas="0"
 cc_nranges_per_server="1"
 
 nclients="1"
-level="6"
+level="4"
 
 use_local_disk="true"
 nservers="10"
-nmachines="25"
+nmachines="19"
 number_of_ltcs="10"
-maxexecutiontime="60"
+maxexecutiontime="600"
+mem_pool_size_gb="20"
+ltc_num_stocs_scatter_data_blocks="1"
+# nservers="1"
+# nmachines="5"
+# number_of_ltcs="1"
 # mem_pool_size_gb="20"
 # major_compaction_max_tables_in_a_set="10"
 # major_compaction_max_parallism="4"
-for dist in "uniform" #"zipfian"
+zipfianconstant="0.99"
+for dist in "zipfian" #"uniform"
 do
 for num_memtable_partitions in "64"
 do

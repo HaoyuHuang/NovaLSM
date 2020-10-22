@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/new-large-nova-lsm-sr-scale-$recordcount"
+exp_results_dir="$home_dir/sept-24-large-nova-lsm-sr-scale-$recordcount"
 dryrun="$2"
 
 mkdir -p $results

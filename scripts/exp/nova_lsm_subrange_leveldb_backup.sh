@@ -126,11 +126,9 @@ function run_bench() {
     mkdir -p $dir
     chmod -R 777 $dir
 
-	cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "shared" $recordcount $number_of_ltcs $cc_nreplicas_per_range $cc_nranges_per_server"
-	echo $cmd
-	eval $cmd
-	ltc_config_path="$config_dir/nova-shared-cc-nrecords-$recordcount-nccservers-$number_of_ltcs-nlogreplicas-$cc_nreplicas_per_range-nranges-$cc_nranges_per_server"
-	
+	number_of_stocs=$((nservers))
+	ltc_config_path="$config_dir/nova-shared-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server-zipfian-0.00-read-1"
+
 	db_path="/db/nova-db-$recordcount-$value_size"
 	echo "$nova_servers $ltc_config_path $db_path"
 	echo "cc servers $nova_all_servers"
@@ -284,7 +282,7 @@ sstable_size_mb="16"
 use_local_disk="true"
 
 ltc_num_stocs_scatter_data_blocks="1"
-max_stoc_file_size_mb="18432"
+max_stoc_file_size_mb="65536"
 
 nclients_per_server="5"
 
@@ -324,11 +322,11 @@ nclients="1"
 nservers="1"
 use_local_disk="true"
 nservers="1"
-nmachines="25"
+nmachines="2"
 number_of_ltcs="1"
-level="6"
-maxexecutiontime="1200"
-for dist in "zipfian" "uniform"
+level="5"
+maxexecutiontime="3600"
+for dist in "uniform" #"zipfian"
 do
 for num_memtable_partitions in "64" #"4" "16"
 do

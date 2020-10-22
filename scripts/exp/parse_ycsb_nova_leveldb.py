@@ -569,10 +569,7 @@ def parse_performance(result_dir):
 			performance["p9999"] = []
 			
 			try:
-				if client_id == 15:
-					file = open("{}/client-node-{}-out".format(result_dir, node_id), 'r')
-				else:
-					file = open("{}/client-node-{}-{}-out".format(result_dir, node_id, client_id), 'r')
+				file = open("{}/client-node-{}-{}-out".format(result_dir, node_id, client_id), 'r')
 			except:
 				continue
 			lines = file.readlines()
@@ -626,8 +623,8 @@ def parse_performance(result_dir):
 						ops = float(othp[4])
 						if duration == 600:
 							basethpt = ops
-						if duration == 1200:
-							overall_thpt = (ops-basethpt) / 600
+						if duration == 	3600:
+							overall_thpt = (ops-basethpt) / 3000
 					except:
 						print line
 						continue
@@ -736,14 +733,19 @@ def parse_exp(exp_dir):
 	for expdirname in os.listdir(exp_dir):
 		if "nova" not in expdirname:
 			continue
-		if "-np-4-" not in expdirname:
-			continue
-		if "0.00-" not in expdirname:
-			continue
-		if "workloadw-" not in expdirname:
-			continue
-		if "try-2-" not in expdirname:
-			continue
+		# if "-np-4-" not in expdirname:
+		# 	continue
+		# if "0.00-" not in expdirname:
+		# 	continue
+		# if "nova-d-zipfian-w-workloada-ltc-10-stoc-0-l0-10240-np-64-mp-64-log-none-p-3-c-10" not in expdirname:
+		# 	continue
+		# if "ltc-3" not in expdirname:
+		# 	continue
+		# if "stoc-9-l0-160" not in expdirname:
+		# 	continue
+
+		# if "try-2-" not in expdirname:
+		# 	continue
 		
 		# num_wait = 0
 		result_dir = exp_dir + "/" + expdirname
@@ -788,7 +790,7 @@ def parse_exp(exp_dir):
 				for client_id in sorted(performance[node_id]):
 					exp_time = max(exp_time, len(performance[node_id][client_id][metric]))
 
-			for i in range(min(exp_time, 7200)):
+			for i in range(min(exp_time, 15000)):
 				t = 0
 				for node_id in sorted(performance):
 					for client_id in sorted(performance[node_id]):
@@ -918,7 +920,7 @@ def print_all(exps):
 
 						node_resource_timelines[resource][node_id] = "{}-{},".format(resource, node_id)
 						node_resource_timelines[resource][node_id] += concat_timeline(timeline)
-						node_resource_timelines["avg_{}".format(resource)][node_id] = stats(timeline)
+						node_resource_timelines["avg_{}".format(resource)][node_id] = stats(timeline[len(timeline)/2:])
 						resource_nodes[resource][node_id] = float(node_resource_timelines["avg_{}".format(resource)][node_id])
 						resource_nodes[resource]["SUM"] += resource_nodes[resource][node_id]
 		
@@ -1021,23 +1023,35 @@ param_dict["el"]="Enable Lookup index"
 param_dict["try"]="Try"
 param_dict["cfg"]="Migration"
 param_dict["lr"]="Number of log record replicas"
+param_dict["sub"]="Max sub compactions"
+param_dict["l"]="Level"
+param_dict["nc"]="Number of compaction threads"
+param_dict["sr"]="Size ratio"
+param_dict["nf"]="No Flush"
+param_dict["of"]="Ordered Flush"
 
 ncores = 32
 disk_metric="bandwidth"
-# disk_metric="read"
+disk_metric="read"
 # print_resource_servers=[0, 1, 2, 4]
-# print_resource_servers=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 # print_resource_servers=[0, 1, 2, 3, 4, 5]
 # print_resource_servers=[0]
 # print_resources=["cpu", "net", "disk", "rdma"]
+# print_resource_servers=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 # print_resources=["disk"]
 print_resources=[]
 print_resource_servers=[]
 
-read_resources_stats=False
+read_resources_stats=True
 print_thpt_timeline=True
+print_resources_stats=True
+print_db_stats=False
+
+read_resources_stats=False
+print_thpt_timeline=False
 print_resources_stats=False
 print_db_stats=False
+
 
 num_nodes=int(sys.argv[1])
 exp_dir=sys.argv[2]

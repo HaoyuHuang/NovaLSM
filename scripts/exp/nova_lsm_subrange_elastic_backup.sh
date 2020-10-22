@@ -151,7 +151,7 @@ function run_bench() {
 	# fi
 
 	# old_ltc_config_path="$config_dir/nova-$arch-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server"
-	ltc_config_path="$config_dir/nova-$arch-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server-zipfian-$zipfianconstant-read-1"
+	ltc_config_path="$config_dir/nova-$arch-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server-zipfian-0.00-read-1"
 	# mv $old_ltc_config_path $ltc_config_path
 	
 	db_path="/db/nova-db-$recordcount-$value_size"
@@ -347,7 +347,7 @@ number_of_ltcs="1"
 nclients="1"
 nservers="6"
 level="6"
-nmachines="16"
+nmachines="21"
 
 exp_seconds_to_fail_stoc="-1"
 fail_stoc_id="-1"
@@ -360,8 +360,7 @@ dist="$6"
 num_sstable_replicas="$7"
 cc_nranges_per_server="$8"
 zipfianconstant="$9"
-arch="elastic"
-
+arch="${10}"
 # nmachines="5"
 # arch="simpleelastic"
 

@@ -3,14 +3,14 @@
 END=$1
 REMOTE_HOME="/proj/BG"
 REMOTE_HOME="/proj/bg-PG0"
-HOME="/users/haoyu"
 setup_script="$REMOTE_HOME/haoyu/scripts/env"
 limit_dir="$REMOTE_HOME/haoyu/scripts"
-LOCAL_HOME="/home/haoyuhua/Documents/nova/NovaLSM/scripts/bootstrap"
+LOCAL_HOME="/Users/haoyuh/Documents/PhdUSC/dblab/nova/NovaLSM/scripts/bootstrap"
 
 
 host="Nova.bg-PG0.apt.emulab.net"
-scp -r $LOCAL_HOME/env/*sh haoyu@node-0.${host}:/proj/bg-PG0/haoyu/scripts/env/
+# host="Nova.bg-PG0.utah.cloudlab.us"
+scp -r $LOCAL_HOME/* haoyu@node-0.${host}:/proj/bg-PG0/haoyu/scripts/
 
 for ((i=0;i<END;i++)); do
     echo "building server on node $i"

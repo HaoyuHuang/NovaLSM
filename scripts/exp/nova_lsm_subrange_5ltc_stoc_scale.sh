@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/nova-lsm-sr-scatter-read-workloads-$recordcount"
+exp_results_dir="$home_dir/sept-25-large-nova-lsm-sr-scale-$recordcount"
 dryrun="$2"
 
 mkdir -p $results
@@ -53,7 +53,7 @@ cc_log_max_file_size_mb="18"
 
 port=$((10000+RANDOM%1000))
 rdma_port=$((20000+RANDOM%1000))
-rdma_max_msg_size=$((512*1024))
+rdma_max_msg_size=$((256*1024))
 rdma_max_num_sends="32"
 rdma_doorbell_batch_size="8"
 enable_load_data="true"
@@ -62,7 +62,8 @@ num_memtables="2"
 
 log_record_mode="none"
 num_log_replicas="1"
-zipfian_dist_file_path="/tmp/zipfian"
+# zipfian_dist_file_path="/tmp/zipfian-$recordcount"
+zipfian_dist_file_path=""
 try="0"
 function run_bench() {
 	servers=()
@@ -74,7 +75,7 @@ function run_bench() {
 	do
 		# if [[ $i == "2" ]]; then
 		# 	i=$((i+1))
-		# 	continue	
+		# 	continue
 		# fi
 		servers+=("node-$i")
 		i=$((i+1))
@@ -115,7 +116,7 @@ function run_bench() {
 
 	current_time=$(date "+%Y-%m-%d-%H-%M-%S")
 	nstoc=$((nservers-number_of_ltcs))
-	result_dir_name="nova-d-$dist-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$l0_stop_write_mb-np-$num_memtable_partitions-ss-$sstable_size_mb-p-$ltc_num_stocs_scatter_data_blocks-sp-$scatter_policy"
+	result_dir_name="nova-d-$dist-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$cc_l0_stop_write_gb-np-$num_memtable_partitions-p-$ltc_num_stocs_scatter_data_blocks"
 	echo "running experiment $result_dir_name"
 
 	# Copy the files over local node
@@ -125,12 +126,12 @@ function run_bench() {
     mkdir -p $dir
     chmod -R 777 $dir
 
-	number_of_stocs=$((nservers-number_of_ltcs))
-	# cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "shared" $recordcount $number_of_ltcs $number_of_stocs $cc_nranges_per_server"
+	# cmd="java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "shared" $recordcount $number_of_ltcs $cc_nreplicas_per_range $cc_nranges_per_server"
 	# echo $cmd
 	# eval $cmd
-	ltc_config_path="$config_dir/nova-shared-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server-zipfian-0.00-read-1"
-
+	# nstoc=$((nservers-number_of_ltcs))
+	ltc_config_path="$config_dir/nova-shared-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$nstoc-nranges-$cc_nranges_per_server-zipfian-0.00-read-1"
+	
 	db_path="/db/nova-db-$recordcount-$value_size"
 	echo "$nova_servers $ltc_config_path $db_path"
 	echo "cc servers $nova_all_servers"
@@ -151,8 +152,6 @@ function run_bench() {
 		echo "restore database image $s"
 		ssh -oStrictHostKeyChecking=no $s "rm -rf /db/nova-db-$recordcount-1024/ && cp -r /db/snapshot-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas/nova-db-$recordcount-1024/ /db/ &" &
 	done
-
-	sleep 10
 
 	for m in ${machines[@]}
 	do
@@ -287,7 +286,7 @@ cc_nreplicas_per_range="1"
 enable_rdma="true"
 row_cache_mb="0"
 
-l0_stop_write_mb="10"
+cc_l0_stop_write_gb="10"
 enable_lookup_index="true"
 
 cc_nconn_workers="512"
@@ -338,8 +337,8 @@ l0_start_compaction_mb="4096"
 log_record_mode="none"
 num_log_replicas="0"
 cc_nranges_per_server="1"
-enable_flush_multiple_memtables="false"
-subrange_no_flush_num_keys="0"
+# enable_flush_multiple_memtables="false"
+# subrange_no_flush_num_keys="0"
 
 enable_flush_multiple_memtables="true"
 subrange_no_flush_num_keys="100"
@@ -351,34 +350,29 @@ major_compaction_type="sc"
 major_compaction_max_parallism="64"
 major_compaction_max_tables_in_a_set="50"
 enable_load_data="false"
-num_memtable_partitions="1"
-num_memtables="2"
-l0_stop_write_mb=$((10*1024))
-nservers="11"
-nclients="4"
+num_memtable_partitions="64"
+level="6"
+number_of_ltcs="5"
+nmachines="25"
+nclients="10"
+num_sstable_replicas="1"
+enable_range_index="false"
+
+nservers="15"
 workload="workloadw"
 dist="uniform"
-nmachines="20"
-scatter_policy="power_of_two"
-level="7"
-num_sstable_replicas="1"
-enable_range_index="true"
-for workload in "workloada" "workloade"
+l0_start_compaction_mb=$((4096/number_of_ltcs))
+l0_stop_write_mb=$((10*1024/number_of_ltcs))
+cc_l0_stop_write_gb=$((l0_stop_write_mb/1024))
+ltc_num_stocs_scatter_data_blocks="10"
+# run_bench
+
+cc_l0_stop_write_gb="30"
+# ="3"
+for ltc_num_stocs_scatter_data_blocks in "3" "10"
 do
-for num_memtable_partitions in "64" #"64"
-do
-for scatter_policy in "power_of_two" #"random" 
-do
-for ltc_num_stocs_scatter_data_blocks in "10" "3" #"1"
-do
-num_memtables="128"
-if [[ $num_memtable_partitions == "1" ]]; then
-	num_memtables="2"
-fi
+l0_stop_write_mb=$((cc_l0_stop_write_gb*1024))
 run_bench
 done
-done
-done
-done
 
-python /proj/bg-PG0/haoyu/scripts/parse_ycsb_nova_leveldb.py $nmachines $exp_results_dir > stats_power2_out
+python /proj/bg-PG0/haoyu/scripts/parse_ycsb_nova_leveldb.py 25 $exp_results_dir > scale_out

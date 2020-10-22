@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/august-11-nova-lsm-sr-zipfian-ltc-elastic-$recordcount"
+exp_results_dir="$home_dir/sept-12-nova-lsm-sr-zipfian-ltc-elastic-$recordcount"
 dryrun="$2"
 
 mkdir -p $results
@@ -339,7 +339,7 @@ number_of_ltcs="1"
 maxexecutiontime=1200
 workload="workloadw"
 enable_load_data="false"
-mem_pool_size_gb="30"
+mem_pool_size_gb="20"
 
 major_compaction_type="sc"
 num_recovery_threads="32"
@@ -387,44 +387,64 @@ cc_nranges_per_server="64"
 try="1"
 dist="uniform"
 
-
-nmachines="16"
-nclients="6"
-number_of_ltcs="3"
-nservers="8"
+nmachines="21"
+nclients="9"
+number_of_ltcs="1"
+nservers="13"
 cc_nranges_per_server="64"
 change_cfg="true"
 num_log_replicas="1"
 arch="elastic"
-maxexecutiontime=$((80*60))
+maxexecutiontime=$((300*60))
 zipfianconstant="0.00"
 
-# nmachines="5"
-# nclients="1"
-# number_of_ltcs="2"
-# nservers="4"
-# cc_nranges_per_server="16"
-# change_cfg="true"
-# num_log_replicas="1"
-# arch="simpleelastic"
-# maxexecutiontime=$((10*60))
 
+num_memtable_partitions="4"
+num_memtables="8"
+try="1"
+mem_pool_size_gb="20"
+number_of_ltcs="3"
+nservers="12"
+workload="workloada"
+arch="$workload"
+log_record_mode="none"
+mem_pool_size_gb="20"
+num_log_replicas="0"
 
 l0_start_compaction_mb=$((4*1024))
 l0_stop_write_mb=$((10*1024))
 l0_start_compaction_mb=$((l0_start_compaction_mb/number_of_ltcs/cc_nranges_per_server))
 l0_stop_write_mb=$((l0_stop_write_mb/number_of_ltcs/cc_nranges_per_server))
 
-num_memtable_partitions="4"
-num_memtables="8"
+# run_bench
 
-for try in "2" #"3" "4" "5"
-do 
-for workload in "workloada" #"workloadw"
-do
+number_of_ltcs="2"
+nservers="8"
+l0_start_compaction_mb=$((4*1024))
+l0_stop_write_mb=$((10*1024))
+l0_start_compaction_mb=$((l0_start_compaction_mb/number_of_ltcs/cc_nranges_per_server))
+l0_stop_write_mb=$((l0_stop_write_mb/number_of_ltcs/cc_nranges_per_server))
+
 run_bench
-done
-done
 
-cp elastic_coord_* $exp_results_dir/
+# log_record_mode="rdma"
+# mem_pool_size_gb="20"
+# num_log_replicas="1"
+# num_memtable_partitions="4"
+# num_memtables="8"
+
+# number_of_ltcs="3"
+# nservers="15"
+# workload="workloade"
+# arch="$workload"
+# run_bench
+
+# nservers="16"
+# workload="workloade"
+# arch="$workload"
+# run_bench
+
+
+
+cp out $exp_results_dir/
 python /proj/bg-PG0/haoyu/scripts/parse_ycsb_nova_leveldb.py $nmachines $exp_results_dir > stats_ltc_elastic_out
