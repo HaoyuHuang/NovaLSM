@@ -127,7 +127,7 @@ function run_bench() {
     chmod -R 777 $dir
 
 	number_of_stocs=$((nservers))
-	ltc_config_path="$config_dir/nova-shared-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server-zipfian-0.00-read-1"
+	ltc_config_path="$config_dir/nova-shared-nrecords-$recordcount-nltc-1-nstoc-1-nranges-1-zipfian-0.00-read-1"
 
 	db_path="/db/nova-db-$recordcount-$value_size"
 	echo "$nova_servers $ltc_config_path $db_path"
@@ -253,7 +253,7 @@ zipfianconstant="0.99"
 
 block_cache_mb="0"
 cc_nreplicas_per_range="1"
-enable_rdma="true"
+enable_rdma="false"
 row_cache_mb="0"
 
 l0_stop_write_mb="0"
@@ -318,15 +318,15 @@ num_log_replicas="0"
 cc_nranges_per_server="1"
 
 number_of_ltcs="1"
-nclients="1"
+nclients="3"
 nservers="1"
 use_local_disk="true"
 nservers="1"
-nmachines="2"
+nmachines="4"
 number_of_ltcs="1"
 level="5"
-maxexecutiontime="3600"
-for dist in "uniform" #"zipfian"
+maxexecutiontime="1200"
+for dist in "zipfian"
 do
 for num_memtable_partitions in "64" #"4" "16"
 do

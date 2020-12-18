@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/oct-13-flush-order-single-thread-$recordcount"
+exp_results_dir="$home_dir/nov-7-$recordcount"
 dryrun="$2"
 
 mkdir -p $results
@@ -129,7 +129,7 @@ function run_bench() {
 	# echo $cmd
 	# eval $cmd
 	number_of_stocs=$((nservers))
-	ltc_config_path="$config_dir/nova-shared-nrecords-$recordcount-nltc-$number_of_ltcs-nstoc-$number_of_stocs-nranges-$cc_nranges_per_server-zipfian-0.00-read-1"
+	ltc_config_path="$config_dir/nova-shared-nrecords-200000000-nltc-1-nstoc-1-nranges-1-zipfian-0.00-read-1"
 	
 	db_path="/db/nova-db-$recordcount-$value_size"
 	echo "$nova_servers $ltc_config_path $db_path"
@@ -353,25 +353,23 @@ enable_load_data="false"
 l0_start_compaction_mb="4096"
 l0_stop_write_mb=$((10*1024))
 nservers="1"
-nmachines="2"
-nclients="1"
-nthreads="1"
+nmachines="5"
+nclients="4"
+nthreads="512"
 mem_pool_size_gb="20"
 num_memtable_partitions="64"
 num_memtables="128"
 enable_range_index="false"
 maxexecutiontime="3600"
 
-workload="workloadc"
+workload="$3"
 dist="uniform"
 level="5"
-for try in "1" "2" "3" "4" "5"
+for try in "1" #"2" "3" "4" "5"
 do
-for workload in "workloadc" #"workloada"
+for dist in "zipfian" #"uniform" #
 do
-for dist in "uniform" #"zipfian"
-do
-for ordered_flush in "true" "false"
+for ordered_flush in "false" #"false"
 do
 for num_memtable_partitions in "64" #"4" "1" "16" "64"
 do
@@ -382,7 +380,6 @@ else
 fi
 num_memtables=$((num_memtable_partitions*2))
 run_bench
-done
 done
 done
 done

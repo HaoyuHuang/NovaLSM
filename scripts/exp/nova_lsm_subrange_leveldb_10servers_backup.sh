@@ -350,15 +350,15 @@ num_log_replicas="0"
 cc_nranges_per_server="1"
 
 nclients="1"
-level="4"
+level="5"
 
 use_local_disk="true"
 nservers="10"
-nmachines="19"
+nmachines="13"
 number_of_ltcs="10"
-maxexecutiontime="600"
+maxexecutiontime="300"
 mem_pool_size_gb="20"
-ltc_num_stocs_scatter_data_blocks="1"
+ltc_num_stocs_scatter_data_blocks="3"
 # nservers="1"
 # nmachines="5"
 # number_of_ltcs="1"
@@ -366,11 +366,12 @@ ltc_num_stocs_scatter_data_blocks="1"
 # major_compaction_max_tables_in_a_set="10"
 # major_compaction_max_parallism="4"
 zipfianconstant="0.99"
-for dist in "zipfian" #"uniform"
-do
+dist="$3"
+# for dist in "zipfian" #"uniform"
+# do
 for num_memtable_partitions in "64"
 do
 run_bench
 done
-done
+# done
 

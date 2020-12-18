@@ -10,8 +10,7 @@ results="/tmp/results"
 recordcount="$1"
 dryrun="$2"
 run_rdma="$3"
-try="$4"
-exp_results_dir="$home_dir/sept-30-nova-10-servers-scatter-10-new-$recordcount"
+exp_results_dir="$home_dir/sigmod-nova-10-servers-scatter-10-single-thread-$recordcount"
 
 
 mkdir -p $results
@@ -67,6 +66,7 @@ log_record_mode="none"
 num_log_replicas="1"
 zipfian_dist_file_path="/tmp/zipfian"
 zipfian_dist_file_path=""
+use_ordered_flush="true"
 # try="0"
 function run_bench() {
 	servers=()
@@ -125,7 +125,7 @@ function run_bench() {
 
 	current_time=$(date "+%Y-%m-%d-%H-%M-%S")
 	nstoc=$((nservers-number_of_ltcs))
-	result_dir_name="try-$try-nova-d-$dist-nf-$subrange_no_flush_num_keys-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$l0_stop_write_mb-np-$num_memtable_partitions-mp-$major_compaction_max_parallism-log-$log_record_mode-p-$ltc_num_stocs_scatter_data_blocks-c-$cardinality"
+	result_dir_name="nova-d-$dist-nf-$subrange_no_flush_num_keys-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$l0_stop_write_mb-np-$num_memtable_partitions-mp-$major_compaction_max_parallism-log-$log_record_mode-p-$ltc_num_stocs_scatter_data_blocks-c-$cardinality"
 	echo "running experiment $result_dir_name"
 
 	# Copy the files over local node
@@ -375,9 +375,10 @@ l0_stop_write_mb=$((10*1024))
 # l0_stop_write_mb="0"
 nservers="10"
 number_of_ltcs="10"
-nmachines="19"
-nclients="9"
-nclients_per_server="5"
+nmachines="13"
+nclients="1"
+nclients_per_server="1"
+nthreads="1"
 use_local_disk="true"
 
 num_memtable_partitions="64"
@@ -386,18 +387,17 @@ maxexecutiontime="1200"
 
 workload="workloadw"
 dist="uniform"
-level="4"
+level="5"
 # mem_pool_size_gb="4"
 enable_range_index="false"
 
 l0_stop_write_mb="10240"
 zipfianconstant="0.99"
 ltc_num_stocs_scatter_data_blocks="3"
+dist="$4"
 for subrange_no_flush_num_keys in "100" #"1000" #"10000" "5000"
 do
-for workload in "workloada"
-do
-for dist in "zipfian"
+for workload in "workloadw" "workloadc" #"workloade" 
 do
 for num_memtable_partitions in "64"
 do
@@ -444,7 +444,6 @@ num_memtables=$((num_memtable_partitions*2))
 run_bench
 fi
 
-done
 done
 done
 done

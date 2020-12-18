@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/latest-leveldb-10servers-$recordcount"
+exp_results_dir="$home_dir/sigmod-leveldb-10servers-single-thread-$recordcount"
 dryrun="$2"
 
 
@@ -187,7 +187,7 @@ function run_bench() {
 	c=${clis[0]}
 	i="1"
 	echo "creating client on $c-$i"
-	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_servers $debug $partition $recordcount 600 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
+	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_servers $debug $partition $recordcount 300 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
 	echo "$cmd"
 	ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
 
@@ -308,10 +308,10 @@ nconn_workers="512"
 nclients_per_server="5"
 persist_log_record="none"
 nservers="10"
-nmachines="25"
-nclients="15"
+nmachines="13"
+nclients="3"
 cache_size_gb="26"
-level="6"
+level="5"
 nranges_per_server="64"
 
 # nservers="1"
@@ -328,9 +328,12 @@ l0_start_compaction_mb=$((l0_start_compaction_mb/nranges_per_server))
 l0_stop_write_mb=$((l0_stop_write_mb/nranges_per_server))
 zipfianconstant="0.99"
 dist="zipfian"
-for dist in "zipfian" "uniform"
+nclients="1"
+nclients_per_server="1"
+nthreads="1"
+for dist in "uniform" "zipfian" 
 do
-for workload in "workloade" "workloadw" "workloada"
+for workload in "workloadw" "workloadc"  #"workloada"
 do
 run_bench
 done

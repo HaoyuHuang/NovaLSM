@@ -8,8 +8,9 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/august-scan-nova-leveldb-ranges-2-$recordcount"
+exp_results_dir="$home_dir/nov-10-leveldb-$recordcount"
 dryrun="$2"
+workload="$3"
 
 
 mkdir -p $results
@@ -21,7 +22,6 @@ nclients="6"
 # YCSB
 maxexecutiontime=300
 
-workload="workloadc"
 nthreads="16"
 debug="false"
 dist="zipfian"
@@ -109,8 +109,8 @@ function run_bench() {
     sudo mkdir -p $dir
     sudo chmod -R 777 $dir
 
-	java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "shared" $recordcount $nservers $nreplicas_per_range $nranges_per_server
-	config_path="$config_dir/nova-shared-cc-nrecords-$recordcount-nccservers-$nservers-nlogreplicas-$nreplicas_per_range-nranges-$nranges_per_server"
+	# java -jar $cache_bin_dir/nova_config_generator.jar $config_dir "shared" $recordcount $nservers $nreplicas_per_range $nranges_per_server
+	config_path="$config_dir/nova-shared-nrecords-200000000-nltc-1-nstoc-1-nranges-1-zipfian-0.00-read-1"
 
 	# config_path="$config_dir/nova-nrecords-$recordcount-nservers-$nservers-nreplicas-$nreplicas_per_range-nranges-$nranges_per_server"
 	db_path="/db/nova-db-$recordcount-$value_size"
@@ -265,12 +265,12 @@ nranges_per_server="128"
 # client configurations. 
 dist="uniform"
 value_size="1024"
-workload="workloada"
+# workload="workloada"
 nthreads="512"
-workload="workloadw"
+# workload="workloadw"
 zipfianconstant="0.99"
 operationcount=0
-maxexecutiontime=1200
+maxexecutiontime=3600
 
 # setup.
 nservers="5"
@@ -312,8 +312,9 @@ nservers="1"
 nmachines="5"
 nclients="4"
 cache_size_gb="22"
-level="6"
+level="5"
 cardinality="10"
+workload="$3"
 
 for persist_log_record in "none" #"disk" "mem"
 do
@@ -325,12 +326,9 @@ l0_stop_write_mb=$((10*1024))
 l0_start_compaction_mb=$((l0_start_compaction_mb/nranges_per_server))
 l0_stop_write_mb=$((l0_stop_write_mb/nranges_per_server))
 
-for dist in "uniform" #"zipfian" 
-do
-for workload in "workloada" "workloadw" "workloade"
+for dist in "zipfian" #"zipfian" 
 do
 run_bench
-done
 done
 done
 done

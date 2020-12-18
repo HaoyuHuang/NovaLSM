@@ -233,7 +233,7 @@ int main(int argc, char *argv[]) {
 
     NovaConfig::config->num_stocs_scatter_data_blocks = FLAGS_ltc_num_stocs_scatter_data_blocks;
     NovaConfig::config->max_stoc_file_size = FLAGS_max_stoc_file_size_mb * 1024;
-    NovaConfig::config->manifest_file_size = NovaConfig::config->max_stoc_file_size;
+    NovaConfig::config->manifest_file_size = NovaConfig::config->max_stoc_file_size * 4;
     NovaConfig::config->sstable_size = FLAGS_sstable_size_mb * 1024 * 1024;
     NovaConfig::config->use_local_disk = FLAGS_use_local_disk;
     NovaConfig::config->num_tinyranges_per_subrange = FLAGS_num_tinyranges_per_subrange;

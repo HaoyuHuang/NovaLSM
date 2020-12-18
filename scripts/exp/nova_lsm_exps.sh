@@ -1,5 +1,5 @@
 #!/bin/bash
-recordcount="10000000"
+recordcount="3000000000"
 dryrun="false"
 
 number_of_ltcs="1"
@@ -15,7 +15,8 @@ num_sstable_meta_replicas="1"
 # do
 # bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_backup.sh $recordcount $dryrun $number_of_ltcs $nservers $num_memtable_partitions $dist $num_sstable_replicas $nranges_per_server $num_sstable_meta_replicas $use_parity
 # done
-bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_replication.sh $recordcount $dryrun
+bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_leveldb_10servers_backup.sh $recordcount $dryrun
+bash /proj/bg-PG0/haoyu/scripts/nova_lsm_subrange_leveldb_10servers.sh $recordcount $dryrun
 # bash /proj/bg-PG0/haoyu/scripts/nova_rocksdb_comparison.sh
 
 # nranges_per_server="16"

@@ -117,11 +117,12 @@ namespace nova {
                     }
                     continue;
                 }
+                NOVA_LOG(INFO) << fmt::format("Read config line: {}", line);
                 auto *frag = new LTCFragment();
                 std::vector<std::string> tokens = SplitByDelimiter(&line, ",");
-                frag->range.key_start = std::stoi(tokens[0]);
-                frag->range.key_end = std::stoi(tokens[1]);
-                frag->ltc_server_id = std::stoi(tokens[2]);
+                frag->range.key_start = std::stoll(tokens[0]);
+                frag->range.key_end = std::stoll(tokens[1]);
+                frag->ltc_server_id = std::stoll(tokens[2]);
                 frag->dbid = std::stoi(tokens[3]);
                 if (cfg->cfg_id == 0) {
                     frag->is_ready_ = true;

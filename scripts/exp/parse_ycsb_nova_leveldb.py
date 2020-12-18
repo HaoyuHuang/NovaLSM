@@ -1032,7 +1032,7 @@ param_dict["of"]="Ordered Flush"
 
 ncores = 32
 disk_metric="bandwidth"
-disk_metric="read"
+# disk_metric="read"
 # print_resource_servers=[0, 1, 2, 4]
 # print_resource_servers=[0, 1, 2, 3, 4, 5]
 # print_resource_servers=[0]
@@ -1044,7 +1044,7 @@ print_resource_servers=[]
 
 read_resources_stats=True
 print_thpt_timeline=True
-print_resources_stats=True
+print_resources_stats=False
 print_db_stats=False
 
 read_resources_stats=False
