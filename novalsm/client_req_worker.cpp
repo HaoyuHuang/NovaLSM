@@ -385,7 +385,7 @@ namespace nova {
             delete stats.sstable_size_dist;
         }
 
-        if (num_l0_sstables == 0 && needs_compaction) {
+        if (needs_compaction) {
             num_l0_sstables = 10000;
         }
 
