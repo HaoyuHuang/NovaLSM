@@ -33,10 +33,11 @@
 # 4. make -j
 
 cmake_minimum_required(VERSION 3.5.1)
-
+set(CMAKE_CXX_FLAGS "-std=c++11")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake/modules/")
-include(ReadVersion)
-get_rocksdb_version(rocksdb_VERSION)
+#include(ReadVersion)
+#get_rocksdb_version(rocksdb_VERSION)
+set(rocksdb_VERSION "6.5")
 project(rocksdb
   VERSION ${rocksdb_VERSION}
   LANGUAGES CXX C ASM)
@@ -44,6 +45,33 @@ project(rocksdb
 if(POLICY CMP0042)
   cmake_policy(SET CMP0042 NEW)
 endif()
+
+
+function(find_static_library LIB_NAME OUT)
+
+  if (WIN32 OR MSVC)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".lib")
+  elseif (UNIX)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+  endif()
+
+  find_library(
+          FOUND_${LIB_NAME}_STATIC
+          ${LIB_NAME}
+  )
+
+  if (FOUND_${LIB_NAME}_STATIC)
+    get_filename_component(ABS_FILE ${FOUND_${LIB_NAME}_STATIC} ABSOLUTE)
+  else()
+    message(SEND_ERROR "Unable to find library ${LIB_NAME}")
+  endif()
+
+  set(${OUT} ${ABS_FILE} PARENT_SCOPE)
+
+endfunction()
+
+find_static_library(gflags GFLAGS)
+
 
 if(NOT CMAKE_BUILD_TYPE)
   if(EXISTS "${CMAKE_SOURCE_DIR}/.git")
@@ -107,27 +135,27 @@ else()
     endif()
   endif()
 
-  set(GFLAGS_LIB)
-  if(WITH_GFLAGS)
-    # Config with namespace available since gflags 2.2.2
-    option(GFLAGS_USE_TARGET_NAMESPACE "Use gflags import target with namespace." ON)
-    find_package(gflags CONFIG)
-    if(gflags_FOUND)
-      if(TARGET ${GFLAGS_TARGET})
-        # Config with GFLAGS_TARGET available since gflags 2.2.0
-        set(GFLAGS_LIB ${GFLAGS_TARGET})
-      else()
-        # Config with GFLAGS_LIBRARIES available since gflags 2.1.0
-        set(GFLAGS_LIB ${GFLAGS_LIBRARIES})
-      endif()
-    else()
-      find_package(gflags REQUIRED)
-        set(GFLAGS_LIB gflags::gflags)
-    endif()
-    include_directories(${GFLAGS_INCLUDE_DIR})
-    list(APPEND THIRDPARTY_LIBS ${GFLAGS_LIB})
-    add_definitions(-DGFLAGS=1)
-  endif()
+#  set(GFLAGS_LIB)
+#  if(WITH_GFLAGS)
+#    # Config with namespace available since gflags 2.2.2
+#    option(GFLAGS_USE_TARGET_NAMESPACE "Use gflags import target with namespace." ON)
+#    find_package(gflags CONFIG)
+#    if(gflags_FOUND)
+#      if(TARGET ${GFLAGS_TARGET})
+#        # Config with GFLAGS_TARGET available since gflags 2.2.0
+#        set(GFLAGS_LIB ${GFLAGS_TARGET})
+#      else()
+#        # Config with GFLAGS_LIBRARIES available since gflags 2.1.0
+#        set(GFLAGS_LIB ${GFLAGS_LIBRARIES})
+#      endif()
+#    else()
+#      find_package(gflags REQUIRED)
+#        set(GFLAGS_LIB gflags::gflags)
+#    endif()
+#    include_directories(${GFLAGS_INCLUDE_DIR})
+#    list(APPEND THIRDPARTY_LIBS ${GFLAGS_LIB})
+#    add_definitions(-DGFLAGS=1)
+#  endif()
 
   if(WITH_SNAPPY)
     find_package(Snappy CONFIG)
@@ -1223,7 +1251,7 @@ if(WITH_TESTS)
         EXCLUDE_FROM_DEFAULT_BUILD_RELWITHDEBINFO 1
         OUTPUT_NAME ${exename}${ARTIFACT_SUFFIX}
       )
-      target_link_libraries(${CMAKE_PROJECT_NAME}_${exename}${ARTIFACT_SUFFIX} testutillib${ARTIFACT_SUFFIX} testharness gtest ${GFLAGS_LIB} ${ROCKSDB_LIB})
+      target_link_libraries(${CMAKE_PROJECT_NAME}_${exename}${ARTIFACT_SUFFIX} testutillib${ARTIFACT_SUFFIX} testharness gtest ${GFLAGS} ${ROCKSDB_LIB})
       if(NOT "${exename}" MATCHES "db_sanity_test")
         add_test(NAME ${exename} COMMAND ${exename}${ARTIFACT_SUFFIX})
         add_dependencies(check ${CMAKE_PROJECT_NAME}_${exename}${ARTIFACT_SUFFIX})
@@ -1254,48 +1282,49 @@ if(WITH_TESTS)
   endif()
 endif()
 
+
 add_library(libnova STATIC ${NOVA_SOURCES})
 set_target_properties(libnova PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(libnova -lpthread event ${ROCKSDB_STATIC_LIB} fmt)
 add_executable(rocksdb_main "nova/rocksdb_main.cpp")
-target_link_libraries(rocksdb_main libnova ${ROCKSDB_STATIC_LIB} -lgflags fmt)
+target_link_libraries(rocksdb_main libnova ${ROCKSDB_STATIC_LIB} ${GFLAGS} fmt)
 #
 if(WITH_BENCHMARK_TOOLS)
   add_executable(db_bench
     tools/db_bench.cc
     tools/db_bench_tool.cc)
   target_link_libraries(db_bench
-    ${ROCKSDB_LIB} ${GFLAGS_LIB})
+    ${ROCKSDB_LIB} -lgflags)
 
   add_executable(cache_bench
     cache/cache_bench.cc)
   target_link_libraries(cache_bench
-    ${ROCKSDB_LIB} ${GFLAGS_LIB})
+    ${ROCKSDB_LIB} -lgflags)
 
   add_executable(memtablerep_bench
     memtable/memtablerep_bench.cc)
   target_link_libraries(memtablerep_bench
-    ${ROCKSDB_LIB} ${GFLAGS_LIB})
+    ${ROCKSDB_LIB} -lgflags)
 
   add_executable(range_del_aggregator_bench
     db/range_del_aggregator_bench.cc)
   target_link_libraries(range_del_aggregator_bench
-    ${ROCKSDB_LIB} ${GFLAGS_LIB})
+    ${ROCKSDB_LIB} -lgflags)
 
   add_executable(table_reader_bench
     table/table_reader_bench.cc)
   target_link_libraries(table_reader_bench
-    ${ROCKSDB_LIB} testharness ${GFLAGS_LIB})
+    ${ROCKSDB_LIB} testharness -lgflags)
 
   add_executable(filter_bench
     util/filter_bench.cc)
   target_link_libraries(filter_bench
-    ${ROCKSDB_LIB} ${GFLAGS_LIB})
+    ${ROCKSDB_LIB} -lgflags)
 
   add_executable(hash_table_bench
     utilities/persistent_cache/hash_table_bench.cc)
   target_link_libraries(hash_table_bench
-    ${ROCKSDB_LIB} ${GFLAGS_LIB})
+    ${ROCKSDB_LIB} -lgflags)
 endif()
 
 if(WITH_CORE_TOOLS OR WITH_TOOLS)

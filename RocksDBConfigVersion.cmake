@@ -9,16 +9,16 @@
 # The variable CVF_VERSION must be set before calling configure_file().
 
 
-set(PACKAGE_VERSION "6.12.0")
+set(PACKAGE_VERSION "6.5")
 
 if(PACKAGE_VERSION VERSION_LESS PACKAGE_FIND_VERSION)
   set(PACKAGE_VERSION_COMPATIBLE FALSE)
 else()
 
-  if("6.12.0" MATCHES "^([0-9]+)\\.")
+  if("6.5" MATCHES "^([0-9]+)\\.")
     set(CVF_VERSION_MAJOR "${CMAKE_MATCH_1}")
   else()
-    set(CVF_VERSION_MAJOR "6.12.0")
+    set(CVF_VERSION_MAJOR "6.5")
   endif()
 
   if(PACKAGE_FIND_VERSION_MAJOR STREQUAL CVF_VERSION_MAJOR)
@@ -33,9 +33,14 @@ else()
 endif()
 
 
+# if the installed project requested no architecture check, don't perform the check
+if("FALSE")
+  return()
+endif()
+
 # if the installed or the using project don't have CMAKE_SIZEOF_VOID_P set, ignore it:
 if("${CMAKE_SIZEOF_VOID_P}" STREQUAL "" OR "8" STREQUAL "")
-   return()
+  return()
 endif()
 
 # check that the installed version has the same 32/64bit-ness as the one which is currently searching:

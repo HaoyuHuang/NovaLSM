@@ -364,7 +364,7 @@ bool process_socket_stats_request(int fd, Connection *conn) {
     num_l0_sstables += metadata.levels[0].files.size();
   }
 
-  if (num_l0_sstables == 0 && needs_compaction) {
+  if (needs_compaction) {
     num_l0_sstables = 10000;
   }
   char *response_buf = worker->buf;

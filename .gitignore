@@ -4,9 +4,8 @@ config.log
 src/.deps
 Makefile
 src/Makefile
-src/twemcache
+src/twemcach
 
-cmake/
 CTestTestfile.cmake
 
 config.log
