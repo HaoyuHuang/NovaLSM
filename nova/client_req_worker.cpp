@@ -468,7 +468,7 @@ namespace nova {
             num_l0_sstables += stats.num_l0_sstables;
         }
 
-        if (num_l0_sstables == 0 && needs_compaction) {
+        if (needs_compaction) {
             num_l0_sstables = 10000;
         }
 
