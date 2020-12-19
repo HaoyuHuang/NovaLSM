@@ -623,8 +623,8 @@ def parse_performance(result_dir):
 						ops = float(othp[4])
 						if duration == 600:
 							basethpt = ops
-						if duration == 	3600:
-							overall_thpt = (ops-basethpt) / 3000
+						if duration == 	1200:
+							overall_thpt = (ops-basethpt) / 600
 					except:
 						print line
 						continue

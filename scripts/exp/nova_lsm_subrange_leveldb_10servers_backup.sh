@@ -157,7 +157,7 @@ function run_bench() {
 	echo "Preparing sar"
 	for m in ${machines[@]}
 	do
-		ssh -oStrictHostKeyChecking=no $m "sudo killall leveldb_main nova_shared_main nova_multi_thread_compaction nova_server_main java collectl sar"
+		ssh -oStrictHostKeyChecking=no $m "sudo killall rocksdb_main leveldb_main nova_shared_main nova_multi_thread_compaction nova_server_main java collectl sar"
 		ssh -oStrictHostKeyChecking=no $m "sudo collectl -scx -i 1 -P > $results/$m-coll.txt &"
 		ssh -oStrictHostKeyChecking=no $m "sar -P ALL 1 > $results/$m-cpu.txt &"
 	    ssh -oStrictHostKeyChecking=no $m "sar -n DEV 1 > $results/$m-net.txt &"
@@ -227,7 +227,7 @@ function run_bench() {
     for m in ${machines[@]}
     do
     	echo "kill java at $m"
-    	ssh -oStrictHostKeyChecking=no $m "sudo killall leveldb_main nova_shared_main nova_multi_thread_compaction nova_server_main java collectl sar"
+    	ssh -oStrictHostKeyChecking=no $m "sudo killall rocksdb_main leveldb_main nova_shared_main nova_multi_thread_compaction nova_server_main java collectl sar"
     done
 
     dir="$exp_results_dir/$result_dir_name"

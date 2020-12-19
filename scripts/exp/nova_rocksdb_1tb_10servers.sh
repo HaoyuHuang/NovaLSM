@@ -155,21 +155,21 @@ function run_bench() {
 		sleep 1
 	done
 
-	# echo "warmup..."
-	# c=${clis[0]}
-	# i="1"
-	# echo "creating client on $c-$i"
-	# cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_servers $debug $partition $recordcount 300 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
-	# echo "$cmd"
-	# ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
+	echo "warmup..."
+	c=${clis[0]}
+	i="1"
+	echo "creating client on $c-$i"
+	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh 512 $nova_servers $debug $partition $recordcount 600 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
+	echo "$cmd"
+	ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
 
 	# echo "warmup complete..."
 	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers "drain"
 	# sleep 10
 
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers "wait"
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers "wait"
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers "wait"
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
 	sleep 10
 
 	for c in ${clis[@]}

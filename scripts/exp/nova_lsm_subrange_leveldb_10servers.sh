@@ -176,7 +176,7 @@ function run_bench() {
 	echo "Preparing sar"
 	for m in ${machines[@]}
 	do
-		ssh -oStrictHostKeyChecking=no $m "sudo killall leveldb_main nova_shared_main nova_multi_thread_compaction nova_server_main java collectl sar"
+		ssh -oStrictHostKeyChecking=no $m "sudo killall rocksdb_main leveldb_main nova_shared_main nova_multi_thread_compaction nova_server_main java collectl sar"
 		ssh -oStrictHostKeyChecking=no $m "sudo collectl -scx -i 1 -P > $results/$m-coll.txt &"
 		ssh -oStrictHostKeyChecking=no $m "sar -P ALL 1 > $results/$m-cpu.txt &"
 	    ssh -oStrictHostKeyChecking=no $m "sar -n DEV 1 > $results/$m-net.txt &"
@@ -208,12 +208,18 @@ function run_bench() {
 
 	sleep 30
 
-	# c=${clis[0]}
-	# i="1"
-	# echo "creating client on $c-$i"
-	# cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_all_servers $debug $partition $recordcount 180 $dist $value_size workloadw $ltc_config_path $cardinality $operationcount $zipfianconstant 0"
-	# echo "$cmd"
-	# ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
+	c=${clis[0]}
+	i="1"
+	echo "creating client on $c-$i"
+	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh 512 $nova_all_servers $debug $partition $recordcount 600 $dist $value_size workloadw $ltc_config_path $cardinality $operationcount $zipfianconstant 0"
+	echo "$cmd"
+	ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
+
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_all_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_all_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_all_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_all_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_all_servers
 
 	# sleep 60
 
@@ -271,7 +277,7 @@ function run_bench() {
     for m in ${machines[@]}
     do
     	echo "kill java at $m"
-    	ssh -oStrictHostKeyChecking=no $m "sudo killall leveldb_main nova_shared_main nova_multi_thread_compaction nova_server_main java collectl sar"
+    	ssh -oStrictHostKeyChecking=no $m "sudo killall rocksdb_main leveldb_main nova_shared_main nova_multi_thread_compaction nova_server_main java collectl sar"
     done
 
     dir="$exp_results_dir/$result_dir_name"

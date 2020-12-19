@@ -381,7 +381,7 @@ namespace nova {
             if (!needs_compaction) {
                 needs_compaction = stats.needs_compaction;
             }
-            num_l0_sstables += stats.num_l0_sstables;
+//            num_l0_sstables += stats.num_l0_sstables;
             delete stats.sstable_size_dist;
         }
 
