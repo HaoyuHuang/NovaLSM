@@ -160,9 +160,9 @@ void StartServer() {
     NOVA_ASSERT(buf != NULL) << "Not enough memory";
 
     if (!FLAGS_recover_dbs) {
-        system(fmt::format("exec rm -rf {}/*",
+        int ret = system(fmt::format("exec rm -rf {}/*",
                            NovaConfig::config->db_path).data());
-        system(fmt::format("exec rm -rf {}/*",
+        ret = system(fmt::format("exec rm -rf {}/*",
                            NovaConfig::config->stoc_files_path).data());
     }
     mkdirs(NovaConfig::config->stoc_files_path.data());
@@ -244,6 +244,9 @@ int main(int argc, char *argv[]) {
         NovaConfig::config->scatter_policy = ScatterPolicy::POWER_OF_TWO;
     } else if (FLAGS_scatter_policy == "power_of_three") {
         NovaConfig::config->scatter_policy = ScatterPolicy::POWER_OF_THREE;
+    } else if (FLAGS_scatter_policy == "local") {
+        NovaConfig::config->scatter_policy = ScatterPolicy::LOCAL;
+        NOVA_ASSERT(NovaConfig::config->num_stocs_scatter_data_blocks == 1);
     } else {
         NovaConfig::config->scatter_policy = ScatterPolicy::SCATTER_DC_STATS;
     }

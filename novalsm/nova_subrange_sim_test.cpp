@@ -178,8 +178,8 @@ void TestSubRanges() {
     NovaConfig::config->nova_buf = buf;
     NovaConfig::config->nnovabuf = ntotal;
     NOVA_ASSERT(buf != NULL) << "Not enough memory";
-    system(fmt::format("exec rm -rf {}/*", NovaConfig::config->db_path).data());
-    system(fmt::format("exec rm -rf {}/*",
+    int ret = system(fmt::format("exec rm -rf {}/*", NovaConfig::config->db_path).data());
+    ret = system(fmt::format("exec rm -rf {}/*",
                        NovaConfig::config->stoc_files_path).data());
 
     mkdirs(NovaConfig::config->stoc_files_path.data());

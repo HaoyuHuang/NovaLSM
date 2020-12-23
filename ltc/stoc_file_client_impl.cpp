@@ -449,8 +449,12 @@ namespace leveldb {
         std::vector<MetaBlockStatus> metablock_replica_status;
         std::vector<uint32_t> random_metablock_stocs;
         StorageSelector selector(rand_seed_);
+        nova::ScatterPolicy scatter_policy = nova::NovaConfig::config->scatter_policy;
+        if (scatter_policy != nova::ScatterPolicy::LOCAL) {
+            scatter_policy = nova::ScatterPolicy::RANDOM;
+        }
         selector.SelectStorageServers(client,
-                                      nova::ScatterPolicy::RANDOM,
+                                      scatter_policy,
                                       meta_block_handles_.size(),
                                       &random_metablock_stocs);
 

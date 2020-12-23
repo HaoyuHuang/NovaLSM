@@ -202,6 +202,11 @@ namespace leveldb {
         selected_storage->resize(num_storage_to_select);
         nova::Servers *available_stocs = available_stoc_servers;
 
+        if (scatter_policy == nova::ScatterPolicy::LOCAL) {
+            (*selected_storage)[0] = nova::NovaConfig::config->my_server_id;
+            return;
+        }
+
         if (num_storage_to_select == available_stocs->servers.size()) {
             for (int i = 0; i < num_storage_to_select; i++) {
                 (*selected_storage)[i] = available_stocs->servers[i];

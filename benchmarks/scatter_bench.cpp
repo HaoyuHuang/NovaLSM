@@ -109,7 +109,7 @@ int main(int argc, char *argv[]) {
     auto *rdma_buf = (char *) malloc(ntotal);
     memset(rdma_buf, 0, ntotal);
     NOVA_ASSERT(rdma_buf != NULL) << "Not enough memory";
-    system(fmt::format("exec rm -rf {}/*", FLAGS_table_path).data());
+    int ret = system(fmt::format("exec rm -rf {}/*", FLAGS_table_path).data());
 
     mkdirs(FLAGS_table_path.data());
 

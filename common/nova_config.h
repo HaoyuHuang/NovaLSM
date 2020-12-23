@@ -27,7 +27,8 @@ namespace nova {
         SCATTER_DC_STATS,
         RANDOM,
         POWER_OF_TWO,
-        POWER_OF_THREE
+        POWER_OF_THREE,
+        LOCAL
     };
 
     enum LTCMigrationPolicy {

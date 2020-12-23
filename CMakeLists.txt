@@ -367,6 +367,8 @@ endfunction()
 
 find_static_library(gflags GFLAGS)
 
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
 # Needed by port_stdcxx.h
 find_package(Threads REQUIRED)
 target_link_libraries(leveldb Threads::Threads -lpthread)

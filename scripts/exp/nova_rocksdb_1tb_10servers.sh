@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/sigmod-rocksdb-drain-10-servers-single-thread-$recordcount"
+exp_results_dir="$home_dir/sigmod-rocksdb-drain-10-servers-mid-load-$recordcount"
 dryrun="$2"
 
 
@@ -301,9 +301,9 @@ num_memtables="128"
 
 l0_start_compaction_mb=$((4*1024))
 l0_stop_write_mb=$((10*1024))
-nclients="1"
+nclients="3"
 nclients_per_server="1"
-nthreads="1"
+nthreads="20"
 
 # ncompaction_workers="32"
 num_max_subcompactions="1"
@@ -311,22 +311,22 @@ size_ratio="3.2"
 level="5"
 # ncompaction_workers="128"
 num_max_subcompactions="1"
-for nranges_per_server in "64"
-do
-l0_start_compaction_mb=$((4*1024))
-l0_stop_write_mb=$((10*1024))
-num_memtables="128"
-num_memtables=$((num_memtables/nranges_per_server))
-l0_start_compaction_mb=$((l0_start_compaction_mb/nranges_per_server))
-l0_stop_write_mb=$((l0_stop_write_mb/nranges_per_server))
-for dist in "uniform" "zipfian"
-do
-for workload in "workloadw" "workloadc" #"workloada"
-do
-run_bench
-done
-done
-done
+# for nranges_per_server in "64"
+# do
+# l0_start_compaction_mb=$((4*1024))
+# l0_stop_write_mb=$((10*1024))
+# num_memtables="128"
+# num_memtables=$((num_memtables/nranges_per_server))
+# l0_start_compaction_mb=$((l0_start_compaction_mb/nranges_per_server))
+# l0_stop_write_mb=$((l0_stop_write_mb/nranges_per_server))
+# for dist in "uniform" "zipfian"
+# do
+# for workload in "workloada" "workloade" #"workloada"
+# do
+# run_bench
+# done
+# done
+# done
 
 
 # tuned
@@ -342,7 +342,28 @@ num_max_subcompactions="4"
 # num_memtables="128"
 # run_bench
 
-# workload="workloade"
+workload="workloade"
+dist="zipfian"
+level="5"
+nranges_per_server="1"
+l0_start_compaction_mb=$((40*16))
+l0_stop_write_mb=$((40*16*2))
+# l0_start_compaction_mb=$((60*16))
+# l0_stop_write_mb=$((60*16*2))
+num_memtables="128"
+run_bench
+
+# maxexecutiontime=3600
+# workload="workloadw"
+# dist="uniform"
+# level="5"
+# nranges_per_server="1"
+# l0_start_compaction_mb=$((60*16))
+# l0_stop_write_mb=$((60*16*2))
+# num_memtables="128"
+# run_bench
+
+# workload="workloadw"
 # dist="zipfian"
 # level="5"
 # nranges_per_server="1"
@@ -351,43 +372,26 @@ num_max_subcompactions="4"
 # num_memtables="128"
 # run_bench
 
-# maxexecutiontime=3600
-workload="workloadw"
+
+workload="workloada"
 dist="uniform"
 level="5"
 nranges_per_server="1"
+# l0_start_compaction_mb=$((4*1024))
+# l0_stop_write_mb=$((10*1024))
 l0_start_compaction_mb=$((60*16))
 l0_stop_write_mb=$((60*16*2))
 num_memtables="128"
-run_bench
+# run_bench
 
-workload="workloadw"
-dist="zipfian"
-level="5"
-nranges_per_server="1"
-l0_start_compaction_mb=$((40*16))
-l0_stop_write_mb=$((40*16*2))
-num_memtables="128"
-run_bench
-
-
-workload="workloadc"
-dist="uniform"
-level="5"
-nranges_per_server="1"
-l0_start_compaction_mb=$((4*1024))
-l0_stop_write_mb=$((10*1024))
-num_memtables="128"
-run_bench
-
-workload="workloadc"
-dist="zipfian"
-level="5"
-nranges_per_server="1"
-l0_start_compaction_mb=$((120*16))
-l0_stop_write_mb=$((60*16))
-num_memtables="128"
-run_bench
+# workload="workloada"
+# dist="zipfian"
+# level="5"
+# nranges_per_server="1"
+# l0_start_compaction_mb=$((120*16))
+# l0_stop_write_mb=$((60*16))
+# num_memtables="128"
+# run_bench
 
 
 
