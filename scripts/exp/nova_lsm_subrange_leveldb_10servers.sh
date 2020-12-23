@@ -10,7 +10,7 @@ results="/tmp/results"
 recordcount="$1"
 dryrun="$2"
 run_rdma="$3"
-exp_results_dir="$home_dir/sigmod-nova-10-servers-scatter-10-single-thread-$recordcount"
+exp_results_dir="$home_dir/sigmod-nova-10-servers-scatter-10-mid-load-$recordcount"
 
 
 mkdir -p $results
@@ -382,9 +382,9 @@ l0_stop_write_mb=$((10*1024))
 nservers="10"
 number_of_ltcs="10"
 nmachines="13"
-nclients="1"
+nclients="3"
 nclients_per_server="1"
-nthreads="1"
+nthreads="20"
 use_local_disk="true"
 
 num_memtable_partitions="64"
@@ -403,7 +403,7 @@ ltc_num_stocs_scatter_data_blocks="3"
 dist="$4"
 for subrange_no_flush_num_keys in "100" #"1000" #"10000" "5000"
 do
-for workload in "workloadw" "workloadc" #"workloade" 
+for workload in "workloada" #"workloade"  #"workloade" 
 do
 for num_memtable_partitions in "64"
 do
@@ -413,6 +413,8 @@ else
 	l0_start_compaction_mb="409"
 fi
 
+l0_start_compaction_mb=$((60*16))
+l0_stop_write_mb=$((60*16*2))
 
 if [[ $workload == "workloade" ]]; then
 	major_compaction_max_parallism="32"

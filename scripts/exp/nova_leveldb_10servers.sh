@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/sigmod-leveldb-10servers-single-thread-$recordcount"
+exp_results_dir="$home_dir/sigmod-leveldb-10servers-mid-load-$recordcount"
 dryrun="$2"
 
 
@@ -328,12 +328,12 @@ l0_start_compaction_mb=$((l0_start_compaction_mb/nranges_per_server))
 l0_stop_write_mb=$((l0_stop_write_mb/nranges_per_server))
 zipfianconstant="0.99"
 dist="zipfian"
-nclients="1"
+nclients="3"
 nclients_per_server="1"
-nthreads="1"
+nthreads="20"
 for dist in "uniform" "zipfian" 
 do
-for workload in "workloadw" "workloadc"  #"workloada"
+for workload in "workloada" "workloade"  #"workloada"
 do
 run_bench
 done

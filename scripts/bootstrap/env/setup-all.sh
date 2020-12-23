@@ -44,6 +44,10 @@ sudo mkdir /db
 sudo mount /dev/sda4 /db
 sudo chmod 777 /db
 
+sudo mkdir /mnt/ramdisk
+sudo mount -t tmpfs -o rw,size=20G tmpfs /mnt/ramdisk
+sudo chmod 777 /mnt/ramdisk
+
 cd $basedir/gflags && sudo make install
 
 sudo apt-get --yes install elfutils

@@ -594,6 +594,12 @@ def parse_performance(result_dir):
 					overall_latencies["write"]["p95"] = latency
 				elif "[UPDATE], 99thPercentileLatency(us)," in line:
 					overall_latencies["write"]["p99"] = latency
+				elif "[SCAN], AverageLatency(us)," in line:
+					overall_latencies["read"]["avg"] = latency
+				elif "[SCAN], 95thPercentileLatency(us)," in line:
+					overall_latencies["read"]["p95"] = latency
+				elif "[SCAN], 99thPercentileLatency(us)," in line:
+					overall_latencies["read"]["p99"] = latency
 
 				if "[OVERALL], Throughput(ops/sec)," in line:
 					ems = line.split(",")
