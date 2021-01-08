@@ -8,7 +8,7 @@ cache_bin_dir="$home_dir/nova"
 client_bin_dir="/tmp/YCSB-Nova"
 results="/tmp/results"
 recordcount="$1"
-exp_results_dir="$home_dir/rocksdb-size-ratio-$recordcount"
+exp_results_dir="$home_dir/sigmod-rocksdb-1-server-logging-$recordcount"
 dryrun="$2"
 
 
@@ -30,7 +30,7 @@ cardinality="10"
 # Server
 nconn_workers="8"
 nasync_workers="8"
-ncompaction_workers="32"
+# ncompaction_workers="32"
 cache_size_gb="32"
 value_size="4096"
 partition="range"
@@ -93,7 +93,7 @@ function run_bench() {
 	current_time=$(date "+%Y-%m-%d-%H-%M-%S")
 	# log_buf_size=$((log_buf_size_mb*1024*1024))
 
-	result_dir_name="nova-d-$dist-w-$workload-l-$level-ltc-$nservers-l0-$l0_stop_write_mb-ss-$write_buffer_size_mb-sub-$num_max_subcompactions-nr-$nranges_per_server-nc-$ncompaction_workers-sr-$size_ratio"
+	result_dir_name="nova-d-$dist-w-$workload-l-$level-ltc-$nservers-l0-$l0_stop_write_mb-ss-$write_buffer_size_mb-sub-$num_max_subcompactions-nr-$nranges_per_server-nc-$ncompaction_workers"
 	echo "running experiment $result_dir_name"
 
 	# Copy the files over local node
@@ -155,23 +155,21 @@ function run_bench() {
 		sleep 1
 	done
 
-	# echo "warmup..."
-	# c=${clis[0]}
-	# i="1"
-	# echo "creating client on $c-$i"
-	# cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh $nthreads $nova_servers $debug $partition $recordcount 600 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
-	# echo "$cmd"
-	# ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
+	echo "warmup..."
+	c=${clis[0]}
+	i="1"
+	echo "creating client on $c-$i"
+	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh 512 $nova_servers $debug $partition $recordcount 600 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
+	echo "$cmd"
+	ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
 
 	# echo "warmup complete..."
 	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers "drain"
 	# sleep 10
 
-	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
 	sleep 10
 
 	for c in ${clis[@]}
@@ -190,7 +188,7 @@ function run_bench() {
 	sleep 10
 	sleep_time=0
 	stop="false"
-	max_wait_time=$((maxexecutiontime+2000))
+	max_wait_time=$((maxexecutiontime+4000))
 	for m in ${clis[@]}
 	do
 		while ssh -oStrictHostKeyChecking=no $m "ps -ef | grep -v \"grep --color=auto ycsb\" | grep -v ssh | grep -v bash | grep ycsb | grep -c java"
@@ -198,7 +196,15 @@ function run_bench() {
 			sleep 10
 			sleep_time=$((sleep_time+10))
 			echo "waiting for $m for $sleep_time seconds"
+			if [[ $sleep_time -gt $max_wait_time ]]; then
+				stop="true"
+				break
+			fi
 		done
+		if [[ $stop == "true" ]]; then
+			echo "exceeded maximum wait time"
+			break
+		fi
 	done
 
 	# DB size. 
@@ -244,7 +250,7 @@ enable_rdma="false"
 
 nconn_workers="256"
 nasync_workers="32"
-ncompaction_workers="128"
+ncompaction_workers="64"
 
 nreplicas_per_range="1"
 write_buffer_size_mb="16"
@@ -264,30 +270,10 @@ operationcount=0
 maxexecutiontime=1200
 
 # setup.
-nservers="5"
-nclients="6"
+nservers="1"
+nclients="1"
 nthreads="512"
 dist="uniform"
-
-# for workload in "workloada" "workloadw"
-# do
-# for dist in "uniform"
-# do
-# nservers="5"
-# for nreplicas_per_range in "2" "3" "4" "5"
-# do
-# enable_rdma="true"
-# nconn_workers="128"
-# persist_log_record="rdma"
-# run_bench
-
-# enable_rdma="false"
-# nconn_workers="256"
-# persist_log_record="nic"
-# run_bench
-# done
-# done
-# done
 
 nclients="4"
 nthreads="512"
@@ -299,12 +285,12 @@ nconn_workers="512"
 nclients_per_server="5"
 persist_log_record="none"
 nservers="1"
-nmachines="4"
-nclients="3"
+nmachines="2"
+nclients="1"
 cache_size_gb="22"
 level="2"
 cardinality="10"
-cache_size_gb="1"
+cache_size_gb="26"
 nranges_per_server="1"
 
 
@@ -313,54 +299,102 @@ workload="workloada"
 nranges_per_server="1"
 num_memtables="128"
 
-# num_max_subcompactions=""
-
 l0_start_compaction_mb=$((4*1024))
 l0_stop_write_mb=$((10*1024))
+nclients="1"
+nclients_per_server="5"
+nthreads="512"
 
-ncompaction_workers="32"
-num_max_subcompactions="4"
-
-
+# ncompaction_workers="32"
+num_max_subcompactions="1"
+size_ratio="3.2"
 level="5"
-ncompaction_workers="64"
-ncompaction_workers="64"
-for workload in "workloadw" #"workloade"
+# ncompaction_workers="128"
+num_max_subcompactions="1"
+persist_log_record="disk"
+for nranges_per_server in "64"
 do
-for dist in "uniform" #"zipfian"
+l0_start_compaction_mb=$((4*1024))
+l0_stop_write_mb=$((10*1024))
+num_memtables="128"
+num_memtables=$((num_memtables/nranges_per_server))
+l0_start_compaction_mb=$((l0_start_compaction_mb/nranges_per_server))
+l0_stop_write_mb=$((l0_stop_write_mb/nranges_per_server))
+for dist in "uniform" "zipfian"
 do
-for size_ratio in "2" "4" "6" "8" "10" #"2"
+for workload in "workloada" "workloade" "workloadw"
 do
-for nmemtables in "10" "20" "40" "60" #"20"
-do
-l0_start_compaction_mb=$((nmemtables*write_buffer_size_mb))
-l0_stop_write_mb=$((nmemtables*2*write_buffer_size_mb))
 run_bench
 done
 done
 done
-done
 
-level="$3"
-ncompaction_workers="$4"
-# ncompaction_workers="128"
-num_max_subcompactions="1"
-# for nranges_per_server in "64"
-# do
+
+# tuned
+num_max_subcompactions="4"
+
+
+workload="workloade"
+dist="uniform"
+level="5"
+nranges_per_server="1"
+l0_start_compaction_mb=$((40*16))
+l0_stop_write_mb=$((40*16*2))
+num_memtables="128"
+run_bench
+
+workload="workloade"
+dist="zipfian"
+level="5"
+nranges_per_server="1"
+l0_start_compaction_mb=$((40*16))
+l0_stop_write_mb=$((40*16*2))
+# l0_start_compaction_mb=$((60*16))
+# l0_stop_write_mb=$((60*16*2))
+num_memtables="128"
+run_bench
+
+# maxexecutiontime=3600
+workload="workloadw"
+dist="uniform"
+level="5"
+nranges_per_server="1"
+l0_start_compaction_mb=$((60*16))
+l0_stop_write_mb=$((60*16*2))
+num_memtables="128"
+run_bench
+
+workload="workloadw"
+dist="zipfian"
+level="5"
+nranges_per_server="1"
+l0_start_compaction_mb=$((40*16))
+l0_stop_write_mb=$((40*16*2))
+num_memtables="128"
+run_bench
+
+
+workload="workloada"
+dist="uniform"
+level="5"
+nranges_per_server="1"
 # l0_start_compaction_mb=$((4*1024))
 # l0_stop_write_mb=$((10*1024))
-# num_memtables="128"
-# num_memtables=$((num_memtables/nranges_per_server))
-# l0_start_compaction_mb=$((l0_start_compaction_mb/nranges_per_server))
-# l0_stop_write_mb=$((l0_stop_write_mb/nranges_per_server))
+l0_start_compaction_mb=$((60*16))
+l0_stop_write_mb=$((60*16*2))
+num_memtables="128"
+run_bench
 
-# for dist in "uniform" "zipfian"
-# do
-# for workload in "workloada" "workloadw" "workloade"
-# do
-# run_bench
-# done
-# done
-# done
+workload="workloada"
+dist="zipfian"
+level="5"
+nranges_per_server="1"
+l0_start_compaction_mb=$((120*16))
+l0_stop_write_mb=$((60*16))
+num_memtables="128"
+run_bench
+
+
+
 
 python /proj/bg-PG0/haoyu/scripts/parse_ycsb_nova_leveldb.py $nmachines $exp_results_dir > stats_leveldb_ranges_out

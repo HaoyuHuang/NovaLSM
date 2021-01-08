@@ -216,6 +216,8 @@ namespace nova {
             rdma_broker_->Init(rdma_ctrl_);
         }
         nova::NovaConfig::config->add_tid_mapping();
+        sleep(10);
+
         mutex_.Lock();
         is_running_ = true;
         mutex_.Unlock();
