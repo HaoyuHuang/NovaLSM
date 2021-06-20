@@ -123,6 +123,7 @@ function run_bench() {
 
 	current_time=$(date "+%Y-%m-%d-%H-%M-%S")
 	nstoc=$((nservers-number_of_ltcs))
+	echo "$nservers, $number_of_ltcs, $nstoc"
 	result_dir_name="nova-zf-$zipfianconstant-nm-$num_memtables-lr-$num_log_replicas-try-$try-cfg-$change_cfg-d-$dist-w-$workload-ltc-$number_of_ltcs-stoc-$nstoc-l0-$l0_stop_write_mb-np-$num_memtable_partitions-nr-$cc_nranges_per_server"
 	echo "running experiment $result_dir_name"
 
@@ -341,16 +342,16 @@ major_compaction_type="sc"
 major_compaction_max_parallism="32"
 major_compaction_max_tables_in_a_set="20"
 
-nmachines="3"
-nservers="2"
-number_of_ltcs="1"
+nmachines="7"
+nservers="6"
+number_of_ltcs="3"
 
 maxexecutiontime=1200
 nclients="1"
 dist="uniform"
 zipfianconstant="0.99"
 workload="workloadw"
-nclients_per_server="5"
+nclients_per_server="1"
 nthreads="512"
 
 run_bench

@@ -180,26 +180,26 @@ function run_bench() {
 		sleep 1
 	done
 
-	sleep 30
+	# sleep 30
 	# cli_nrecords=$((recordcount))
 
-	echo "warmup..."
-	c=${clis[0]}
-	i="1"
-	echo "creating client on $c-$i"
-	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh 512 $nova_servers $debug $partition $recordcount 600 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
-	echo "$cmd"
-	ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
+	# echo "warmup..."
+	# c=${clis[0]}
+	# i="1"
+	# echo "creating client on $c-$i"
+	# cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh 512 $nova_servers $debug $partition $recordcount 600 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
+	# echo "$cmd"
+	# ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
 
-	echo "warmup complete..."
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	sleep 10
+	# echo "warmup complete..."
+	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	# sleep 10
 
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
 	sleep 10
 
 	for c in ${clis[@]}
@@ -332,7 +332,7 @@ nmachines="2"
 nclients="1"
 nclients_per_server="5"
 nthreads="512"
-
+maxexecutiontime="600"
 for nranges_per_server in "1" "64"
 do
 l0_start_compaction_mb="4096"
@@ -352,4 +352,4 @@ done
 done
 done
 
-python /proj/bg-PG0/haoyu/scripts/parse_ycsb_nova_leveldb.py $nmachines $exp_results_dir > stats_leveldb_10servers_ranges_out_$recordcount
+python /proj/bg-PG0/haoyu/scripts/parse_ycsb_nova_leveldb.py $nmachines $exp_results_dir > stats_leveldb_servers_ranges_out_$recordcount

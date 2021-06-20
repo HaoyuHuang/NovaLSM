@@ -147,7 +147,7 @@ function run_bench() {
 	do
 		echo "creating servers on $s"
 		nova_rdma_port=$((rdma_port))
-		cmd="stdbuf --output=0 --error=0 ./rocksdb_main --size_ratio=$size_ratio --num_max_subcompactions=$num_max_subcompactions --max_msg_size=$max_msg_size --num_memtables=$num_memtables --level=$level --l0_start_compaction_mb=$l0_start_compaction_mb --l0_stop_write_mb=$l0_stop_write_mb --block_cache_mb=$block_cache_mb --db_path=$db_path --write_buffer_size_mb=$write_buffer_size_mb --servers=$nova_servers --server_id=$server_id --recordcount=$recordcount --data_partition_alg=$partition --num_conn_workers=$nconn_workers --num_async_workers=$nasync_workers --num_compaction_workers=$ncompaction_workers --cache_size_gb=$cache_size_gb --use_fixed_value_size=$value_size --config_path=$config_path --enable_load_data=true"
+		cmd="stdbuf --output=0 --error=0 ./rocksdb_main --disable_wal=$disable_wal --size_ratio=$size_ratio --num_max_subcompactions=$num_max_subcompactions --max_msg_size=$max_msg_size --num_memtables=$num_memtables --level=$level --l0_start_compaction_mb=$l0_start_compaction_mb --l0_stop_write_mb=$l0_stop_write_mb --block_cache_mb=$block_cache_mb --db_path=$db_path --write_buffer_size_mb=$write_buffer_size_mb --servers=$nova_servers --server_id=$server_id --recordcount=$recordcount --data_partition_alg=$partition --num_conn_workers=$nconn_workers --num_async_workers=$nasync_workers --num_compaction_workers=$ncompaction_workers --cache_size_gb=$cache_size_gb --use_fixed_value_size=$value_size --config_path=$config_path --enable_load_data=true"
 		echo "$cmd"
 		ssh -oStrictHostKeyChecking=no $s "rm -rf $db_path && mkdir -p $db_path && cd $cache_bin_dir && $cmd >& $results/server-$s-out &" &
 		server_id=$((server_id+1))
@@ -155,21 +155,21 @@ function run_bench() {
 		sleep 1
 	done
 
-	echo "warmup..."
-	c=${clis[0]}
-	i="1"
-	echo "creating client on $c-$i"
-	cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh 512 $nova_servers $debug $partition $recordcount 600 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
-	echo "$cmd"
-	ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
+	# echo "warmup..."
+	# c=${clis[0]}
+	# i="1"
+	# echo "creating client on $c-$i"
+	# cmd="stdbuf --output=0 --error=0 bash $script_dir/run_ycsb.sh 512 $nova_servers $debug $partition $recordcount 600 $dist $value_size workloadw $config_path $cardinality $operationcount $zipfianconstant 0"
+	# echo "$cmd"
+	# ssh -oStrictHostKeyChecking=no $c "cd $client_bin_dir && $cmd >& $results/client-$c-$i-out"
 
 	# echo "warmup complete..."
 	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers "drain"
 	# sleep 10
 
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
-	java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
+	# java -jar $cache_bin_dir/nova_client_stats.jar $nova_servers
 	sleep 10
 
 	for c in ${clis[@]}
@@ -311,7 +311,8 @@ size_ratio="3.2"
 level="5"
 # ncompaction_workers="128"
 num_max_subcompactions="1"
-persist_log_record="disk"
+disable_wal="false"
+maxexecutiontime="600"
 for nranges_per_server in "64"
 do
 l0_start_compaction_mb=$((4*1024))
