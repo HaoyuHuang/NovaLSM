@@ -248,6 +248,7 @@ namespace nova {
                                   uint32_t imm_data,
                                   bool *) {
         bool processed = false;
+//        NOVA_LOG(INFO) << "*** <Begin> The received buffer[0] for rdma-server is "<< buf[0];
         switch (type) {
             case IBV_WC_SEND:
                 break;
@@ -318,7 +319,8 @@ namespace nova {
                             AddBGStorageTask(task);
                             request_context_map_.erase(req_id);
                         }
-                    } else if (context.request_type ==
+                    }
+                    else if (context.request_type ==
                                leveldb::StoCRequestType::RDMA_WRITE_REMOTE_BUF_ALLOCATED) {
                         rdma_write_handler_->Handle(context.buf, context.size);
                         request_context_map_.erase(req_id);
@@ -333,7 +335,8 @@ namespace nova {
                     ct.request_type = leveldb::StoCRequestType::STOC_READ_STATS;
                     ct.stoc_req_id = stoc_req_id;
                     private_cq_.push_back(ct);
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_DELETE_TABLES) {
                     uint32_t msg_size = 1;
                     uint32_t nfiles = leveldb::DecodeFixed32(buf + msg_size);
@@ -358,7 +361,8 @@ namespace nova {
                                 "rdma-server[{}]: Delete SSTables. nsstables:{}",
                                 thread_id_, nfiles);
                     processed = true;
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_READ_BLOCKS) {
                     uint32_t msg_size = 1;
                     uint32_t stoc_file_id = 0;
@@ -409,7 +413,8 @@ namespace nova {
                         AddBGStorageTask(task);
                     }
                     processed = true;
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_WRITE_SSTABLE) {
                     uint32_t msg_size = 2;
                     std::string dbname;
@@ -480,7 +485,8 @@ namespace nova {
                                 thread_id_, dbname, file_number, size,
                                 stoc_file->file_id(), stoc_file_off, filename);
                     processed = true;
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_ALLOCATE_LOG_BUFFER) {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);
                     std::string log_file(buf + 5, size);
@@ -500,7 +506,8 @@ namespace nova {
                                 "rdma-server{}]: Allocate log buffer for file {}.",
                                 thread_id_, log_file);
                     processed = true;
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::RDMA_WRITE_REQUEST) {
                     uint32_t size = leveldb::DecodeFixed32(buf + 1);
                     uint32_t slabclassid = mem_manager_->slabclassid(thread_id_, size);
@@ -524,7 +531,8 @@ namespace nova {
                                 "rdma-server{}]: Allocate buffer for RDMA WRITE.",
                                 thread_id_);
                     processed = true;
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_QUERY_LOG_FILES) {
                     uint32_t server_id = leveldb::DecodeFixed32(buf + 1);
                     uint32_t dbid = leveldb::DecodeFixed32(buf + 5);
@@ -545,7 +553,8 @@ namespace nova {
                     }
                     rdma_broker_->PostSend(send_buf, msg_size, remote_server_id,
                                            stoc_req_id);
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_DELETE_LOG_FILE) {
                     int size = 1;
                     uint32_t nlogs = leveldb::DecodeFixed32(buf + 1);
@@ -561,7 +570,8 @@ namespace nova {
                                 "rdma-server{}]: Delete log buffer for file {}.",
                                 thread_id_, logfiles.size());
                     processed = true;
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_FILENAME_STOCFILEID) {
                     uint32 read_size = 1;
                     uint32_t nfiles = leveldb::DecodeFixed32(buf + read_size);
@@ -586,7 +596,8 @@ namespace nova {
                                 "rdma-server{}]: Filename stoc file mapping {}.",
                                 thread_id_, fn_stocfile.size());
                     processed = true;
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_COMPACTION) {
                     auto req = new leveldb::CompactionRequest;
                     req->DecodeRequest(buf + 1,
@@ -599,7 +610,8 @@ namespace nova {
                     task.compaction_request = req;
                     AddCompactionStorageTask(task);
                     processed = true;
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_IS_READY_FOR_REQUESTS) {
                     processed = true;
                     ServerCompleteTask ct = {};
@@ -607,7 +619,8 @@ namespace nova {
                     ct.request_type = leveldb::StoCRequestType::STOC_IS_READY_FOR_REQUESTS;
                     ct.stoc_req_id = stoc_req_id;
                     private_cq_.push_back(ct);
-                } else if (buf[0] ==
+                }
+                else if (buf[0] ==
                            leveldb::StoCRequestType::STOC_REPLICATE_SSTABLES) {
                     StorageTask task = {};
                     task.stoc_req_id = stoc_req_id;
@@ -627,10 +640,14 @@ namespace nova {
                         task.replication_pairs.push_back(pair);
                     }
                     AddCompactionStorageTask(task);
+
                     processed = true;
                 }
                 break;
         }
+//        NOVA_LOG(INFO) << "*** <End> The received buffer[0] for rdma-server is "<< buf[0];
+//        NOVA_LOG(INFO) << "*** <End> type is "<< type;
+//        NOVA_LOG(INFO) << "*** <End> processed is "<< processed;
         return processed;
     }
 }

@@ -1,5 +1,5 @@
 #!/bin/bash
-home_dir="/proj/bg-PG0/haoyu"
+home_dir="/scratch1/wang4996/temp/"
 # home_dir="/proj/BG/haoyu"
 config_dir="$home_dir/config"
 db_dir="$home_dir/db"
@@ -101,9 +101,9 @@ function run_bench() {
 		machines+=("node-$id")
 	done
 
-	echo ${clis[@]}
-	echo ${servers[@]}
-	echo ${machines[@]}
+	echo "clients are${clis[@]}"
+	echo "servers are ${servers[@]}"
+	echo "machines are ${machines[@]}"
 
 	nova_servers=""
 	nova_all_servers=""
@@ -141,57 +141,57 @@ function run_bench() {
 	ltc_config_path="$config_dir/nova-tutorial-config"
 	
 	db_path="/db/nova-db-$recordcount-$value_size"
-	echo "$nova_servers $ltc_config_path $db_path"
+	echo "All servers are $nova_servers $ltc_config_path $db_path"
 	echo "cc servers $nova_all_servers"
 	if [[ $dryrun == "true" ]]; then
 		return
 	fi
 
-	for m in ${machines[@]}
-	do
-		echo "remove $results at machine $m"
-    	ssh -oStrictHostKeyChecking=no $m "sudo rm -rf $results && mkdir -p $results && chmod -R 777 $results"
-    	ssh -oStrictHostKeyChecking=no $m "sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'"
-	done
-
-	# restore the database image. 
-	for s in ${servers[@]}
-	do
-		echo "restore database image $s"
-		ssh -oStrictHostKeyChecking=no $s "rm -rf /db/nova-db-$recordcount-1024/ && cp -r /db/snapshot-$cc_nranges_per_server-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas/nova-db-$recordcount-1024/ /db/ &" &
-	done
-
-	sleep 10
-
-	for m in ${machines[@]}
-	do
-		while ssh -oStrictHostKeyChecking=no $m "ps -ef | grep -v grep | grep -v ssh | grep -v bash | grep -c \"cp -r\""
-		do
-			sleep 10
-			echo "waiting for $m"
-		done
-	done
-	
-	# start stats
-	echo "Preparing sar"
-	for m in ${machines[@]}
-	do
-		ssh -oStrictHostKeyChecking=no $m "sudo killall leveldb_main nova_shared_main nova_multi_thread_compaction nova_server_main java collectl sar"
-		ssh -oStrictHostKeyChecking=no $m "sudo collectl -scx -i 1 -P > $results/$m-coll.txt &"
-		ssh -oStrictHostKeyChecking=no $m "sar -P ALL 1 > $results/$m-cpu.txt &"
-	    ssh -oStrictHostKeyChecking=no $m "sar -n DEV 1 > $results/$m-net.txt &"
-	    ssh -oStrictHostKeyChecking=no $m "sar -r 1 > $results/$m-mem.txt &"
-	    ssh -oStrictHostKeyChecking=no $m "sar -d 1 > $results/$m-disk.txt &"
-	done
-
-	for m in ${machines[@]}
-	do
-		while ssh -oStrictHostKeyChecking=no $m "ps -ef | grep -v grep | grep -v ssh | grep -v bash | grep -c nova_server_main"
-		do
-			sleep 10
-			echo "waiting for $m"
-		done
-	done
+#	for m in ${machines[@]}
+#	do
+#		echo "remove $results at machine $m"
+#    	ssh -oStrictHostKeyChecking=no $m "sudo rm -rf $results && mkdir -p $results && chmod -R 777 $results"
+#    	ssh -oStrictHostKeyChecking=no $m "sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'"
+#	done
+#
+#	# restore the database image.
+#	for s in ${servers[@]}
+#	do
+#		echo "restore database image $s"
+#		ssh -oStrictHostKeyChecking=no $s "rm -rf /db/nova-db-$recordcount-1024/ && cp -r /db/snapshot-$cc_nranges_per_server-$nservers-$number_of_ltcs-$dist-$num_memtable_partitions-$memtable_size_mb-$zipfianconstant-$num_sstable_replicas/nova-db-$recordcount-1024/ /db/ &" &
+#	done
+#
+#	sleep 10
+#
+#	for m in ${machines[@]}
+#	do
+#		while ssh -oStrictHostKeyChecking=no $m "ps -ef | grep -v grep | grep -v ssh | grep -v bash | grep -c \"cp -r\""
+#		do
+#			sleep 10
+#			echo "waiting for $m"
+#		done
+#	done
+#
+#	# start stats
+#	echo "Preparing sar"
+#	for m in ${machines[@]}
+#	do
+#		ssh -oStrictHostKeyChecking=no $m "sudo killall leveldb_main nova_shared_main nova_multi_thread_compaction nova_server_main java collectl sar"
+#		ssh -oStrictHostKeyChecking=no $m "sudo collectl -scx -i 1 -P > $results/$m-coll.txt &"
+#		ssh -oStrictHostKeyChecking=no $m "sar -P ALL 1 > $results/$m-cpu.txt &"
+#	    ssh -oStrictHostKeyChecking=no $m "sar -n DEV 1 > $results/$m-net.txt &"
+#	    ssh -oStrictHostKeyChecking=no $m "sar -r 1 > $results/$m-mem.txt &"
+#	    ssh -oStrictHostKeyChecking=no $m "sar -d 1 > $results/$m-disk.txt &"
+#	done
+#
+#	for m in ${machines[@]}
+#	do
+#		while ssh -oStrictHostKeyChecking=no $m "ps -ef | grep -v grep | grep -v ssh | grep -v bash | grep -c nova_server_main"
+#		do
+#			sleep 10
+#			echo "waiting for $m"
+#		done
+#	done
 
 	server_id=0
 	for s in ${servers[@]}

@@ -267,6 +267,7 @@ namespace nova {
 
         NOVA_ASSERT((processed_by_client || processed_by_server));
         NOVA_ASSERT(!(processed_by_client && processed_by_server));
+        return true;
     }
 
     RDMAWRITEDiskWorker::RDMAWRITEDiskWorker(const std::string &table_path,

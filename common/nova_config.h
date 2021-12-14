@@ -227,6 +227,7 @@ namespace nova {
         int block_cache_mb = 0;
         bool enable_lookup_index = false;
         bool enable_range_index = false;
+        //total number of memtable in one LTC
         uint32_t num_memtables = 0;
         uint32_t num_memtable_partitions = 0;
         uint64_t memtable_size_mb = 0;
@@ -269,7 +270,7 @@ namespace nova {
                     thread_id.resize(kMaxThreadIdSize);
                 }
 
-                NOVA_LOG(INFO) << fmt::format("{}:{}", thread_id, tid.second);
+//                NOVA_LOG(INFO) << fmt::format("{}:{}", thread_id, tid.second);
             }
         }
 

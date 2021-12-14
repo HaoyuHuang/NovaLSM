@@ -115,7 +115,7 @@ namespace leveldb {
 
         std::vector<nova::RDMAMsgHandler *> rdma_msg_handlers_;
 
-        sem_t Wait() {
+        void Wait() {
             NOVA_ASSERT(sem_wait(&sem_) == 0);
         }
 

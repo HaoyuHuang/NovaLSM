@@ -43,6 +43,7 @@ namespace nova {
 
         bool Schedule(const leveldb::EnvBGTask &task) override {
             NOVA_ASSERT(false);
+            return true;
         }
 
         leveldb::StoCClient *stoc_client() override {

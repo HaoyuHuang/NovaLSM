@@ -204,7 +204,7 @@ namespace rdmaio {
             return res;
         }
 
-        RCQP *destroy_rc_qp(QPIdx idx) {
+        void destroy_rc_qp(QPIdx idx) {
             SCS s;
             uint64_t qid = get_rc_key(idx);
             NOVA_ASSERT(qps_.find(qid) != qps_.end());
@@ -375,7 +375,7 @@ namespace rdmaio {
                 << "TCP listen error: " << strerror(errno);
             while (running_) {
                 asm volatile("":: : "memory");
-                struct sockaddr_in cli_addr = {0};
+                struct sockaddr_in cli_addr = {};
                 socklen_t clilen = sizeof(cli_addr);
                 auto csfd = accept(listenfd, (struct sockaddr *) &cli_addr,
                                    &clilen);
@@ -472,6 +472,7 @@ namespace rdmaio {
             }
             // end of the server
             close(listenfd);
+            return nullptr;
         }
 
     private:

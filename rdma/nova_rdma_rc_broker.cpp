@@ -138,6 +138,8 @@ namespace nova {
         uint64_t wr_id = psend_index_[qp_idx];
         const char *sendbuf = rdma_send_buf_[qp_idx] + wr_id * max_msg_size_;
         if (localbuf != nullptr) {
+            NOVA_LOG(DEBUG) << fmt::format(
+                        "Look at here!!!!!!!!!!!!! {}",sendbuf[0]);
             sendbuf = localbuf;
         }
         int ssge_idx = send_sge_index_[qp_idx];
@@ -169,6 +171,7 @@ namespace nova {
                     imm_data,
                     remote_addr, is_offset, size, psend_index_[qp_idx],
                     npending_send_[qp_idx]);
+
         FlushSendsOnQP(qp_idx);
         NOVA_ASSERT(npending_send_[qp_idx] <= max_num_sends_);
 

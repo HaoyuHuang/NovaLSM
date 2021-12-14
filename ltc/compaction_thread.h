@@ -99,7 +99,7 @@ namespace leveldb {
 
         bool IsInitialized() override;
 
-        void Start();
+        [[noreturn]] void Start();
 
         uint64_t thread_id_ = 0;
 

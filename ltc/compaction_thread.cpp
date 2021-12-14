@@ -36,7 +36,7 @@ namespace leveldb {
     }
 
 
-    void LTCCompactionThread::Start() {
+    [[noreturn]] void LTCCompactionThread::Start() {
         nova::NovaConfig::config->add_tid_mapping();
 
         background_work_mutex_.Lock();

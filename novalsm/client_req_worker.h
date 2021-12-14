@@ -95,7 +95,7 @@ namespace nova {
         std::vector<RDMAMsgHandler *> workers;
     };
 
-    class NICClientReqWorker {
+    class NICClientReqWorker { // The request worker for SToC?
     public:
         NICClientReqWorker(int thread_id)
                 :
