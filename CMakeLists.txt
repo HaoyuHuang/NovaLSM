@@ -12,7 +12,7 @@ add_compile_options(-fexceptions)
 
 #set(CMAKE_INCLUDE_CURRENT_DIR ON)
 #set(CMAKE_CXX_COMPILER /usr/bin/g++)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w -ggdb")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (WIN32)
