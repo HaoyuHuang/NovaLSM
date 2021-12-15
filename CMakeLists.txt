@@ -3,15 +3,16 @@
 # found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 cmake_minimum_required(VERSION 3.9)
+#cmake_policy(SET CMP0076 NEW)
 # Keep the version below in sync with the one in db.h
 project(leveldb VERSION 1.22.0 LANGUAGES C CXX)
 
-add_definitions(-std=c++11)
+add_definitions(-std=c++17)
 add_compile_options(-fexceptions)
 
 #set(CMAKE_INCLUDE_CURRENT_DIR ON)
-set(CMAKE_CXX_COMPILER /usr/bin/g++)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+#set(CMAKE_CXX_COMPILER /usr/bin/g++)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (WIN32)
@@ -72,6 +73,10 @@ configure_file(
 
 include_directories(
         "${PROJECT_BINARY_DIR}/include"
+        "${PROJECT_BINARY_DIR}/db"
+        "${PROJECT_BINARY_DIR}/port"
+        "${PROJECT_BINARY_DIR}/util"
+        "${PROJECT_BINARY_DIR}/common"
         "."
 )
 
@@ -82,14 +87,17 @@ endif (BUILD_SHARED_LIBS)
 
 # Must be included before CMAKE_INSTALL_INCLUDEDIR is used.
 include(GNUInstallDirs)
-
-add_library(leveldb "" novalsm/lsm_tree_cleaner.cpp novalsm/lsm_tree_cleaner.h db/flush_order.cpp db/flush_order.h)
+#add_library(nova_config common/nova_config.h
+#        common/nova_config.cc common/nova_common.h common/nova_common.cpp)
+#add_library(msg_lowO novalsm/rdma_msg_handler.cpp
+#        novalsm/rdma_msg_handler.h)
+#target_compile_options(msg_lowO PRIVATE -O0)
+add_library(leveldb "" )
 target_sources(leveldb
         PRIVATE
         "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
         include/leveldb/stoc_client.h
         include/leveldb/db_types.h
-
         novalsm/rdma_admission_ctrl.cpp
         novalsm/rdma_admission_ctrl.h
         db/lookup_index.cpp
@@ -181,13 +189,10 @@ target_sources(leveldb
         "ltc/stoc_client_impl.h"
         "novalsm/rdma_server.cpp"
         "novalsm/rdma_server.h"
-
-
         "util/testharness.cc"
         "util/testharness.h"
         "util/testutil.cc"
         "util/testutil.h"
-
         db/range_index.cpp
         db/range_index.h
         ltc/db_migration.cpp
@@ -196,7 +201,6 @@ target_sources(leveldb
         log/log_recovery.h
         ltc/db_helper.cpp
         ltc/db_helper.h
-
         stoc/persistent_stoc_file.cpp
         stoc/persistent_stoc_file.h
         bench_memtable/memtable_worker.cpp
@@ -205,8 +209,18 @@ target_sources(leveldb
         ltc/compaction_thread.h
         common/city_hash.h
         common/city_hash.cpp
-        rdma/common.hpp
+        common/nova_common.cpp
+
+        common/nova_config.cc
+        common/nova_mem_manager.h
+        common/nova_mem_manager.cpp
+        common/nova_chained_hashtable.cpp
+        common/nova_chained_hashtable.h
+        common/nova_client_sock.cpp
+        common/nova_client_sock.h
         common/nova_console_logging.h
+
+        rdma/common.hpp
         rdma/mr.hpp
         rdma/msg_interface.hpp
         rdma/pre_connector.hpp
@@ -215,32 +229,26 @@ target_sources(leveldb
         rdma/rdma_ctrl.hpp
         rdma/rdma_ctrl_impl.hpp
         rdma/rnic.hpp
-        common/nova_config.h
-        common/nova_config.cc
-        rdma/nova_msg_parser.h
-        novalsm/nic_server.cpp
-        novalsm/nic_server.h
-        novalsm/client_req_worker.cpp
-        novalsm/client_req_worker.h
-        common/nova_common.cpp
-        common/nova_common.h
         rdma/rdma_msg_callback.h
         rdma/nova_rdma_rc_broker.cpp
         rdma/nova_rdma_rc_broker.h
         rdma/nova_rdma_broker.h
-        common/nova_mem_manager.h
-        common/nova_mem_manager.cpp
-        common/nova_chained_hashtable.cpp
-        common/nova_chained_hashtable.h
+        rdma/nova_msg_parser.h
+        novalsm/nic_server.cpp
+        novalsm/nic_server.h
+        novalsm/local_server.cpp
+        novalsm/local_server.h
+        novalsm/client_req_worker.cpp
+        novalsm/client_req_worker.h
+        novalsm/rdma_msg_handler.cpp
+        novalsm/rdma_msg_handler.h
 
         log/stoc_log_manager.cpp
         log/stoc_log_manager.h
         log/logc_log_writer.cc
         log/logc_log_writer.h
-        common/nova_client_sock.cpp
-        common/nova_client_sock.h
-        novalsm/rdma_msg_handler.cpp
-        novalsm/rdma_msg_handler.h
+
+
         ltc/stoc_file_client_impl.cpp
         ltc/stoc_file_client_impl.h
 
@@ -249,7 +257,6 @@ target_sources(leveldb
         benchmarks/mock_rtable.cpp
         benchmarks/rdma_write_client.h
         benchmarks/rdma_write_client.cpp
-
         benchmarks/rdma_write_server_worker.cpp
         benchmarks/rdma_write_server_worker.h
 
@@ -261,7 +268,7 @@ target_sources(leveldb
         util/scrambled_zipfian_generator.h
         util/skewed_latest_generator.h
         util/utils.h
-
+        novalsm/lsm_tree_cleaner.cpp novalsm/lsm_tree_cleaner.h db/flush_order.cpp db/flush_order.h
         # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
         "${LEVELDB_PUBLIC_INCLUDE_DIR}/c.h"
@@ -279,8 +286,11 @@ target_sources(leveldb
         "${LEVELDB_PUBLIC_INCLUDE_DIR}/table.h"
         "${LEVELDB_PUBLIC_INCLUDE_DIR}/write_batch.h"
         "${LEVELDB_PUBLIC_INCLUDE_DIR}/env_bg_thread.h"
+        common/nova_common.h
+        common/nova_config.h
         )
-
+#target_link_libraries(leveldb msg_lowO)
+#target_compile_options(leveldb PRIVATE -O3)
 if (WIN32)
     target_sources(leveldb
             PRIVATE
@@ -364,7 +374,10 @@ function(find_static_library LIB_NAME OUT)
     set(${OUT} ${ABS_FILE} PARENT_SCOPE)
 
 endfunction()
-
+#configure_file(
+#        "port/port_config.h.in"
+#        "${PROJECT_BINARY_DIR}/${TimberSaw_PORT_CONFIG_DIR}/port_config.h"
+#)
 find_static_library(gflags GFLAGS)
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
@@ -373,6 +386,9 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 find_package(Threads REQUIRED)
 target_link_libraries(leveldb Threads::Threads -lpthread)
 target_link_libraries(leveldb ibverbs event fmt)
+
+add_executable(scatter_bench "benchmarks/scatter_bench.cpp")
+target_link_libraries(scatter_bench -lgflags leveldb)
 
 add_executable(nova_server_main "novalsm/nova_server_main.cpp")
 target_link_libraries(nova_server_main ${GFLAGS} leveldb)
@@ -383,11 +399,15 @@ target_link_libraries(file_reader -lgflags leveldb)
 add_executable(nova_server_main_debug "novalsm/nova_server_main.cpp")
 target_link_libraries(nova_server_main_debug -lgflags leveldb -pg)
 
+
+
 add_executable(nova_subrange_sim "novalsm/nova_subrange_sim_test.cpp")
 target_link_libraries(nova_subrange_sim -lgflags leveldb -pg)
 
-add_executable(scatter_bench "benchmarks/scatter_bench.cpp")
-target_link_libraries(scatter_bench -lgflags leveldb)
+add_executable(Mem_leak_checker memory_leak.cpp)
+target_link_libraries(Mem_leak_checker leveldb)
+
+
 
 add_executable(memtable_bench "bench_memtable/memtable_bench.cpp")
 target_link_libraries(memtable_bench -lgflags leveldb)
@@ -400,3 +420,44 @@ target_link_libraries(bloom_test -lgflags leveldb)
 
 add_executable(filter_block_test "table/filter_block_test.cc")
 target_link_libraries(filter_block_test -lgflags leveldb)
+
+
+
+#function(TimberSaw_benchmark bench_file)
+#    get_filename_component(bench_target_name "${bench_file}" NAME_WE)
+#
+#    add_executable("${bench_target_name}" )
+#    target_sources("${bench_target_name}"
+#            PRIVATE
+#            "util/histogram.cc"
+#            "util/histogram.h"
+#            "util/testutil.cc"
+#            "util/testutil.h"
+#            "${bench_file}"
+#
+#            )
+##    message(STATUS "foo include dir: ${leveldb}")
+#    target_link_libraries("${bench_target_name}" leveldb)
+#    target_compile_definitions("${bench_target_name}"
+#            PRIVATE
+#            ${LEVELDB_PLATFORM_NAME}=1
+#            )
+#    if (NOT HAVE_CXX17_HAS_INCLUDE)
+#        target_compile_definitions("${bench_target_name}"
+#                PRIVATE
+#                LEVELDB_HAS_PORT_CONFIG_H=1
+#                )
+#    endif(NOT HAVE_CXX17_HAS_INCLUDE)
+#endfunction(TimberSaw_benchmark)
+add_executable(db_bench "util/histogram.cc"
+        "util/histogram.h"
+        "util/testutil.cc"
+        "util/testutil.h"
+        "benchmarks/db_bench.cc")
+#target_sources(db_bench
+#        PRIVATE
+#
+#        )
+target_link_libraries(db_bench leveldb -lgflags)
+
+#TimberSaw_benchmark("benchmarks/db_bench.cc")

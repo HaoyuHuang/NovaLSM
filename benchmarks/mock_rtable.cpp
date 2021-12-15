@@ -35,6 +35,7 @@ namespace nova {
         uint64_t offset = rand() % (max_rtable_size_ - 4096);
         leveldb::Slice result;
         NOVA_ASSERT(file->Read({}, offset, 4096, &result, buf).ok());
+        return true;
     }
 
     void MockRTable::CreateNewFile() {

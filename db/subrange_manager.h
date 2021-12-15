@@ -8,6 +8,7 @@
 #ifndef LEVELDB_SUBRANGE_MANAGER_H
 #define LEVELDB_SUBRANGE_MANAGER_H
 
+#include <cmath>
 #include "leveldb/subrange.h"
 #include "memtable.h"
 #include "version_set.h"

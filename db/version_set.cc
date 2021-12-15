@@ -1357,7 +1357,7 @@ namespace leveldb {
 
     void Version::Decode(Slice *buf) {
         uint32_t read_size = 0;
-        uint32_t levels;
+        uint32_t levels = 0;
         NOVA_ASSERT(DecodeFixed32(buf, &levels));
         NOVA_ASSERT(levels == options_->level);
         for (int level = 0; level < levels; level++) {

@@ -1,9 +1,8 @@
-
 //
-// Created by Haoyu Huang on 4/4/19.
-// Copyright (c) 2019 University of Southern California. All rights reserved.
+// Created by ruihong on 11/10/21.
 //
 
+#include "local_server.h"
 #include <netinet/tcp.h>
 #include <signal.h>
 #include <fmt/core.h>
@@ -15,207 +14,18 @@
 
 #include "leveldb/write_batch.h"
 #include "db/filename.h"
-#include "nic_server.h"
+#include "local_server.h"
 #include "ltc/stoc_file_client_impl.h"
 #include "util/env_posix.h"
 #include "ltc/db_helper.h"
+#include "nic_server.h"
 
 namespace nova {
-    void start(NICClientReqWorker *store) {
-        store->Start();
-    }
+//
 
-    LoadThread::LoadThread(std::vector<nova::RDMAMsgHandler *> &async_workers, nova::NovaMemManager *mem_manager,
-                           std::set<uint32_t> &assigned_dbids, uint32_t tid) : async_workers_(async_workers),
-                                                                               mem_manager_(mem_manager),
-                                                                               assigned_frags_(assigned_dbids),
-                                                                               tid_(tid) {
-    }
 
-    uint64_t LoadThread::LoadDataWithRangePartition() {
-        // load data.
-        timeval start{};
-        gettimeofday(&start, nullptr);
-        uint64_t loaded_keys = 0;
-        std::vector<LTCFragment *> &frags = NovaConfig::config->cfgs[0]->fragments;
-        leveldb::StoCReplicateLogRecordState *state = new leveldb::StoCReplicateLogRecordState[NovaConfig::config->servers.size()];
-        for (int i = 0; i < NovaConfig::config->servers.size(); i++) {
-            state[i].rdma_wr_id = -1;
-            state[i].result = leveldb::StoCReplicateLogRecordResult::REPLICATE_LOG_RECORD_NONE;
-        }
-        unsigned int rand_seed = tid_;
-        auto client = new leveldb::StoCBlockClient(tid_, nullptr);
-        client->rdma_msg_handlers_ = async_workers_;
 
-        int pivot = 0;
-        int i = pivot;
-        int loaded_frags = 0;
-        std::vector<leveldb::DB *> dbs;
-        while (loaded_frags < frags.size()) {
-            if (frags[i]->ltc_server_id != NovaConfig::config->my_server_id) {
-                loaded_frags++;
-                i = (i + 1) % frags.size();
-                continue;
-            }
-
-            uint32_t dbid = frags[i]->dbid;
-            if (assigned_frags_.find(dbid) == assigned_frags_.end()) {
-                loaded_frags++;
-                i = (i + 1) % frags.size();
-                continue;
-            }
-
-            // Insert cold keys first so that hot keys will be at the top level.
-            leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frags[i]->db);
-            dbs.push_back(db);
-            NOVA_LOG(INFO) << fmt::format("t[{}] Insert range {} to {}", tid_,
-                                          frags[i]->range.key_start,
-                                          frags[i]->range.key_end);
-            for (uint64_t j = frags[i]->range.key_end - 1;
-                 j >= frags[i]->range.key_start; j--) {
-                auto v = static_cast<char>((j % 10) + 'a');
-
-                std::string key(std::to_string(j));
-                std::string val(
-                        NovaConfig::config->load_default_value_size, v);
-
-                for (int k = 0; k < NovaConfig::config->servers.size(); k++) {
-                    state[k].rdma_wr_id = -1;
-                    state[k].result = leveldb::StoCReplicateLogRecordResult::REPLICATE_LOG_RECORD_NONE;
-                }
-                leveldb::WriteOptions option;
-                option.hash = j;
-                option.rand_seed = &rand_seed;
-                option.stoc_client = client;
-                option.thread_id = tid_;
-                option.local_write = true;
-                option.replicate_log_record_states = state;
-                // DO NOT update subranges since this is not the actual workload.
-                option.is_loading_db = true;
-
-                leveldb::Status s = db->Put(option, key, val);
-                NOVA_ASSERT(s.ok());
-                loaded_keys++;
-                if (loaded_keys % 100000 == 0) {
-                    timeval now{};
-                    gettimeofday(&now, nullptr);
-                    NOVA_LOG(INFO)
-                        << fmt::format("t[{}]: Load {} entries took {}", tid_,
-                                       loaded_keys,
-                                       (now.tv_sec - start.tv_sec));
-                }
-
-                if (j == frags[i]->range.key_start) {
-                    break;
-                }
-            }
-            loaded_frags++;
-            i = (i + 1) % frags.size();
-        }
-
-        for (auto db : dbs) {
-            auto dbimpl = reinterpret_cast<leveldb::DBImpl *>(db);
-            dbimpl->is_loading_db_ = true;
-            db->StartCoordinatedCompaction();
-        }
-        // Wait until there are no SSTables at L0.
-        while (NovaConfig::config->major_compaction_type != "no") {
-            uint32_t l0tables = 0;
-            uint32_t nmemtables = 0;
-            bool needs_compaction = false;
-            for (auto db : dbs) {
-                leveldb::DBStats stats;
-                stats.sstable_size_dist = new uint32_t[20];
-                db->QueryDBStats(&stats);
-                if (!needs_compaction) {
-                    needs_compaction = stats.needs_compaction;
-                }
-                l0tables += stats.num_l0_sstables;
-                nmemtables += db->FlushMemTables(true);
-                delete stats.sstable_size_dist;
-            }
-            NOVA_LOG(rdmaio::INFO) << fmt::format(
-                        "Waiting for {} L0 tables and {} memtables to go to L1 Needs compaction:{}",
-                        l0tables, nmemtables, needs_compaction);
-            if (l0tables == 0 && nmemtables == 0) {
-                break;
-            }
-            sleep(1);
-        }
-        for (auto db : dbs) {
-            auto dbimpl = reinterpret_cast<leveldb::DBImpl *>(db);
-            dbimpl->is_loading_db_ = false;
-        }
-        NOVA_LOG(INFO)
-            << fmt::format("t[{}]: Completed loading data {}", tid_,
-                           loaded_keys);
-        return loaded_keys;
-    }
-
-    void LoadThread::VerifyLoad() {
-        auto client = new leveldb::StoCBlockClient(tid_, nullptr);
-        client->rdma_msg_handlers_ = async_workers_;
-        leveldb::ReadOptions read_options = {};
-        read_options.mem_manager = mem_manager_;
-        read_options.stoc_client = client;
-
-        read_options.thread_id = tid_;
-        read_options.verify_checksums = false;
-        std::vector<LTCFragment *> &frags = NovaConfig::config->cfgs[0]->fragments;
-        for (int i = 0; i < frags.size(); i++) {
-            if (frags[i]->ltc_server_id != NovaConfig::config->my_server_id) {
-                continue;
-            }
-            leveldb::DB *db = reinterpret_cast<leveldb::DB *>(frags[i]->db);
-            NOVA_LOG(INFO) << fmt::format("t[{}] Verify range {} to {}", tid_,
-                                          frags[i]->range.key_start,
-                                          frags[i]->range.key_end);
-
-            for (uint64_t j = frags[i]->range.key_end - 1;
-                 j >= frags[i]->range.key_start; j--) {
-                auto v = static_cast<char>((j % 10) + 'a');
-                std::string key = std::to_string(j);
-                std::string expected_val(
-                        NovaConfig::config->load_default_value_size, v
-                );
-                std::string value;
-                leveldb::Status s = db->Get(read_options, key, &value);
-                NOVA_ASSERT(s.ok()) << s.ToString();
-
-                leveldb::Status status = db->Get(read_options, key, &value);
-                NOVA_ASSERT(status.ok())
-                    << fmt::format("key:{} status:{}", key, status.ToString());
-                NOVA_ASSERT(expected_val.compare(value) == 0) << value;
-
-                if (j == frags[i]->range.key_start) {
-                    break;
-                }
-            }
-            NOVA_LOG(INFO)
-                << fmt::format("t[{}]: Success: Verified range {} to {}", tid_,
-                               frags[i]->range.key_start,
-                               frags[i]->range.key_end);
-        }
-    }
-
-    void LoadThread::Start() {
-        timeval start{};
-        gettimeofday(&start, nullptr);
-
-        uint64_t puts = 0;
-        int iter = 1;
-//        if (NovaConfig::config->num_mem_partitions == 1) {
-//            iter = 1;
-//        }
-        for (int i = 0; i < iter; i++) {
-            puts += LoadDataWithRangePartition();
-        }
-        timeval end{};
-        gettimeofday(&end, nullptr);
-        throughput = puts / std::max((int) (end.tv_sec - start.tv_sec), 1);
-    }
-
-    void NICServer::LoadData() {
+    void LocalServer::LoadData() {
         if (!NovaConfig::config->use_local_disk) {
             if (NovaConfig::config->cfgs[0]->IsStoC()) {
                 return;
@@ -275,8 +85,7 @@ namespace nova {
         }
     }
 
-    NICServer::NICServer(RdmaCtrl *rdma_ctrl,
-                         char *rdmabuf, int nport) : nport_(nport) {
+    LocalServer::LocalServer(RdmaCtrl *rdma_ctrl, char *rdmabuf) {
         Configuration *cfg = NovaConfig::config->cfgs[0];
         for (int i = 0; i < cfg->fragments.size(); i++) {
             std::string db_path = DBName(NovaConfig::config->db_path, cfg->fragments[i]->dbid);
@@ -330,8 +139,8 @@ namespace nova {
 
         leveldb::StocPersistentFileManager *stoc_file_manager =
                 new leveldb::StocPersistentFileManager(env, mem_manager,
-               NovaConfig::config->stoc_files_path,
-               NovaConfig::config->max_stoc_file_size);
+                                                       NovaConfig::config->stoc_files_path,
+                                                       NovaConfig::config->max_stoc_file_size);
         std::vector<nova::RDMAMsgCallback *> rdma_threads;
         for (int db_index = 0; db_index < cfg->fragments.size(); db_index++) {
             //If this server is not a LTC according to the ID, then we do not need to create the db instance.
@@ -503,7 +312,7 @@ namespace nova {
             db_migrate_workers.emplace_back(&DBMigration::Start, migrate);
         }
 
-        for (auto rdma_server : rdma_servers) {
+        for (auto rdma_server: rdma_servers) {
             nova::RDMAWriteHandler *write_handler = new nova::RDMAWriteHandler(db_migration_threads);
             rdma_server->rdma_write_handler_ = write_handler;
         }
@@ -663,7 +472,7 @@ namespace nova {
         while (!all_initialized) {
             all_initialized = true;
             if (NovaConfig::config->enable_rdma) {
-                for (const auto &worker : fg_rdma_msg_handlers) {
+                for (const auto &worker: fg_rdma_msg_handlers) {
                     if (!worker->IsInitialized()) {
                         all_initialized = false;
                         break;
@@ -672,7 +481,7 @@ namespace nova {
                 if (!all_initialized) {
                     continue;
                 }
-                for (const auto &worker : bg_rdma_msg_handlers) {
+                for (const auto &worker: bg_rdma_msg_handlers) {
                     if (!worker->IsInitialized()) {
                         all_initialized = false;
                         break;
@@ -682,13 +491,13 @@ namespace nova {
             if (!all_initialized) {
                 continue;
             }
-            for (const auto &worker : bg_flush_memtable_threads) {
+            for (const auto &worker: bg_flush_memtable_threads) {
                 if (!worker->IsInitialized()) {
                     all_initialized = false;
                     break;
                 }
             }
-            for (const auto &worker : bg_compaction_threads) {
+            for (const auto &worker: bg_compaction_threads) {
                 if (!worker->IsInitialized()) {
                     all_initialized = false;
                     break;
@@ -721,7 +530,7 @@ namespace nova {
             LoadData();
         }
 
-        for (auto db : dbs_) {
+        for (auto db: dbs_) {
             if (!db) {
                 continue;
             }
@@ -756,7 +565,7 @@ namespace nova {
                 ready_ltcs.insert(NovaConfig::config->my_server_id);
             }
             while (true) {
-                for (auto &ltc : NovaConfig::config->cfgs[0]->ltc_servers) {
+                for (auto &ltc: NovaConfig::config->cfgs[0]->ltc_servers) {
                     if (ready_ltcs.find(ltc) != ready_ltcs.end()) {
                         continue;
                     }
@@ -781,117 +590,22 @@ namespace nova {
             }
         }
 
-        // Start connection threads in the end after we have loaded all data.
-        for (int i = 0; i < NovaConfig::config->num_conn_workers; i++) {
-            conn_worker_threads.emplace_back(start, conn_workers[i]);
-        }
-        current_conn_worker_id_ = 0;
+//        // Start connection threads in the end after we have loaded all data.
+//        for (int i = 0; i < NovaConfig::config->num_conn_workers; i++) {
+//            conn_worker_threads.emplace_back(start, conn_workers[i]);
+//        }
+//        current_conn_worker_id_ = 0;
         usleep(1000000);
         nova::NovaConfig::config->print_mapping();
     }
 
-    void make_socket_non_blocking(int sockfd) {
-        int flags = fcntl(sockfd, F_GETFL, 0);
-        if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1) {
-        }
+
+
+
+
+    leveldb::DB * LocalServer::Start() {
+        return dbs_[0];
     }
 
-    void on_accept(int fd, short which, void *arg) {
-        auto *server = (NICServer *) arg;
-        NOVA_ASSERT(fd == server->listen_fd_);
-        NOVA_LOG(DEBUG) << "new connection " << fd;
 
-        int client_fd;
-        struct sockaddr_in client_addr{};
-        socklen_t client_len = sizeof(client_addr);
-
-        client_fd = accept(fd, (struct sockaddr *) &client_addr, &client_len);
-        NOVA_ASSERT(client_fd < NOVA_MAX_CONN) << client_fd
-                                               << " not enough connections";
-        NOVA_ASSERT(client_fd >= 0) << client_fd;
-        make_socket_non_blocking(client_fd);
-        NOVA_LOG(DEBUG) << "register " << client_fd;
-
-        NICClientReqWorker *store = server->conn_workers[server->current_conn_worker_id_];
-        if (NovaConfig::config->num_conn_workers == 1) {
-            server->current_conn_worker_id_ = 0;
-        } else {
-            server->current_conn_worker_id_ =
-                    (server->current_conn_worker_id_ + 1) % NovaConfig::config->num_conn_workers;
-        }
-
-        store->conn_mu.lock();
-        store->conn_queue.push_back(client_fd);
-        store->conn_mu.unlock();
-    }
-
-    void NICServer::Start() {
-        SetupListener();
-        struct event event{};
-        struct event_config *ev_config;
-        ev_config = event_config_new();
-        NOVA_ASSERT(event_config_set_flag(ev_config, EVENT_BASE_FLAG_NOLOCK) == 0);
-        NOVA_ASSERT(event_config_avoid_method(ev_config, "poll") == 0);
-        NOVA_ASSERT(event_config_avoid_method(ev_config, "select") == 0);
-        NOVA_ASSERT(event_config_set_flag(ev_config, EVENT_BASE_FLAG_EPOLL_USE_CHANGELIST) == 0);
-        base = event_base_new_with_config(ev_config);
-
-        if (!base) {
-            fprintf(stderr, "Can't allocate event base\n");
-            exit(1);
-        }
-
-        NOVA_LOG(INFO) << "Using Libevent with backend method " << event_base_get_method(base);
-        const int f = event_base_get_features(base);
-        if ((f & EV_FEATURE_ET)) {
-            NOVA_LOG(INFO) << "Edge-triggered events are supported.";
-        }
-        if ((f & EV_FEATURE_O1)) {
-            NOVA_LOG(INFO) << "O(1) event notification is supported.";
-        }
-        if ((f & EV_FEATURE_FDS)) {
-            NOVA_LOG(INFO) << "All FD types are supported.";
-        }
-
-        /* Listen for notifications from other threads */
-        memset(&event, 0, sizeof(struct event));
-        NOVA_ASSERT(event_assign(&event, base, listen_fd_, EV_READ | EV_PERSIST, on_accept, (void *) this) == 0);
-        NOVA_ASSERT(event_add(&event, 0) == 0) << listen_fd_;
-        NOVA_ASSERT(event_base_loop(base, 0) == 0) << listen_fd_;
-        NOVA_LOG(INFO) << "started";
-    }
-
-    void NICServer::SetupListener() {
-        int one = 1;
-        struct linger ling = {0, 0};
-        int fd = socket(AF_INET, SOCK_STREAM, 0);
-        NOVA_ASSERT(fd != -1) << "create socket failed";
-
-        /**********************************************************
-         * internet socket address structure: our address and port
-         *********************************************************/
-        struct sockaddr_in sin{};
-        sin.sin_family = AF_INET;
-        sin.sin_addr.s_addr = INADDR_ANY;
-        sin.sin_port = htons(nport_);
-
-        /**********************************************************
-         * bind socket to address and port
-         *********************************************************/
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-        setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *) &one, sizeof(one));
-        setsockopt(fd, SOL_SOCKET, SO_LINGER, (void *) &ling, sizeof(ling));
-        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (void *) &one, sizeof(one));
-
-        int ret = bind(fd, (struct sockaddr *) &sin, sizeof(sin));
-        NOVA_ASSERT(ret != -1) << "bind port failed";
-
-        /**********************************************************
-         * put socket into listening state
-         *********************************************************/
-        ret = listen(fd, 65536);
-        NOVA_ASSERT(ret != -1) << "listen socket failed";
-        listen_fd_ = fd;
-        make_socket_non_blocking(listen_fd_);
-    }
 }

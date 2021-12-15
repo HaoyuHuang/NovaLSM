@@ -8,6 +8,7 @@
 #include "rdma/rdma_ctrl.hpp"
 #include "common/nova_common.h"
 #include "common/nova_config.h"
+#include "local_server.h"
 #include "nic_server.h"
 #include "leveldb/db.h"
 #include "leveldb/comparator.h"
@@ -168,18 +169,19 @@ void StartServer() {
     mkdirs(NovaConfig::config->stoc_files_path.data());
     mkdirs(NovaConfig::config->db_path.data());
     auto *mem_server = new NICServer(rdma_ctrl, buf, port);
+//    auto *mem_server = new LocalServer(rdma_ctrl, buf);
     mem_server->Start();
 }
 
 int main(int argc, char *argv[]) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);
     int i;
-    const char **methods = event_get_supported_methods();
-    printf("Starting Libevent %s.  Available methods are:\n",
-           event_get_version());
-    for (i = 0; methods[i] != NULL; ++i) {
-        printf("    %s\n", methods[i]);
-    }
+//    const char **methods = event_get_supported_methods();
+//    printf("Starting Libevent %s.  Available methods are:\n",
+//           event_get_version());
+//    for (i = 0; methods[i] != NULL; ++i) {
+//        printf("    %s\n", methods[i]);
+//    }
     if (FLAGS_server_id == -1) {
         exit(0);
     }

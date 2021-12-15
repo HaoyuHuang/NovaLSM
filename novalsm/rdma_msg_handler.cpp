@@ -277,11 +277,18 @@ namespace nova {
         if (opcode == IBV_WC_SEND) {
             return true;
         }
-        bool processed_by_client = stoc_client_->OnRecv(opcode, wr_id, remote_server_id, buf, imm_data, nullptr);
-        bool processed_by_server = rdma_server_->ProcessRDMAWC(opcode, wr_id, remote_server_id, buf, imm_data, nullptr);
+        volatile bool processed_by_client = stoc_client_->OnRecv(opcode, wr_id, remote_server_id, buf, imm_data, nullptr);
+//        NOVA_LOG(INFO) << "*** <End> processed_by_client right after processing is "<< processed_by_client;
+        volatile bool processed_by_server = rdma_server_->ProcessRDMAWC(opcode, wr_id, remote_server_id, buf, imm_data, nullptr);
+//        NOVA_LOG(INFO) << "*** <End> processed_by_client after processing of servers is "<< processed_by_client;
         if (processed_by_client && processed_by_server) {
+//            NOVA_LOG(INFO) << "*** <End> processed_by_client is "<< processed_by_client;
+
+//            NOVA_LOG(INFO) << "*** <End> processed_by_server is "<< processed_by_server;
+
             NOVA_ASSERT(false)
                 << fmt::format("Processed by both client and server");
         }
+        return true;
     }
 }

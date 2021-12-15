@@ -129,7 +129,7 @@ namespace leveldb {
         std::vector<EnvBGThread *> bg_flush_memtable_threads = {};
         EnvBGThread *reorg_thread = nullptr;
         EnvBGThread *compaction_coordinator_thread = nullptr;
-
+        //total number of memtables
         uint32_t num_memtables = 2;
 
         MemTableType memtable_type = MemTableType::kStaticPartition;
@@ -170,7 +170,7 @@ namespace leveldb {
         // so you may wish to adjust this parameter to control memory usage.
         // Also, a larger write buffer will result in a longer recovery time
         // the next time the database is opened.
-        size_t write_buffer_size = 4 * 1024 * 1024;
+        size_t write_buffer_size = 2 * 1024 * 1024;
 
         // Number of open files that can be used by the DB.  You may need to
         // increase this if your database has a large working set (budget
@@ -188,7 +188,7 @@ namespace leveldb {
         // block size specified here corresponds to uncompressed data.  The
         // actual size of the unit read from disk may be smaller if
         // compression is enabled.  This parameter can be changed dynamically.
-        size_t block_size = 4 * 1024;
+        size_t block_size = 8 * 1024;
 
         // Number of keys between restart points for delta encoding of keys.
         // This parameter can be changed dynamically.  Most clients should
@@ -203,7 +203,7 @@ namespace leveldb {
         // compactions and hence longer latency/performance hiccups.
         // Another reason to increase this parameter might be when you are
         // initially populating a large database.
-        size_t max_file_size = 2 * 1024 * 1024;
+        size_t max_file_size = 64 * 1024 * 1024;
 
         // The maximum log file size a MC maintains.
         // When the log file is full, MC flushes the log to DC.

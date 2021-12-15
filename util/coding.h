@@ -206,6 +206,7 @@ namespace leveldb {
             return false;
         }
         assert(false);
+        return false;
     }
 
     inline bool DecodeBool(Slice *ptr, bool* value) {

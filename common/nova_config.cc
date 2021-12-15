@@ -7,6 +7,7 @@
 #include "nova_config.h"
 
 namespace nova {
+
     uint64_t nrdma_buf_unit() {
         return (NovaConfig::config->rdma_max_num_sends * 2) *
                NovaConfig::config->max_msg_size;

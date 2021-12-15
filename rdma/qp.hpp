@@ -45,7 +45,7 @@ namespace rdmaio {
                 rnic_(rnic) {
         }
 
-        ~QP() {
+        virtual ~QP() {
             if (qp_ != nullptr)
                 ibv_destroy_qp(qp_);
             if (cq_ != nullptr)
@@ -156,7 +156,7 @@ namespace rdmaio {
             recv_cq_ = recv_cq;
             RCQPImpl::init<F>(qp_, cq_, recv_cq_, rnic_, qp_type);
         }
-
+        ~RRCQP(){}
         ConnStatus connect(std::string ip, int port) {
             return connect(ip, port, idx_);
         }

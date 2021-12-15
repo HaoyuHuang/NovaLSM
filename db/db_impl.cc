@@ -40,6 +40,7 @@
 #include "subrange_manager.h"
 #include "compaction.h"
 #include "ltc/storage_selector.h"
+#include "common/nova_config.h"
 
 namespace leveldb {
     namespace {
@@ -140,6 +141,7 @@ namespace leveldb {
         terminate_coordinated_compaction_ = false;
         start_compaction_ = true;
         if (options_.enable_lookup_index) {
+            //So big!
             lookup_index_ = new LookupIndex(
                     options_.upper_key - options_.lower_key);
             for (int i = 0; i < options_.upper_key - options_.lower_key; i++) {
@@ -1053,6 +1055,8 @@ namespace leveldb {
                                                 bool prune_memtable) {
         for (auto &task : tasks) {
             MemTable *imm = reinterpret_cast<MemTable *>(task.memtable);
+//            NOVA_LOG(nova::INFO) << fmt::format("memtable size is {}",
+//                                                imm->);
             NOVA_ASSERT(imm);
             FileMetaData &meta = imm->meta();
             meta.number = versions_->NewFileNumber();
@@ -1062,6 +1066,8 @@ namespace leveldb {
             Iterator *iter = imm->NewIterator(TraceType::IMMUTABLE_MEMTABLE, AccessCaller::kCompaction);
             nova::NovaGlobalVariables::global.generated_memtable_sizes += imm->ApproximateMemoryUsage();
             s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta, bg_thread, prune_memtable);
+            NOVA_LOG(nova::INFO) << fmt::format("Flush a memtable, number is {}, size is {}, smallest key is {}, largest key is {}",
+                                                meta.number ,meta.file_size, meta.smallest.Encode().ToString(), meta.largest.Encode().ToString());
             NOVA_ASSERT(s.ok()) << s.ToString();
             delete iter;
             // Note that if file_size is zero, the file has been deleted and
@@ -1233,6 +1239,7 @@ namespace leveldb {
         }
         p->mutex.Unlock();
         delete state;
+        return true;
     }
 
     bool DBImpl::CompactMemTable(EnvBGThread *bg_thread,
@@ -1273,10 +1280,10 @@ namespace leveldb {
                              meta.largest,
                              meta.block_replica_handles, meta.parity_block_handle);
             }
-            NOVA_LOG(rdmaio::DEBUG)
+            NOVA_LOG(rdmaio::INFO)
                 << fmt::format(
-                        "db[{}]: !!!!!!!!!!!!!!!!!!!!!!!!!!!! Flush memtable-{}",
-                        dbid_, imm->memtableid());
+                        "db[{}]: !!!!!!!!!!!!!!!!!!!!!!!!!!!! Flush memtable-{}, size is {}",
+                        dbid_, imm->memtableid(), meta.file_size);
         }
 
         versions_->AppendChangesToManifest(&edit, manifest_file_,
@@ -1443,6 +1450,7 @@ namespace leveldb {
                                                               &closed_memtable_log_files);
         }
         if (!memtable_tasks.empty()) {
+
             CompactMemTableStaticPartition(bg_thread, memtable_tasks, &edit, options_.enable_flush_multiple_memtables);
             // Include the latest version.
             versions_->AppendChangesToManifest(&edit, manifest_file_, options_.manifest_stoc_ids);
@@ -2069,9 +2077,10 @@ namespace leveldb {
                        std::string *value) {
         number_of_gets_ += 1;
         if (lookup_index_) {
-            if (GetWithLookupIndex(options, key, value).ok()) {
-                return Status::OK();
-            }
+//            if (GetWithLookupIndex(options, key, value).ok()) {
+//                return Status::OK();
+//            }
+            return GetWithLookupIndex(options, key, value);
         }
         return GetWithRangeIndex(options, key, value);
     }
@@ -2191,11 +2200,11 @@ namespace leveldb {
 //                value->assign(l1val);
 //            }
         }
-        NOVA_ASSERT(s.ok())
-            << fmt::format("key:{} val:{} seq:{} status:{} version:{}",
-                           key.ToString(), value->size(), latest_seq,
-                           s.ToString(),
-                           current->DebugString());
+//        NOVA_ASSERT(s.ok())
+//            << fmt::format("key:{} val:{} seq:{} status:{} version:{}",
+//                           key.ToString(), value->size(), latest_seq,
+//                           s.ToString(),
+//                           current->DebugString());
         versions_->versions_[vid]->Unref(dbname_);
         return s;
     }
@@ -2507,12 +2516,20 @@ namespace leveldb {
                 imm.partition_id = partition_id;
                 imm.next_imm_slot = slot_immid.first;
                 imms.push_back(imm);
+//                NOVA_LOG(rdmaio::INFO) << fmt::format(
+//                            "There is still immutable in memory. THe problem is about the flush scheduling");
             }
             partition->mutex.Unlock();
         }
         for (auto &imm : imms) {
+//            NOVA_LOG(rdmaio::INFO) << fmt::format("minor compaction scheduled");
             ScheduleFlushMemTableTask(imm.thread_id, imm.memtable_id, imm.table, imm.partition_id, imm.next_imm_slot, &rand_seed_,
                                       false);
+        }
+        if (imms.size()==0 && number_of_immutable_memtables_ > 0){
+            NOVA_LOG(rdmaio::INFO) << fmt::format(
+                "number_of_immutable_memtables_ says there is still memtable, but we did not get anty from the manager");
+
         }
         return number_of_immutable_memtables_;
     }
@@ -2542,9 +2559,7 @@ namespace leveldb {
             imm_slot = -1;
             if (table) {
                 auto atomic_mem = versions_->mid_table_mapping_[table->memtableid()];
-                if (atomic_mem->memtable_size_ <= options_.write_buffer_size) {
-                    break;
-                }
+
                 bool wait_for_l0 = false;
                 while (options_.l0bytes_stop_writes_trigger > 0) {
                     // Get the current version.
@@ -2569,7 +2584,9 @@ namespace leveldb {
                     versions_->versions_[current->version_id_]->Unref(dbname_);
                     break;
                 }
-
+                if (atomic_mem->memtable_size_ <= options_.write_buffer_size) {
+                    break;
+                }
                 if (wait_for_l0) {
                     // Check if the table is still valid.
                     continue;
@@ -2734,7 +2751,7 @@ namespace leveldb {
                                  const leveldb::Slice &key,
                                  const leveldb::Slice &val) {
         uint64_t last_sequence = versions_->last_sequence_.fetch_add(1);
-        if (processed_writes_ > SUBRANGE_WARMUP_NPUTS &&
+        if (processed_writes_ > SUBRANGE_WARMUP_NPUTS && processed_writes_ < 2*SUBRANGE_WARMUP_NPUTS &&
             processed_writes_ % SUBRANGE_REORG_INTERVAL == 0 &&
             options_.enable_subrange_reorg) {
             // wake up reorg thread.
@@ -3413,6 +3430,10 @@ namespace leveldb {
                                                           &impl->memtable_id_seq_,
                                                           &impl->partitioned_active_memtables_,
                                                           &impl->partitioned_imms_);
+            if (!nova::NovaConfig::config->recover_dbs){
+                impl->subrange_manager_->ConstructSubrangesWithUniform(impl->user_comparator_);
+            }
+
         }
         if (options.enable_range_index) {
             impl->range_index_manager_ = new RangeIndexManager(&impl->scan_stats, impl->versions_,

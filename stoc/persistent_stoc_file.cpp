@@ -79,7 +79,7 @@ namespace leveldb {
         file_size_ = 0;
         allocated_mem_size_ = file_size;
 
-        NOVA_LOG(rdmaio::DEBUG)
+        NOVA_LOG(rdmaio::INFO)
             << fmt::format(
                     "StoC file {} created with t:{} file size {} allocated size {}",
                     file_id_, thread_id,

@@ -264,6 +264,7 @@ namespace nova {
             case IBV_WR_ATOMIC_FETCH_AND_ADD:
                 return "FA";
         }
+        return "";
     }
 
     std::string ibv_wc_opcode_str(ibv_wc_opcode code) {
@@ -285,6 +286,7 @@ namespace nova {
             case IBV_WC_RECV_RDMA_WITH_IMM:
                 return "RECV_IMM";
         }
+        return "";
     }
 
 //inline __attribute__ ((always_inline))
